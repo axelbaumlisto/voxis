@@ -1,0 +1,153 @@
+/* History Page - TUI style */
+.history-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Search */
+.history-search {
+  margin-bottom: var(--spacing-md);
+}
+
+.history-search-input {
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+
+.history-search-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* History List - scrollable */
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+/* History Entry - list item style */
+.history-entry {
+  padding: var(--spacing-sm);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.history-entry:hover {
+  background: var(--bg-panel);
+}
+
+.history-entry.selected {
+  background: var(--accent);
+  color: #000;
+}
+
+.history-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-xs);
+}
+
+.history-entry-timestamp {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.history-entry.selected .history-entry-timestamp {
+  color: #333;
+}
+
+.history-entry-meta {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.history-entry-language,
+.history-entry-duration {
+  font-size: 11px;
+  padding: 1px 4px;
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+}
+
+.history-entry.selected .history-entry-language,
+.history-entry.selected .history-entry-duration {
+  background: rgba(0, 0, 0, 0.2);
+  border-color: rgba(0, 0, 0, 0.3);
+  color: #333;
+}
+
+.history-entry-text {
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-entry-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-xs);
+}
+
+.history-entry-actions button {
+  font-size: 12px;
+  padding: 2px var(--spacing-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+
+.history-entry-actions button:hover {
+  background: var(--bg-panel);
+}
+
+.history-entry.selected .history-entry-actions button {
+  background: rgba(0, 0, 0, 0.2);
+  border-color: rgba(0, 0, 0, 0.3);
+  color: #000;
+}
+
+/* Empty State */
+.history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  text-align: center;
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.history-empty p {
+  margin: var(--spacing-xs) 0;
+}
+
+.history-empty-hint {
+  font-size: 12px;
+}
+
+/* Toast notification */
+.copied-toast {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--success);
+  color: #000;
+  padding: var(--spacing-xs) var(--spacing-md);
+  font-size: 12px;
+  z-index: 100;
+}

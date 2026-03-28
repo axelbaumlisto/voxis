@@ -1,0 +1,635 @@
+//! Pending suggestions-related Tauri commands.
+
+use crate::config::BATCH_SUGGESTIONS_PROMPT;
+use crate::error::BoxedIntoCommandError;
+use crate::learning::{CorrectionTracker, LearningMode};
+use crate::llm::{DictionarySuggestion, LlmConfig, LlmProcessor};
+use crate::storage::{AppPaths, StorageFactory, TrackedSuggestion};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, State};
+
+use super::get_factory;
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Create a CorrectionTracker with config from storage.
+/// DRY: Extracts repeated tracker creation pattern.
+/// DIP: Uses factory._dyn() methods for trait-based storage.
+fn create_tracker(factory: &StorageFactory) -> Result<CorrectionTracker, String> {
+    let config = factory.config().load().unwrap_or_default();
+    let mode = config
+        .dictionary
+        .learning_mode
+        .parse()
+        .unwrap_or(LearningMode::Auto);
+
+    Ok(CorrectionTracker::new(
+        mode,
+        config.dictionary.learning_threshold,
+        factory.corrections_dyn(),
+        factory.dictionary_dyn(),
+    ))
+}
+
+/// Action to perform on a suggestion.
+enum SuggestionAction {
+    Approve,
+    Reject,
+}
+
+/// Target for a suggestion action.
+enum SuggestionTarget {
+    ById(i64),
+    BySource(String, String),
+}
+
+/// Execute a suggestion action (approve/reject) on a target.
+/// DRY: Consolidates the 4 approve/reject commands into a single helper.
+fn execute_suggestion_action(
+    factory: &StorageFactory,
+    action: SuggestionAction,
+    target: SuggestionTarget,
+) -> Result<(), String> {
+    let tracker = create_tracker(factory)?;
+
+    match (action, target) {
+        (SuggestionAction::Approve, SuggestionTarget::ById(id)) => tracker.approve(id).cmd_err(),
+        (SuggestionAction::Approve, SuggestionTarget::BySource(source, replacement)) => {
+            tracker.approve_by_source(&source, &replacement).cmd_err()
+        }
+        (SuggestionAction::Reject, SuggestionTarget::ById(id)) => tracker.reject(id).cmd_err(),
+        (SuggestionAction::Reject, SuggestionTarget::BySource(source, replacement)) => {
+            tracker.reject_by_source(&source, &replacement).cmd_err()
+        }
+    }
+}
+
+// =============================================================================
+// Batch LLM Processing Helpers
+// =============================================================================
+
+/// Build LLM config for batch suggestion analysis.
+fn build_batch_llm_config(config: &crate::config::AppConfig) -> LlmConfig {
+    LlmConfig {
+        api_url: crate::config::GROQ_CHAT_URL.to_string(),
+        api_key: config.llm.api_key.clone(),
+        model: "llama-3.3-70b-versatile".to_string(),
+        prompt: BATCH_SUGGESTIONS_PROMPT.to_string(),
+    }
+}
+
+/// Collect history entry texts into JSON array for batch LLM processing.
+fn collect_history_texts(entries: &[crate::storage::HistoryEntry]) -> String {
+    let texts: Vec<&str> = entries.iter().map(|e| e.text.as_str()).collect();
+    serde_json::to_string(&texts).unwrap_or_default()
+}
+
+/// Process LLM suggestions through the correction tracker.
+fn process_llm_suggestions(
+    tracker: &CorrectionTracker,
+    suggestions: &[DictionarySuggestion],
+) -> usize {
+    suggestions
+        .iter()
+        .filter(|s| tracker.on_suggestion(s).is_ok())
+        .count()
+}
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// Pending suggestion entry for frontend display.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingSuggestion {
+    pub id: i64,
+    pub source: String,
+    pub replacement: String,
+    pub count: u32,
+    pub first_seen: String,
+    pub last_seen: String,
+}
+
+impl From<TrackedSuggestion> for PendingSuggestion {
+    fn from(s: TrackedSuggestion) -> Self {
+        Self {
+            id: s.id,
+            source: s.source,
+            replacement: s.replacement,
+            count: s.count,
+            first_seen: s.first_seen,
+            last_seen: s.last_seen,
+        }
+    }
+}
+
+/// Result of reprocessing history through LLM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReprocessResult {
+    pub processed: usize,
+    pub suggestions_found: usize,
+}
+
+// =============================================================================
+// Commands
+// =============================================================================
+
+/// Get all pending suggestions.
+#[tauri::command]
+pub fn get_pending_suggestions(paths: State<AppPaths>) -> Result<Vec<PendingSuggestion>, String> {
+    let pending = get_factory(&paths).corrections().get_pending().cmd_err()?;
+    Ok(pending.into_iter().map(PendingSuggestion::from).collect())
+}
+
+/// Get count of pending suggestions.
+#[tauri::command]
+pub fn get_pending_count(paths: State<AppPaths>) -> Result<usize, String> {
+    get_factory(&paths).corrections().pending_count().cmd_err()
+}
+
+/// Approve a pending suggestion and add to dictionary.
+#[tauri::command]
+pub fn approve_suggestion(id: i64, paths: State<AppPaths>) -> Result<(), String> {
+    execute_suggestion_action(
+        &get_factory(&paths),
+        SuggestionAction::Approve,
+        SuggestionTarget::ById(id),
+    )
+}
+
+/// Approve a suggestion by source and replacement.
+#[tauri::command]
+pub fn approve_suggestion_by_source(
+    source: String,
+    replacement: String,
+    paths: State<AppPaths>,
+) -> Result<(), String> {
+    execute_suggestion_action(
+        &get_factory(&paths),
+        SuggestionAction::Approve,
+        SuggestionTarget::BySource(source, replacement),
+    )
+}
+
+/// Reject a pending suggestion.
+#[tauri::command]
+pub fn reject_suggestion(id: i64, paths: State<AppPaths>) -> Result<(), String> {
+    execute_suggestion_action(
+        &get_factory(&paths),
+        SuggestionAction::Reject,
+        SuggestionTarget::ById(id),
+    )
+}
+
+/// Reject a suggestion by source and replacement.
+#[tauri::command]
+pub fn reject_suggestion_by_source(
+    source: String,
+    replacement: String,
+    paths: State<AppPaths>,
+) -> Result<(), String> {
+    execute_suggestion_action(
+        &get_factory(&paths),
+        SuggestionAction::Reject,
+        SuggestionTarget::BySource(source, replacement),
+    )
+}
+
+/// Reprocess history entries through LLM to generate suggestions.
+#[tauri::command]
+pub async fn reprocess_history_for_suggestions(
+    limit: Option<usize>,
+    paths: State<'_, AppPaths>,
+    app: AppHandle,
+) -> Result<ReprocessResult, String> {
+    let factory = get_factory(&paths);
+    let config = factory.config().load().unwrap_or_default();
+
+    if config.llm.api_key.is_empty() {
+        return Err("LLM API key not configured".to_string());
+    }
+
+    let entries = factory.history().load(limit).cmd_err()?;
+    if entries.is_empty() {
+        return Ok(ReprocessResult {
+            processed: 0,
+            suggestions_found: 0,
+        });
+    }
+
+    // Process batch through LLM
+    let batch_input = collect_history_texts(&entries);
+    let llm = LlmProcessor::new(build_batch_llm_config(&config));
+    let result = llm.process(&batch_input).await.cmd_err()?;
+
+    // Track suggestions
+    let tracker = create_tracker(&factory)?;
+    let suggestions_found = process_llm_suggestions(&tracker, &result.suggestions);
+
+    let _ = app.emit("suggestions-updated", ());
+
+    Ok(ReprocessResult {
+        processed: entries.len(),
+        suggestions_found,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::SuggestionStatus;
+
+    #[test]
+    fn test_pending_suggestion_from_tracked() {
+        let tracked = TrackedSuggestion {
+            id: 1,
+            source: "test".into(),
+            replacement: "Test".into(),
+            count: 5,
+            status: SuggestionStatus::Pending,
+            first_seen: "2024-01-01".into(),
+            last_seen: "2024-01-02".into(),
+        };
+
+        let pending: PendingSuggestion = tracked.into();
+        assert_eq!(pending.id, 1);
+        assert_eq!(pending.source, "test");
+        assert_eq!(pending.count, 5);
+    }
+
+    #[test]
+    fn test_reprocess_result_serialize() {
+        let result = ReprocessResult {
+            processed: 10,
+            suggestions_found: 3,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"processed\":10"));
+        assert!(json.contains("\"suggestions_found\":3"));
+    }
+
+    #[test]
+    fn test_pending_suggestion_serde_roundtrip() {
+        let suggestion = PendingSuggestion {
+            id: 1,
+            source: "солид".into(),
+            replacement: "SOLID".into(),
+            count: 3,
+            first_seen: "2024-01-01".into(),
+            last_seen: "2024-01-05".into(),
+        };
+        let json = serde_json::to_string(&suggestion).unwrap();
+        let deserialized: PendingSuggestion = serde_json::from_str(&json).unwrap();
+        assert_eq!(suggestion.id, deserialized.id);
+        assert_eq!(suggestion.source, deserialized.source);
+        assert_eq!(suggestion.count, deserialized.count);
+    }
+
+    #[test]
+    fn test_pending_suggestion_all_fields() {
+        let suggestion = PendingSuggestion {
+            id: 42,
+            source: "souprawhisper".into(),
+            replacement: "SoupaWhisper".into(),
+            count: 10,
+            first_seen: "2024-06-01".into(),
+            last_seen: "2024-06-15".into(),
+        };
+        assert_eq!(suggestion.id, 42);
+        assert_eq!(suggestion.source, "souprawhisper");
+        assert_eq!(suggestion.replacement, "SoupaWhisper");
+        assert_eq!(suggestion.count, 10);
+        assert_eq!(suggestion.first_seen, "2024-06-01");
+        assert_eq!(suggestion.last_seen, "2024-06-15");
+    }
+
+    #[test]
+    fn test_reprocess_result_deserialize() {
+        let json = r#"{"processed":25,"suggestions_found":7}"#;
+        let result: ReprocessResult = serde_json::from_str(json).unwrap();
+        assert_eq!(result.processed, 25);
+        assert_eq!(result.suggestions_found, 7);
+    }
+
+    #[test]
+    fn test_reprocess_result_zero_values() {
+        let result = ReprocessResult {
+            processed: 0,
+            suggestions_found: 0,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"processed\":0"));
+        assert!(json.contains("\"suggestions_found\":0"));
+    }
+
+    #[test]
+    fn test_collect_history_texts_formats_json() {
+        let entries = vec![
+            crate::storage::HistoryEntry {
+                id: 1,
+                text: "Hello world".into(),
+                timestamp: "2024-01-01".into(),
+                language: None,
+                duration: None,
+            },
+            crate::storage::HistoryEntry {
+                id: 2,
+                text: "Test text".into(),
+                timestamp: "2024-01-02".into(),
+                language: Some("en".into()),
+                duration: Some(2.5),
+            },
+        ];
+
+        let result = collect_history_texts(&entries);
+        assert!(result.contains("Hello world"));
+        assert!(result.contains("Test text"));
+        // Should be valid JSON array
+        let parsed: Vec<String> = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.len(), 2);
+    }
+
+    #[test]
+    fn test_collect_history_texts_empty() {
+        let entries: Vec<crate::storage::HistoryEntry> = vec![];
+        let result = collect_history_texts(&entries);
+        assert_eq!(result, "[]");
+    }
+
+    #[test]
+    fn test_collect_history_texts_single_entry() {
+        let entries = vec![crate::storage::HistoryEntry {
+            id: 1,
+            text: "Single entry".into(),
+            timestamp: "2024-01-01".into(),
+            language: None,
+            duration: None,
+        }];
+
+        let result = collect_history_texts(&entries);
+        let parsed: Vec<String> = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0], "Single entry");
+    }
+
+    #[test]
+    fn test_build_batch_llm_config() {
+        let mut config = crate::config::AppConfig::default();
+        config.llm.api_key = "test-api-key-123".to_string();
+
+        let llm_config = build_batch_llm_config(&config);
+
+        assert!(!llm_config.api_url.is_empty());
+        assert_eq!(llm_config.api_key, "test-api-key-123");
+        assert_eq!(llm_config.model, "llama-3.3-70b-versatile");
+        assert!(!llm_config.prompt.is_empty());
+    }
+
+    #[test]
+    fn test_pending_suggestion_from_tracked_preserves_timestamps() {
+        let tracked = TrackedSuggestion {
+            id: 5,
+            source: "timestamp_test".into(),
+            replacement: "TIMESTAMP_TEST".into(),
+            count: 1,
+            status: SuggestionStatus::Pending,
+            first_seen: "2024-03-15T10:30:00".into(),
+            last_seen: "2024-03-20T14:45:00".into(),
+        };
+
+        let pending: PendingSuggestion = tracked.into();
+        assert_eq!(pending.first_seen, "2024-03-15T10:30:00");
+        assert_eq!(pending.last_seen, "2024-03-20T14:45:00");
+    }
+
+    #[test]
+    fn test_suggestion_action_enum_coverage() {
+        // Test both variants exist and can be created
+        let _approve = SuggestionAction::Approve;
+        let _reject = SuggestionAction::Reject;
+    }
+
+    #[test]
+    fn test_suggestion_target_enum_coverage() {
+        // Test both variants exist and can be created
+        let _by_id = SuggestionTarget::ById(123);
+        let _by_source = SuggestionTarget::BySource("src".into(), "repl".into());
+    }
+
+    #[test]
+    fn test_create_tracker_success() {
+        use crate::storage::test_utils::create_temp_paths;
+
+        let (_temp, paths) = create_temp_paths();
+        let factory = StorageFactory::new(paths);
+
+        // Should successfully create tracker with default config
+        let tracker = create_tracker(&factory);
+        assert!(tracker.is_ok());
+
+        let tracker = tracker.unwrap();
+        // Default learning mode should be parsed
+        assert_eq!(tracker.threshold(), 3); // default threshold
+    }
+
+    #[test]
+    fn test_create_tracker_disabled_mode() {
+        use crate::config::AppConfig;
+        use crate::storage::test_utils::create_temp_paths;
+
+        let (_temp, paths) = create_temp_paths();
+        let factory = StorageFactory::new(paths);
+
+        // Set learning mode to disabled
+        let mut config = AppConfig::default();
+        config.dictionary.learning_mode = "disabled".to_string();
+        factory.config().save(&config).unwrap();
+
+        let tracker = create_tracker(&factory).unwrap();
+        assert_eq!(tracker.mode(), LearningMode::Disabled);
+    }
+
+    #[test]
+    fn test_execute_approve_by_id() {
+        use crate::llm::DictionarySuggestion;
+        use crate::storage::test_utils::create_temp_paths;
+
+        let (_temp, paths) = create_temp_paths();
+        let factory = StorageFactory::new(paths);
+
+        // Create a suggestion first
+        let tracker = create_tracker(&factory).unwrap();
+        tracker
+            .on_suggestion(&DictionarySuggestion {
+                source: "test".into(),
+                replacement: "TEST".into(),
+            })
+            .unwrap();
+
+        // Get the pending ID
+        let pending = factory.corrections().get_pending().unwrap();
+        assert_eq!(pending.len(), 1);
+        let id = pending[0].id;
+
+        // Execute approve by ID
+        let result = execute_suggestion_action(
+            &factory,
+            SuggestionAction::Approve,
+            SuggestionTarget::ById(id),
+        );
+        assert!(result.is_ok());
+
+        // Should be removed from pending
+        let pending = factory.corrections().get_pending().unwrap();
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn test_execute_reject_by_id() {
+        use crate::llm::DictionarySuggestion;
+        use crate::storage::test_utils::create_temp_paths;
+
+        let (_temp, paths) = create_temp_paths();
+        let factory = StorageFactory::new(paths);
+
+        // Create a suggestion first
+        let tracker = create_tracker(&factory).unwrap();
+        tracker
+            .on_suggestion(&DictionarySuggestion {
+                source: "reject_test".into(),
+                replacement: "REJECT_TEST".into(),
+            })
+            .unwrap();
+
+        let pending = factory.corrections().get_pending().unwrap();
+        let id = pending[0].id;
+
+        // Execute reject by ID
+        let result = execute_suggestion_action(
+            &factory,
+            SuggestionAction::Reject,
+            SuggestionTarget::ById(id),
+        );
+        assert!(result.is_ok());
+
+        // Should be removed from pending
+        let pending = factory.corrections().get_pending().unwrap();
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn test_execute_approve_by_source() {
+        use crate::llm::DictionarySuggestion;
+        use crate::storage::test_utils::create_temp_paths;
+
+        let (_temp, paths) = create_temp_paths();
+        let factory = StorageFactory::new(paths);
+
+        // Create a suggestion
+        let tracker = create_tracker(&factory).unwrap();
+        tracker
+            .on_suggestion(&DictionarySuggestion {
+                source: "source_approve".into(),
+                replacement: "SOURCE_APPROVE".into(),
+            })
+            .unwrap();
+
+        // Execute approve by source
+        let result = execute_suggestion_action(
+            &factory,
+            SuggestionAction::Approve,
+            SuggestionTarget::BySource("source_approve".into(), "SOURCE_APPROVE".into()),
+        );
+        assert!(result.is_ok());
+
+        // Should be added to dictionary
+        let has_entry = factory.dictionary().contains("source_approve").unwrap();
+        assert!(has_entry);
+    }
+
+    #[test]
+    fn test_execute_reject_by_source() {
+        use crate::llm::DictionarySuggestion;
+        use crate::storage::test_utils::create_temp_paths;
+
+        let (_temp, paths) = create_temp_paths();
+        let factory = StorageFactory::new(paths);
+
+        // Create a suggestion
+        let tracker = create_tracker(&factory).unwrap();
+        tracker
+            .on_suggestion(&DictionarySuggestion {
+                source: "source_reject".into(),
+                replacement: "SOURCE_REJECT".into(),
+            })
+            .unwrap();
+
+        assert_eq!(factory.corrections().pending_count().unwrap(), 1);
+
+        // Execute reject by source
+        let result = execute_suggestion_action(
+            &factory,
+            SuggestionAction::Reject,
+            SuggestionTarget::BySource("source_reject".into(), "SOURCE_REJECT".into()),
+        );
+        assert!(result.is_ok());
+
+        // Should be removed from pending
+        assert_eq!(factory.corrections().pending_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_process_llm_suggestions_counts_all_successful() {
+        use crate::llm::DictionarySuggestion;
+        use crate::storage::test_utils::create_temp_paths;
+
+        let (_temp, paths) = create_temp_paths();
+        let factory = StorageFactory::new(paths);
+
+        // Add an entry to dictionary first
+        factory.dictionary().add("existing", "EXISTING").unwrap();
+
+        let tracker = create_tracker(&factory).unwrap();
+
+        let suggestions = vec![
+            DictionarySuggestion {
+                source: "existing".into(),
+                replacement: "EXISTING".into(),
+            },
+            DictionarySuggestion {
+                source: "new_word".into(),
+                replacement: "NEW_WORD".into(),
+            },
+        ];
+
+        // Process suggestions
+        let count = process_llm_suggestions(&tracker, &suggestions);
+
+        // Both return Ok (AlreadyInDictionary and Recorded), so count is 2
+        assert_eq!(count, 2);
+
+        // But only the new word should be pending
+        let pending = factory.corrections().pending_count().unwrap();
+        assert_eq!(pending, 1);
+    }
+
+    #[test]
+    fn test_process_llm_suggestions_empty_input() {
+        use crate::storage::test_utils::create_temp_paths;
+
+        let (_temp, paths) = create_temp_paths();
+        let factory = StorageFactory::new(paths);
+
+        let tracker = create_tracker(&factory).unwrap();
+
+        let suggestions: Vec<DictionarySuggestion> = vec![];
+
+        // Process empty list
+        let count = process_llm_suggestions(&tracker, &suggestions);
+
+        // Should return 0
+        assert_eq!(count, 0);
+    }
+}

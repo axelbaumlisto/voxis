@@ -1,0 +1,319 @@
+/* Settings Page - TUI style */
+.settings-page {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.page-header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+}
+
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.settings-error {
+  color: var(--error);
+  font-size: 12px;
+}
+
+/* Settings Grid */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--spacing-md);
+}
+
+/* Settings Section - TUI box style */
+.settings-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+}
+
+.settings-section-title {
+  font-size: 14px;
+  font-weight: bold;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-section-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+}
+
+/* Settings Field */
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.settings-field-switch {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.settings-field-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-field-label {
+  font-size: 14px;
+  color: var(--fg);
+}
+
+.settings-field-description {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.settings-field-input {
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.settings-field-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* Switch - terminal style toggle */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  transition: 0.1s;
+}
+
+.switch-slider::before {
+  position: absolute;
+  content: "";
+  height: 10px;
+  width: 10px;
+  left: 2px;
+  bottom: 2px;
+  background: var(--fg-muted);
+  transition: 0.1s;
+}
+
+.switch input:checked + .switch-slider {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.switch input:checked + .switch-slider::before {
+  transform: translateX(16px);
+  background: #000;
+}
+
+/* Password Field */
+.password-field-wrapper {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.password-field-wrapper input {
+  flex: 1;
+}
+
+.password-toggle {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 12px;
+}
+
+.password-toggle:hover {
+  background: var(--bg-panel);
+  color: var(--fg);
+}
+
+/* Select - terminal style */
+.settings-field select {
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.settings-field select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* Provider Select */
+.provider-select-wrapper {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.provider-select-wrapper select {
+  flex: 1;
+}
+
+.provider-action-btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.provider-action-btn:hover {
+  background: var(--bg-panel);
+  border-color: var(--accent);
+}
+
+.provider-delete-btn:hover {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.theme-preview-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.theme-preview-btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 12px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.theme-preview-btn:hover:not(:disabled) {
+  background: var(--bg-panel);
+  border-color: var(--accent);
+}
+
+.theme-preview-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  width: 90%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-sm);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.modal-close:hover {
+  color: var(--fg);
+}
+
+.modal-body {
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  border-top: 1px solid var(--border);
+}
+
+.modal-error {
+  color: var(--error);
+  font-size: 12px;
+  padding: var(--spacing-xs);
+  background: rgba(255, 0, 0, 0.1);
+  border: 1px solid var(--error);
+}
+
+/* Textarea */
+.settings-textarea {
+  resize: vertical;
+  min-height: 60px;
+  font-family: inherit;
+}

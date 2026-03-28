@@ -1,0 +1,110 @@
+# SoupaWhisper Visualization Theme Template
+#
+# This file describes the format for custom visualization themes.
+# Copy this file to ~/.config/soupawhisper/themes/my_theme.toml
+# and customize the values.
+#
+# Colors are in hexadecimal RGB format: "#RRGGBB"
+# Alpha channel is optional: "#RRGGBBAA"
+
+[meta]
+# Theme identifier (used in config, must be unique)
+id = "my_custom_theme"
+# Display name shown in UI
+name = "My Custom Theme"
+# Author name (optional)
+author = "Your Name"
+# Version string (optional)
+version = "1.0"
+# Short description for theme picker
+description = "A custom visualization theme"
+
+[colors]
+# Background color (usually transparent for overlay)
+# Use "#00000000" for fully transparent
+background = "#00000000"
+
+# Idle state: thin horizontal line when not recording
+idle = "#1e88e5"
+
+# Recording state: main color for waveform bars
+# (used only when use_gradient = false)
+recording = "#1e88e5"
+
+# Peak indicator color
+recording_peak = "#64b5f6"
+
+# Transcribing state: pulsing bars while processing audio
+transcribing = "#4caf50"
+
+# Queued state: waiting for transcription
+queued = "#ffa726"
+
+# Text color for badges and labels
+text = "#ffffff"
+
+[gradient]
+# Enable gradient rendering for waveform bars (Winamp-style)
+# When true, bars will be colored based on height using gradient colors below
+# When false, bars use solid "recording" color
+enabled = false
+
+# Gradient colors (used when enabled = true)
+# Colors are applied from bottom to top of each bar
+
+# Bottom of bar (low audio level)
+bottom = "#188408"    # Green
+
+# Middle of bar
+middle = "#ffff00"    # Yellow
+
+# Top of bar (high audio level / peak)
+top = "#ef3110"       # Red
+
+# ============================================================================
+# Built-in Theme Examples
+# ============================================================================
+#
+# Default (Blue):
+#   recording = "#1e88e5"
+#   transcribing = "#4caf50"
+#   gradient.enabled = false
+#
+# Winamp Classic (Fire):
+#   gradient.enabled = true
+#   gradient.bottom = "#188408"   # Green
+#   gradient.middle = "#ffff00"   # Yellow
+#   gradient.top = "#ef3110"      # Red
+#   recording_peak = "#ffffff"    # White
+#
+# Neon:
+#   gradient.enabled = true
+#   gradient.bottom = "#00ffff"   # Cyan
+#   gradient.middle = "#ff00ff"   # Magenta
+#   gradient.top = "#ffff00"      # Yellow
+#
+# Dark Purple:
+#   recording = "#7c4dff"
+#   transcribing = "#69f0ae"
+#   gradient.enabled = false
+#
+# Monochrome:
+#   recording = "#a0a0a0"
+#   transcribing = "#808080"
+#   gradient.enabled = false
+#
+# ============================================================================
+# Tips
+# ============================================================================
+#
+# 1. Use contrasting colors for recording vs transcribing states
+#    so users can easily tell what state the app is in.
+#
+# 2. For gradient themes, the classic Winamp "fire" look uses:
+#    green (bottom) → yellow (middle) → red (top)
+#
+# 3. Test your theme with the "Validate Theme" button in settings
+#    to check for transparency and contrast issues.
+#
+# 4. Peak indicator (recording_peak) should be bright/white
+#    to stand out at the top of bars.

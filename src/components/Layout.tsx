@@ -1,0 +1,153 @@
+import { NavLink, Outlet, useLocation, Navigate } from "react-router-dom";
+import { useEffect, useCallback, useState } from "react";
+import { useRecordingContext } from "../contexts/RecordingContext";
+import SpectrumVisualizer from "./SpectrumVisualizer";
+import PermissionBanner from "./PermissionBanner";
+import {
+  getStatusClass,
+  getStatusText,
+  getStatusIcon,
+  RecordingState,
+} from "../lib/status";
+import { getFooterShortcuts } from "../lib/keyboardShortcuts";
+import { useClock } from "../hooks/useClock";
+import { useHotkeyDisplay } from "../hooks/useHotkeyDisplay";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { useThemeColors } from "../hooks/useThemeColors";
+import {
+  checkPermissions,
+  openPermissionSettings,
+  requestMicrophonePermission,
+  requestAccessibilityPermission,
+  PermissionInfo,
+} from "../lib/commands";
+
+const navItems = [
+  { path: "/history", label: "History" },
+  { path: "/dictionary", label: "Dictionary" },
+  { path: "/settings", label: "Settings" },
+];
+
+function Layout() {
+  const location = useLocation();
+  const { state, error, lastTranscription } = useRecordingContext();
+
+  // Use extracted hooks (SRP)
+  const currentTime = useClock();
+  const { hotkey } = useHotkeyDisplay();
+
+  // Sync theme colors from native overlay to CSS variables
+  const useGradient = useThemeColors();
+
+  // SRP: Keyboard handling extracted to hook
+  useKeyboardShortcuts(lastTranscription);
+
+  // Get shortcuts for footer display
+  const footerShortcuts = getFooterShortcuts();
+
+  // Permission state
+  const [permissions, setPermissions] = useState<PermissionInfo[]>([]);
+
+  // Check permissions on mount and when window gains focus
+  const refreshPermissions = useCallback(async () => {
+    try {
+      const perms = await checkPermissions();
+      setPermissions(perms);
+    } catch {
+      // Ignore errors - permissions UI is optional
+    }
+  }, []);
+
+  useEffect(() => {
+    // Check permissions on mount (wizard already requested them at startup)
+    refreshPermissions();
+
+    // Re-check when window gains focus (user may have changed settings)
+    const handleFocus = () => {
+      refreshPermissions();
+    };
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [refreshPermissions]);
+
+  // Handle permission request - trigger permission dialog, then open system settings
+  const handleRequestPermission = useCallback(async (permission: string) => {
+    // Trigger permission request so app appears in System Settings list
+    if (permission.toLowerCase() === "microphone") {
+      await requestMicrophonePermission();
+    } else if (permission.toLowerCase() === "accessibility") {
+      await requestAccessibilityPermission();
+    }
+    // Open the corresponding Settings page
+    openPermissionSettings(permission);
+  }, []);
+
+  // Computed status values using shared utilities
+  const statusClass = getStatusClass(state as RecordingState, error);
+  const statusText = getStatusText({ state: state as RecordingState, error, hotkey });
+  const statusIcon = getStatusIcon(state as RecordingState, error);
+
+  // Redirect to history if on home page
+  const isHome = location.pathname === "/";
+
+  return (
+    <div className="layout">
+      {/* Header - Textual style */}
+      <header className="header">
+        <span className="header-title">SoupaWhisper 2</span>
+        {error && <span className="header-error">{error}</span>}
+        <span className="header-time">{currentTime}</span>
+      </header>
+
+      {/* Status Bar */}
+      <div className={`status-bar ${statusClass}`}>
+        <span>
+          {statusIcon} {statusText}
+        </span>
+      </div>
+
+      {/* Permission Banner */}
+      <PermissionBanner
+        permissions={permissions}
+        onRequestPermission={handleRequestPermission}
+      />
+
+      {/* Tabs - TUI style */}
+      <nav className="tabs">
+        {navItems.map(({ path, label }) => (
+          <NavLink
+            key={path}
+            to={path}
+            className={({ isActive }) =>
+              `tab ${isActive || (isHome && path === "/history") ? "active" : ""}`
+            }
+          >
+            {label}
+          </NavLink>
+        ))}
+      </nav>
+
+      {/* Main Content */}
+      <main className="main-content">
+        {isHome ? <Navigate to="/history" replace /> : <Outlet />}
+      </main>
+
+      {/* Spectrum Visualizer */}
+      <SpectrumVisualizer mode={error ? "error" : state} useGradient={useGradient} />
+
+      {/* Footer - Generated from shortcuts registry (OCP) */}
+      <footer className="footer">
+        {footerShortcuts.map((shortcut) => (
+          <span key={shortcut.key}>
+            <span className="footer-key">{shortcut.keyLabel}</span> {shortcut.label}
+          </span>
+        ))}
+      </footer>
+    </div>
+  );
+}
+
+export default Layout;

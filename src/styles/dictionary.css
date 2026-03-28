@@ -1,0 +1,281 @@
+/* Dictionary Page - TUI style */
+.dictionary-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Add Card - TUI box style */
+.dictionary-add-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  margin-bottom: var(--spacing-md);
+}
+
+.dictionary-add-title {
+  font-size: 14px;
+  font-weight: bold;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Add Entry Form */
+.add-entry-form {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+}
+
+.add-entry-input {
+  flex: 1;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.add-entry-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.add-entry-form button {
+  padding: var(--spacing-xs) var(--spacing-md);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.add-entry-form button:hover {
+  background: var(--bg-panel);
+}
+
+/* Dictionary List - scrollable */
+.dictionary-list {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+/* Dictionary Entry - list item style */
+.dictionary-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  border-bottom: 1px solid var(--border);
+}
+
+.dictionary-entry:hover {
+  background: var(--bg-panel);
+}
+
+.dictionary-entry.editing {
+  background: var(--bg-panel);
+}
+
+.dictionary-source {
+  flex: 1;
+  font-size: 14px;
+}
+
+.dictionary-arrow {
+  color: var(--fg-muted);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.dictionary-replacement {
+  flex: 1;
+  font-size: 14px;
+  color: var(--accent);
+}
+
+.dictionary-input {
+  flex: 1;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.dictionary-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.dictionary-entry-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.dictionary-entry-actions button {
+  font-size: 12px;
+  padding: 2px var(--spacing-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+
+.dictionary-entry-actions button:hover {
+  background: var(--bg-panel);
+}
+
+/* Empty State */
+.dictionary-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  text-align: center;
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.dictionary-empty p {
+  margin: var(--spacing-xs) 0;
+}
+
+.dictionary-empty-hint {
+  font-size: 12px;
+}
+
+/* Pending Suggestions Section */
+.pending-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--accent);
+  margin-bottom: var(--spacing-md);
+}
+
+.pending-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.pending-title {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--accent);
+  margin: 0;
+}
+
+.pending-description {
+  font-size: 12px;
+  color: var(--fg-muted);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.pending-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.pending-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+
+.pending-item:last-child {
+  border-bottom: none;
+}
+
+.pending-item:hover {
+  background: var(--bg-panel);
+}
+
+.pending-item.ready {
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.pending-item-content {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex: 1;
+  position: relative;
+}
+
+.pending-source {
+  font-size: 14px;
+  flex: 1;
+}
+
+.pending-arrow {
+  color: var(--fg-muted);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.pending-replacement {
+  font-size: 14px;
+  color: var(--accent);
+  flex: 1;
+}
+
+.pending-count {
+  font-size: 12px;
+  color: var(--fg-muted);
+  padding: 2px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.pending-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--accent);
+  opacity: 0.5;
+  transition: width 0.3s ease;
+}
+
+.pending-item-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.pending-item-actions button {
+  font-size: 12px;
+  padding: 2px var(--spacing-sm);
+}
+
+.pending-item-actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+
+.pending-item-actions button.primary:hover {
+  opacity: 0.9;
+}
+
+.pending-item-actions button.secondary {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+
+.pending-item-actions button.secondary:hover {
+  background: var(--bg-panel);
+}

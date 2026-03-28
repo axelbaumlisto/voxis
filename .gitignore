@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+src-tauri/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+*.env
+.env.*
+
+# Test artifacts
+*.tsbuildinfo
+playwright-report/
+test-results/
+src-tauri/tests/screenshots/
+
+# Claude / local agent tooling
+.claude/
+.pi/
+.superpowers/
+
+# Python version (legacy, kept locally)
+.python-version
+pyproject.toml
+uv.lock
+src/soupawhisper/
+
+# Keep benchmark scripts, ignore Python legacy scripts
+scripts/*.py
+.worktrees/

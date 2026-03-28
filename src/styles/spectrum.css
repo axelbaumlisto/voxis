@@ -1,0 +1,74 @@
+/* Spectrum Visualizer - Winamp-style FFT bars */
+.spectrum {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  height: 64px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.spectrum-bar {
+  flex: 1;
+  min-width: 4px;
+  max-width: 12px;
+  min-height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  transition: height 0.05s ease-out;
+}
+
+/* Idle state - flat gray bars */
+.spectrum.idle .spectrum-bar {
+  background: var(--border);
+  height: 2px;
+}
+
+/* Recording state - solid color (default, for non-gradient themes) */
+.spectrum.recording .spectrum-bar {
+  background: var(--spectrum-recording, var(--accent));
+}
+
+/* Recording state - gradient mode (class added by React) */
+/* Gradient is fixed to container height so color depends on bar height */
+.spectrum.recording.gradient .spectrum-bar {
+  background: linear-gradient(
+    to top,
+    var(--spectrum-bottom, var(--success)) 0%,
+    var(--spectrum-middle, var(--warning)) 50%,
+    var(--spectrum-top, var(--error)) 100%
+  );
+  /* Fix gradient to full container height, positioned at bottom */
+  background-size: 100% 48px; /* spectrum height (64px) minus padding (16px) */
+  background-position: bottom;
+  background-repeat: no-repeat;
+}
+
+/* Transcribing state - pulsing with theme color */
+.spectrum.transcribing .spectrum-bar {
+  background: var(--spectrum-transcribing, var(--warning));
+  opacity: 0.9;
+}
+
+.spectrum.transcribing .spectrum-bar.pulse {
+  animation: pulse-opacity 0.5s ease-in-out infinite alternate;
+}
+
+/* Error state - red bars */
+.spectrum.error .spectrum-bar {
+  background: var(--error);
+  opacity: 0.8;
+}
+
+@keyframes pulse-opacity {
+  from {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 1;
+  }
+}
