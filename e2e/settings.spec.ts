@@ -34,6 +34,7 @@ test.describe("Settings Page", () => {
                 cloud_provider: "groq",
                 local_backend: "faster-whisper",
                 text_processing: true,
+                paste_shortcuts: "ctrl_shift_v",
                 vad: { enabled: false, threshold: 0.5 },
                 overlay: {
                   enabled: true,
@@ -61,10 +62,42 @@ test.describe("Settings Page", () => {
               return [{ id: "default", name: "Default Device", is_default: true }];
             case "get_llm_providers":
               return [];
+            case "check_permissions":
+              return [
+                { name: "Microphone", status: "granted", description: "Required for audio recording" },
+                { name: "Input Monitoring", status: "granted", description: "Required for global hotkey detection" },
+              ];
+            case "get_audio_level":
+              return 0;
+            case "get_visualization_themes":
+              return [
+                { id: "default", name: "Default", description: "Default" },
+                { id: "winamp_classic", name: "Winamp Classic", description: "Fire spectrum" },
+                { id: "dark", name: "Dark Purple", description: "Purple" },
+                { id: "neon", name: "Neon", description: "Neon" },
+                { id: "monochrome", name: "Monochrome", description: "Grayscale" },
+              ];
+            case "get_theme_colors":
+              return {
+                use_gradient: true,
+                gradient_bottom: "#299400",
+                gradient_middle: "#d6b521",
+                gradient_top: "#ef3110",
+                recording: "#ef3110",
+                transcribing: "#69f0ae",
+                idle: "#299400",
+              };
+            case "plugin:event|listen":
+              return Math.floor(Math.random() * 1000000);
+            case "plugin:event|unlisten":
+              return null;
             default:
               console.log("Unhandled invoke:", cmd);
               return undefined;
           }
+        },
+        transformCallback: (callback: (data: unknown) => void) => {
+          return Math.floor(Math.random() * 1000000);
         },
       };
     });

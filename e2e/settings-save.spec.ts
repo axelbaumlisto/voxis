@@ -37,6 +37,7 @@ test.describe("Settings Save", () => {
         cloud_provider: "openai",
         local_backend: "whisper_cpp",
         text_processing: true,
+        paste_shortcuts: "ctrl_shift_v",
         vad: {
           enabled: false,
           threshold: 0.5,
@@ -101,6 +102,13 @@ test.describe("Settings Save", () => {
               return true;
             case "get_llm_providers":
               return [];
+            case "get_visualization_themes":
+              return [
+                { id: "default", name: "Default", description: "Default" },
+                { id: "winamp_classic", name: "Winamp Classic", description: "Fire" },
+              ];
+            case "get_theme_colors":
+              return { use_gradient: true, gradient_bottom: "#299400", gradient_middle: "#d6b521", gradient_top: "#ef3110", recording: "#ef3110", transcribing: "#69f0ae", idle: "#299400" };
             default:
               return undefined;
           }
