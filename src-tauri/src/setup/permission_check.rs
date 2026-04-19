@@ -3,7 +3,7 @@ use crate::permissions;
 
 #[cfg(target_os = "macos")]
 pub(super) fn check_permissions_and_prompt() -> bool {
-    use crate::permissions::Permission;
+    use crate::permissions::{Permission, PermissionChecker};
 
     let checker = permissions::create_permission_checker();
 

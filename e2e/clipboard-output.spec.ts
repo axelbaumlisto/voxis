@@ -33,6 +33,7 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
     cloud_provider: "groq",
     local_backend: "faster-whisper",
     text_processing: false,
+    paste_shortcuts: "ctrl_shift_v",
     vad: { enabled: false, threshold: 0.5 },
     overlay: {
       enabled: false,
@@ -152,6 +153,11 @@ function setupMocks(page: any, config: Record<string, unknown>) {
 
             case "plugin:event|unlisten":
               return null;
+
+            case "get_visualization_themes":
+              return [{ id: "default", name: "Default", description: "Default" }];
+            case "get_theme_colors":
+              return { use_gradient: true, gradient_bottom: "#299400", gradient_middle: "#d6b521", gradient_top: "#ef3110", recording: "#ef3110", transcribing: "#69f0ae", idle: "#299400" };
 
             default:
               return undefined;

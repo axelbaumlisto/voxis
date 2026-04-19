@@ -16,7 +16,7 @@ export default function PasteShortcutCheckboxes({
 }: PasteShortcutCheckboxesProps) {
   // Parse comma-separated value into Set
   const selected = new Set(
-    value
+    (value ?? "")
       .split(",")
       .map((s) => s.trim())
       .filter((s) => s.length > 0)

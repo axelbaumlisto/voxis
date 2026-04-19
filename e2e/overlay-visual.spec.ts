@@ -37,6 +37,7 @@ test.describe("Overlay Visual Verification", () => {
         cloud_provider: "groq",
         local_backend: "mlx",
         text_processing: true,
+        paste_shortcuts: "ctrl_shift_v",
         vad: { enabled: true, threshold: 0.5 },
         overlay: {
           enabled: true,
