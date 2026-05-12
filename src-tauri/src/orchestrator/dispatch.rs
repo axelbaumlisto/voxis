@@ -27,13 +27,13 @@ impl TranscriptionDispatcher {
                 );
 
                 let config = load_config_from_app(&app);
-                let ctx = transcription::TranscriptionContext::new_with_coordinator(
+                let ctx = transcription::TranscriptionContext::new(
                     app.clone(),
                     Arc::clone(&output),
                     Arc::clone(&state),
                     Arc::clone(&overlay),
                     item.audio_data.clone(),
-                    Some(Arc::clone(&coordinator)),
+                    Arc::clone(&coordinator),
                 );
 
                 transcription::transcribe_and_output(ctx, item.audio_data, config).await;

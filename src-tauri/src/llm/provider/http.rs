@@ -12,7 +12,7 @@ use crate::llm::client;
 use crate::llm::config::LlmConfig;
 use crate::llm::engine;
 
-/// Default timeout aligned with `LlmProcessor` to keep behaviour consistent.
+/// Default timeout (seconds) for outbound LLM HTTP requests.
 const HTTP_TIMEOUT_SECS: u64 = 30;
 
 /// Generic OpenAI-compatible chat-completions provider.

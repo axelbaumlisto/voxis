@@ -1,16 +1,14 @@
-//! LLM request engine for processor pipeline.
+//! LLM HTTP transport — shared chat-completion call used by providers.
 //!
-//! Combines request building, API execution, and pipeline orchestration.
+//! After removing `LlmProcessor`, this module only exposes
+//! `send_chat_completion`, which is reused by `HttpLlmProvider` (DRY).
+//! Request construction lives in `client::build_chat_request`; response parsing
+//! lives in `parser::parse_result` and is invoked by callers (provider/parser
+//! split keeps SRP intact).
 
-use super::client::{build_chat_request, ChatRequest, ChatResponse};
+use super::client::ChatRequest;
+use super::client::ChatResponse;
 use super::config::LlmConfig;
-use super::parser::parse_result;
-use super::types::LlmResult;
-
-/// Build request payload from LLM config + source text.
-pub fn build_request(config: &LlmConfig, text: &str) -> ChatRequest {
-    build_chat_request(&config.model, &config.prompt, text)
-}
 
 /// Send chat completion request and return assistant message content.
 pub async fn send_chat_completion(
@@ -42,32 +40,10 @@ pub async fn send_chat_completion(
     Ok(content)
 }
 
-/// Execute post-processing pipeline:
-/// 1) Empty input short-circuit
-/// 2) Prompt/request build
-/// 3) LLM API call
-/// 4) Result parsing
-pub async fn process_text(
-    http_client: &reqwest::Client,
-    config: &LlmConfig,
-    text: &str,
-) -> Result<LlmResult, Box<dyn std::error::Error + Send + Sync>> {
-    if text.trim().is_empty() {
-        return Ok(LlmResult {
-            text: text.to_string(),
-            suggestions: Vec::new(),
-        });
-    }
-
-    let request = build_request(config, text);
-    let content = send_chat_completion(http_client, config, &request).await?;
-
-    parse_result(&content, text)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::client::build_chat_request;
 
     fn test_config(url: String) -> LlmConfig {
         LlmConfig {
@@ -76,21 +52,6 @@ mod tests {
             model: "test-model".to_string(),
             prompt: "Test prompt".to_string(),
         }
-    }
-
-    #[test]
-    fn test_build_request_uses_model_and_prompt_from_config() {
-        let config = LlmConfig {
-            api_url: "https://api.example.com".to_string(),
-            api_key: "test-key".to_string(),
-            model: "gpt-4o-mini".to_string(),
-            prompt: "Fix punctuation".to_string(),
-        };
-
-        let request = build_request(&config, "hello world");
-        assert_eq!(request.model, "gpt-4o-mini");
-        assert_eq!(request.messages[0].content, "Fix punctuation");
-        assert_eq!(request.messages[1].content, "hello world");
     }
 
     #[tokio::test]
@@ -146,20 +107,5 @@ mod tests {
 
         assert!(err.contains("401"));
         mock.assert_async().await;
-    }
-
-    #[tokio::test]
-    async fn test_pipeline_returns_early_for_empty_text() {
-        let client = reqwest::Client::new();
-        let config = LlmConfig {
-            api_url: "https://api.example.com".to_string(),
-            api_key: "test-key".to_string(),
-            model: "test-model".to_string(),
-            prompt: "Test prompt".to_string(),
-        };
-
-        let result = process_text(&client, &config, "   ").await.unwrap();
-        assert_eq!(result.text, "   ");
-        assert!(result.suggestions.is_empty());
     }
 }

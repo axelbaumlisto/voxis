@@ -1,9 +1,18 @@
 //! Pending suggestions-related Tauri commands.
+//!
+//! Architecture (SOLID after LlmProcessor removal):
+//! - OCP/DIP: batch processing depends on `LlmProvider` trait, not concrete
+//!   `LlmProcessor`. Construction lives in a single factory (`build_batch_provider`).
+//! - SRP: `process_batch_via_provider` is a pure function (no Tauri state),
+//!   making it directly unit-testable with mock providers.
+//! - DRY: reuses `crate::llm::parser::parse_result` — same parser the
+//!   live post-processing pipeline uses.
 
 use crate::config::BATCH_SUGGESTIONS_PROMPT;
 use crate::error::BoxedIntoCommandError;
 use crate::learning::{CorrectionTracker, LearningMode};
-use crate::llm::{DictionarySuggestion, LlmConfig, LlmProcessor};
+use crate::llm::provider::{HttpLlmProvider, LlmProvider};
+use crate::llm::{parser, DictionarySuggestion, LlmResult};
 use crate::storage::{AppPaths, StorageFactory, TrackedSuggestion};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -70,14 +79,41 @@ fn execute_suggestion_action(
 // Batch LLM Processing Helpers
 // =============================================================================
 
-/// Build LLM config for batch suggestion analysis.
-fn build_batch_llm_config(config: &crate::config::AppConfig) -> LlmConfig {
-    LlmConfig {
-        api_url: crate::config::GROQ_CHAT_URL.to_string(),
-        api_key: config.llm.api_key.clone(),
-        model: "llama-3.3-70b-versatile".to_string(),
-        prompt: BATCH_SUGGESTIONS_PROMPT.to_string(),
+/// Build a one-off `LlmProvider` for batch suggestion processing.
+///
+/// SRP: this factory is the single place that decides how to construct an
+/// LLM transport for batch reprocessing. Unlike `crate::llm::provider::build_llm_provider`
+/// (which respects `config.llm.enabled` for the live post-processing pipeline),
+/// batch reprocessing is an explicit user action and uses Groq-specific
+/// endpoint/model regardless of the post-process toggle.
+///
+/// Returns `None` when the API key is missing or blank.
+fn build_batch_provider(config: &crate::config::AppConfig) -> Option<Box<dyn LlmProvider>> {
+    if config.llm.api_key.trim().is_empty() {
+        return None;
     }
+    Some(Box::new(HttpLlmProvider::new(
+        format!("{}-batch", config.llm.provider),
+        crate::config::GROQ_CHAT_URL.to_string(),
+        config.llm.api_key.clone(),
+        "llama-3.3-70b-versatile".to_string(),
+    )))
+}
+
+/// Send `batch_input` through `provider` with `batch_prompt` and parse the
+/// model output into a structured `LlmResult`.
+///
+/// SRP: pure function — no Tauri state, no storage, no events. Easily
+/// unit-testable with mock providers.
+/// DRY: delegates parsing to `crate::llm::parser::parse_result` so the batch
+/// path uses the same parsing logic as the live post-processing pipeline.
+async fn process_batch_via_provider(
+    provider: &dyn LlmProvider,
+    batch_prompt: &str,
+    batch_input: &str,
+) -> Result<LlmResult, String> {
+    let content = provider.process(batch_prompt, batch_input).await?;
+    parser::parse_result(&content, batch_input).map_err(|e| e.to_string())
 }
 
 /// Collect history entry texts into JSON array for batch LLM processing.
@@ -226,12 +262,15 @@ pub async fn reprocess_history_for_suggestions(
         });
     }
 
-    // Process batch through LLM
+    // Process batch through LLM via trait abstraction (OCP/DIP).
     let batch_input = collect_history_texts(&entries);
-    let llm = LlmProcessor::new(build_batch_llm_config(&config));
-    let result = llm.process(&batch_input).await.cmd_err()?;
+    let provider = build_batch_provider(&config)
+        .ok_or_else(|| "LLM API key not configured".to_string())?;
+    let result =
+        process_batch_via_provider(provider.as_ref(), BATCH_SUGGESTIONS_PROMPT, &batch_input)
+            .await?;
 
-    // Track suggestions
+    // Track suggestions.
     let tracker = create_tracker(&factory)?;
     let suggestions_found = process_llm_suggestions(&tracker, &result.suggestions);
 
@@ -381,17 +420,168 @@ mod tests {
         assert_eq!(parsed[0], "Single entry");
     }
 
+    // -----------------------------------------------------------------------
+    // build_batch_provider tests (replaces former build_batch_llm_config tests)
+    // -----------------------------------------------------------------------
+
     #[test]
-    fn test_build_batch_llm_config() {
-        let mut config = crate::config::AppConfig::default();
-        config.llm.api_key = "test-api-key-123".to_string();
+    fn test_build_batch_provider_returns_none_with_empty_key() {
+        let config = crate::config::AppConfig {
+            llm: crate::config::LlmConfig {
+                api_key: String::new(),
+                ..crate::config::LlmConfig::default()
+            },
+            ..crate::config::AppConfig::default()
+        };
+        assert!(build_batch_provider(&config).is_none());
+    }
 
-        let llm_config = build_batch_llm_config(&config);
+    #[test]
+    fn test_build_batch_provider_returns_none_with_whitespace_key() {
+        let config = crate::config::AppConfig {
+            llm: crate::config::LlmConfig {
+                api_key: "   \t  ".to_string(),
+                ..crate::config::LlmConfig::default()
+            },
+            ..crate::config::AppConfig::default()
+        };
+        assert!(build_batch_provider(&config).is_none());
+    }
 
-        assert!(!llm_config.api_url.is_empty());
-        assert_eq!(llm_config.api_key, "test-api-key-123");
-        assert_eq!(llm_config.model, "llama-3.3-70b-versatile");
-        assert!(!llm_config.prompt.is_empty());
+    #[test]
+    fn test_build_batch_provider_returns_some_with_key_even_if_disabled() {
+        // Batch reprocessing ignores `llm.enabled` — it's an explicit user action.
+        let config = crate::config::AppConfig {
+            llm: crate::config::LlmConfig {
+                enabled: false,
+                api_key: "test-api-key-123".to_string(),
+                ..crate::config::LlmConfig::default()
+            },
+            ..crate::config::AppConfig::default()
+        };
+        let provider = build_batch_provider(&config);
+        assert!(provider.is_some());
+        let provider = provider.unwrap();
+        // Name carries provider id with `-batch` suffix for log clarity.
+        assert!(provider.name().ends_with("-batch"));
+        assert!(provider.is_available());
+    }
+
+    // -----------------------------------------------------------------------
+    // process_batch_via_provider tests (mock LlmProvider)
+    // -----------------------------------------------------------------------
+
+    use async_trait::async_trait;
+    use std::sync::{Arc, Mutex as StdMutex};
+
+    type ProviderCalls = Arc<StdMutex<Vec<(String, String)>>>;
+
+    /// Mock provider returning a canned response and recording calls.
+    struct MockProvider {
+        response: String,
+        calls: ProviderCalls,
+    }
+
+    impl MockProvider {
+        fn new(response: &str) -> (Self, ProviderCalls) {
+            let calls: ProviderCalls = Arc::new(StdMutex::new(Vec::new()));
+            (
+                Self {
+                    response: response.to_string(),
+                    calls: Arc::clone(&calls),
+                },
+                calls,
+            )
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for MockProvider {
+        fn name(&self) -> &str {
+            "MockBatch"
+        }
+        fn is_available(&self) -> bool {
+            true
+        }
+        async fn process(
+            &self,
+            system_prompt: &str,
+            user_text: &str,
+        ) -> Result<String, String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((system_prompt.to_string(), user_text.to_string()));
+            Ok(self.response.clone())
+        }
+    }
+
+    /// Provider that always errors.
+    struct FailingProvider;
+
+    #[async_trait]
+    impl LlmProvider for FailingProvider {
+        fn name(&self) -> &str {
+            "FailingBatch"
+        }
+        fn is_available(&self) -> bool {
+            true
+        }
+        async fn process(&self, _: &str, _: &str) -> Result<String, String> {
+            Err("simulated network error".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_batch_via_provider_parses_suggestions() {
+        let (provider, calls) = MockProvider::new(
+            r#"{"suggestions":[{"source":"solid","replacement":"SOLID"},{"source":"dry","replacement":"DRY"}]}"#,
+        );
+
+        let result = process_batch_via_provider(&provider, "batch prompt", "[\"text\"]")
+            .await
+            .expect("parser must succeed for well-formed JSON");
+
+        assert_eq!(result.suggestions.len(), 2);
+        assert_eq!(result.suggestions[0].source, "solid");
+        assert_eq!(result.suggestions[0].replacement, "SOLID");
+        assert_eq!(result.suggestions[1].source, "dry");
+
+        // Provider received the batch prompt + input.
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "batch prompt");
+        assert_eq!(calls[0].1, "[\"text\"]");
+    }
+
+    #[tokio::test]
+    async fn test_process_batch_via_provider_propagates_provider_error() {
+        let provider = FailingProvider;
+        let err = process_batch_via_provider(&provider, "prompt", "[]")
+            .await
+            .expect_err("failing provider must return Err");
+        assert!(err.contains("simulated network error"));
+    }
+
+    #[tokio::test]
+    async fn test_process_batch_via_provider_handles_malformed_json() {
+        // parser::parse_result is total — it returns a fallback for non-JSON,
+        // so this is Ok with empty suggestions, not Err.
+        let (provider, _) = MockProvider::new("not valid json at all");
+        let result = process_batch_via_provider(&provider, "prompt", "original")
+            .await
+            .expect("parser is total and returns a fallback");
+        assert!(result.suggestions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_process_batch_via_provider_empty_suggestions_ok() {
+        let (provider, _) =
+            MockProvider::new(r#"{"text":"","suggestions":[]}"#);
+        let result = process_batch_via_provider(&provider, "prompt", "[\"a\"]")
+            .await
+            .unwrap();
+        assert!(result.suggestions.is_empty());
     }
 
     #[test]
