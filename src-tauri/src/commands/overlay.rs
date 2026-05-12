@@ -157,6 +157,15 @@ pub fn get_overlay_theme_data(
     crate::overlay_native::OverlayThemeData::from_theme(&theme)
 }
 
+/// Diagnostic command — lets the overlay webview log a marker to the Rust
+/// tracing stream. Used during E2E development to verify that the React
+/// app inside the NSPanel actually runs and receives state events.
+#[tauri::command]
+#[specta::specta]
+pub fn debug_log_overlay(message: String) {
+    tracing::info!("overlay-diag: {}", message);
+}
+
 /// Run overlay demo mode (debug only).
 /// Shows recording state with simulated audio levels.
 #[cfg(debug_assertions)]

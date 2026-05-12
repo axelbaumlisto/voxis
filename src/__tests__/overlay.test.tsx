@@ -64,7 +64,9 @@ describe("OverlayApp (HandyPill shell)", () => {
     render(<OverlayApp />);
     const pill = screen.getByTestId("handy-pill-stub");
     expect(pill.dataset.mode).toBe("idle");
-    expect(pill.dataset.visible).toBe("false");
+    // Pill is always visible at OS level; the mode prop drives icon/bars
+    // animation but the pill never fades out (user requirement).
+    expect(pill.dataset.visible).toBe("true");
     expect(Number(pill.dataset.barCount)).toBe(9);
   });
 

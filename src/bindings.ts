@@ -390,6 +390,14 @@ async getOverlayThemeData(themeId: string) : Promise<OverlayThemeData> {
     return await TAURI_INVOKE("get_overlay_theme_data", { themeId });
 },
 /**
+ * Diagnostic command — lets the overlay webview log a marker to the Rust
+ * tracing stream. Used during E2E development to verify that the React
+ * app inside the NSPanel actually runs and receives state events.
+ */
+async debugLogOverlay(message: string) : Promise<void> {
+    await TAURI_INVOKE("debug_log_overlay", { message });
+},
+/**
  * List available audio input devices.
  * Requires microphone permission to access audio hardware.
  */

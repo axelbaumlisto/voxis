@@ -132,8 +132,7 @@ export function useOverlayState(): OverlaySnapshot {
         }
         unlistens.push(unlisten);
       } catch (err) {
-        // Non-Tauri environment or transient failure — keep defaults.
-        console.warn(`[useOverlayState] failed to subscribe to ${event}:`, err);
+        console.warn(`[useOverlayState] subscribe ${event} failed:`, err);
       }
     };
 

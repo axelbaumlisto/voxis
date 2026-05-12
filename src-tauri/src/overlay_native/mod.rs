@@ -95,7 +95,11 @@ pub struct CreateOverlayParams<'a> {
         "nspanel" => {
             #[cfg(target_os = "macos")]
             if let Some(app) = params.app_handle.as_ref() {
-                match nspanel::NsPanelOverlay::new(app.clone()) {
+                match nspanel::NsPanelOverlay::new(
+                    app.clone(),
+                    params.position,
+                    params.margin,
+                ) {
                     Ok(o) => return Box::new(o),
                     Err(e) => tracing::warn!("NSPanel overlay failed: {}; falling back", e),
                 }

@@ -120,6 +120,7 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
         crate::commands::overlay::preview_visualization_theme,
         crate::commands::overlay::get_theme_colors,
         crate::commands::overlay::get_overlay_theme_data,
+        crate::commands::overlay::debug_log_overlay,
         // recording
         crate::commands::recording::list_audio_devices,
         crate::commands::recording::start_recording,

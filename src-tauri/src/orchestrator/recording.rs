@@ -149,9 +149,13 @@ impl RecordingCoordinator {
         self.mirror_state().await;
 
         if config.overlay.enabled {
-            tracing::info!("on_hotkey_pressed: overlay.show(Recording)");
-            self.overlay.lock().await.show(OverlayState::Recording);
-            tracing::info!("on_hotkey_pressed: overlay shown, preparing polling");
+            tracing::info!("on_hotkey_pressed: about to acquire overlay lock");
+            let overlay_guard = self.overlay.lock().await;
+            tracing::info!("on_hotkey_pressed: overlay lock acquired, calling show()");
+            overlay_guard.show(OverlayState::Recording);
+            tracing::info!("on_hotkey_pressed: show() returned, dropping overlay guard");
+            drop(overlay_guard);
+            tracing::info!("on_hotkey_pressed: overlay guard dropped, preparing polling");
             let token = CancellationToken::new();
             let mut cancel_guard = self.polling_cancel.lock().await;
             if let Some(old_token) = cancel_guard.take() {

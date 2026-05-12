@@ -22,9 +22,14 @@
 //! - KISS: minimal surface; non-macOS path is a deliberate no-op (no `unimplemented!`).
 
 use super::backend::OverlayBackend;
-use super::OverlayState;
+use super::{OverlayPositionConfig, OverlayState};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+/// Default Handy-style pill dimensions (kept fixed across config sizes — the
+/// HandyPill component is built around this canvas).
+pub const PILL_WIDTH: u32 = 172;
+pub const PILL_HEIGHT: u32 = 36;
 
 /// Tauri webview label assigned to the overlay panel.
 pub const OVERLAY_PANEL_LABEL: &str = "overlay";
@@ -82,12 +87,21 @@ impl NsPanelOverlay {
     /// creation through `app.run_on_main_thread` and synchronously wait for
     /// the result over a `std::sync::mpsc` channel. If we are already on the
     /// main thread, the closure executes inline — still safe.
+    ///
+    /// `position` + `margin` honour the user's overlay placement config so
+    /// the pill appears where settings say (BottomCenter, TopRight, etc.).
+    /// Window size is fixed at `PILL_WIDTH × PILL_HEIGHT` since HandyPill
+    /// is a single-canvas design.
     #[cfg(target_os = "macos")]
-    pub fn new(app: tauri::AppHandle) -> Result<Self, String> {
+    pub fn new(
+        app: tauri::AppHandle,
+        position: OverlayPositionConfig,
+        margin: i32,
+    ) -> Result<Self, String> {
         let (tx, rx) = std::sync::mpsc::channel::<Result<imp::Inner, String>>();
         let app_for_thread = app.clone();
         let dispatched = app.run_on_main_thread(move || {
-            let _ = tx.send(imp::Inner::create(app_for_thread));
+            let _ = tx.send(imp::Inner::create(app_for_thread, position, margin));
         });
         if let Err(e) = dispatched {
             return Err(format!("run_on_main_thread dispatch failed: {e}"));
@@ -103,7 +117,7 @@ impl NsPanelOverlay {
 
     /// Stub constructor on non-macOS — mirrors [`Self::unavailable`].
     #[cfg(not(target_os = "macos"))]
-    pub fn new() -> Result<Self, String> {
+    pub fn new(_position: OverlayPositionConfig, _margin: i32) -> Result<Self, String> {
         Err("NSPanel overlay is only supported on macOS".to_string())
     }
 }
@@ -196,10 +210,12 @@ impl Drop for NsPanelOverlay {
 
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::{events, OverlayState, OVERLAY_PANEL_LABEL};
-    use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+    use super::{
+        events, OverlayPositionConfig, OverlayState, OVERLAY_PANEL_LABEL, PILL_HEIGHT, PILL_WIDTH,
+    };
+    use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Size, WebviewUrl};
     use tauri_nspanel::{
-        tauri_panel, CollectionBehavior, ManagerExt, PanelLevel, WebviewWindowExt,
+        tauri_panel, CollectionBehavior, ManagerExt, PanelBuilder, PanelLevel,
     };
 
     tauri_panel! {
@@ -220,48 +236,129 @@ mod imp {
     }
 
     impl Inner {
+        /// Resolve initial (x, y) for the pill based on the active monitor and
+        /// the user's `PositionConfig` + `margin`. Returns LOGICAL GLOBAL pixels
+        /// (includes the monitor's position offset, which matters when external
+        /// displays are arranged to the left/right of the built-in one).
+        ///
+        /// Mirrors Handy's `calculate_overlay_position` (RecordingOverlay.rs).
+        fn compute_initial_position(
+            app: &AppHandle,
+            position: OverlayPositionConfig,
+            margin: i32,
+        ) -> (f64, f64) {
+            let monitor = app
+                .get_webview_window("main")
+                .and_then(|w| w.current_monitor().ok().flatten())
+                .or_else(|| {
+                    app.available_monitors()
+                        .ok()
+                        .and_then(|m| m.into_iter().next())
+                });
+            let Some(monitor) = monitor else {
+                return (100.0, 100.0);
+            };
+            // Tauri returns physical pixels for monitor.position()/size();
+            // dividing by scale yields logical coords. Both numbers need it,
+            // including the monitor's top-left offset which is non-zero for
+            // any monitor arranged to the left/above the built-in display.
+            let scale = monitor.scale_factor().max(1.0);
+            let phys_size = monitor.size();
+            let phys_pos = monitor.position();
+            let mx = phys_pos.x as f64 / scale;
+            let my = phys_pos.y as f64 / scale;
+            let mw = (phys_size.width as f64 / scale) as i32;
+            let mh = (phys_size.height as f64 / scale) as i32;
+            let (local_x, local_y) = position.calculate(
+                mw,
+                mh,
+                PILL_WIDTH as i32,
+                PILL_HEIGHT as i32,
+                margin,
+            );
+            // Translate monitor-local coordinates into the global desktop space.
+            (mx + local_x as f64, my + local_y as f64)
+        }
+
         /// Build a borderless webview, convert it to an `NSPanel`, and apply
         /// the desired collection behaviour.
-        pub fn create(app: AppHandle) -> Result<Self, String> {
+        pub fn create(
+            app: AppHandle,
+            position: OverlayPositionConfig,
+            margin: i32,
+        ) -> Result<Self, String> {
             let label = OVERLAY_PANEL_LABEL.to_string();
 
+            let (init_x, init_y) = Self::compute_initial_position(&app, position, margin);
+
             // Reuse an existing panel if one is already registered (e.g. across
-            // backend reinit). We do not eagerly close it so a follow-up
-            // wiring task can decide the right lifecycle.
+            // backend reinit). Re-apply position in case settings changed.
             if app.get_webview_panel(&label).is_ok() {
+                if let Some(window) = app.get_webview_window(&label) {
+                    let _ = window.set_position(tauri::LogicalPosition::new(init_x, init_y));
+                    let _ = window.set_size(tauri::LogicalSize::new(
+                        PILL_WIDTH as f64,
+                        PILL_HEIGHT as f64,
+                    ));
+                }
                 return Ok(Inner::Live { app, label });
             }
 
-            // Create the underlying webview window. The HTML page itself lives
-            // in the frontend bundle (e.g. `overlay.html`) and is not part of
-            // this task — pointing the URL at it lets the panel render.
-            let window = WebviewWindowBuilder::new(
-                &app,
-                &label,
-                WebviewUrl::App("overlay.html".into()),
-            )
-            .title("Recording Overlay")
-            .resizable(false)
-            .decorations(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .visible(false)
-            .transparent(true)
-            .build()
-            .map_err(|e| format!("Failed to build overlay webview: {e}"))?;
+            // Match Handy's PanelBuilder usage exactly (RecordingOverlay.rs).
+            // Key choices proven to render on macOS in Handy:
+            //   - PanelLevel::Status (higher than Floating; survives Mission
+            //     Control / Spaces)
+            //   - transparent(true) at BOTH PanelBuilder and window builder
+            //   - has_shadow(false)
+            //   - corner_radius(0.0) (CSS handles visual radius)
+            //   - no_activate(true) so the panel never steals focus
+            //   - panel.hide() after build — displayed via window.show() later
+            let panel = PanelBuilder::<_, RecordingOverlayPanel>::new(&app, &label)
+                .url(WebviewUrl::App("overlay.html".into()))
+                .title("Recording Overlay")
+                .position(Position::Logical(LogicalPosition {
+                    x: init_x,
+                    y: init_y,
+                }))
+                .level(PanelLevel::Status)
+                .size(Size::Logical(LogicalSize {
+                    width: PILL_WIDTH as f64,
+                    height: PILL_HEIGHT as f64,
+                }))
+                .has_shadow(false)
+                .transparent(true)
+                // no_activate(false) — with true, PanelBuilder temporarily sets
+                // NSApplicationActivationPolicy::Prohibited which can leave
+                // the entire voice app marked hidden=true. The panel window
+                // still appears in CGWindowList but AppKit refuses to paint
+                // its content. Skipping the trick keeps the app activated
+                // long enough for the panel to receive a draw cycle.
+                .no_activate(false)
+                .corner_radius(0.0)
+                .with_window(|w| {
+                    let w = w.decorations(false).transparent(true);
+                    #[cfg(debug_assertions)]
+                    let w = w.devtools(true);
+                    w
+                })
+                .collection_behavior(
+                    CollectionBehavior::new()
+                        .can_join_all_spaces()
+                        .full_screen_auxiliary(),
+                )
+                .build()
+                .map_err(|e| format!("Failed to build overlay panel: {e}"))?;
 
-            let panel = window
-                .to_panel::<RecordingOverlayPanel>()
-                .map_err(|e| format!("Failed to convert window to NSPanel: {e}"))?;
-
-            panel.set_level(PanelLevel::Floating.value());
-            panel.set_collection_behavior(
-                CollectionBehavior::new()
-                    .can_join_all_spaces()
-                    .stationary()
-                    .ignores_cycle()
-                    .value(),
-            );
+            // KEEP THE PANEL VISIBLE at the OS level. Hiding it via
+            // either `panel.hide()` (NSPanel orderOut:) or `window.hide()`
+            // breaks the WebKit draw pipeline so subsequent `window.show()`
+            // calls don't bring back content (the panel registers in
+            // CGWindowList but never paints). HandyPill's CSS already
+            // gates user-visible state with `opacity: 0` on `.recording-overlay`
+            // and `.fade-in` only when mode != idle. Net effect: panel is
+            // always physically there but invisibly transparent until
+            // recording starts.
+            panel.show_and_make_key();
 
             Ok(Inner::Live { app, label })
         }
@@ -273,57 +370,109 @@ mod imp {
             }
         }
 
+        /// Dispatch a closure to the main thread (AppKit invariant).
+        ///
+        /// NSPanel show/hide and any NSWindow mutation MUST happen on the main
+        /// thread or AppKit aborts the process with no Rust panic. We use
+        /// `app.run_on_main_thread` which is a fire-and-forget queue — we
+        /// intentionally don't wait for the closure to finish (avoids blocking
+        /// the async caller). Closures only do thread-safe work: lookup the
+        /// panel via `Manager::get_webview_panel` and call AppKit methods on it.
+        fn on_main_thread<F: FnOnce(AppHandle) + Send + 'static>(app: &AppHandle, f: F) {
+            let app_clone = app.clone();
+            if let Err(e) = app.run_on_main_thread(move || f(app_clone)) {
+                tracing::debug!("nspanel: run_on_main_thread dispatch failed: {e}");
+            }
+        }
+
+        /// Emit to the overlay webview both via the window handle AND the
+        /// app-wide bus (belt-and-suspenders). Some Tauri/tauri-nspanel
+        /// builds silently drop events on panel-wrapped windows, but
+        /// `app.emit` always reaches every webview listening for the event.
+        fn emit_to_overlay<T: serde::Serialize + Clone>(
+            app: &AppHandle,
+            label: &str,
+            event: &str,
+            payload: &T,
+        ) {
+            let window_result = app
+                .get_webview_window(label)
+                .map(|w| w.emit(event, payload));
+            let app_result = app.emit(event, payload);
+            // Trace any failure so we can debug missing pill animation.
+            match (window_result, app_result) {
+                (Some(Err(e)), _) => {
+                    tracing::warn!("nspanel: window.emit({event}) failed: {e}")
+                }
+                (_, Err(e)) => {
+                    tracing::warn!("nspanel: app.emit({event}) failed: {e}")
+                }
+                _ => tracing::trace!("nspanel: emit {event} sent"),
+            }
+        }
+
         pub fn show(&self, state: OverlayState) {
             if let Some((app, label)) = self.live() {
-                if let Err(e) = app.emit(events::STATE, &state) {
-                    tracing::debug!("nspanel: emit state failed: {e}");
-                }
-                if let Ok(panel) = app.get_webview_panel(label) {
-                    panel.show();
-                }
+                tracing::info!("nspanel: emit overlay state -> {state:?}");
+                Self::emit_to_overlay(app, label, events::STATE, &state);
             }
         }
 
         pub fn hide(&self) {
             if let Some((app, label)) = self.live() {
-                if let Ok(panel) = app.get_webview_panel(label) {
-                    panel.hide();
-                }
+                tracing::info!("nspanel: emit overlay state -> Idle (hide)");
+                Self::emit_to_overlay(app, label, events::STATE, &OverlayState::Idle);
             }
         }
 
         pub fn send_audio_level(&self, level: f32) {
-            if let Some((app, _)) = self.live() {
-                let _ = app.emit(events::AUDIO_LEVEL, level);
+            if let Some((app, label)) = self.live() {
+                Self::emit_to_overlay(app, label, events::AUDIO_LEVEL, &level);
             }
         }
 
         pub fn send_spectrum_bins(&self, bins: [f32; crate::audio::SPECTRUM_BARS]) {
-            if let Some((app, _)) = self.live() {
-                let _ = app.emit(events::SPECTRUM_BINS, bins);
+            if let Some((app, label)) = self.live() {
+                Self::emit_to_overlay(
+                    app,
+                    label,
+                    events::SPECTRUM_BINS,
+                    &bins.to_vec(),
+                );
             }
         }
 
         pub fn update_position(&self, x: i32, y: i32, width: u32, height: u32) {
             if let Some((app, label)) = self.live() {
-                if let Some(window) = app.get_webview_window(label) {
-                    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
-                    let _ = window.set_size(tauri::PhysicalSize::new(width, height));
-                }
+                let label = label.to_string();
+                Self::on_main_thread(app, move |app| {
+                    if let Some(window) = app.get_webview_window(&label) {
+                        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+                        let _ = window.set_size(tauri::PhysicalSize::new(width, height));
+                    }
+                });
             }
         }
 
         pub fn set_theme(&self, theme_name: &str) {
-            if let Some((app, _)) = self.live() {
-                let _ = app.emit(events::THEME, theme_name.to_string());
+            if let Some((app, label)) = self.live() {
+                Self::emit_to_overlay(
+                    app,
+                    label,
+                    events::THEME,
+                    &theme_name.to_string(),
+                );
             }
         }
 
         pub fn shutdown(&mut self) {
             if let Inner::Live { app, label } = self {
-                if let Ok(panel) = app.get_webview_panel(label) {
-                    panel.hide();
-                }
+                let label = label.clone();
+                Self::on_main_thread(app, move |app| {
+                    if let Ok(panel) = app.get_webview_panel(&label) {
+                        panel.hide();
+                    }
+                });
                 // Leave the panel registered; closing it requires the runtime
                 // to be alive and crossing FFI boundaries here would risk a
                 // deadlock if shutdown runs on a non-main thread.

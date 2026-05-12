@@ -18,15 +18,30 @@ const PILL_BAR_COUNT = 9; // Handy's pill renders 9 bars
 
 export function OverlayApp() {
   const snapshot = useOverlayState();
-  const bars = useSmoothBars(snapshot.spectrumBins, {
+  // E2E hook: `/overlay.html?mode=recording` forces recording mode without
+  // depending on Tauri events. Used by Playwright pixel tests.
+  const forcedMode =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("mode")
+      : null;
+  const effectiveMode = (forcedMode ?? snapshot.mode) as typeof snapshot.mode;
+  const effectiveBins =
+    forcedMode === "recording"
+      ? Array.from({ length: 32 }, (_, i) => 0.4 + 0.3 * Math.sin(i))
+      : snapshot.spectrumBins;
+  const bars = useSmoothBars(effectiveBins, {
     size: PILL_BAR_COUNT,
     alpha: SMOOTH_ALPHA,
   });
-  const visible = snapshot.mode !== "idle";
+  // Pill is always visible at the OS level (matches user expectation: a
+  // persistent indicator that shows status; animation changes per mode but
+  // the pill itself never fades out). The `mode` prop drives which icon
+  // and whether bars are drawn (HandyPill internally).
+  const visible = true;
 
   return (
     <HandyPill
-      mode={snapshot.mode}
+      mode={effectiveMode}
       bars={bars}
       visible={visible}
       onCancel={() => {
