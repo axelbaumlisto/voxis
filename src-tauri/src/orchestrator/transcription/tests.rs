@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::AppConfig;
+use crate::orchestrator::coordinator::TranscriptionCoordinator;
 use crate::orchestrator::post_process::PostProcessResult;
 use crate::orchestrator::state::RecordingState;
 use crate::output::OutputHandler;
@@ -16,6 +17,7 @@ type CtxCtor = fn(
     Arc<Mutex<RecordingState>>,
     Arc<Mutex<Box<dyn OverlayBackend>>>,
     Vec<u8>,
+    Arc<TranscriptionCoordinator>,
 ) -> TranscriptionContext;
 
 #[test]
@@ -208,6 +210,23 @@ fn test_transcription_context_fields() {
     // TranscriptionContext should have all required fields
     // This is a compile-time check - if struct changes, this test breaks
     let _: CtxCtor = TranscriptionContext::new;
+}
+
+#[test]
+fn test_transcription_context_holds_coordinator_type() {
+    // SRP/KISS: coordinator is required, not optional.
+    //
+    // Compile-time guarantee enforced through the `CtxCtor` type alias above:
+    // its 6th parameter is `Arc<TranscriptionCoordinator>` (not `Option`).
+    // If the field's type ever changes, this assignment fails to compile.
+    let _: CtxCtor = TranscriptionContext::new;
+
+    // Runtime check that a fresh coordinator starts in Idle and can be cloned
+    // into the Arc required by the context constructor.
+    use crate::orchestrator::coordinator::Stage;
+    let coordinator = Arc::new(TranscriptionCoordinator::new());
+    assert_eq!(coordinator.current_stage(), Stage::Idle);
+    let _cloned: Arc<TranscriptionCoordinator> = Arc::clone(&coordinator);
 }
 
 // ==========================================================================
