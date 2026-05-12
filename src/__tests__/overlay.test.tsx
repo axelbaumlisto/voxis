@@ -1,102 +1,111 @@
 /**
- * Unit tests for the overlay webview entry component.
+ * Tests for the overlay webview entry component.
  *
- * Verifies that OverlayApp mounts safely, subscribes to overlay://state,
- * and updates `mode` class on event payloads (string or { state }).
+ * Post-Handy-port architecture: OverlayApp is a thin shell composing
+ * `useOverlayState` + `useTheme` + `<OverlayCanvas>`. The behavioural
+ * contract is exercised at the hook/component layer; this suite only
+ * verifies the shell wiring (root className, theme/family data-attrs).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 
-// Hoisted mock state — captured by vi.mock factory at module init.
+type EventHandler = (event: { payload: unknown }) => void;
 const listenMock = vi.fn();
+const invokeMock = vi.fn();
+const handlers = new Map<string, EventHandler>();
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (...args: unknown[]) => listenMock(...args),
 }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
+}));
 
-// Waveform is heavy (polls audio level) — stub to a static element.
-vi.mock("../components/Waveform", () => ({
-  default: ({ mode }: { mode: string }) => (
-    <div data-testid="waveform" data-mode={mode} />
+// Stub the canvas — its own unit tests cover routing semantics.
+vi.mock("../components/overlay/OverlayCanvas", () => ({
+  default: ({ snapshot, theme }: { snapshot: { mode: string; themeId: string }; theme: { id: string; family: string } | null }) => (
+    <div
+      data-testid="overlay-canvas-stub"
+      data-mode={snapshot.mode}
+      data-theme={theme?.id ?? snapshot.themeId}
+      data-family={theme?.family ?? "loading"}
+    />
   ),
 }));
 
-// Import AFTER mocks are registered.
 import { OverlayApp } from "../overlay";
 
 describe("OverlayApp", () => {
-  let capturedHandler: ((event: { payload: unknown }) => void) | null = null;
-
   beforeEach(() => {
-    capturedHandler = null;
-    listenMock.mockImplementation(async (_event, handler) => {
-      capturedHandler = handler as (event: { payload: unknown }) => void;
-      return () => {}; // unlisten
+    handlers.clear();
+    listenMock.mockImplementation(async (event: string, handler: EventHandler) => {
+      handlers.set(event, handler);
+      return () => {};
     });
+    // Default: getOverlayThemeData rejects → useTheme stays at null
+    invokeMock.mockRejectedValue(new Error("test theme not loaded"));
   });
 
   afterEach(() => {
     listenMock.mockReset();
+    invokeMock.mockReset();
   });
 
-  it("mounts with idle mode by default", () => {
+  it("mounts with idle mode and exposes data attributes", () => {
     render(<OverlayApp />);
-    const overlay = document.querySelector(".overlay");
-    expect(overlay).not.toBeNull();
-    expect(overlay?.className).toContain("overlay-idle");
+    const root = screen.getByTestId("overlay-root");
+    expect(root.className).toContain("overlay-idle");
+    expect(root.dataset.theme).toBe("winamp_classic"); // default
+    expect(root.dataset.family).toBe("loading"); // useTheme rejected
   });
 
-  it("subscribes to overlay://state event", () => {
+  it("subscribes to all four overlay events", async () => {
     render(<OverlayApp />);
-    expect(listenMock).toHaveBeenCalledWith("overlay://state", expect.any(Function));
-  });
-
-  it("updates mode from string payload", async () => {
-    render(<OverlayApp />);
-    // Wait for listen() promise to resolve and handler to be captured.
-    await vi.waitFor(() => expect(capturedHandler).not.toBeNull());
-
     await act(async () => {
-      capturedHandler!({ payload: "recording" });
+      await Promise.resolve();
     });
-
-    const waveform = screen.getByTestId("waveform");
-    expect(waveform.dataset.mode).toBe("recording");
+    const subscribed = listenMock.mock.calls.map((c) => c[0]);
+    expect(subscribed).toEqual(
+      expect.arrayContaining([
+        "overlay://state",
+        "overlay://audio-level",
+        "overlay://spectrum-bins",
+        "overlay://theme",
+      ]),
+    );
   });
 
-  it("updates mode from { state } object payload", async () => {
+  it("updates root className when state event arrives", async () => {
     render(<OverlayApp />);
-    await vi.waitFor(() => expect(capturedHandler).not.toBeNull());
-
     await act(async () => {
-      capturedHandler!({ payload: { state: "transcribing" } });
+      await Promise.resolve();
     });
-
-    expect(screen.getByTestId("waveform").dataset.mode).toBe("transcribing");
+    await act(async () => {
+      handlers.get("overlay://state")!({ payload: "recording" });
+    });
+    expect(screen.getByTestId("overlay-root").className).toContain("overlay-recording");
   });
 
-  it("ignores malformed payloads gracefully", async () => {
+  it("forwards mode to OverlayCanvas via snapshot prop", async () => {
     render(<OverlayApp />);
-    await vi.waitFor(() => expect(capturedHandler).not.toBeNull());
-
     await act(async () => {
-      capturedHandler!({ payload: null });
-      capturedHandler!({ payload: 42 });
-      capturedHandler!({ payload: { not_state: "x" } });
+      await Promise.resolve();
     });
-
-    // Mode unchanged → still idle
-    expect(screen.getByTestId("waveform").dataset.mode).toBe("idle");
+    await act(async () => {
+      handlers.get("overlay://state")!({ payload: { state: "transcribing" } });
+    });
+    expect(screen.getByTestId("overlay-canvas-stub").dataset.mode).toBe("transcribing");
   });
 
-  it("survives listen() rejection without crashing", async () => {
+  it("survives missing Tauri APIs (non-Tauri environment)", async () => {
     listenMock.mockRejectedValueOnce(new Error("not in Tauri"));
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
     render(<OverlayApp />);
-
-    // Component still renders even when subscription fails.
-    expect(screen.getByTestId("waveform")).toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // Renders without crashing, stays at defaults.
+    expect(screen.getByTestId("overlay-root")).toBeInTheDocument();
     consoleWarn.mockRestore();
   });
 });
