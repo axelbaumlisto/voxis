@@ -82,6 +82,18 @@ export const OVERLAY_SIZE_OPTIONS: SelectOption[] = [
 ];
 
 // =============================================================================
+// Overlay Backend Options
+// =============================================================================
+
+export const OVERLAY_BACKEND_OPTIONS: SelectOption[] = [
+  { label: "Auto (recommended)", value: "auto" },
+  { label: "Native (egui)", value: "native" },
+  { label: "Subprocess", value: "subprocess" },
+  { label: "NSPanel (macOS only)", value: "nspanel" },
+  { label: "Off", value: "none" },
+];
+
+// =============================================================================
 // VAD Options
 // =============================================================================
 

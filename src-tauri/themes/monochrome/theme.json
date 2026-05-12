@@ -1,0 +1,21 @@
+{
+  "name": "Monochrome",
+  "description": null,
+  "family": "bars",
+  "colors": {
+    "background": "#00000000",
+    "idle": "#606060",
+    "recording": "#a0a0a0",
+    "recording_peak": "#ffffff",
+    "transcribing": "#4caf50",
+    "queued": "#ffa726",
+    "text": "#ffffff"
+  },
+  "use_gradient": true,
+  "gradient": {
+    "bottom": "#606060",
+    "middle": "#a0a0a0",
+    "top": "#ffffff"
+  },
+  "organic_ring": null
+}

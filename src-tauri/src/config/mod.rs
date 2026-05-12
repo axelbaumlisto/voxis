@@ -160,6 +160,10 @@ pub struct OverlayConfig {
     /// Visualization theme name.
     #[serde(default = "default_overlay_theme")]
     pub theme: String,
+    /// Overlay backend: `"auto"` (default, picks best), `"native"`, `"subprocess"`,
+    /// `"nspanel"` (macOS only, opt-in), or `"none"`.
+    #[serde(default = "default_overlay_backend")]
+    pub backend: String,
 }
 
 impl Default for OverlayConfig {
@@ -171,8 +175,13 @@ impl Default for OverlayConfig {
             margin: DEFAULT_OVERLAY_MARGIN,
             audio_boost: DEFAULT_AUDIO_BOOST,
             theme: DEFAULT_OVERLAY_THEME.into(),
+            backend: default_overlay_backend(),
         }
     }
+}
+
+fn default_overlay_backend() -> String {
+    "auto".to_string()
 }
 
 /// LLM post-processing settings.

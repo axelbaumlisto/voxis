@@ -38,6 +38,8 @@ impl OverlayManager {
             &config.overlay.theme,
             config.overlay.audio_boost,
             Arc::clone(&self.theme_loader),
+            &config.overlay.backend,
+            Some(self.app.clone()),
         );
         *self.overlay.lock().await = new_overlay;
 
