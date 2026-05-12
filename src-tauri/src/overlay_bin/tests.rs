@@ -117,7 +117,9 @@ fn test_state_color() {
 
 #[test]
 fn test_pulse_factor_range() {
-    for phase in [0.0, 1.0, 2.0, 3.14, 6.28] {
+    // Sample phases including approximate π and 2π — use std consts to avoid
+    // clippy::approx_constant. The test verifies range invariants, not exact values.
+    for phase in [0.0, 1.0, 2.0, std::f32::consts::PI, std::f32::consts::TAU] {
         for i in 0..5 {
             let f = pulse_factor(phase, i);
             assert!((0.5..=1.0).contains(&f), "pulse_factor out of range: {}", f);
