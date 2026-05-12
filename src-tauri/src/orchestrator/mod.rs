@@ -72,6 +72,7 @@ impl Orchestrator {
         let overlay: Arc<Mutex<Box<dyn OverlayBackend>>> =
             Arc::new(Mutex::new(Box::new(NoopOverlay::new())));
         let polling_cancel = Arc::new(Mutex::new(None::<CancellationToken>));
+        let coordinator = Arc::new(TranscriptionCoordinator::new());
 
         TranscriptionDispatcher::spawn_worker(
             Arc::clone(&queue),
@@ -79,42 +80,25 @@ impl Orchestrator {
             output,
             Arc::clone(&state),
             Arc::clone(&overlay),
+            Arc::clone(&coordinator),
         );
 
         let recording = RecordingCoordinator::new(
             app.clone(),
             recorder,
             state,
+            Arc::clone(&coordinator),
             queue,
             Arc::clone(&overlay),
             polling_cancel,
         );
         let overlay_manager = OverlayManager::new(app.clone(), overlay, theme_loader);
-        let coordinator = Arc::new(TranscriptionCoordinator::new());
 
         Self {
             app,
             recording,
             overlay_manager,
             coordinator,
-        }
-    }
-
-    /// Debug-only check that Coordinator and RecordingCoordinator agree on stage.
-    /// Logs (not asserts) divergence so Phase 4.1 is observation-only.
-    fn check_stage_agreement(&self, recording_state: RecordingState, label: &str) {
-        let coord_stage = self.coordinator.current_stage();
-        let expected = map_state_to_stage(&recording_state);
-        if coord_stage != expected {
-            tracing::warn!(
-                "Stage divergence after {}: coordinator={:?}, recording_state={:?} (mapped to {:?})",
-                label,
-                coord_stage,
-                recording_state,
-                expected
-            );
-        } else {
-            tracing::debug!("Stage agreement after {}: {:?}", label, coord_stage);
         }
     }
 
@@ -131,17 +115,10 @@ impl Orchestrator {
         self.overlay_manager.preview_theme(theme_id).await
     }
     pub async fn on_hotkey_pressed(&self) {
-        // Phase 4.1: parallel run. Coordinator observes; RecordingCoordinator decides.
-        self.coordinator.on_press();
         self.recording.on_hotkey_pressed().await;
-        let state = self.recording.get_state().await;
-        self.check_stage_agreement(state, "press");
     }
     pub async fn on_hotkey_released(&self) {
-        self.coordinator.on_release();
         self.recording.on_hotkey_released().await;
-        let state = self.recording.get_state().await;
-        self.check_stage_agreement(state, "release");
     }
     pub async fn get_state(&self) -> RecordingState {
         self.recording.get_state().await

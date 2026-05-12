@@ -203,7 +203,10 @@ fn worker_loop(rx: mpsc::Receiver<Command>, stage: Arc<Mutex<Stage>>) {
                 last_press = Some(now);
 
                 let mut s = stage.lock().expect("stage mutex poisoned");
-                if matches!(*s, Stage::Idle) {
+                // TALRI semantics: pressing during Processing starts a new
+                // recording while previous transcription continues in queue.
+                // Press during Recording is ignored (already recording).
+                if matches!(*s, Stage::Idle | Stage::Processing) {
                     *s = Stage::Recording;
                 } else {
                     tracing::debug!("Coordinator: press ignored in stage {:?}", *s);
@@ -228,7 +231,17 @@ fn worker_loop(rx: mpsc::Receiver<Command>, stage: Arc<Mutex<Stage>>) {
             }
             Command::ProcessingFinished => {
                 let mut s = stage.lock().expect("stage mutex poisoned");
-                *s = Stage::Idle;
+                // Only transition to Idle from Processing. If a new recording
+                // started before previous transcription finished, stay in
+                // Recording.
+                if matches!(*s, Stage::Processing) {
+                    *s = Stage::Idle;
+                } else {
+                    tracing::debug!(
+                        "Coordinator: ProcessingFinished while in {:?}; stage unchanged",
+                        *s
+                    );
+                }
             }
         }
     }
@@ -425,5 +438,40 @@ mod tests {
             coord.notify_processing_finished();
             wait_for_stage(&coord, Stage::Idle, &format!("iter {i} finish"));
         }
+    }
+
+    #[test]
+    fn test_press_during_processing_starts_new_recording() {
+        // TALRI semantics: pressing while previous transcription is in progress
+        // begins a new recording without waiting.
+        let coord = TranscriptionCoordinator::new();
+        coord.on_press();
+        wait_for_stage(&coord, Stage::Recording, "first press");
+        coord.on_release();
+        wait_for_stage(&coord, Stage::Processing, "first release");
+
+        // Now press again before ProcessingFinished arrives.
+        std::thread::sleep(DEBOUNCE + Duration::from_millis(5));
+        coord.on_press();
+        wait_for_stage(&coord, Stage::Recording, "second press during processing");
+    }
+
+    #[test]
+    fn test_processing_finished_during_recording_stays_recording() {
+        // If the previous transcription completes while user is mid-recording
+        // of the next utterance, stage must NOT switch to Idle.
+        let coord = TranscriptionCoordinator::new();
+        coord.on_press();
+        wait_for_stage(&coord, Stage::Recording, "press");
+        coord.on_release();
+        wait_for_stage(&coord, Stage::Processing, "release");
+        std::thread::sleep(DEBOUNCE + Duration::from_millis(5));
+        coord.on_press();
+        wait_for_stage(&coord, Stage::Recording, "new press");
+
+        // Late ProcessingFinished from the FIRST transcription:
+        coord.notify_processing_finished();
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(coord.current_stage(), Stage::Recording);
     }
 }
