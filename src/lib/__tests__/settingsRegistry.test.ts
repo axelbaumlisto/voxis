@@ -23,8 +23,18 @@ describe("settingsRegistry.ts", () => {
       expect(sections).toContain("Recording");
       expect(sections).toContain("Output");
       expect(sections).toContain("Overlay");
+      expect(sections).toContain("VAD");
       expect(sections).toContain("LLM");
       expect(sections).toContain("Advanced");
+    });
+
+    it("VAD section has backend selector and tuning controls", () => {
+      const vad = getSettingsBySection("VAD");
+      const keys = vad.map((s) => s.key);
+      expect(keys).toContain("vad.backend");
+      expect(keys).toContain("vad.onset_frames");
+      expect(keys).toContain("vad.hangover_frames");
+      expect(keys).toContain("vad.prefill_frames");
     });
 
     it("each setting has required fields", () => {

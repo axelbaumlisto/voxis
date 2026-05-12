@@ -7,6 +7,7 @@
 
 import {
   AUDIO_BOOST_OPTIONS,
+  VAD_BACKEND_OPTIONS,
   BACKEND_OPTIONS,
   CLOUD_PROVIDER_OPTIONS,
   getHotkeyOptions,
@@ -171,6 +172,40 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     section: "Overlay",
     description: "Visualization preset (built-in and custom themes)",
     customComponent: "theme-select",
+  },
+
+  // VAD section
+  {
+    key: "vad.backend",
+    label: "Voice Activity Detection",
+    widgetType: "select",
+    section: "VAD",
+    description: "Filter silence from recordings before transcription",
+    options: VAD_BACKEND_OPTIONS,
+  },
+  {
+    key: "vad.onset_frames",
+    label: "Onset (frames)",
+    widgetType: "input",
+    section: "VAD",
+    description: "Consecutive voice frames required to trigger speech start (default: 3)",
+    placeholder: "3",
+  },
+  {
+    key: "vad.hangover_frames",
+    label: "Hangover (frames)",
+    widgetType: "input",
+    section: "VAD",
+    description: "Silence frames tolerated before ending speech (default: 5)",
+    placeholder: "5",
+  },
+  {
+    key: "vad.prefill_frames",
+    label: "Prefill (frames)",
+    widgetType: "input",
+    section: "VAD",
+    description: "Past frames included when speech starts (default: 2)",
+    placeholder: "2",
   },
 
   // LLM section
