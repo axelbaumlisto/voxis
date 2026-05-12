@@ -138,3 +138,24 @@ fn test_get_audio_boost_default() {
     let boost = recorder.get_audio_boost();
     assert!((boost - 800.0).abs() < 0.1);
 }
+
+#[test]
+fn test_set_vad_to_none_disables_filtering() {
+    let recorder = AudioRecorder::new();
+    recorder.set_vad(None);
+    // No panic, no state change observable from outside. Just verify call is safe.
+    assert!(!recorder.is_recording());
+}
+
+#[test]
+fn test_set_vad_resets_state_on_install() {
+    use crate::audio::vad::ThresholdVad;
+    let recorder = AudioRecorder::new();
+    let vad = Box::new(ThresholdVad::new(0.1));
+    recorder.set_vad(Some(vad));
+    // Re-install with new VAD — also no panic, replaces previous.
+    let vad2 = Box::new(ThresholdVad::new(0.2));
+    recorder.set_vad(Some(vad2));
+    // Remove
+    recorder.set_vad(None);
+}

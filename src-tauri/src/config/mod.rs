@@ -107,6 +107,10 @@ Output: {"suggestions": [
 pub struct VadConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// VAD backend: `"none"` (no filtering, default), `"threshold"` (RMS-based),
+    /// or `"silero"` (Silero ONNX model).
+    #[serde(default = "default_vad_backend")]
+    pub backend: String,
     #[serde(default = "default_vad_threshold")]
     pub threshold: f32,
     /// Consecutive voice frames required to trigger speech start.
@@ -124,12 +128,17 @@ impl Default for VadConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            backend: default_vad_backend(),
             threshold: DEFAULT_VAD_THRESHOLD,
             onset_frames: 3,
             hangover_frames: 5,
             prefill_frames: 2,
         }
     }
+}
+
+fn default_vad_backend() -> String {
+    "none".to_string()
 }
 
 /// Recording overlay settings.

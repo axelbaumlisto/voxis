@@ -318,3 +318,104 @@ fn test_smoothed_zero_onset_and_hangover() {
     assert!(vad.push_frame(&speech(480)).unwrap().is_speech());
     assert!(!vad.push_frame(&silence(480)).unwrap().is_speech());
 }
+
+// =========================================================================
+// filter_with_vad — pure transformation pipeline
+// =========================================================================
+
+#[test]
+fn test_filter_with_vad_empty_input() {
+    let mut vad = ThresholdVad::new(0.1);
+    let result = filter_with_vad(&[], &mut vad, 480);
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_filter_with_vad_shorter_than_frame_passes_through() {
+    let mut vad = ThresholdVad::new(0.1);
+    let samples = vec![0.5; 100]; // less than 480
+    let result = filter_with_vad(&samples, &mut vad, 480);
+    assert_eq!(result, samples, "short input should pass through unchanged");
+}
+
+#[test]
+fn test_filter_with_vad_silence_filtered_out() {
+    let mut vad = ThresholdVad::new(0.1);
+    let silence = vec![0.0; 480 * 3]; // 3 silent frames
+    let result = filter_with_vad(&silence, &mut vad, 480);
+    assert!(result.is_empty(), "silence should be filtered out");
+}
+
+#[test]
+fn test_filter_with_vad_speech_retained() {
+    let mut vad = ThresholdVad::new(0.05);
+    let speech: Vec<f32> = (0..480 * 3).map(|i| ((i as f32 * 0.1).sin()) * 0.5).collect();
+    let result = filter_with_vad(&speech, &mut vad, 480);
+    assert!(!result.is_empty(), "speech should be retained");
+    assert!(result.len() <= speech.len(), "output cannot exceed input");
+}
+
+#[test]
+fn test_filter_with_vad_mixed_silence_and_speech() {
+    let mut vad = ThresholdVad::new(0.05);
+    let mut samples = vec![0.0; 480]; // silence
+    samples.extend((0..480).map(|i| ((i as f32 * 0.1).sin()) * 0.5)); // speech
+    samples.extend(vec![0.0; 480]); // silence
+
+    let result = filter_with_vad(&samples, &mut vad, 480);
+    // Should be ~480 samples (only the speech frame)
+    assert!(result.len() >= 480 && result.len() <= 480 * 2);
+}
+
+#[test]
+fn test_filter_with_vad_drops_partial_trailing_frame() {
+    let mut vad = ThresholdVad::new(0.1);
+    let speech: Vec<f32> = (0..480 + 100).map(|i| ((i as f32 * 0.1).sin()) * 0.5).collect();
+    let result = filter_with_vad(&speech, &mut vad, 480);
+    // Trailing 100 samples (< frame_size) are dropped
+    assert!(result.len() == 0 || result.len() == 480);
+}
+
+// =========================================================================
+// build_vad — factory
+// =========================================================================
+
+#[test]
+fn test_build_vad_disabled_returns_none() {
+    let mut config = crate::config::VadConfig::default();
+    config.enabled = false;
+    assert!(build_vad(&config, None).is_none());
+}
+
+#[test]
+fn test_build_vad_backend_none_returns_none() {
+    let mut config = crate::config::VadConfig::default();
+    config.enabled = true;
+    config.backend = "none".into();
+    assert!(build_vad(&config, None).is_none());
+}
+
+#[test]
+fn test_build_vad_threshold_returns_some() {
+    let mut config = crate::config::VadConfig::default();
+    config.enabled = true;
+    config.backend = "threshold".into();
+    assert!(build_vad(&config, None).is_some());
+}
+
+#[test]
+fn test_build_vad_silero_without_model_returns_none() {
+    let mut config = crate::config::VadConfig::default();
+    config.enabled = true;
+    config.backend = "silero".into();
+    // Model path not provided -> graceful fallback
+    assert!(build_vad(&config, None).is_none());
+}
+
+#[test]
+fn test_build_vad_unknown_backend_returns_none() {
+    let mut config = crate::config::VadConfig::default();
+    config.enabled = true;
+    config.backend = "alien-backend".into();
+    assert!(build_vad(&config, None).is_none());
+}

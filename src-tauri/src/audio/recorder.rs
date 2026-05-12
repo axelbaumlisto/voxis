@@ -1,5 +1,6 @@
 use crate::audio::stream::{spawn_recording_thread, RecordCommand};
 use crate::audio::sync::lock_or_recover;
+use crate::audio::vad::{filter_with_vad, VoiceActivityDetector, SILERO_FRAME_SAMPLES};
 use crate::audio::TRANSCRIPTION_SAMPLE_RATE;
 use crate::audio::{downsample, get_device, list_devices, samples_to_wav, AudioDevice, AudioError};
 use cpal::traits::DeviceTrait;
@@ -17,6 +18,9 @@ pub struct AudioRecorder {
     audio_boost: Arc<AtomicU32>,
     stop_tx: Mutex<Option<mpsc::Sender<RecordCommand>>>,
     thread_handle: Mutex<Option<JoinHandle<()>>>,
+    /// Optional VAD applied to downsampled (16 kHz) samples in `stop()`.
+    /// Setting `None` disables VAD filtering (default behaviour).
+    vad: Mutex<Option<Box<dyn VoiceActivityDetector>>>,
 }
 
 impl Default for AudioRecorder {
@@ -40,7 +44,21 @@ impl AudioRecorder {
             audio_boost: Arc::new(AtomicU32::new(8000)),
             stop_tx: Mutex::new(None),
             thread_handle: Mutex::new(None),
+            vad: Mutex::new(None),
         }
+    }
+
+    /// Install or remove a Voice Activity Detection backend.
+    ///
+    /// When set, `stop()` filters downsampled samples through this VAD before
+    /// WAV encoding. Calling with `None` disables filtering. The VAD is reset
+    /// (LSTM state cleared) on each call.
+    pub fn set_vad(&self, mut vad: Option<Box<dyn VoiceActivityDetector>>) {
+        if let Some(ref mut v) = vad {
+            v.reset();
+        }
+        let mut guard = lock_or_recover(&self.vad);
+        *guard = vad;
     }
 
     pub fn set_audio_boost(&self, boost: f32) {
@@ -62,6 +80,7 @@ impl AudioRecorder {
         }
 
         self.clear_samples();
+        self.reset_vad();
 
         #[cfg(target_os = "macos")]
         {
@@ -112,6 +131,14 @@ impl AudioRecorder {
     fn clear_samples(&self) {
         let mut samples = lock_or_recover(&self.samples);
         samples.clear();
+    }
+
+    /// Reset VAD internal state (e.g. LSTM in Silero) between recordings.
+    fn reset_vad(&self) {
+        let mut guard = lock_or_recover(&self.vad);
+        if let Some(ref mut vad) = *guard {
+            vad.reset();
+        }
     }
 
     fn get_device_config(
@@ -180,7 +207,7 @@ impl AudioRecorder {
         let samples = self.get_samples();
         let sample_rate = self.sample_rate.load(Ordering::SeqCst);
 
-        let (final_samples, final_rate) = if sample_rate > TRANSCRIPTION_SAMPLE_RATE {
+        let (downsampled, final_rate) = if sample_rate > TRANSCRIPTION_SAMPLE_RATE {
             (
                 downsample(&samples, sample_rate, TRANSCRIPTION_SAMPLE_RATE),
                 TRANSCRIPTION_SAMPLE_RATE,
@@ -189,7 +216,32 @@ impl AudioRecorder {
             (samples, sample_rate)
         };
 
+        let final_samples = self.apply_vad(downsampled, final_rate);
         samples_to_wav(&final_samples, final_rate)
+    }
+
+    /// Apply VAD filter (if configured) to 16 kHz mono samples.
+    /// Returns samples unchanged when VAD is `None` or the rate doesn't match
+    /// `TRANSCRIPTION_SAMPLE_RATE` (Silero frame size assumes 16 kHz).
+    fn apply_vad(&self, samples: Vec<f32>, rate: u32) -> Vec<f32> {
+        if rate != TRANSCRIPTION_SAMPLE_RATE {
+            return samples;
+        }
+        let mut guard = lock_or_recover(&self.vad);
+        let Some(ref mut vad) = *guard else {
+            return samples;
+        };
+        let filtered = filter_with_vad(&samples, vad.as_mut(), SILERO_FRAME_SAMPLES);
+        let original_secs = samples.len() as f32 / TRANSCRIPTION_SAMPLE_RATE as f32;
+        let filtered_secs = filtered.len() as f32 / TRANSCRIPTION_SAMPLE_RATE as f32;
+        tracing::info!(
+            "VAD filtered: {:.2}s -> {:.2}s ({} -> {} samples)",
+            original_secs,
+            filtered_secs,
+            samples.len(),
+            filtered.len()
+        );
+        filtered
     }
 
     #[cfg(target_os = "macos")]

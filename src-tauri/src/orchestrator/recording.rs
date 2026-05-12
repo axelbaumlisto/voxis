@@ -1,11 +1,44 @@
 use super::{audio_level, load_config_from_app, ErrorContext, RecordingState, TranscriptionQueue};
+use crate::audio::vad::build_vad;
 use crate::audio::AudioRecorder;
+use crate::config::VadConfig;
 use crate::overlay_native::{OverlayBackend, OverlayState};
 use crate::permissions::{create_permission_checker, Permission, PermissionChecker};
+use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+
+/// Resolve the bundled Silero VAD model path via Tauri's resource directory.
+/// Returns `None` if the resource is missing (e.g. unbundled dev build).
+fn resolve_silero_model_path(app: &AppHandle) -> Option<PathBuf> {
+    let resource_dir = app.path().resource_dir().ok()?;
+    let candidate = resource_dir.join("resources/silero_vad_v4.onnx");
+    if candidate.exists() {
+        return Some(candidate);
+    }
+    // Dev mode fallback: project resources/ directory next to Cargo.toml
+    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("silero_vad_v4.onnx");
+    if dev_path.exists() {
+        return Some(dev_path);
+    }
+    None
+}
+
+/// Install VAD on the recorder according to config.
+/// Side-effect only: failures are logged and gracefully degrade to no VAD.
+fn install_vad(recorder: &AudioRecorder, app: &AppHandle, vad_config: &VadConfig) {
+    let model_path = if vad_config.backend == "silero" {
+        resolve_silero_model_path(app)
+    } else {
+        None
+    };
+    let vad = build_vad(vad_config, model_path.as_deref());
+    recorder.set_vad(vad);
+}
 
 pub struct RecordingCoordinator {
     app: AppHandle,
@@ -60,6 +93,7 @@ impl RecordingCoordinator {
         } else {
             config.audio_device.clone()
         };
+        install_vad(&self.recorder, &self.app, &config.vad);
         if let Err(e) = self.recorder.start(&device) {
             self.handle_error(&mut state, &e.to_string(), ErrorContext::Hotkey)
                 .await;

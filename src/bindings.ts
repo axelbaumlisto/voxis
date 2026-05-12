@@ -700,7 +700,12 @@ export type TranscriptionResult = { text: string; language?: string | null; dura
 /**
  * Voice Activity Detection settings.
  */
-export type VadConfig = { enabled?: boolean; threshold?: number; 
+export type VadConfig = { enabled?: boolean; 
+/**
+ * VAD backend: `"none"` (no filtering, default), `"threshold"` (RMS-based),
+ * or `"silero"` (Silero ONNX model).
+ */
+backend?: string; threshold?: number; 
 /**
  * Consecutive voice frames required to trigger speech start.
  */

@@ -127,6 +127,7 @@ impl ConfigSqliteStorage {
         // VAD
         config.vad = VadConfig {
             enabled: self.get_bool(&conn, "vad_enabled", config.vad.enabled),
+            backend: self.get_str(&conn, "vad_backend", &config.vad.backend),
             threshold: self.get_typed(&conn, "vad_threshold", config.vad.threshold),
             onset_frames: self.get_typed(&conn, "vad_onset_frames", config.vad.onset_frames),
             hangover_frames: self.get_typed(&conn, "vad_hangover_frames", config.vad.hangover_frames),
