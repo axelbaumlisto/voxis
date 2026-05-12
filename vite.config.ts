@@ -19,10 +19,11 @@ export default defineConfig({
     minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
     // produce sourcemaps for debug builds
     sourcemap: !!process.env.TAURI_DEBUG,
-    // Single entry point (native overlay used instead of webview)
+    // Two entry points: main app and webview overlay (NSPanel backend).
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
+        overlay: resolve(__dirname, "overlay.html"),
       },
     },
   },

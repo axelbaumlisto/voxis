@@ -1,0 +1,21 @@
+{
+  "name": "Default",
+  "description": null,
+  "family": "bars",
+  "colors": {
+    "background": "#00000000",
+    "idle": "#1e88e5",
+    "recording": "#1e88e5",
+    "recording_peak": "#64b5f6",
+    "transcribing": "#4caf50",
+    "queued": "#ffa726",
+    "text": "#ffffff"
+  },
+  "use_gradient": true,
+  "gradient": {
+    "bottom": "#1e88e5",
+    "middle": "#42a5f5",
+    "top": "#64b5f6"
+  },
+  "organic_ring": null
+}

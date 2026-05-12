@@ -665,7 +665,12 @@ audio_boost?: number;
 /**
  * Visualization theme name.
  */
-theme?: string }
+theme?: string; 
+/**
+ * Overlay backend: `"auto"` (default, picks best), `"native"`, `"subprocess"`,
+ * `"nspanel"` (macOS only, opt-in), or `"none"`.
+ */
+backend?: string }
 /**
  * Overlay position on screen.
  */

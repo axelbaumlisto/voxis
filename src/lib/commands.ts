@@ -45,6 +45,7 @@ export interface OverlayConfig {
   margin: number;
   audio_boost: number;
   theme: string;
+  backend: string;
 }
 
 export interface LlmConfig {

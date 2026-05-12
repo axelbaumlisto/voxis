@@ -1,0 +1,21 @@
+{
+  "name": "Neon",
+  "description": null,
+  "family": "bars",
+  "colors": {
+    "background": "#00000000",
+    "idle": "#00ffff",
+    "recording": "#ff00ff",
+    "recording_peak": "#ffffff",
+    "transcribing": "#4caf50",
+    "queued": "#ffa726",
+    "text": "#ffffff"
+  },
+  "use_gradient": true,
+  "gradient": {
+    "bottom": "#00ffff",
+    "middle": "#ff00ff",
+    "top": "#ffff00"
+  },
+  "organic_ring": null
+}

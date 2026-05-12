@@ -1,0 +1,21 @@
+{
+  "name": "Dark Purple",
+  "description": null,
+  "family": "bars",
+  "colors": {
+    "background": "#00000000",
+    "idle": "#7c4dff",
+    "recording": "#7c4dff",
+    "recording_peak": "#b388ff",
+    "transcribing": "#4caf50",
+    "queued": "#ffa726",
+    "text": "#ffffff"
+  },
+  "use_gradient": true,
+  "gradient": {
+    "bottom": "#7c4dff",
+    "middle": "#9c6dff",
+    "top": "#b388ff"
+  },
+  "organic_ring": null
+}

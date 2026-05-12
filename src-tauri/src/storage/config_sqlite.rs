@@ -142,6 +142,7 @@ impl ConfigSqliteStorage {
             margin: self.get_typed(&conn, "overlay_margin", config.overlay.margin),
             audio_boost: self.get_typed(&conn, "overlay_audio_boost", config.overlay.audio_boost),
             theme: self.get_str(&conn, "overlay_theme", &config.overlay.theme),
+            backend: self.get_str(&conn, "overlay_backend", &config.overlay.backend),
         };
 
         // LLM
