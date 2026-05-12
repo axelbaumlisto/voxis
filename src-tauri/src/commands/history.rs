@@ -8,7 +8,7 @@ use tauri::State;
 use super::get_factory;
 
 /// History entry for frontend display.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct HistoryEntry {
     pub id: i64,
     pub timestamp: String,
@@ -32,6 +32,7 @@ impl From<crate::storage::HistoryEntry> for HistoryEntry {
 
 /// Get transcription history.
 #[tauri::command]
+#[specta::specta]
 pub fn get_history(
     limit: Option<usize>,
     paths: State<AppPaths>,
@@ -67,6 +68,7 @@ pub fn add_history_entry(
 
 /// Clear all history entries.
 #[tauri::command]
+#[specta::specta]
 pub fn clear_history(paths: State<AppPaths>) -> Result<(), String> {
     get_factory(&paths).history().clear().cmd_err()
 }

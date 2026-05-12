@@ -1,5 +1,6 @@
 mod backend;
 mod native;
+pub mod nspanel;
 mod subprocess;
 pub mod theme;
 

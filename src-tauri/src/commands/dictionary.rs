@@ -8,7 +8,7 @@ use tauri::State;
 use super::get_factory;
 
 /// Dictionary entry for frontend display.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DictionaryEntry {
     pub id: i64,
     pub source: String,
@@ -17,6 +17,7 @@ pub struct DictionaryEntry {
 
 /// Get all dictionary entries.
 #[tauri::command]
+#[specta::specta]
 pub fn get_dictionary(paths: State<AppPaths>) -> Result<Vec<DictionaryEntry>, String> {
     let entries = get_factory(&paths).dictionary().load().cmd_err()?;
 

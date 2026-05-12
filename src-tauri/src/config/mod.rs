@@ -103,7 +103,7 @@ Output: {"suggestions": [
 // =============================================================================
 
 /// Voice Activity Detection settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct VadConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -133,7 +133,7 @@ impl Default for VadConfig {
 }
 
 /// Recording overlay settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct OverlayConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -167,7 +167,7 @@ impl Default for OverlayConfig {
 }
 
 /// LLM post-processing settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct LlmConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -197,7 +197,7 @@ impl Default for LlmConfig {
 }
 
 /// Dictionary and learning settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct DictionaryConfig {
     #[serde(default)]
     pub path: String,
@@ -228,7 +228,7 @@ impl Default for DictionaryConfig {
 /// - overlay: Recording overlay UI settings
 /// - llm: LLM post-processing settings
 /// - dictionary: Dictionary and learning settings
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct AppConfig {
     // API settings
     #[serde(default)]

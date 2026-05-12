@@ -10,6 +10,7 @@ use super::get_factory;
 
 /// Get the current app configuration.
 #[tauri::command]
+#[specta::specta]
 pub fn get_config(paths: State<AppPaths>) -> Result<AppConfig, String> {
     get_factory(&paths).config().load().cmd_err()
 }
@@ -17,6 +18,7 @@ pub fn get_config(paths: State<AppPaths>) -> Result<AppConfig, String> {
 /// Save the app configuration.
 /// SRP: Uses ConfigChangeHandler trait for change detection and response.
 #[tauri::command]
+#[specta::specta]
 pub async fn save_config(
     config: AppConfig,
     paths: State<'_, AppPaths>,

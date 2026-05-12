@@ -1,6 +1,7 @@
 //! Orchestrator module - coordinates recording, dispatch and overlay workflow.
 
 pub mod audio_level;
+pub mod coordinator;
 pub mod dispatch;
 pub mod overlay_manager;
 pub mod post_process;

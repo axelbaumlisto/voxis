@@ -1,4 +1,3 @@
-import React from "react";
 import { PASTE_SHORTCUT_OPTIONS } from "../../lib/constants";
 
 interface PasteShortcutCheckboxesProps {

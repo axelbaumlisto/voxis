@@ -67,6 +67,21 @@ pub struct HotkeyState {
     pub hotkey_listener: Arc<Mutex<HotkeyListener>>,
 }
 
+/// Build the specta Builder that mirrors the subset of Tauri commands we want
+/// type-checked from the frontend. KISS: starts with five commands; expand as
+/// the rest of the surface is migrated. This is intentionally separate from the
+/// real Tauri `invoke_handler` (see `setup::command_handler`) so we can grow
+/// specta coverage incrementally without breaking runtime command dispatch.
+pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
+    tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
+        crate::commands::config::get_config,
+        crate::commands::config::save_config,
+        crate::commands::history::get_history,
+        crate::commands::history::clear_history,
+        crate::commands::dictionary::get_dictionary,
+    ])
+}
+
 /// Initialize and run the Tauri application.
 pub fn run() {
     // Initialize X11 thread safety BEFORE anything else (Linux only)
@@ -80,6 +95,24 @@ pub fn run() {
     setup::kill_existing_instances();
 
     tracing::info!("Starting Voice app...");
+
+    // Specta TypeScript bindings: parallel builder used for type generation only.
+    // The real invoke_handler is still produced by setup::command_handler() so the
+    // entire command surface keeps working unchanged. In debug builds we re-export
+    // bindings.ts whenever the app starts (cheap incremental task, gated by
+    // debug_assertions so it never runs in release).
+    #[cfg(debug_assertions)]
+    {
+        use specta_typescript::{BigIntExportBehavior, Typescript};
+        // `@ts-nocheck` skips strict-mode unused-import errors for the generated
+        // helpers (TAURI_CHANNEL, __makeEvents__) that specta emits unconditionally.
+        let ts = Typescript::default()
+            .bigint(BigIntExportBehavior::Number)
+            .header("// @ts-nocheck\n");
+        if let Err(e) = specta_bindings_builder().export(ts, "../src/bindings.ts") {
+            tracing::warn!("Failed to export specta TypeScript bindings: {}", e);
+        }
+    }
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -98,4 +131,44 @@ pub fn run() {
         .invoke_handler(setup::command_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod bindings_export_tests {
+    //! Forces specta bindings to regenerate on every `cargo test` run.
+    //!
+    //! Keeping the export inside a test guarantees that:
+    //! 1. `src/bindings.ts` stays in sync with Rust command/type signatures.
+    //! 2. CI fails (via dirty git tree check) when a developer forgets to
+    //!    commit a regenerated bindings file.
+    //!
+    //! The test only runs in debug builds; the production path stays in
+    //! `run()` gated by `cfg(debug_assertions)` for dev-server workflows.
+
+    use super::specta_bindings_builder;
+    use specta_typescript::{BigIntExportBehavior, Typescript};
+
+    #[test]
+    fn exports_typescript_bindings() {
+        // Resolve path relative to the src-tauri crate so the test works from
+        // any working directory (cargo runs tests from the crate root).
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let output = std::path::Path::new(manifest_dir).join("../src/bindings.ts");
+
+        // Map i64/u64 -> TS `number`. JS losslessly stores integers up to 2^53,
+        // which covers all id-like fields we currently expose.
+        // `@ts-nocheck` skips strict-mode unused-import errors for specta helpers.
+        let ts = Typescript::default()
+            .bigint(BigIntExportBehavior::Number)
+            .header("// @ts-nocheck\n");
+        specta_bindings_builder()
+            .export(ts, &output)
+            .expect("specta bindings export failed");
+
+        assert!(
+            output.exists(),
+            "bindings.ts was not written to {}",
+            output.display()
+        );
+    }
 }

@@ -38,6 +38,11 @@ tauri-plugin-os = "2.0.0-rc.1"
 # SQLite for history (compatible with Python soupawhisper)
 rusqlite = { version = "0.32", features = ["bundled"] }
 
+# Type-safe Tauri command bindings — autogenerates src/bindings.ts
+specta = "=2.0.0-rc.22"
+specta-typescript = "0.0.9"
+tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
+
 # Parsing
 rust-ini = "0.21"
 regex = "1"
@@ -100,6 +105,11 @@ cocoa = "0.26"
 core-graphics = "0.24"
 core-foundation = "0.10"
 tauri-plugin-macos-permissions = "2.3.0"
+# NSPanel backend (alternative to subprocess overlay, opt-in).
+# Requires `tauri/macos-private-api` feature (see override below).
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+# macOS-only override: enable `macos-private-api` needed by tauri-nspanel.
+tauri = { version = "2", features = ["tray-icon", "devtools", "macos-private-api"] }
 
 # X11 thread safety (XInitThreads for rdev + GTK)
 [target.'cfg(target_os = "linux")'.dependencies]
