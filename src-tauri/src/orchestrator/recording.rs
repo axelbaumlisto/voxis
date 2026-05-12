@@ -100,13 +100,16 @@ impl RecordingCoordinator {
     }
 
     pub async fn on_hotkey_pressed(&self) {
+        tracing::info!("on_hotkey_pressed: enter");
         let stage = self.coordinator.current_stage();
+        tracing::info!("on_hotkey_pressed: current_stage={:?}", stage);
         // TALRI semantics: allow press from Idle (start fresh) or Processing
         // (queue a new recording while previous transcription finishes).
         if !matches!(stage, Stage::Idle | Stage::Processing) {
             tracing::debug!("Ignoring hotkey press - stage: {:?}", stage);
             return;
         }
+        tracing::info!("on_hotkey_pressed: checking mic permission");
         if !create_permission_checker()
             .check(Permission::Microphone)
             .is_granted()
@@ -117,25 +120,38 @@ impl RecordingCoordinator {
             return;
         }
 
+        tracing::info!("on_hotkey_pressed: loading config");
         let config = load_config_from_app(&self.app);
         let device = if config.audio_device == "default" {
             "default".to_string()
         } else {
             config.audio_device.clone()
         };
+        tracing::info!("on_hotkey_pressed: installing vad");
         install_vad(&self.recorder, &self.app, &config.vad);
+        tracing::info!("on_hotkey_pressed: starting recorder, device={device}");
         if let Err(e) = self.recorder.start(&device) {
+            tracing::error!("on_hotkey_pressed: recorder.start failed: {e}");
             self.handle_error(&e.to_string(), ErrorContext::Hotkey).await;
             return;
         }
+        tracing::info!("on_hotkey_pressed: recorder started OK");
 
         // Drive Coordinator + wait for the worker to apply the transition.
         self.coordinator.on_press();
+        tracing::info!("on_hotkey_pressed: sent on_press, awaiting stage Recording");
         self.await_stage(Stage::Recording).await;
+        tracing::info!(
+            "on_hotkey_pressed: stage now {:?}",
+            self.coordinator.current_stage()
+        );
+        tracing::info!("on_hotkey_pressed: mirror_state");
         self.mirror_state().await;
 
         if config.overlay.enabled {
+            tracing::info!("on_hotkey_pressed: overlay.show(Recording)");
             self.overlay.lock().await.show(OverlayState::Recording);
+            tracing::info!("on_hotkey_pressed: overlay shown, preparing polling");
             let token = CancellationToken::new();
             let mut cancel_guard = self.polling_cancel.lock().await;
             if let Some(old_token) = cancel_guard.take() {
@@ -143,11 +159,15 @@ impl RecordingCoordinator {
             }
             *cancel_guard = Some(token.clone());
             drop(cancel_guard);
+            tracing::info!("on_hotkey_pressed: spawning audio_level polling");
             audio_level::start_audio_level_polling(
                 Arc::clone(&self.recorder),
                 Arc::clone(&self.overlay),
                 token,
             );
+            tracing::info!("on_hotkey_pressed: polling spawned, returning");
+        } else {
+            tracing::info!("on_hotkey_pressed: overlay disabled, returning");
         }
     }
 

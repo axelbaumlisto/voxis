@@ -74,9 +74,27 @@ impl NsPanelOverlay {
     ///    `CanJoinAllSpaces | Stationary | IgnoresCycle`.
     ///
     /// On non-macOS this is equivalent to [`Self::unavailable`].
+    ///
+    /// macOS note: `WebviewWindowBuilder::build()` and `to_panel()` must run
+    /// on the main thread (AppKit invariant). When called from any other
+    /// thread (e.g. a Tauri command's async task), Tauri panics on the
+    /// `[NSWindow init]` assertion. We therefore dispatch the webview/panel
+    /// creation through `app.run_on_main_thread` and synchronously wait for
+    /// the result over a `std::sync::mpsc` channel. If we are already on the
+    /// main thread, the closure executes inline — still safe.
     #[cfg(target_os = "macos")]
     pub fn new(app: tauri::AppHandle) -> Result<Self, String> {
-        let inner = imp::Inner::create(app)?;
+        let (tx, rx) = std::sync::mpsc::channel::<Result<imp::Inner, String>>();
+        let app_for_thread = app.clone();
+        let dispatched = app.run_on_main_thread(move || {
+            let _ = tx.send(imp::Inner::create(app_for_thread));
+        });
+        if let Err(e) = dispatched {
+            return Err(format!("run_on_main_thread dispatch failed: {e}"));
+        }
+        let inner = rx
+            .recv()
+            .map_err(|e| format!("main-thread NSPanel result channel closed: {e}"))??;
         Ok(Self {
             running: Arc::new(AtomicBool::new(true)),
             inner,
