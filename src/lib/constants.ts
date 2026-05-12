@@ -81,6 +81,16 @@ export const OVERLAY_SIZE_OPTIONS: SelectOption[] = [
   { label: "Large", value: "large" },
 ];
 
+// =============================================================================
+// VAD Options
+// =============================================================================
+
+export const VAD_BACKEND_OPTIONS: SelectOption[] = [
+  { label: "Off (no filtering)", value: "none" },
+  { label: "Threshold (simple RMS)", value: "threshold" },
+  { label: "Silero (ML model)", value: "silero" },
+];
+
 export const AUDIO_BOOST_OPTIONS: SelectOption[] = [
   { label: "Low (400)", value: "400" },
   { label: "Medium (800)", value: "800" },

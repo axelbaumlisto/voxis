@@ -31,7 +31,11 @@ export interface AppConfig {
 
 export interface VadConfig {
   enabled: boolean;
+  backend: string;
   threshold: number;
+  onset_frames: number;
+  hangover_frames: number;
+  prefill_frames: number;
 }
 
 export interface OverlayConfig {
