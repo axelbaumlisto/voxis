@@ -329,7 +329,7 @@ mod tests {
         let storage = DebugStorage::new(temp.path().to_path_buf()).unwrap();
 
         // Create some files
-        storage.save_audio(&vec![0u8; 100]).unwrap();
+        storage.save_audio(&[0u8; 100]).unwrap();
         let entry = DebugEntry {
             timestamp: "2024-01-01T12:00:00".to_string(),
             audio_file: None,
@@ -459,8 +459,8 @@ not valid json at all
         let storage = DebugStorage::new(temp.path().to_path_buf()).unwrap();
 
         // Create multiple files of different types
-        storage.save_audio(&vec![0u8; 100]).unwrap();
-        storage.save_audio(&vec![0u8; 200]).unwrap();
+        storage.save_audio(&[0u8; 100]).unwrap();
+        storage.save_audio(&[0u8; 200]).unwrap();
         let entry = DebugEntry {
             timestamp: "2024-01-01".to_string(),
             audio_file: Some("test.wav".to_string()),

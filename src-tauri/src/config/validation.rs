@@ -184,84 +184,67 @@ mod tests {
         );
     }
 
+    /// DRY helper: build a config with one invalid field via a mutator,
+    /// validate, and assert exactly one error on the expected field.
+    fn assert_single_error<F: FnOnce(&mut AppConfig)>(mutator: F, expected_field: &str) {
+        let mut config = AppConfig::default();
+        mutator(&mut config);
+        let errors = validate_config(&config);
+        assert_eq!(errors.len(), 1, "expected 1 error, got {:?}", errors);
+        assert_eq!(errors[0].field, expected_field);
+    }
+
     #[test]
     fn test_invalid_language() {
-        let mut config = AppConfig::default();
-        config.language = "invalid".into();
-        let errors = validate_config(&config);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].field, "language");
+        assert_single_error(|c| c.language = "invalid".into(), "language");
     }
 
     #[test]
     fn test_invalid_backend() {
-        let mut config = AppConfig::default();
-        config.backend = "invalid".into();
-        let errors = validate_config(&config);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].field, "backend");
+        assert_single_error(|c| c.backend = "invalid".into(), "backend");
     }
 
     #[test]
     fn test_invalid_hotkey_config() {
-        let mut config = AppConfig::default();
-        config.hotkey = "invalid_key".into();
-        let errors = validate_config(&config);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].field, "hotkey");
+        assert_single_error(|c| c.hotkey = "invalid_key".into(), "hotkey");
     }
 
     #[test]
     fn test_invalid_typing_delay() {
-        let mut config = AppConfig::default();
-        config.typing_delay = 2000;
-        let errors = validate_config(&config);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].field, "typing_delay");
+        assert_single_error(|c| c.typing_delay = 2000, "typing_delay");
     }
 
     #[test]
     fn test_invalid_history_days_zero() {
-        let mut config = AppConfig::default();
-        config.history_days = 0;
-        let errors = validate_config(&config);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].field, "history_days");
+        assert_single_error(|c| c.history_days = 0, "history_days");
     }
 
     #[test]
     fn test_invalid_history_days_too_large() {
-        let mut config = AppConfig::default();
-        config.history_days = 500;
-        let errors = validate_config(&config);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].field, "history_days");
+        assert_single_error(|c| c.history_days = 500, "history_days");
     }
 
     #[test]
     fn test_invalid_overlay_position() {
-        let mut config = AppConfig::default();
-        config.overlay.position = "invalid".into();
-        let errors = validate_config(&config);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].field, "overlay.position");
+        assert_single_error(
+            |c| c.overlay.position = "invalid".into(),
+            "overlay.position",
+        );
     }
 
     #[test]
     fn test_invalid_overlay_size() {
-        let mut config = AppConfig::default();
-        config.overlay.size = "huge".into();
-        let errors = validate_config(&config);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].field, "overlay.size");
+        assert_single_error(|c| c.overlay.size = "huge".into(), "overlay.size");
     }
 
     #[test]
     fn test_multiple_errors() {
-        let mut config = AppConfig::default();
-        config.language = "invalid".into();
-        config.backend = "invalid".into();
-        config.hotkey = "invalid".into();
+        let config = AppConfig {
+            language: "invalid".into(),
+            backend: "invalid".into(),
+            hotkey: "invalid".into(),
+            ..AppConfig::default()
+        };
         let errors = validate_config(&config);
         assert_eq!(errors.len(), 3);
     }

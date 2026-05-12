@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_overlay_state_variants() {
-        let states = vec![
+        let states = [
             OverlayState::Hidden,
             OverlayState::Idle,
             OverlayState::Recording,

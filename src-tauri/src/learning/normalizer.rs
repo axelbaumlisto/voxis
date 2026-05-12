@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn test_no_duplicate_mappings() {
         // Verify that the same canonical term appears for multiple aliases
-        let docker_aliases = vec!["docker", "докер"];
+        let docker_aliases = ["docker", "докер"];
         let results: Vec<_> = docker_aliases
             .iter()
             .map(|a| SuggestionNormalizer::get_proper_form(a))

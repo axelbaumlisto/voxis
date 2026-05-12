@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn test_show_permission_dialog_format() {
         // Test that the dialog message is formatted correctly
-        let missing = vec![Permission::InputMonitoring, Permission::Microphone];
+        let missing = [Permission::InputMonitoring, Permission::Microphone];
         let permission_names: Vec<&str> = missing.iter().map(|p| p.display_name()).collect();
         let permission_list = permission_names.join(" and ");
         assert_eq!(permission_list, "Input Monitoring and Microphone");
@@ -379,7 +379,7 @@ mod tests {
 
     #[test]
     fn test_show_permission_dialog_single() {
-        let missing = vec![Permission::InputMonitoring];
+        let missing = [Permission::InputMonitoring];
         let permission_names: Vec<&str> = missing.iter().map(|p| p.display_name()).collect();
         let permission_list = permission_names.join(" and ");
         assert_eq!(permission_list, "Input Monitoring");

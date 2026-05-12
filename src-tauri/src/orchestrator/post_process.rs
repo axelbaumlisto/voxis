@@ -180,15 +180,20 @@ mod tests {
     use async_trait::async_trait;
     use std::sync::{Arc, Mutex};
 
+    /// Shared handle to mock-provider call log (system_prompt, user_text).
+    /// SRP: dedicated alias keeps `MockProvider::new()` signature readable
+    /// and silences `clippy::type_complexity`.
+    type ProviderCalls = Arc<Mutex<Vec<(String, String)>>>;
+
     /// Mock provider for trait-level integration tests.
     struct MockProvider {
         response: String,
-        calls: Arc<Mutex<Vec<(String, String)>>>,
+        calls: ProviderCalls,
     }
 
     impl MockProvider {
-        fn new(response: &str) -> (Self, Arc<Mutex<Vec<(String, String)>>>) {
-            let calls = Arc::new(Mutex::new(Vec::new()));
+        fn new(response: &str) -> (Self, ProviderCalls) {
+            let calls: ProviderCalls = Arc::new(Mutex::new(Vec::new()));
             let provider = Self {
                 response: response.to_string(),
                 calls: Arc::clone(&calls),

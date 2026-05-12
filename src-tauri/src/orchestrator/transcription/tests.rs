@@ -8,10 +8,22 @@ use crate::storage::{self, DebugEntry, DebugStorage, LlmLog, TranscriptionLog};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// SRP: type alias for the `TranscriptionContext::new` signature — used by the
+/// compile-time signature check below; silences `clippy::type_complexity`.
+type CtxCtor = fn(
+    tauri::AppHandle,
+    Arc<OutputHandler>,
+    Arc<Mutex<RecordingState>>,
+    Arc<Mutex<Box<dyn OverlayBackend>>>,
+    Vec<u8>,
+) -> TranscriptionContext;
+
 #[test]
 fn test_validate_config_missing_api_key() {
-    let mut config = AppConfig::default();
-    config.api_key = String::new();
+    let config = AppConfig {
+        api_key: String::new(),
+        ..AppConfig::default()
+    };
     assert!(validate_config(&config).is_err());
     assert_eq!(
         validate_config(&config).unwrap_err(),
@@ -21,8 +33,10 @@ fn test_validate_config_missing_api_key() {
 
 #[test]
 fn test_validate_config_with_api_key() {
-    let mut config = AppConfig::default();
-    config.api_key = "test-key".to_string();
+    let config = AppConfig {
+        api_key: "test-key".to_string(),
+        ..AppConfig::default()
+    };
     assert!(validate_config(&config).is_ok());
 }
 
@@ -179,7 +193,7 @@ fn test_recording_state_initial() {
 
 #[test]
 fn test_recording_state_transitions() {
-    let states = vec![
+    let states = [
         RecordingState::Idle,
         RecordingState::Recording,
         RecordingState::Transcribing,
@@ -193,13 +207,7 @@ fn test_recording_state_transitions() {
 fn test_transcription_context_fields() {
     // TranscriptionContext should have all required fields
     // This is a compile-time check - if struct changes, this test breaks
-    let _: fn(
-        tauri::AppHandle,
-        Arc<OutputHandler>,
-        Arc<Mutex<RecordingState>>,
-        Arc<Mutex<Box<dyn OverlayBackend>>>,
-        Vec<u8>,
-    ) -> TranscriptionContext = TranscriptionContext::new;
+    let _: CtxCtor = TranscriptionContext::new;
 }
 
 // ==========================================================================
@@ -768,7 +776,7 @@ fn test_post_process_result_text_matches_llm_output() {
     // Simulating apply_post_processing behavior:
     // final_text starts as transcription, then gets replaced by llm.text
     let mut final_text = "corrected text with punctuation".to_string();
-    if let Some(ref llm) = Some(&llm_result) {
+    if let Some(llm) = Some(&llm_result) {
         final_text = llm.text.clone();
     }
 

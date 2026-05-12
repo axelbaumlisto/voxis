@@ -242,8 +242,10 @@ mod tests {
 
     #[test]
     fn test_recording_state_clone() {
+        // RecordingState is Copy; this exercises that property (Clone falls
+        // back to Copy for Copy types).
         let state = RecordingState::Transcribing;
-        let cloned = state.clone();
+        let cloned = state;
         assert_eq!(state, cloned);
     }
 

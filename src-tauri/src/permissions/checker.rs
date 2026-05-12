@@ -158,7 +158,8 @@ mod tests {
     fn test_permission_clone_and_copy() {
         let p = Permission::InputMonitoring;
         let p2 = p; // Copy
-        let p3 = p.clone(); // Clone
+        // Explicitly test the Clone trait (Permission also implements Copy).
+        let p3 = Clone::clone(&p);
         assert_eq!(p, p2);
         assert_eq!(p, p3);
     }
@@ -201,7 +202,8 @@ mod tests {
     fn test_permission_status_clone_and_copy() {
         let s = PermissionStatus::Granted;
         let s2 = s; // Copy
-        let s3 = s.clone(); // Clone
+        // Explicitly test the Clone trait (PermissionStatus also implements Copy).
+        let s3 = Clone::clone(&s);
         assert_eq!(s, s2);
         assert_eq!(s, s3);
     }

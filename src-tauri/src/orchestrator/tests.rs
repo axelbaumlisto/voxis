@@ -722,7 +722,7 @@ async fn test_queue_pipeline_multiple_items() {
         }
 
         // Stop recording, push to queue
-        let audio = vec![i as u8; 512];
+        let audio = vec![i; 512];
         let queue_len = queue.push(audio).await;
         assert_eq!(queue_len as u8, i + 1);
 

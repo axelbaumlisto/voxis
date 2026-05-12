@@ -48,34 +48,6 @@ pub(crate) fn stage_to_state(stage: Stage) -> RecordingState {
     }
 }
 
-#[cfg(test)]
-mod stage_mapping_tests {
-    use super::*;
-
-    #[test]
-    fn test_stage_idle_maps_to_state_idle() {
-        assert_eq!(stage_to_state(Stage::Idle), RecordingState::Idle);
-    }
-
-    #[test]
-    fn test_stage_recording_maps_to_state_recording() {
-        assert_eq!(stage_to_state(Stage::Recording), RecordingState::Recording);
-    }
-
-    #[test]
-    fn test_stage_processing_maps_to_state_transcribing() {
-        assert_eq!(stage_to_state(Stage::Processing), RecordingState::Transcribing);
-    }
-
-    #[test]
-    fn test_stage_mapping_is_total() {
-        // Compile-time guarantee + smoke test: every Stage maps to a state.
-        for stage in [Stage::Idle, Stage::Recording, Stage::Processing] {
-            let _ = stage_to_state(stage);
-        }
-    }
-}
-
 /// Phase 4.2: Coordinator is the single source of truth for recording state.
 ///
 /// The legacy `Arc<Mutex<RecordingState>>` is kept only as a downstream cache
@@ -278,3 +250,31 @@ impl RecordingCoordinator {
 }
 
 
+
+#[cfg(test)]
+mod stage_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn test_stage_idle_maps_to_state_idle() {
+        assert_eq!(stage_to_state(Stage::Idle), RecordingState::Idle);
+    }
+
+    #[test]
+    fn test_stage_recording_maps_to_state_recording() {
+        assert_eq!(stage_to_state(Stage::Recording), RecordingState::Recording);
+    }
+
+    #[test]
+    fn test_stage_processing_maps_to_state_transcribing() {
+        assert_eq!(stage_to_state(Stage::Processing), RecordingState::Transcribing);
+    }
+
+    #[test]
+    fn test_stage_mapping_is_total() {
+        // Compile-time guarantee + smoke test: every Stage maps to a state.
+        for stage in [Stage::Idle, Stage::Recording, Stage::Processing] {
+            let _ = stage_to_state(stage);
+        }
+    }
+}
