@@ -1,4 +1,5 @@
 import React from "react";
+import OverlayBackendSelector from "../components/settings/OverlayBackendSelector";
 import PasteShortcutCheckboxes from "../components/settings/PasteShortcutCheckboxes";
 import ProviderSelect from "../components/settings/ProviderSelect";
 import ThemeSelect from "../components/settings/ThemeSelect";
@@ -62,6 +63,21 @@ registerCustomWidget("paste-shortcut-checkboxes", ({
     label={label}
     description={description}
     value={config.paste_shortcuts}
+    onChange={(value) => onChange(settingKey, value)}
+  />
+));
+
+registerCustomWidget("overlay-backend-select", ({
+  label,
+  description,
+  config,
+  settingKey,
+  onChange,
+}) => (
+  <OverlayBackendSelector
+    label={label}
+    description={description}
+    value={config.overlay.backend}
     onChange={(value) => onChange(settingKey, value)}
   />
 ));
