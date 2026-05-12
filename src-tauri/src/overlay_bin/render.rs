@@ -10,7 +10,10 @@ pub fn amplify_level(level: f32) -> f32 {
     level.min(1.0)
 }
 
-/// Get color for overlay state.
+/// Get color for overlay state (legacy fallback, see `types::colors`).
+/// Production paths use `VisualizationTheme` for colors; this function is
+/// retained as a documented fallback contract and tested in `tests.rs`.
+#[allow(dead_code)]
 pub fn state_color(state: OverlayState) -> (u8, u8, u8) {
     match state {
         OverlayState::Recording | OverlayState::Idle | OverlayState::Hidden => colors::BLUE,

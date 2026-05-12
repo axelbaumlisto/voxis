@@ -148,6 +148,7 @@ pub fn get_theme_colors(
 /// Shows recording state with simulated audio levels.
 #[cfg(debug_assertions)]
 #[tauri::command]
+#[specta::specta]
 pub async fn overlay_demo(state: State<'_, OrchestratorState>) -> Result<(), String> {
     state.orchestrator.run_demo().await;
     Ok(())

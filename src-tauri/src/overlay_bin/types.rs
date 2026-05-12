@@ -7,7 +7,12 @@ pub const DEFAULT_HEIGHT: u32 = 60;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const DEFAULT_MARGIN: u32 = 30;
 
-/// Overlay colors (RGB).
+/// Overlay colors (RGB). Legacy fallback palette used by `render::state_color`
+/// when no `VisualizationTheme` is available. Production code paths in
+/// `platform/macos/draw.rs` resolve colors via the active theme; these
+/// constants remain as the documented contract for the fallback and are
+/// covered by unit tests in `tests.rs::test_state_color`.
+#[allow(dead_code)]
 pub mod colors {
     pub const BLUE: (u8, u8, u8) = (30, 136, 229);
     pub const GREEN: (u8, u8, u8) = (76, 175, 80);
