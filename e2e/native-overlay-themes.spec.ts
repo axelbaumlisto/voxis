@@ -45,29 +45,13 @@ test.describe("Native overlay organic themes", () => {
     expect(result.fileSize).toBeGreaterThan(5000);
   });
 
-  // KNOWN BUGS (Rust overlay binary, out of scope for this E2E fix):
-  //
-  // Bug 1 — All three builtin organic themes share identical visual parameters
-  //   (gap_degrees, taper, base_thickness, colors, gradient). See
-  //   `src-tauri/src/overlay_native/theme.rs::builtin_organic()` — the function
-  //   accepts `id` and `name` but applies the same OrganicRingShape/Motion to
-  //   every theme. The themes/{quiet,living}_reed/drifting_contour/theme.json
-  //   bundled assets are also identical. Until the visuals are differentiated,
-  //   `quietReed.sha256 !== livingReed.sha256` cannot hold even at the
-  //   pixel-perfect level.
-  //
-  // Bug 2 — OrganicRing family renders a blank (transparent) frame on macOS.
-  //   See `src-tauri/src/overlay_bin/platform/macos/ring.rs` + `draw.rs`. With
-  //   identical pos/state/spectrum/level commands, `bars` themes capture as
-  //   ~30 KB PNGs while organic themes capture as ~1.7 KB blank PNGs. The ring
-  //   geometry is computed but no visible pixels reach the framebuffer.
-  //
-  // Both bugs are tracked outside this E2E fix. The tests below are kept in the
-  // codebase as a forward-compatible specification: they will start passing
-  // automatically once Rust fixes land.
-  //
+  // Bug fixes landed: see .pi/plans/native-overlay-organic-fixes.md
+  // - theme.rs::organic_template + 3 distinct builtins (different shape + colors)
+  // - bundled themes/<id>/theme.json updated to match
+  // - convert_theme_file now parses file.organic_ring (was always None → blank)
+  // Each captured PNG must be non-blank (>5KB) and have a distinct hash.
   // eslint-disable-next-line no-empty-pattern
-  test.fixme("captures distinct organic theme screenshots in recording state", async ({}, testInfo) => {
+  test("captures distinct organic theme screenshots in recording state", async ({}, testInfo) => {
     const outputDir = testInfo.outputPath("organic-recording");
 
     const quietReed = await harness.captureTheme({
@@ -86,9 +70,13 @@ test.describe("Native overlay organic themes", () => {
       outputPath: `${outputDir}/drifting_contour.png`,
     });
 
-    expect(quietReed.fileSize).toBeGreaterThan(0);
-    expect(livingReed.fileSize).toBeGreaterThan(0);
-    expect(driftingContour.fileSize).toBeGreaterThan(0);
+    // Non-blank threshold: empty 400x100 PNGs encode to ~1700 bytes. After
+    // the organic_ring loader fix, even quiet_reed (thin stroke, wide gap)
+    // produces ~4 KB; living_reed and drifting_contour produce much more.
+    // 3000 reliably separates blank from rendered.
+    expect(quietReed.fileSize).toBeGreaterThan(3000);
+    expect(livingReed.fileSize).toBeGreaterThan(3000);
+    expect(driftingContour.fileSize).toBeGreaterThan(3000);
 
     expect(quietReed.sha256).not.toBe(livingReed.sha256);
     expect(quietReed.sha256).not.toBe(driftingContour.sha256);
@@ -96,7 +84,7 @@ test.describe("Native overlay organic themes", () => {
   });
 
   // eslint-disable-next-line no-empty-pattern
-  test.fixme("captures distinct recording and transcribing screenshots for living_reed", async ({}, testInfo) => {
+  test("captures distinct recording and transcribing screenshots for living_reed", async ({}, testInfo) => {
     const outputDir = testInfo.outputPath("living-reed-states");
 
     const recording = await harness.captureTheme({
@@ -110,13 +98,13 @@ test.describe("Native overlay organic themes", () => {
       outputPath: `${outputDir}/living_reed_transcribing.png`,
     });
 
-    expect(recording.fileSize).toBeGreaterThan(0);
-    expect(transcribing.fileSize).toBeGreaterThan(0);
+    expect(recording.fileSize).toBeGreaterThan(3000);
+    expect(transcribing.fileSize).toBeGreaterThan(3000);
     expect(recording.sha256).not.toBe(transcribing.sha256);
   });
 
   // eslint-disable-next-line no-empty-pattern
-  test.fixme("captures changing transcribing pulse frames for living_reed", async ({}, testInfo) => {
+  test("captures changing transcribing pulse frames for living_reed", async ({}, testInfo) => {
     const outputDir = testInfo.outputPath("living-reed-transcribing-pulse");
 
     const first = await harness.captureTheme({
@@ -130,8 +118,8 @@ test.describe("Native overlay organic themes", () => {
       outputPath: `${outputDir}/living_reed_transcribing_2.png`,
     });
 
-    expect(first.fileSize).toBeGreaterThan(0);
-    expect(second.fileSize).toBeGreaterThan(0);
+    expect(first.fileSize).toBeGreaterThan(3000);
+    expect(second.fileSize).toBeGreaterThan(3000);
     expect(first.sha256).not.toBe(second.sha256);
   });
 });

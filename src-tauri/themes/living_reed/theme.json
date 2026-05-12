@@ -1,21 +1,21 @@
 {
   "name": "Living Reed",
-  "description": null,
+  "description": "Balanced motion, warm green palette \u2014 reference organic profile.",
   "family": "organic_ring",
   "colors": {
     "background": "#00000000",
-    "idle": "#606060",
-    "recording": "#a0a0a0",
-    "recording_peak": "#ffffff",
+    "idle": "#3a6841",
+    "recording": "#7cc287",
+    "recording_peak": "#c4eac8",
     "transcribing": "#4caf50",
     "queued": "#ffa726",
     "text": "#ffffff"
   },
   "use_gradient": true,
   "gradient": {
-    "bottom": "#606060",
-    "middle": "#a0a0a0",
-    "top": "#ffffff"
+    "bottom": "#3a6841",
+    "middle": "#7cc287",
+    "top": "#c4eac8"
   },
   "organic_ring": {
     "shape": {

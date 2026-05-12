@@ -1,35 +1,35 @@
 {
   "name": "Drifting Contour",
-  "description": null,
+  "description": "Expressive motion, warm amber palette \u2014 most visually active organic theme.",
   "family": "organic_ring",
   "colors": {
     "background": "#00000000",
-    "idle": "#606060",
-    "recording": "#a0a0a0",
-    "recording_peak": "#ffffff",
+    "idle": "#7a5a30",
+    "recording": "#d9a865",
+    "recording_peak": "#f4d9a8",
     "transcribing": "#4caf50",
     "queued": "#ffa726",
     "text": "#ffffff"
   },
   "use_gradient": true,
   "gradient": {
-    "bottom": "#606060",
-    "middle": "#a0a0a0",
-    "top": "#ffffff"
+    "bottom": "#7a5a30",
+    "middle": "#d9a865",
+    "top": "#f4d9a8"
   },
   "organic_ring": {
     "shape": {
-      "gap_degrees": 42.0,
-      "base_thickness": 7.2,
-      "taper": 0.7,
-      "roundness": 0.9,
-      "active_zones": 3
+      "gap_degrees": 28.0,
+      "base_thickness": 9.0,
+      "taper": 0.9,
+      "roundness": 0.7,
+      "active_zones": 5
     },
     "motion": {
-      "idle_breathing": 0.1,
-      "speech_responsiveness": 0.92,
-      "drift": 0.38,
-      "settle_speed": 0.6
+      "idle_breathing": 0.18,
+      "speech_responsiveness": 1.1,
+      "drift": 0.55,
+      "settle_speed": 0.4
     }
   }
 }

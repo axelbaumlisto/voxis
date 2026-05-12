@@ -1,35 +1,35 @@
 {
   "name": "Quiet Reed",
-  "description": null,
+  "description": "Minimal motion, cool blue palette \u2014 ambient always-on indicator.",
   "family": "organic_ring",
   "colors": {
     "background": "#00000000",
-    "idle": "#606060",
-    "recording": "#a0a0a0",
-    "recording_peak": "#ffffff",
+    "idle": "#3d5168",
+    "recording": "#7a9fbd",
+    "recording_peak": "#b8d0e6",
     "transcribing": "#4caf50",
     "queued": "#ffa726",
     "text": "#ffffff"
   },
   "use_gradient": true,
   "gradient": {
-    "bottom": "#606060",
-    "middle": "#a0a0a0",
-    "top": "#ffffff"
+    "bottom": "#3d5168",
+    "middle": "#7a9fbd",
+    "top": "#b8d0e6"
   },
   "organic_ring": {
     "shape": {
-      "gap_degrees": 42.0,
-      "base_thickness": 7.2,
-      "taper": 0.7,
-      "roundness": 0.9,
-      "active_zones": 3
+      "gap_degrees": 60.0,
+      "base_thickness": 5.0,
+      "taper": 0.4,
+      "roundness": 0.95,
+      "active_zones": 2
     },
     "motion": {
-      "idle_breathing": 0.1,
-      "speech_responsiveness": 0.92,
-      "drift": 0.38,
-      "settle_speed": 0.6
+      "idle_breathing": 0.05,
+      "speech_responsiveness": 0.6,
+      "drift": 0.15,
+      "settle_speed": 0.8
     }
   }
 }

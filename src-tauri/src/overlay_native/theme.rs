@@ -215,39 +215,117 @@ impl VisualizationTheme {
         t
     }
 
-    fn builtin_organic(id: &str, name: &str) -> Self {
+    /// Common scaffolding for organic-ring themes. Sets family + organic_ring
+    /// to provided shape/motion; callers override colors and gradient for
+    /// personality. Keeps DRY without forcing identical visuals.
+    fn organic_template(
+        id: &str,
+        name: &str,
+        shape: OrganicRingShape,
+        motion: OrganicRingMotion,
+    ) -> Self {
         let mut t = Self::builtin_monochrome();
         t.id = id.into();
         t.name = name.into();
         t.family = VisualizationFamily::OrganicRing;
-        t.organic_ring = Some(OrganicRingTheme {
-            shape: OrganicRingShape {
+        t.organic_ring = Some(OrganicRingTheme { shape, motion });
+        t
+    }
+
+    /// Quiet Reed — minimal motion, cool blue palette. Suitable for ambient
+    /// always-on indicator. Wide gap, thin stroke, low speech responsiveness.
+    pub fn builtin_quiet_reed() -> Self {
+        let mut t = Self::organic_template(
+            "quiet_reed",
+            "Quiet Reed",
+            OrganicRingShape {
+                gap_degrees: 60.0,
+                base_thickness: 5.0,
+                taper: 0.4,
+                roundness: 0.95,
+                active_zones: 2,
+            },
+            OrganicRingMotion {
+                idle_breathing: 0.05,
+                speech_responsiveness: 0.6,
+                drift: 0.15,
+                settle_speed: 0.8,
+            },
+        );
+        // Cool blue palette.
+        t.idle = Color32::from_rgb(0x3d, 0x51, 0x68);
+        t.recording = Color32::from_rgb(0x7a, 0x9f, 0xbd);
+        t.recording_peak = Color32::from_rgb(0xb8, 0xd0, 0xe6);
+        t.gradient = GradientColors {
+            bottom: Color32::from_rgb(0x3d, 0x51, 0x68),
+            middle: Color32::from_rgb(0x7a, 0x9f, 0xbd),
+            top: Color32::from_rgb(0xb8, 0xd0, 0xe6),
+        };
+        t
+    }
+
+    /// Living Reed — balanced motion, warm green palette. The original
+    /// reference organic profile.
+    pub fn builtin_living_reed() -> Self {
+        let mut t = Self::organic_template(
+            "living_reed",
+            "Living Reed",
+            OrganicRingShape {
                 gap_degrees: 42.0,
                 base_thickness: 7.2,
                 taper: 0.7,
                 roundness: 0.9,
                 active_zones: 3,
             },
-            motion: OrganicRingMotion {
+            OrganicRingMotion {
                 idle_breathing: 0.1,
                 speech_responsiveness: 0.92,
                 drift: 0.38,
                 settle_speed: 0.6,
             },
-        });
+        );
+        // Living green palette.
+        t.idle = Color32::from_rgb(0x3a, 0x68, 0x41);
+        t.recording = Color32::from_rgb(0x7c, 0xc2, 0x87);
+        t.recording_peak = Color32::from_rgb(0xc4, 0xea, 0xc8);
+        t.gradient = GradientColors {
+            bottom: Color32::from_rgb(0x3a, 0x68, 0x41),
+            middle: Color32::from_rgb(0x7c, 0xc2, 0x87),
+            top: Color32::from_rgb(0xc4, 0xea, 0xc8),
+        };
         t
     }
 
-    pub fn builtin_quiet_reed() -> Self {
-        Self::builtin_organic("quiet_reed", "Quiet Reed")
-    }
-
-    pub fn builtin_living_reed() -> Self {
-        Self::builtin_organic("living_reed", "Living Reed")
-    }
-
+    /// Drifting Contour — expressive motion, warm amber palette. Narrow gap,
+    /// thick stroke, many active zones, high drift — most visually active.
     pub fn builtin_drifting_contour() -> Self {
-        Self::builtin_organic("drifting_contour", "Drifting Contour")
+        let mut t = Self::organic_template(
+            "drifting_contour",
+            "Drifting Contour",
+            OrganicRingShape {
+                gap_degrees: 28.0,
+                base_thickness: 9.0,
+                taper: 0.9,
+                roundness: 0.7,
+                active_zones: 5,
+            },
+            OrganicRingMotion {
+                idle_breathing: 0.18,
+                speech_responsiveness: 1.1,
+                drift: 0.55,
+                settle_speed: 0.4,
+            },
+        );
+        // Warm amber palette.
+        t.idle = Color32::from_rgb(0x7a, 0x5a, 0x30);
+        t.recording = Color32::from_rgb(0xd9, 0xa8, 0x65);
+        t.recording_peak = Color32::from_rgb(0xf4, 0xd9, 0xa8);
+        t.gradient = GradientColors {
+            bottom: Color32::from_rgb(0x7a, 0x5a, 0x30),
+            middle: Color32::from_rgb(0xd9, 0xa8, 0x65),
+            top: Color32::from_rgb(0xf4, 0xd9, 0xa8),
+        };
+        t
     }
 
     pub fn builtin_theme_ids() -> &'static [&'static str] {
@@ -563,11 +641,34 @@ impl ThemeLoader {
             _ => VisualizationFamily::Bars,
         };
 
+        // BUG FIX (Phase 3): previously this always set organic_ring: None,
+        // dropping the shape/motion from the JSON. Result: any external theme
+        // declared as family=organic_ring rendered blank because
+        // build_ring_points short-circuits when theme.organic_ring is None.
+        let organic_ring = match (&family, file.organic_ring.as_ref()) {
+            (VisualizationFamily::OrganicRing, Some(cfg)) => Some(OrganicRingTheme {
+                shape: OrganicRingShape {
+                    gap_degrees: cfg.shape.gap_degrees,
+                    base_thickness: cfg.shape.base_thickness,
+                    taper: cfg.shape.taper,
+                    roundness: cfg.shape.roundness,
+                    active_zones: cfg.shape.active_zones,
+                },
+                motion: OrganicRingMotion {
+                    idle_breathing: cfg.motion.idle_breathing,
+                    speech_responsiveness: cfg.motion.speech_responsiveness,
+                    drift: cfg.motion.drift,
+                    settle_speed: cfg.motion.settle_speed,
+                },
+            }),
+            _ => None,
+        };
+
         Ok(VisualizationTheme {
             id,
             name: file.name,
             family,
-            organic_ring: None,
+            organic_ring,
             background: parse_color(&file.colors.background).unwrap_or(Color32::TRANSPARENT),
             idle: parse_color(&file.colors.idle)?,
             recording,
@@ -750,5 +851,108 @@ fn parse_array_color(arr: &[u8]) -> Result<Color32, ThemeLoadError> {
             "Invalid color array length: {}",
             arr.len()
         ))),
+    }
+}
+
+#[cfg(test)]
+mod organic_theme_tests {
+    //! Contract tests for organic-ring builtin themes.
+    //!
+    //! These tests guarantee that:
+    //! 1. The three organic builtins have distinct visuals (shape + colors).
+    //! 2. Each builtin matches its bundled JSON asset under `themes/<id>/theme.json`.
+    //!
+    //! If a test fails, either the Rust code or the JSON drifted out of sync.
+
+    use super::*;
+    use std::path::PathBuf;
+
+    fn organic_themes() -> [(&'static str, VisualizationTheme); 3] {
+        [
+            ("quiet_reed", VisualizationTheme::builtin_quiet_reed()),
+            ("living_reed", VisualizationTheme::builtin_living_reed()),
+            (
+                "drifting_contour",
+                VisualizationTheme::builtin_drifting_contour(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn test_organic_themes_have_distinct_shapes() {
+        let themes = organic_themes();
+        let shapes: Vec<&OrganicRingShape> = themes
+            .iter()
+            .map(|(_, t)| &t.organic_ring.as_ref().expect("organic_ring").shape)
+            .collect();
+        // Compare pair-wise via debug representation (struct PartialEq would
+        // require deriving it; debug repr captures all fields).
+        let signatures: Vec<String> = shapes.iter().map(|s| format!("{s:?}")).collect();
+        assert_ne!(signatures[0], signatures[1], "quiet vs living shape");
+        assert_ne!(signatures[0], signatures[2], "quiet vs drifting shape");
+        assert_ne!(signatures[1], signatures[2], "living vs drifting shape");
+    }
+
+    #[test]
+    fn test_organic_themes_have_distinct_motions() {
+        let themes = organic_themes();
+        let motions: Vec<String> = themes
+            .iter()
+            .map(|(_, t)| {
+                format!(
+                    "{:?}",
+                    t.organic_ring.as_ref().expect("organic_ring").motion
+                )
+            })
+            .collect();
+        assert_ne!(motions[0], motions[1], "quiet vs living motion");
+        assert_ne!(motions[0], motions[2], "quiet vs drifting motion");
+        assert_ne!(motions[1], motions[2], "living vs drifting motion");
+    }
+
+    #[test]
+    fn test_organic_themes_have_distinct_recording_colors() {
+        let themes = organic_themes();
+        let colors: Vec<Color32> = themes.iter().map(|(_, t)| t.recording).collect();
+        assert_ne!(colors[0], colors[1], "quiet vs living recording color");
+        assert_ne!(colors[0], colors[2], "quiet vs drifting recording color");
+        assert_ne!(colors[1], colors[2], "living vs drifting recording color");
+    }
+
+    #[test]
+    fn test_organic_themes_load_from_bundled_json() {
+        // Walks each bundled JSON, parses it via ThemeLoader, and asserts the
+        // resulting VisualizationTheme matches the builtin (single source of
+        // truth — code wins, JSON must match).
+        let themes_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("themes");
+        let mut loader = ThemeLoader::new(themes_dir);
+        loader.scan().expect("scan bundled themes");
+
+        for (id, builtin) in organic_themes() {
+            let loaded = loader.get_theme(id);
+            let b_shape = &builtin.organic_ring.as_ref().unwrap().shape;
+            let l_shape = &loaded.organic_ring.as_ref().unwrap().shape;
+            assert_eq!(
+                format!("{b_shape:?}"),
+                format!("{l_shape:?}"),
+                "shape mismatch for {id}"
+            );
+            let b_motion = &builtin.organic_ring.as_ref().unwrap().motion;
+            let l_motion = &loaded.organic_ring.as_ref().unwrap().motion;
+            assert_eq!(
+                format!("{b_motion:?}"),
+                format!("{l_motion:?}"),
+                "motion mismatch for {id}"
+            );
+            assert_eq!(
+                builtin.recording, loaded.recording,
+                "recording color mismatch for {id}"
+            );
+            assert_eq!(builtin.idle, loaded.idle, "idle color mismatch for {id}");
+            assert_eq!(
+                builtin.recording_peak, loaded.recording_peak,
+                "recording_peak color mismatch for {id}"
+            );
+        }
     }
 }

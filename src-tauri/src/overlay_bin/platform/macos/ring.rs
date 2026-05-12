@@ -410,11 +410,11 @@ mod tests {
         );
         for &(x, y) in &points {
             assert!(
-                x >= 0.0 && x <= 400.0,
+                (0.0..=400.0).contains(&x),
                 "point x={x} out of [0, 400] bounds"
             );
             assert!(
-                y >= 0.0 && y <= 100.0,
+                (0.0..=100.0).contains(&y),
                 "point y={y} out of [0, 100] bounds"
             );
         }
