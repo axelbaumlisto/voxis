@@ -292,10 +292,12 @@ mod tests {
         let file = NamedTempFile::new().unwrap();
         let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
 
-        let mut config = AppConfig::default();
-        config.api_key = "test-key-123".to_string();
-        config.hotkey = "f12".to_string();
-        config.auto_type = false;
+        let mut config = AppConfig {
+            api_key: "test-key-123".to_string(),
+            hotkey: "f12".to_string(),
+            auto_type: false,
+            ..AppConfig::default()
+        };
         config.llm.api_key = "llm-key-456".to_string();
 
         storage.save(&config).unwrap();
@@ -333,8 +335,10 @@ mod tests {
         let file = NamedTempFile::new().unwrap();
         let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
 
-        let mut config = AppConfig::default();
-        config.api_key = "first-key".to_string();
+        let mut config = AppConfig {
+            api_key: "first-key".to_string(),
+            ..AppConfig::default()
+        };
         storage.save(&config).unwrap();
 
         // Update api_key
@@ -364,22 +368,24 @@ mod tests {
         let file = NamedTempFile::new().unwrap();
         let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
 
-        let mut config = AppConfig::default();
-        config.api_key = "api-123".to_string();
-        config.model = "custom-model".to_string();
-        config.language = "ru".to_string();
-        config.hotkey = "ctrl+shift+r".to_string();
-        config.auto_type = false;
-        config.auto_enter = true;
-        config.typing_delay = 50;
-        config.notifications = false;
-        config.backend = "custom-backend".to_string();
-        config.debug = true;
-        config.audio_device = "USB Mic".to_string();
-        config.history_enabled = false;
-        config.history_days = 90;
-        config.active_provider = "local".to_string();
-        config.text_processing = false;
+        let mut config = AppConfig {
+            api_key: "api-123".to_string(),
+            model: "custom-model".to_string(),
+            language: "ru".to_string(),
+            hotkey: "ctrl+shift+r".to_string(),
+            auto_type: false,
+            auto_enter: true,
+            typing_delay: 50,
+            notifications: false,
+            backend: "custom-backend".to_string(),
+            debug: true,
+            audio_device: "USB Mic".to_string(),
+            history_enabled: false,
+            history_days: 90,
+            active_provider: "local".to_string(),
+            text_processing: false,
+            ..AppConfig::default()
+        };
         config.vad.enabled = true;
         config.vad.threshold = 0.75;
         config.overlay.enabled = true;
@@ -423,9 +429,11 @@ mod tests {
         let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
 
         // Save initial config
-        let mut config = AppConfig::default();
-        config.api_key = "initial-key".to_string();
-        config.hotkey = "f10".to_string();
+        let config = AppConfig {
+            api_key: "initial-key".to_string(),
+            hotkey: "f10".to_string(),
+            ..AppConfig::default()
+        };
         storage.save(&config).unwrap();
 
         // Update only api_key
@@ -505,8 +513,8 @@ mod tests {
         let result: i32 = storage.get_typed(&conn, "nonexistent_int", 42);
         assert_eq!(result, 42);
 
-        let result: f64 = storage.get_typed(&conn, "nonexistent_float", 3.14);
-        assert!((result - 3.14).abs() < 0.001);
+        let result: f64 = storage.get_typed(&conn, "nonexistent_float", 1.5);
+        assert!((result - 1.5).abs() < 0.001);
     }
 
     #[test]
@@ -633,10 +641,12 @@ mod tests {
         let file = NamedTempFile::new().unwrap();
         let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
 
-        let mut config = AppConfig::default();
-        config.api_key = "key'with\"special<>&chars".to_string();
+        let mut config = AppConfig {
+            api_key: "key'with\"special<>&chars".to_string(),
+            hotkey: "Привет мир 你好".to_string(), // Unicode
+            ..AppConfig::default()
+        };
         config.llm.prompt = "Prompt with\nnewlines\tand\ttabs".to_string();
-        config.hotkey = "Привет мир 你好".to_string(); // Unicode
 
         storage.save(&config).unwrap();
         let loaded = storage.load().unwrap();
@@ -655,8 +665,10 @@ mod tests {
 
         // Create storage and initialize
         let storage1 = ConfigSqliteStorage::new(path.clone());
-        let mut config1 = AppConfig::default();
-        config1.api_key = "initial".to_string();
+        let config1 = AppConfig {
+            api_key: "initial".to_string(),
+            ..AppConfig::default()
+        };
         storage1.save(&config1).unwrap();
 
         // Concurrent reads should work
@@ -684,8 +696,10 @@ mod tests {
         assert_eq!(config, AppConfig::default());
 
         // Verify schema was created by checking we can write
-        let mut config2 = AppConfig::default();
-        config2.api_key = "after_migration".to_string();
+        let config2 = AppConfig {
+            api_key: "after_migration".to_string(),
+            ..AppConfig::default()
+        };
         storage.save(&config2).unwrap();
 
         let loaded = storage.load().unwrap();
@@ -715,8 +729,10 @@ mod tests {
         let file = NamedTempFile::new().unwrap();
         let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
 
-        let mut config = AppConfig::default();
-        config.paste_shortcuts = "ctrl_shift_v,shift_insert".to_string();
+        let config = AppConfig {
+            paste_shortcuts: "ctrl_shift_v,shift_insert".to_string(),
+            ..AppConfig::default()
+        };
 
         storage.save(&config).unwrap();
         let loaded = storage.load().unwrap();

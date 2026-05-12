@@ -337,10 +337,12 @@ mod tests {
         let file = NamedTempFile::new().unwrap();
         let storage = ConfigIniStorage::new(file.path().to_path_buf());
 
-        let mut config = AppConfig::default();
-        config.api_key = "test-key".to_string();
-        config.hotkey = "f12".to_string();
-        config.auto_type = false;
+        let config = AppConfig {
+            api_key: "test-key".to_string(),
+            hotkey: "f12".to_string(),
+            auto_type: false,
+            ..AppConfig::default()
+        };
 
         storage.save(&config).unwrap();
         let loaded = storage.load().unwrap();
@@ -483,13 +485,15 @@ mod tests {
         let file = NamedTempFile::new().unwrap();
         let storage = ConfigIniStorage::new(file.path().to_path_buf());
 
-        let mut config = AppConfig::default();
-        config.api_key = "key-123".to_string();
+        let mut config = AppConfig {
+            api_key: "key-123".to_string(),
+            history_days: 60,
+            ..AppConfig::default()
+        };
         config.llm.enabled = true;
         config.llm.api_key = "llm-key".to_string();
         config.vad.threshold = 0.75;
         config.overlay.enabled = true;
-        config.history_days = 60;
 
         storage.save(&config).unwrap();
         let loaded = storage.load().unwrap();

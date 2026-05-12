@@ -373,7 +373,7 @@ fn test_filter_with_vad_drops_partial_trailing_frame() {
     let speech: Vec<f32> = (0..480 + 100).map(|i| ((i as f32 * 0.1).sin()) * 0.5).collect();
     let result = filter_with_vad(&speech, &mut vad, 480);
     // Trailing 100 samples (< frame_size) are dropped
-    assert!(result.len() == 0 || result.len() == 480);
+    assert!(result.is_empty() || result.len() == 480);
 }
 
 // =========================================================================

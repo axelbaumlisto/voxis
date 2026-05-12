@@ -1,7 +1,7 @@
 use cocoa::appkit::NSColor;
 use cocoa::base::{id, nil};
 use cocoa::foundation::{NSPoint, NSRect, NSSize};
-use objc::{class, msg_send};
+use objc::{class, msg_send, sel, sel_impl};
 use voice_lib::overlay::themes::VisualizationFamily;
 
 use crate::overlay_bin::render::{amplify_level, pulse_factor, PULSE_HEIGHTS};

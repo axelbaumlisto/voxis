@@ -162,9 +162,11 @@ mod tests {
         let factory = StorageFactory::new(paths);
 
         // Test config storage works through factory
-        let mut config = crate::config::AppConfig::default();
-        config.api_key = "test-factory-key".to_string();
-        config.hotkey = "f10".to_string();
+        let config = crate::config::AppConfig {
+            api_key: "test-factory-key".to_string(),
+            hotkey: "f10".to_string(),
+            ..crate::config::AppConfig::default()
+        };
 
         factory.config().save(&config).unwrap();
         let loaded = factory.config().load().unwrap();

@@ -1,5 +1,16 @@
 use super::*;
 
+/// Pseudo-random hash seeds (f32-truncated to fit precision).
+/// Used to deterministically generate noise samples in spectrum tests.
+const HASH_SEED_X: f32 = 12_345.679;
+const HASH_SEED_Y: f32 = 43_758.547;
+
+/// Deterministic PRNG: produces values in [-1.0, 1.0] from index `i`.
+fn hash_sample(i: usize) -> f32 {
+    let x = ((i as f32 * HASH_SEED_X).sin() * HASH_SEED_Y).fract();
+    x * 2.0 - 1.0
+}
+
 #[test]
 fn test_analyzer_creation() {
     let analyzer = SpectrumAnalyzer::new();
@@ -164,13 +175,7 @@ fn test_white_noise_produces_distributed_spectrum() {
     let mut analyzer = SpectrumAnalyzer::new();
 
     // Generate pseudo-random noise
-    let samples: Vec<f32> = (0..FFT_SIZE)
-        .map(|i| {
-            // Simple PRNG for deterministic test
-            let x = ((i as f32 * 12345.6789).sin() * 43758.5453).fract();
-            x * 2.0 - 1.0
-        })
-        .collect();
+    let samples: Vec<f32> = (0..FFT_SIZE).map(hash_sample).collect();
 
     let bars = analyzer.analyze(&samples, 4.0);
 
@@ -208,7 +213,7 @@ fn test_bar_values_in_valid_range() {
 
     for (i, &val) in bars.iter().enumerate() {
         assert!(
-            val >= 0.0 && val <= 1.0,
+            (0.0..=1.0).contains(&val),
             "Bar {} value {} should be in [0, 1]",
             i,
             val
@@ -222,7 +227,7 @@ fn test_noise_floor_adapts_to_ambient() {
 
     // Feed 50 frames of low-level noise to let noise floor adapt
     let noise: Vec<f32> = (0..FFT_SIZE)
-        .map(|i| ((i as f32 * 12345.6789).sin() * 43758.5453).fract() * 0.001)
+        .map(|i| hash_sample(i) * 0.001)
         .collect();
     for _ in 0..50 {
         analyzer.analyze(&noise, 4.0);
@@ -360,7 +365,7 @@ fn test_reset_clears_noise_floor() {
 
     // Feed some data to change noise floor
     let noise: Vec<f32> = (0..FFT_SIZE)
-        .map(|i| ((i as f32 * 12345.6789).sin() * 43758.5453).fract() * 0.001)
+        .map(|i| hash_sample(i) * 0.001)
         .collect();
     for _ in 0..20 {
         analyzer.analyze(&noise, 4.0);

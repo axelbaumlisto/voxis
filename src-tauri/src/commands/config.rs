@@ -84,9 +84,11 @@ mod tests {
         let (_temp_dir, paths) = create_temp_paths();
         let factory = crate::storage::StorageFactory::new(paths);
 
-        let mut config = AppConfig::default();
-        config.api_key = "test-api-key".to_string();
-        config.hotkey = "f12".to_string();
+        let config = AppConfig {
+            api_key: "test-api-key".to_string(),
+            hotkey: "f12".to_string(),
+            ..AppConfig::default()
+        };
 
         factory.config().save(&config).unwrap();
         let loaded = factory.config().load().unwrap();

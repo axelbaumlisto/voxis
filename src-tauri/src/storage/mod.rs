@@ -22,21 +22,6 @@ pub mod providers;
 pub mod sqlite_base;
 pub mod traits;
 
-/// Test utilities for storage module (DRY: shared across test modules).
-#[cfg(test)]
-pub mod test_utils {
-    use super::AppPaths;
-    use tempfile::TempDir;
-
-    /// Create temporary paths for testing.
-    /// Returns (TempDir, AppPaths) - TempDir must be kept alive during test.
-    pub fn create_temp_paths() -> (TempDir, AppPaths) {
-        let temp_dir = TempDir::new().unwrap();
-        let paths = AppPaths::from_config_dir(temp_dir.path().to_path_buf());
-        (temp_dir, paths)
-    }
-}
-
 pub use config_ini::ConfigIniStorage;
 pub use config_sqlite::ConfigSqliteStorage;
 pub use corrections::{CorrectionStats, CorrectionsStorage as CorrectionsJsonStorage};
@@ -75,3 +60,18 @@ pub use traits::{
     DictionaryStorage as DictionaryStorageTrait, HistoryStorage as HistoryStorageTrait,
     ProvidersStorage as ProvidersStorageTrait, StorageResult,
 };
+
+/// Test utilities for storage module (DRY: shared across test modules).
+#[cfg(test)]
+pub mod test_utils {
+    use super::AppPaths;
+    use tempfile::TempDir;
+
+    /// Create temporary paths for testing.
+    /// Returns (TempDir, AppPaths) - TempDir must be kept alive during test.
+    pub fn create_temp_paths() -> (TempDir, AppPaths) {
+        let temp_dir = TempDir::new().unwrap();
+        let paths = AppPaths::from_config_dir(temp_dir.path().to_path_buf());
+        (temp_dir, paths)
+    }
+}

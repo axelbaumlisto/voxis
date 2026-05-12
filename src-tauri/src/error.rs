@@ -67,10 +67,8 @@ mod tests {
 
     #[test]
     fn test_boxed_error() {
-        let result: Result<i32, Box<dyn std::error::Error>> = Err(Box::new(io::Error::new(
-            io::ErrorKind::Other,
-            "boxed error",
-        )));
+        let result: Result<i32, Box<dyn std::error::Error>> =
+            Err(Box::new(io::Error::other("boxed error")));
         let cmd_result = result.cmd_err();
         assert!(cmd_result.is_err());
         assert!(cmd_result.unwrap_err().contains("boxed error"));

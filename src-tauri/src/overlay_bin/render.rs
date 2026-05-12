@@ -27,6 +27,7 @@ pub fn pulse_factor(phase: f32, bar_index: usize) -> f32 {
 
 /// Convert state enum into Lua-compatible state name.
 #[inline]
+#[allow(dead_code)] // Used by Lua bridge in production builds.
 pub fn state_name(state: OverlayState) -> &'static str {
     match state {
         OverlayState::Idle | OverlayState::Hidden => "idle",
