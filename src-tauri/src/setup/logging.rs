@@ -45,6 +45,41 @@ pub fn init_logging() {
 
     tracing::info!("Logging initialized, file: {:?}", log_dir.join("voice.log"));
 
+    // Capture panics from any thread — without this, panics in background
+    // threads (writer/health/coordinator/audio polling) exit the process
+    // silently with no panic message in our logs, which makes settings-save
+    // and hotkey crashes opaque.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| info.payload().downcast_ref::<String>().map(|s| s.as_str()))
+            .unwrap_or("<non-string panic payload>");
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let thread_name = std::thread::current()
+            .name()
+            .unwrap_or("<unnamed>")
+            .to_string();
+        tracing::error!(
+            target: "panic",
+            thread = %thread_name,
+            location = %location,
+            payload = %payload,
+            backtrace = ?backtrace,
+            "PANIC: {} at {}",
+            payload,
+            location
+        );
+        // Defer to the default hook too — keeps stderr backtrace on tty.
+        default_hook(info);
+    }));
+
     let stale_log = log_dir.join("soupawhisper.log");
     if stale_log.exists() {
         let _ = std::fs::remove_file(&stale_log);

@@ -238,6 +238,7 @@ impl ConfigSqliteStorage {
             &config.overlay.audio_boost.to_string(),
         )?;
         self.set(&conn, "overlay_theme", &config.overlay.theme)?;
+        self.set(&conn, "overlay_backend", &config.overlay.backend)?;
 
         // LLM
         self.set(&conn, "llm_enabled", &config.llm.enabled.to_string())?;
@@ -421,6 +422,27 @@ mod tests {
         assert!(loaded.llm.enabled);
         assert_eq!(loaded.llm.api_key, "llm-secret");
         assert_eq!(loaded.dictionary.learning_threshold, 10);
+    }
+
+    /// Regression: `overlay.backend` must be persisted by `save()`.
+    /// Before fix: read path had `get_str("overlay_backend", …)` at line
+    /// ~145, but write path silently dropped it — changing backend in the UI
+    /// looked successful (in-memory config updated) but was lost on next load.
+    #[test]
+    fn test_overlay_backend_persists_through_roundtrip() {
+        let file = NamedTempFile::new().unwrap();
+        let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
+
+        let mut config = AppConfig::default();
+        config.overlay.backend = "nspanel".to_string();
+
+        storage.save(&config).unwrap();
+        let loaded = storage.load().unwrap();
+
+        assert_eq!(
+            loaded.overlay.backend, "nspanel",
+            "overlay.backend must roundtrip through SQLite (read AND write)"
+        );
     }
 
     #[test]
