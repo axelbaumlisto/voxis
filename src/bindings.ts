@@ -499,6 +499,18 @@ async manualStopRecording() : Promise<Result<null, string>> {
 }
 },
 /**
+ * Cancel any in-progress recording (Handy-style overlay cancel button).
+ * Has no effect while transcription is already in flight.
+ */
+async cancelOperation() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cancel_operation") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get all pending suggestions.
  */
 async getPendingSuggestions() : Promise<Result<PendingSuggestion[], string>> {
