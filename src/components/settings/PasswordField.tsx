@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import FieldWrapper from "./FieldWrapper";
 
 interface PasswordFieldProps {
@@ -16,6 +17,7 @@ function PasswordField({
   placeholder,
   description,
 }: PasswordFieldProps) {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
 
   return (
@@ -33,7 +35,7 @@ function PasswordField({
           className="password-toggle"
           onClick={() => setVisible(!visible)}
         >
-          {visible ? "Hide" : "Show"}
+          {visible ? t("common.hide") : t("common.show")}
         </button>
       </div>
     </FieldWrapper>

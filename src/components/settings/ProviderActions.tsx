@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { LlmProvider } from "../../lib/commands";
 
 interface ProviderActionsProps {
@@ -17,12 +18,13 @@ function ProviderActions({
   onEdit,
   onRemove,
 }: ProviderActionsProps) {
+  const { t } = useTranslation();
   return (
     <>
       <button
         className="provider-action-btn"
         onClick={onAdd}
-        title="Add custom provider"
+        title={t("settings.addProvider")}
       >
         +
       </button>
@@ -31,14 +33,14 @@ function ProviderActions({
           <button
             className="provider-action-btn provider-edit-btn"
             onClick={onEdit}
-            title="Edit provider"
+            title={t("settings.editProvider")}
           >
             &#9998;
           </button>
           <button
             className="provider-action-btn provider-delete-btn"
             onClick={onRemove}
-            title="Remove provider"
+            title={t("settings.removeProvider")}
           >
             x
           </button>

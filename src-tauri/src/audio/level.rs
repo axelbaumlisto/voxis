@@ -54,15 +54,29 @@ pub(crate) fn process_chunk<T>(
     }
 }
 
+/// dB range for visualization mapping.
+const DB_MIN: f32 = -55.0;
+const DB_MAX: f32 = -8.0;
+/// Post-normalization gain.
+const VIS_GAIN: f32 = 1.3;
+/// Curve shaping exponent (< 1.0 boosts quiet signals).
+const CURVE_POWER: f32 = 0.7;
+/// Noise floor adaptation rate (very slow).
+const NOISE_ALPHA: f32 = 0.001;
+/// Initial noise floor estimate (dB).
+const NOISE_FLOOR_INIT: f32 = -40.0;
+
 /// Spectrum analyzer using FFT.
 ///
 /// Converts audio samples to frequency-domain spectrum for visualization.
-/// Uses Hann windowing to reduce spectral leakage and logarithmic
-/// frequency binning for perceptually accurate display.
+/// Uses Hann windowing, adaptive noise floor, dB-domain processing,
+/// gain/curve shaping, and neighbor smoothing for perceptually accurate display.
 pub struct SpectrumAnalyzer {
     planner: FftPlanner<f32>,
     window: Vec<f32>,
     scratch: Vec<Complex<f32>>,
+    /// Per-bucket adaptive noise floor (dB). Updated only on quiet signals.
+    pub(crate) noise_floor: Vec<f32>,
 }
 
 impl SpectrumAnalyzer {
@@ -76,14 +90,21 @@ impl SpectrumAnalyzer {
             planner: FftPlanner::new(),
             window,
             scratch: vec![Complex::new(0.0, 0.0); FFT_SIZE],
+            noise_floor: vec![NOISE_FLOOR_INIT; SPECTRUM_BARS],
         }
+    }
+
+    /// Reset analyzer state (noise floor back to defaults).
+    pub fn reset(&mut self) {
+        self.noise_floor.fill(NOISE_FLOOR_INIT);
     }
 
     /// Compute spectrum from audio samples.
     ///
     /// Returns 32 frequency bin magnitudes (0.0 to 1.0).
     /// Requires at least FFT_SIZE samples for accurate results.
-    /// The `boost` parameter amplifies the spectrum for visualization (typically audio_boost / 200.0).
+    /// The `boost` parameter is a legacy multiplier kept for API compat
+    /// (1.0 = neutral; higher = more sensitive).
     pub fn analyze(&mut self, samples: &[f32], boost: f32) -> [f32; SPECTRUM_BARS] {
         let mut result = [0.0f32; SPECTRUM_BARS];
 
@@ -94,55 +115,83 @@ impl SpectrumAnalyzer {
         // Take last FFT_SIZE samples
         let recent = &samples[samples.len() - FFT_SIZE..];
 
-        // Apply Hann window and convert to complex
+        // Remove DC component
+        let mean = recent.iter().sum::<f32>() / FFT_SIZE as f32;
+
+        // Apply Hann window, subtract DC, convert to complex
         let mut buffer: Vec<Complex<f32>> = recent
             .iter()
             .zip(self.window.iter())
-            .map(|(&s, &w)| Complex::new(s * w, 0.0))
+            .map(|(&s, &w)| Complex::new((s - mean) * w, 0.0))
             .collect();
 
         // Perform FFT
         let fft = self.planner.plan_fft_forward(FFT_SIZE);
         fft.process_with_scratch(&mut buffer, &mut self.scratch);
 
-        // Convert to magnitudes (only positive frequencies: 0 to FFT_SIZE/2)
+        // Group into bars, process in dB domain with adaptive noise floor
         let half = FFT_SIZE / 2;
-        let magnitudes: Vec<f32> = buffer[..half]
-            .iter()
-            .map(|c| c.norm() / FFT_SIZE as f32)
-            .collect();
+        self.compute_bars(&buffer[..half], &mut result, boost);
 
-        // Group into 32 bars with logarithmic frequency distribution
-        Self::group_to_bars(&magnitudes, &mut result, boost);
+        // Light neighbor smoothing to reduce jitter
+        Self::smooth_bars(&mut result);
 
         result
     }
 
-    /// Group frequency bins into display bars using logarithmic scale.
-    fn group_to_bars(magnitudes: &[f32], bars: &mut [f32; SPECTRUM_BARS], boost: f32) {
-        let num_bins = magnitudes.len();
+    /// Compute bar values from FFT output using dB-domain processing.
+    fn compute_bars(
+        &mut self,
+        fft_out: &[Complex<f32>],
+        bars: &mut [f32; SPECTRUM_BARS],
+        boost: f32,
+    ) {
+        let num_bins = fft_out.len();
 
         for (bar_idx, bar) in bars.iter_mut().enumerate().take(SPECTRUM_BARS) {
-            // Logarithmic frequency mapping
             let low_freq = Self::bar_to_freq_low(bar_idx, SPECTRUM_BARS);
             let high_freq = Self::bar_to_freq_high(bar_idx, SPECTRUM_BARS);
 
             let low_bin = Self::freq_to_bin(low_freq, num_bins);
-            let high_bin = Self::freq_to_bin(high_freq, num_bins);
+            let high_bin = Self::freq_to_bin(high_freq, num_bins).min(num_bins - 1);
 
-            // Average magnitudes in this range
-            // Note: boost parameter controls sensitivity (audio_boost / 200.0 gives good range)
-            if high_bin > low_bin {
-                let sum: f32 = magnitudes[low_bin..=high_bin.min(num_bins - 1)]
-                    .iter()
-                    .sum();
-                let avg = sum / (high_bin - low_bin + 1) as f32;
-                // Scale for typical audio levels with configurable boost
-                *bar = (avg * boost).min(1.0);
-            } else if low_bin < num_bins {
-                // Single bin
-                *bar = (magnitudes[low_bin] * boost).min(1.0);
+            // Average power in this frequency range
+            let bin_count = if high_bin >= low_bin { high_bin - low_bin + 1 } else { 1 };
+            let mut power_sum = 0.0f32;
+            for bin_idx in low_bin..=high_bin.min(num_bins - 1) {
+                let mag = fft_out[bin_idx].norm();
+                power_sum += mag * mag;
             }
+            let avg_power = power_sum / bin_count as f32;
+
+            // Convert to dB
+            let db = if avg_power > 1e-12 {
+                20.0 * (avg_power.sqrt() / FFT_SIZE as f32).log10()
+            } else {
+                -80.0
+            };
+
+            // Adaptive noise floor: only update when signal is quiet
+            if db < self.noise_floor[bar_idx] + 10.0 {
+                self.noise_floor[bar_idx] =
+                    NOISE_ALPHA * db + (1.0 - NOISE_ALPHA) * self.noise_floor[bar_idx];
+            }
+
+            // Map dB range → 0..1, apply gain and curve shaping
+            let normalized = ((db - DB_MIN) / (DB_MAX - DB_MIN)).clamp(0.0, 1.0);
+            let shaped = (normalized * VIS_GAIN * boost.max(0.1) / 4.0)
+                .powf(CURVE_POWER)
+                .clamp(0.0, 1.0);
+            *bar = shaped;
+        }
+    }
+
+    /// Light neighbor smoothing to reduce visual jitter.
+    fn smooth_bars(bars: &mut [f32; SPECTRUM_BARS]) {
+        // Work on a copy to avoid cascading updates
+        let orig = *bars;
+        for i in 1..SPECTRUM_BARS - 1 {
+            bars[i] = orig[i] * 0.7 + orig[i - 1] * 0.15 + orig[i + 1] * 0.15;
         }
     }
 

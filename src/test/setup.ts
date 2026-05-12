@@ -4,6 +4,42 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { resetMocks, setupDefaultMocks } from "./mocks/tauri";
 import { _resetPlatformCache } from "../lib/constants";
 
+// Mock react-i18next — resolves keys to English translations for test assertions
+import en from "../i18n/locales/en.json";
+
+function resolveKey(key: string, translations: Record<string, unknown>): string {
+  const parts = key.split(".");
+  let current: unknown = translations;
+  for (const part of parts) {
+    if (current && typeof current === "object" && part in current) {
+      current = (current as Record<string, unknown>)[part];
+    } else {
+      return key; // fallback to key
+    }
+  }
+  return typeof current === "string" ? current : key;
+}
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, opts?: Record<string, unknown>) => {
+      let text = resolveKey(key, en);
+      if (opts) {
+        Object.entries(opts).forEach(([k, v]) => {
+          text = text.replace(`{{${k}}}`, String(v));
+        });
+      }
+      return text;
+    },
+    i18n: {
+      language: "en",
+      changeLanguage: vi.fn(),
+    },
+  }),
+  Trans: ({ children }: { children: React.ReactNode }) => children,
+  initReactI18next: { type: "3rdParty", init: () => {} },
+}));
+
 // =============================================================================
 // Global Setup
 // =============================================================================

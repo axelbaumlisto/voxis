@@ -1,10 +1,12 @@
 import { useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useRecordingContext } from "../contexts/RecordingContext";
 import { useHotkey } from "../hooks/useHotkey";
 import { useFailedTranscriptions } from "../hooks/useFailedTranscriptions";
 import "../styles/home.css";
 
 function HomePage() {
+  const { t } = useTranslation();
   const { state, lastTranscription, error, start, stop } =
     useRecordingContext();
   const { items: failedItems, retry, dismiss, retrying } = useFailedTranscriptions();
@@ -41,11 +43,11 @@ function HomePage() {
   const getButtonText = () => {
     switch (state) {
       case "recording":
-        return "[ Stop ]";
+        return t("home.stop");
       case "transcribing":
-        return "[ ... ]";
+        return t("home.transcribing");
       default:
-        return "[ Record ]";
+        return t("home.record");
     }
   };
 
@@ -79,10 +81,10 @@ function HomePage() {
               onClick={() => retry(item.id)}
               disabled={retrying === item.id}
             >
-              {retrying === item.id ? "Retrying..." : "Try Again"}
+              {retrying === item.id ? t("common.retrying") : t("common.retry")}
             </button>
             <button onClick={() => dismiss(item.id)} className="dismiss">
-              Dismiss
+              {t("common.dismiss")}
             </button>
           </div>
         </div>
@@ -90,16 +92,16 @@ function HomePage() {
 
       {lastTranscription && (
         <div className="transcription-card">
-          <div className="transcription-header">Last Transcription</div>
+          <div className="transcription-header">{t("home.lastTranscription")}</div>
           <p className="transcription-text">{lastTranscription}</p>
-          <small className="transcription-note">Copied to clipboard</small>
+          <small className="transcription-note">{t("home.copiedToClipboard")}</small>
         </div>
       )}
 
       {!lastTranscription && !error && (
         <div className="empty-state">
-          <p>Press your hotkey or click the button to start recording</p>
-          <p className="fg-muted">Transcriptions will appear here</p>
+          <p>{t("home.emptyState")}</p>
+          <p className="fg-muted">{t("home.emptyHint")}</p>
         </div>
       )}
     </div>

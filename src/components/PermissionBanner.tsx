@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { PermissionInfo, restartApp } from "../lib/commands";
 import "../styles/permission-banner.css";
 
@@ -18,6 +19,7 @@ function PermissionBanner({
   permissions,
   onRequestPermission,
 }: PermissionBannerProps) {
+  const { t } = useTranslation();
   const missing = (permissions ?? []).filter((p) => p.status !== "granted");
 
   if (missing.length === 0) {
@@ -48,7 +50,7 @@ function PermissionBanner({
                 onClick={() => onRequestPermission(perm.name)}
                 type="button"
               >
-                [Open Settings]
+                {t("permissions.openSettings")}
               </button>
               {needsRestart && (
                 <button
@@ -56,7 +58,7 @@ function PermissionBanner({
                   onClick={handleRestart}
                   type="button"
                 >
-                  [Restart]
+                  {t("permissions.restart")}
                 </button>
               )}
             </div>

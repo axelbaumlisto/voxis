@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useHistory } from "../hooks/useHistory";
 import { useCopyToClipboard } from "../lib/clipboard";
 import AsyncContent from "../components/AsyncContent";
@@ -6,6 +7,7 @@ import HistoryList from "../components/history/HistoryList";
 import "../styles/history.css";
 
 function HistoryPage() {
+  const { t } = useTranslation();
   const { entries, loading, error, reload, clear } = useHistory(100);
   const [search, setSearch] = useState("");
   const { copied, copy } = useCopyToClipboard();
@@ -17,7 +19,7 @@ function HistoryPage() {
   }, [entries, search]);
 
   const handleClear = async () => {
-    if (window.confirm("Are you sure you want to clear all history?")) {
+    if (window.confirm(t("history.confirmClear"))) {
       await clear();
     }
   };
@@ -27,22 +29,22 @@ function HistoryPage() {
       <header className="page-header">
         <div className="page-header-content">
           <div>
-            <h1 className="page-title">History</h1>
+            <h1 className="page-title">{t("history.title")}</h1>
             <p className="page-description">
-              View your past transcriptions ({entries.length} entries)
+              {t("history.description", { count: entries.length })}
             </p>
           </div>
           <div className="page-header-actions">
-            {copied && <span className="copied-toast">Copied!</span>}
+            {copied && <span className="copied-toast">{t("common.copied")}</span>}
             <button className="secondary" onClick={reload}>
-              Refresh
+              {t("common.refresh")}
             </button>
             <button
               className="secondary"
               onClick={handleClear}
               disabled={entries.length === 0}
             >
-              Clear
+              {t("common.clear")}
             </button>
           </div>
         </div>
@@ -51,7 +53,7 @@ function HistoryPage() {
       <div className="history-search">
         <input
           type="text"
-          placeholder="Search transcriptions..."
+          placeholder={t("history.searchPlaceholder")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="history-search-input"

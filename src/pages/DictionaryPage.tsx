@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useDictionary } from "../hooks/useDictionary";
 import { usePendingSuggestions } from "../hooks/usePendingSuggestions";
 import { getConfig } from "../lib/commands";
@@ -9,6 +10,7 @@ import PendingSection from "../components/dictionary/PendingSection";
 import "../styles/dictionary.css";
 
 function DictionaryPage() {
+  const { t } = useTranslation();
   const { entries, loading, error, add, remove, update, reload } = useDictionary();
   const {
     suggestions: pendingSuggestions,
@@ -46,9 +48,9 @@ function DictionaryPage() {
   return (
     <div className="dictionary-page">
       <header className="page-header">
-        <h1 className="page-title">Dictionary</h1>
+        <h1 className="page-title">{t("dictionary.title")}</h1>
         <p className="page-description">
-          Manage word replacements for transcriptions ({entries.length} entries)
+          {t("dictionary.description", { count: entries.length })}
         </p>
       </header>
 
@@ -63,7 +65,7 @@ function DictionaryPage() {
       />
 
       <div className="card dictionary-add-card">
-        <h3 className="dictionary-add-title">Add New Entry</h3>
+        <h3 className="dictionary-add-title">{t("dictionary.addNewEntry")}</h3>
         <AddEntryForm onAdd={add} />
       </div>
 
@@ -71,8 +73,8 @@ function DictionaryPage() {
         loading={loading}
         error={error}
         isEmpty={entries.length === 0}
-        emptyMessage="No dictionary entries yet."
-        emptyHint="Add word replacements to automatically correct transcriptions."
+        emptyMessage={t("dictionary.empty")}
+        emptyHint={t("dictionary.emptyHint")}
         emptyClassName="dictionary-empty"
       >
         <div className="dictionary-list">

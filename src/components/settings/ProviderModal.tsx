@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { LlmProvider } from "../../lib/commands";
 import { useProviderForm, ProviderFormMode } from "../../hooks/useProviderForm";
 import ProviderFormBase from "./ProviderFormBase";
@@ -36,9 +37,10 @@ function ProviderModal({
     handleSubmit,
   } = useProviderForm({ mode, provider, existingIds, onSave, onClose });
 
-  const title = mode === "add" ? "Add Custom Provider" : "Edit Provider";
-  const submitText = mode === "add" ? "Add Provider" : "Save Changes";
-  const savingText = mode === "add" ? "Adding..." : "Saving...";
+  const { t } = useTranslation();
+  const title = mode === "add" ? t("settings.addCustomProvider") : t("settings.editProviderTitle");
+  const submitText = mode === "add" ? t("settings.addProviderBtn") : t("settings.saveChanges");
+  const savingText = mode === "add" ? t("common.adding") : t("common.saving");
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -70,7 +72,7 @@ function ProviderModal({
 
         <div className="modal-footer">
           <button className="secondary" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button className="primary" onClick={handleSubmit} disabled={saving}>
             {saving ? savingText : submitText}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import FieldWrapper from "./FieldWrapper";
 import { useVisualizationThemes } from "../../hooks/useVisualizationThemes";
 import { previewVisualizationTheme } from "../../lib/commands";
@@ -11,12 +12,13 @@ interface ThemeSelectProps {
 }
 
 function ThemeSelect({ label, description, value, onChange }: ThemeSelectProps) {
+  const { t } = useTranslation();
   const { options, loading, error, reload } = useVisualizationThemes(value);
   const [previewing, setPreviewing] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   const helperText = loading
-    ? "Loading themes..."
+    ? t("settings.themeLoading")
     : previewError
       ? `Preview failed: ${previewError}`
       : error
@@ -59,7 +61,7 @@ function ThemeSelect({ label, description, value, onChange }: ThemeSelectProps) 
           onClick={() => void runPreview(false)}
           disabled={previewing}
         >
-          {previewing ? "Previewing..." : "Preview"}
+          {previewing ? t("common.previewing") : t("settings.preview")}
         </button>
         <button
           type="button"

@@ -150,7 +150,7 @@ test.describe("Dictionary Page", () => {
     await firstEntry.locator('button:has-text("Edit")').click();
 
     // Should show input fields
-    const sourceInput = firstEntry.locator('input[placeholder="Source"]');
+    const sourceInput = firstEntry.locator('input[placeholder*="Source"]');
     await expect(sourceInput).toBeVisible();
 
     // Modify the source
@@ -188,7 +188,7 @@ test.describe("Dictionary Page", () => {
     await firstEntry.locator('button:has-text("Edit")').click();
 
     // Modify the source
-    const sourceInput = firstEntry.locator('input[placeholder="Source"]');
+    const sourceInput = firstEntry.locator('input[placeholder*="Source"]');
     await sourceInput.fill("changed");
 
     // Cancel

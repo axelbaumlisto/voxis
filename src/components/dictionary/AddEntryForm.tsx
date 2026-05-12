@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface AddEntryFormProps {
   onAdd: (source: string, replacement: string) => Promise<void>;
 }
 
 function AddEntryForm({ onAdd }: AddEntryFormProps) {
+  const { t } = useTranslation();
   const [source, setSource] = useState("");
   const [replacement, setReplacement] = useState("");
   const [adding, setAdding] = useState(false);
@@ -31,7 +33,7 @@ function AddEntryForm({ onAdd }: AddEntryFormProps) {
         type="text"
         value={source}
         onChange={(e) => setSource(e.target.value)}
-        placeholder="Source word (e.g., солид)"
+        placeholder={t("dictionary.sourcePlaceholder")}
         className="add-entry-input"
       />
       <span className="dictionary-arrow">→</span>
@@ -39,7 +41,7 @@ function AddEntryForm({ onAdd }: AddEntryFormProps) {
         type="text"
         value={replacement}
         onChange={(e) => setReplacement(e.target.value)}
-        placeholder="Replacement (e.g., SOLID)"
+        placeholder={t("dictionary.replacementPlaceholder")}
         className="add-entry-input"
       />
       <button
@@ -47,7 +49,7 @@ function AddEntryForm({ onAdd }: AddEntryFormProps) {
         className="primary"
         disabled={adding || !source.trim() || !replacement.trim()}
       >
-        {adding ? "Adding..." : "Add"}
+        {adding ? t("common.adding") : t("common.add")}
       </button>
     </form>
   );
