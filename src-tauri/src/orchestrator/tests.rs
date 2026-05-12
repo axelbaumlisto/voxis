@@ -1359,3 +1359,77 @@ async fn test_polling_cancel_on_rapid_recordings() {
 }
 
 use crate::overlay_native::OverlayState;
+
+#[test]
+fn test_map_state_to_stage_idle() {
+    use crate::orchestrator::coordinator::Stage;
+    use crate::orchestrator::map_state_to_stage;
+    assert_eq!(map_state_to_stage(&RecordingState::Idle), Stage::Idle);
+}
+
+#[test]
+fn test_map_state_to_stage_error_is_idle() {
+    use crate::orchestrator::coordinator::Stage;
+    use crate::orchestrator::map_state_to_stage;
+    assert_eq!(map_state_to_stage(&RecordingState::Error), Stage::Idle);
+}
+
+#[test]
+fn test_map_state_to_stage_recording() {
+    use crate::orchestrator::coordinator::Stage;
+    use crate::orchestrator::map_state_to_stage;
+    assert_eq!(
+        map_state_to_stage(&RecordingState::Recording),
+        Stage::Recording
+    );
+}
+
+#[test]
+fn test_map_state_to_stage_transcribing_is_processing() {
+    use crate::orchestrator::coordinator::Stage;
+    use crate::orchestrator::map_state_to_stage;
+    assert_eq!(
+        map_state_to_stage(&RecordingState::Transcribing),
+        Stage::Processing
+    );
+}
+
+#[test]
+fn test_coordinator_can_be_created_and_observes_idle() {
+    use crate::orchestrator::coordinator::{Stage, TranscriptionCoordinator};
+    let coord = TranscriptionCoordinator::new();
+    assert_eq!(coord.current_stage(), Stage::Idle);
+}
+
+#[test]
+fn test_coordinator_transitions_on_press_release() {
+    use crate::orchestrator::coordinator::{Stage, TranscriptionCoordinator};
+    let coord = TranscriptionCoordinator::new();
+    coord.on_press();
+    // Worker thread processes async; poll up to 500ms
+    for _ in 0..50 {
+        if coord.current_stage() == Stage::Recording {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(coord.current_stage(), Stage::Recording);
+
+    coord.on_release();
+    for _ in 0..50 {
+        if coord.current_stage() == Stage::Processing {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(coord.current_stage(), Stage::Processing);
+
+    coord.notify_processing_finished();
+    for _ in 0..50 {
+        if coord.current_stage() == Stage::Idle {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(coord.current_stage(), Stage::Idle);
+}
