@@ -166,6 +166,27 @@ pub fn debug_log_overlay(message: String) {
     tracing::info!("overlay-diag: {}", message);
 }
 
+/// Diagnostic command — injects arbitrary JS into the overlay panel webview
+/// via `WebviewWindow::eval`. This bypasses the Tauri event bus and lets us
+/// verify whether the panel's JS execution context is alive at all.
+///
+/// The injected script is expected to call back into the host via
+/// `__TAURI_INTERNALS__.invoke('debug_log_overlay', { message })`. If we see
+/// the corresponding `overlay-diag` log line, JS is running. If not, the
+/// panel webview is silent.
+#[tauri::command]
+#[specta::specta]
+pub fn debug_eval_overlay(app: tauri::AppHandle, script: String) -> Result<(), String> {
+    use tauri::Manager;
+    let label = crate::overlay_native::nspanel::OVERLAY_PANEL_LABEL;
+    let window = app
+        .get_webview_window(label)
+        .ok_or_else(|| format!("overlay webview '{label}' not found"))?;
+    window
+        .eval(&script)
+        .map_err(|e| format!("eval failed: {e}"))
+}
+
 /// Run overlay demo mode (debug only).
 /// Shows recording state with simulated audio levels.
 #[cfg(debug_assertions)]

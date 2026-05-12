@@ -398,6 +398,24 @@ async debugLogOverlay(message: string) : Promise<void> {
     await TAURI_INVOKE("debug_log_overlay", { message });
 },
 /**
+ * Diagnostic command — injects arbitrary JS into the overlay panel webview
+ * via `WebviewWindow::eval`. This bypasses the Tauri event bus and lets us
+ * verify whether the panel's JS execution context is alive at all.
+ * 
+ * The injected script is expected to call back into the host via
+ * `__TAURI_INTERNALS__.invoke('debug_log_overlay', { message })`. If we see
+ * the corresponding `overlay-diag` log line, JS is running. If not, the
+ * panel webview is silent.
+ */
+async debugEvalOverlay(script: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("debug_eval_overlay", { script }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * List available audio input devices.
  * Requires microphone permission to access audio hardware.
  */

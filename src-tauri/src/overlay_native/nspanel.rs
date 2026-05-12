@@ -349,15 +349,11 @@ mod imp {
                 .build()
                 .map_err(|e| format!("Failed to build overlay panel: {e}"))?;
 
-            // KEEP THE PANEL VISIBLE at the OS level. Hiding it via
-            // either `panel.hide()` (NSPanel orderOut:) or `window.hide()`
-            // breaks the WebKit draw pipeline so subsequent `window.show()`
-            // calls don't bring back content (the panel registers in
-            // CGWindowList but never paints). HandyPill's CSS already
-            // gates user-visible state with `opacity: 0` on `.recording-overlay`
-            // and `.fade-in` only when mode != idle. Net effect: panel is
-            // always physically there but invisibly transparent until
-            // recording starts.
+            // Always-visible pill (user requirement). Calling
+            // `panel.show_and_make_key()` here is what gives the panel
+            // its first draw cycle. Without this, the NSWindow is
+            // registered in CGWindowList but never paints content and
+            // screencapture returns "could not create image from window".
             panel.show_and_make_key();
 
             Ok(Inner::Live { app, label })

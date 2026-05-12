@@ -1,8 +1,8 @@
 /**
- * Overlay webview entry point \u2014 Handy-style pill (172\u00d736).
+ * Overlay webview entry point — Handy-style pill (172×36).
  *
  * Architecture (SOLID + KISS):
- * - SRP: this shell only wires events \u2192 hooks \u2192 HandyPill render.
+ * - SRP: this shell only wires events → hooks → HandyPill render.
  * - DIP: depends on `useOverlayState` (events) and `commands.cancelOperation`
  *        (Tauri command), not on any concrete backend.
  * - KISS: zero local state. HandyPill is the sole visual component.
