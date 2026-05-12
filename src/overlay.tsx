@@ -20,7 +20,7 @@ interface OverlayStatePayload {
   state: OverlayMode;
 }
 
-function OverlayApp() {
+export function OverlayApp() {
   const [mode, setMode] = useState<OverlayMode>("idle");
 
   useEffect(() => {

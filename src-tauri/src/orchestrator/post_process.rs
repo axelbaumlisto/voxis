@@ -343,24 +343,30 @@ mod tests {
 
     #[test]
     fn test_build_llm_provider_returns_none_when_disabled() {
-        let mut config = crate::config::LlmConfig::default();
-        config.enabled = false;
+        let config = crate::config::LlmConfig {
+            enabled: false,
+            ..crate::config::LlmConfig::default()
+        };
         assert!(crate::llm::provider::build_llm_provider(&config).is_none());
     }
 
     #[test]
     fn test_build_llm_provider_returns_none_when_no_key() {
-        let mut config = crate::config::LlmConfig::default();
-        config.enabled = true;
-        config.api_key = String::new();
+        let config = crate::config::LlmConfig {
+            enabled: true,
+            api_key: String::new(),
+            ..crate::config::LlmConfig::default()
+        };
         assert!(crate::llm::provider::build_llm_provider(&config).is_none());
     }
 
     #[test]
     fn test_build_llm_provider_returns_http_with_key() {
-        let mut config = crate::config::LlmConfig::default();
-        config.enabled = true;
-        config.api_key = "test-key".into();
+        let config = crate::config::LlmConfig {
+            enabled: true,
+            api_key: "test-key".into(),
+            ..crate::config::LlmConfig::default()
+        };
         let provider = crate::llm::provider::build_llm_provider(&config);
         assert!(provider.is_some());
         let provider = provider.unwrap();

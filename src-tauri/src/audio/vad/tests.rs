@@ -380,42 +380,36 @@ fn test_filter_with_vad_drops_partial_trailing_frame() {
 // build_vad — factory
 // =========================================================================
 
+fn vad_config_with(enabled: bool, backend: &str) -> crate::config::VadConfig {
+    crate::config::VadConfig {
+        enabled,
+        backend: backend.into(),
+        ..crate::config::VadConfig::default()
+    }
+}
+
 #[test]
 fn test_build_vad_disabled_returns_none() {
-    let mut config = crate::config::VadConfig::default();
-    config.enabled = false;
-    assert!(build_vad(&config, None).is_none());
+    assert!(build_vad(&vad_config_with(false, "threshold"), None).is_none());
 }
 
 #[test]
 fn test_build_vad_backend_none_returns_none() {
-    let mut config = crate::config::VadConfig::default();
-    config.enabled = true;
-    config.backend = "none".into();
-    assert!(build_vad(&config, None).is_none());
+    assert!(build_vad(&vad_config_with(true, "none"), None).is_none());
 }
 
 #[test]
 fn test_build_vad_threshold_returns_some() {
-    let mut config = crate::config::VadConfig::default();
-    config.enabled = true;
-    config.backend = "threshold".into();
-    assert!(build_vad(&config, None).is_some());
+    assert!(build_vad(&vad_config_with(true, "threshold"), None).is_some());
 }
 
 #[test]
 fn test_build_vad_silero_without_model_returns_none() {
-    let mut config = crate::config::VadConfig::default();
-    config.enabled = true;
-    config.backend = "silero".into();
     // Model path not provided -> graceful fallback
-    assert!(build_vad(&config, None).is_none());
+    assert!(build_vad(&vad_config_with(true, "silero"), None).is_none());
 }
 
 #[test]
 fn test_build_vad_unknown_backend_returns_none() {
-    let mut config = crate::config::VadConfig::default();
-    config.enabled = true;
-    config.backend = "alien-backend".into();
-    assert!(build_vad(&config, None).is_none());
+    assert!(build_vad(&vad_config_with(true, "alien-backend"), None).is_none());
 }
