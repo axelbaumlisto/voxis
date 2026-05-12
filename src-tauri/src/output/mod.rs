@@ -41,27 +41,28 @@ pub enum Platform {
 
 impl Platform {
     /// Detect current platform.
+    #[cfg(target_os = "macos")]
     pub fn detect() -> Self {
-        #[cfg(target_os = "macos")]
-        {
-            return Platform::MacOS;
+        Platform::MacOS
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn detect() -> Self {
+        Platform::Windows
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn detect() -> Self {
+        if std::env::var("WAYLAND_DISPLAY").is_ok() {
+            Platform::LinuxWayland
+        } else {
+            Platform::Linux
         }
-        #[cfg(target_os = "windows")]
-        {
-            return Platform::Windows;
-        }
-        #[cfg(target_os = "linux")]
-        {
-            if std::env::var("WAYLAND_DISPLAY").is_ok() {
-                Platform::LinuxWayland
-            } else {
-                Platform::Linux
-            }
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-        {
-            Platform::Linux // Fallback
-        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    pub fn detect() -> Self {
+        Platform::Linux
     }
 }
 

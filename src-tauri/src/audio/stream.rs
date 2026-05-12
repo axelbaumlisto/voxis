@@ -90,9 +90,9 @@ fn build_and_play_stream(
 
     // Drop device early - we don't need it after stream is created.
     // On macOS, device drop can take 200-400ms due to CoreAudio cleanup,
-    // so dropping it while recording (instead of during stop) prevents
-    // the delay from affecting stop() latency.
-    drop(device);
+    // so letting it go out of scope while recording (instead of during stop)
+    // prevents the delay from affecting stop() latency.
+    let _ = device;
 
     let stream = match stream_result {
         Ok(Ok(s)) => s,

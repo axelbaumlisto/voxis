@@ -56,6 +56,11 @@ impl WaveformLevels {
     pub fn len(&self) -> usize {
         self.levels.len()
     }
+
+    /// Returns `true` if the level buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.levels.is_empty()
+    }
 }
 
 pub fn amplify_level(level: f32, audio_boost: f32) -> f32 {

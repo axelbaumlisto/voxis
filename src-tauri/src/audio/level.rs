@@ -158,8 +158,9 @@ impl SpectrumAnalyzer {
             // Average power in this frequency range
             let bin_count = if high_bin >= low_bin { high_bin - low_bin + 1 } else { 1 };
             let mut power_sum = 0.0f32;
-            for bin_idx in low_bin..=high_bin.min(num_bins - 1) {
-                let mag = fft_out[bin_idx].norm();
+            let upper = high_bin.min(num_bins - 1);
+            for fft_bin in &fft_out[low_bin..=upper] {
+                let mag = fft_bin.norm();
                 power_sum += mag * mag;
             }
             let avg_power = power_sum / bin_count as f32;
