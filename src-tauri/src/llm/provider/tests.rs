@@ -1,8 +1,8 @@
 //! Integration tests for the `LlmProvider` trait surface.
 //!
-//! Per-implementation behaviour lives in `http.rs` / `apple.rs`; this file
-//! verifies the trait itself (object safety, dispatch) and end-to-end HTTP
-//! happy-path / error-path with mockito.
+//! Per-implementation behaviour lives in `http.rs`; this file verifies the
+//! trait itself (object safety, dispatch) and end-to-end HTTP happy-path /
+//! error-path with mockito.
 
 use super::*;
 
@@ -19,9 +19,6 @@ fn test_provider_trait_is_object_safe() {
         "model",
     ));
     assert_object_safe(http_provider);
-
-    let apple_provider: Box<dyn LlmProvider> = Box::new(AppleIntelligenceProvider::new());
-    assert_object_safe(apple_provider);
 }
 
 #[tokio::test]
@@ -72,27 +69,6 @@ async fn test_http_provider_handles_error() {
 
     assert!(err.contains("401"), "expected 401 in error message: {err}");
     mock.assert_async().await;
-}
-
-#[tokio::test]
-async fn test_apple_intelligence_provider_returns_err_when_unavailable() {
-    let provider = AppleIntelligenceProvider::new();
-
-    // We can only assert the contract when the runtime is unavailable; on
-    // Apple Silicon with FoundationModels installed the call may succeed.
-    if provider.is_available() {
-        return;
-    }
-
-    let err = provider
-        .process("Fix grammar.", "hello world")
-        .await
-        .expect_err("unavailable provider must return Err");
-
-    assert!(
-        !err.is_empty(),
-        "Err message should describe why provider is unavailable"
-    );
 }
 
 #[tokio::test]

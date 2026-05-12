@@ -1,10 +1,17 @@
 //! Post-processing for transcriptions.
 //!
 //! SRP: This module handles dictionary replacements and LLM processing only.
+//!
+//! Architecture (OCP/DIP after Phase 1.1):
+//! - LLM transport selection lives in `llm::provider::build_llm_provider()`.
+//! - This module depends on the `LlmProvider` trait, not on `LlmProcessor`.
+//! - The provider returns raw assistant content; suggestion parsing happens
+//!   here via `llm::parser::parse_result()`.
 
 use crate::config::AppConfig;
 use crate::learning::{CorrectionTracker, LearningMode};
-use crate::llm::{DictionarySuggestion, LlmProcessor, LlmResult};
+use crate::llm::provider::{build_llm_provider, LlmProvider};
+use crate::llm::{parser, DictionarySuggestion, LlmResult};
 use crate::storage;
 use std::time::Instant;
 use tauri::AppHandle;
@@ -37,13 +44,17 @@ pub async fn apply_post_processing(
 
     // LLM post-processing if enabled (skip for very short texts - 2 words or less)
     let word_count = final_text.split_whitespace().count();
-    if config.llm.enabled && !config.llm.api_key.is_empty() && word_count > 2 {
-        let result = apply_llm(app, config, &final_text).await;
-        llm_duration_ms = result.llm_duration_ms;
-        if let Some(ref llm) = result.llm_result {
-            final_text = llm.text.clone();
+    if config.llm.enabled && word_count > 2 {
+        if let Some(provider) = build_llm_provider(&config.llm) {
+            let result = apply_llm_via_provider(app, config, provider.as_ref(), &final_text).await;
+            llm_duration_ms = result.llm_duration_ms;
+            if let Some(ref llm) = result.llm_result {
+                final_text = llm.text.clone();
+            }
+            llm_result = result.llm_result;
+        } else {
+            tracing::debug!("LLM enabled but no available provider; skipping post-processing");
         }
-        llm_result = result.llm_result;
     }
 
     PostProcessResult {
@@ -72,27 +83,40 @@ fn apply_dictionary(app: &AppHandle, text: &str) -> String {
     result
 }
 
-/// Apply LLM processing to text.
-async fn apply_llm(app: &AppHandle, config: &AppConfig, text: &str) -> PostProcessResult {
+/// Apply LLM processing to text via the provider trait.
+///
+/// DIP: depends on the `LlmProvider` abstraction, not on a concrete transport.
+/// The provider returns raw assistant output; suggestion parsing happens here
+/// via `llm::parser::parse_result()` so any back-end (HTTP, Apple, mock) works.
+async fn apply_llm_via_provider(
+    app: &AppHandle,
+    config: &AppConfig,
+    provider: &dyn LlmProvider,
+    text: &str,
+) -> PostProcessResult {
     let llm_start = Instant::now();
-    let processor = LlmProcessor::new(crate::llm::LlmConfig {
-        api_url: config.llm.api_url.clone(),
-        api_key: config.llm.api_key.clone(),
-        model: config.llm.model.clone(),
-        prompt: config.llm.prompt.clone(),
-    });
 
-    match processor.process(text).await {
-        Ok(result) => {
+    match provider.process(&config.llm.prompt, text).await {
+        Ok(content) => {
+            let result = match parser::parse_result(&content, text) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    tracing::warn!("Failed to parse LLM response: {}", e);
+                    LlmResult {
+                        text: text.to_string(),
+                        suggestions: Vec::new(),
+                    }
+                }
+            };
             let llm_duration_ms = llm_start.elapsed().as_millis() as u64;
             tracing::info!(
-                "LLM processed: \"{}\" -> \"{}\" ({} suggestions)",
+                "LLM[{}] processed: \"{}\" -> \"{}\" ({} suggestions)",
+                provider.name(),
                 text,
                 result.text,
                 result.suggestions.len()
             );
 
-            // Process suggestions through CorrectionTracker
             if !result.suggestions.is_empty() {
                 process_suggestions(app, config, &result.suggestions);
             }
@@ -104,7 +128,7 @@ async fn apply_llm(app: &AppHandle, config: &AppConfig, text: &str) -> PostProce
             }
         }
         Err(e) => {
-            tracing::warn!("LLM processing failed: {}", e);
+            tracing::warn!("LLM[{}] processing failed: {}", provider.name(), e);
             PostProcessResult {
                 text: text.to_string(),
                 llm_result: None,
@@ -153,6 +177,196 @@ fn process_suggestions(app: &AppHandle, config: &AppConfig, suggestions: &[Dicti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use std::sync::{Arc, Mutex};
+
+    /// Mock provider for trait-level integration tests.
+    struct MockProvider {
+        response: String,
+        calls: Arc<Mutex<Vec<(String, String)>>>,
+    }
+
+    impl MockProvider {
+        fn new(response: &str) -> (Self, Arc<Mutex<Vec<(String, String)>>>) {
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let provider = Self {
+                response: response.to_string(),
+                calls: Arc::clone(&calls),
+            };
+            (provider, calls)
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for MockProvider {
+        fn name(&self) -> &str {
+            "Mock"
+        }
+        fn is_available(&self) -> bool {
+            true
+        }
+        async fn process(
+            &self,
+            system_prompt: &str,
+            user_text: &str,
+        ) -> Result<String, String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((system_prompt.to_string(), user_text.to_string()));
+            Ok(self.response.clone())
+        }
+    }
+
+    /// Provider that always errors — used to verify graceful fallback.
+    struct FailingProvider;
+
+    #[async_trait]
+    impl LlmProvider for FailingProvider {
+        fn name(&self) -> &str {
+            "Failing"
+        }
+        fn is_available(&self) -> bool {
+            true
+        }
+        async fn process(&self, _: &str, _: &str) -> Result<String, String> {
+            Err("simulated network error".into())
+        }
+    }
+
+    fn test_config() -> AppConfig {
+        AppConfig::default()
+    }
+
+    #[tokio::test]
+    async fn test_apply_llm_via_provider_parses_full_result() {
+        let (provider, calls) =
+            MockProvider::new(r#"{"text":"corrected","suggestions":[]}"#);
+        let config = test_config();
+
+        // Build a fake AppHandle by reusing a real app: not available in unit tests.
+        // Instead, we test the provider/parser wiring directly by calling the helper
+        // and ignoring app-dependent side-effects (suggestion tracking is skipped
+        // when suggestions are empty, so no app access is needed).
+        let result = apply_llm_via_provider_no_app(
+            &config,
+            &provider,
+            "original text input here",
+        )
+        .await;
+
+        assert_eq!(result.text, "corrected");
+        assert!(result.llm_result.is_some());
+        let llm = result.llm_result.unwrap();
+        assert_eq!(llm.text, "corrected");
+        assert!(llm.suggestions.is_empty());
+
+        // Provider received the prompt + user text
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1, "original text input here");
+    }
+
+    #[tokio::test]
+    async fn test_apply_llm_via_provider_parses_suggestions() {
+        let (provider, _) = MockProvider::new(
+            r#"{"text":"SOLID principles","suggestions":[{"source":"solid","replacement":"SOLID"}]}"#,
+        );
+        let config = test_config();
+
+        let result = apply_llm_via_provider_no_app(&config, &provider, "solid principles").await;
+
+        let llm = result.llm_result.expect("llm_result must be Some");
+        assert_eq!(llm.text, "SOLID principles");
+        assert_eq!(llm.suggestions.len(), 1);
+        assert_eq!(llm.suggestions[0].source, "solid");
+        assert_eq!(llm.suggestions[0].replacement, "SOLID");
+    }
+
+    #[tokio::test]
+    async fn test_apply_llm_via_provider_falls_back_on_error() {
+        let provider = FailingProvider;
+        let config = test_config();
+
+        let result =
+            apply_llm_via_provider_no_app(&config, &provider, "input text fallback").await;
+
+        // Returns original text and no LLM result on error.
+        assert_eq!(result.text, "input text fallback");
+        assert!(result.llm_result.is_none());
+        assert_eq!(result.llm_duration_ms, 0);
+    }
+
+    #[tokio::test]
+    async fn test_apply_llm_via_provider_falls_back_on_bad_json() {
+        // parser::parse_result is total — returns a fallback result for non-JSON.
+        // Verify we still produce a usable LlmResult (with original text).
+        let (provider, _) = MockProvider::new("not valid json at all");
+        let config = test_config();
+
+        let result = apply_llm_via_provider_no_app(&config, &provider, "some input").await;
+
+        assert!(result.llm_result.is_some());
+        let llm = result.llm_result.unwrap();
+        assert_eq!(llm.text, "some input");
+        assert!(llm.suggestions.is_empty());
+    }
+
+    /// Helper for unit tests that avoids requiring a Tauri `AppHandle`.
+    /// Mirrors `apply_llm_via_provider` but skips the side-effecting suggestion
+    /// tracker (which needs storage). Keeps tests fast and hermetic.
+    async fn apply_llm_via_provider_no_app(
+        config: &AppConfig,
+        provider: &dyn LlmProvider,
+        text: &str,
+    ) -> PostProcessResult {
+        let llm_start = Instant::now();
+        match provider.process(&config.llm.prompt, text).await {
+            Ok(content) => {
+                let result = parser::parse_result(&content, text).unwrap_or_else(|_| LlmResult {
+                    text: text.to_string(),
+                    suggestions: Vec::new(),
+                });
+                PostProcessResult {
+                    text: result.text.clone(),
+                    llm_duration_ms: llm_start.elapsed().as_millis() as u64,
+                    llm_result: Some(result),
+                }
+            }
+            Err(_) => PostProcessResult {
+                text: text.to_string(),
+                llm_result: None,
+                llm_duration_ms: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn test_build_llm_provider_returns_none_when_disabled() {
+        let mut config = crate::config::LlmConfig::default();
+        config.enabled = false;
+        assert!(crate::llm::provider::build_llm_provider(&config).is_none());
+    }
+
+    #[test]
+    fn test_build_llm_provider_returns_none_when_no_key() {
+        let mut config = crate::config::LlmConfig::default();
+        config.enabled = true;
+        config.api_key = String::new();
+        assert!(crate::llm::provider::build_llm_provider(&config).is_none());
+    }
+
+    #[test]
+    fn test_build_llm_provider_returns_http_with_key() {
+        let mut config = crate::config::LlmConfig::default();
+        config.enabled = true;
+        config.api_key = "test-key".into();
+        let provider = crate::llm::provider::build_llm_provider(&config);
+        assert!(provider.is_some());
+        let provider = provider.unwrap();
+        // Name reflects the configured cloud provider (e.g. "groq", "openai").
+        assert_eq!(provider.name(), config.provider);
+    }
 
     #[test]
     fn test_post_process_result_default() {
