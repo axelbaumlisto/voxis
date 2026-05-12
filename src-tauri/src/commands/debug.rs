@@ -42,6 +42,7 @@ pub fn get_debug_dir(paths: State<AppPaths>) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
     use crate::storage::test_utils::create_temp_paths;
 

@@ -1,8 +1,8 @@
 use super::load_config_from_app;
 use crate::config::AppConfig;
 use crate::overlay_native::{
-    create_overlay, OverlayBackend, OverlayPositionConfig, OverlaySizeConfig, OverlayState,
-    ThemeLoaderHandle,
+    create_overlay, CreateOverlayParams, OverlayBackend, OverlayPositionConfig,
+    OverlaySizeConfig, OverlayState, ThemeLoaderHandle,
 };
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -30,17 +30,17 @@ impl OverlayManager {
     pub async fn init(&self, config: &AppConfig) {
         let position = OverlayPositionConfig::parse(&config.overlay.position);
         let size = OverlaySizeConfig::parse(&config.overlay.size);
-        let new_overlay = create_overlay(
-            config.overlay.enabled,
+        let new_overlay = create_overlay(CreateOverlayParams {
+            enabled: config.overlay.enabled,
             position,
             size,
-            config.overlay.margin,
-            &config.overlay.theme,
-            config.overlay.audio_boost,
-            Arc::clone(&self.theme_loader),
-            &config.overlay.backend,
-            Some(self.app.clone()),
-        );
+            margin: config.overlay.margin,
+            theme: &config.overlay.theme,
+            audio_boost: config.overlay.audio_boost,
+            theme_loader: Arc::clone(&self.theme_loader),
+            backend: &config.overlay.backend,
+            app_handle: Some(self.app.clone()),
+        });
         *self.overlay.lock().await = new_overlay;
 
         if config.overlay.enabled {

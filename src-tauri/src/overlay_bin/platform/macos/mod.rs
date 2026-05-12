@@ -120,7 +120,7 @@ pub fn run(cmd_rx: mpsc::Receiver<Command>) {
         let _: () = msg_send![window, setContentView: view];
         let _: () = msg_send![window, makeKeyAndOrderFront: nil];
 
-        let mut theme_loader: ThemeLoader = create_theme_loader();
+        let theme_loader: ThemeLoader = create_theme_loader();
         let mut state = Box::new(ViewState {
             state: OverlayState::Idle,
             visible: true,

@@ -246,8 +246,8 @@ impl OutputHandler {
     }
 
     /// Paste from clipboard with specified shortcuts (comma-separated).
-    /// Valid shortcuts: "ctrl_shift_v", "ctrl_v", "shift_insert"
-    pub fn paste_with_shortcuts(&self, shortcuts: &str) -> Result<(), OutputError> {
+    /// Valid shortcuts: "ctrl_shift_v", "ctrl_v", "shift_insert". Ignored on macOS.
+    pub fn paste_with_shortcuts(&self, #[allow(unused_variables)] shortcuts: &str) -> Result<(), OutputError> {
         #[cfg(target_os = "macos")]
         {
             // macOS always uses Cmd+V, shortcuts parameter ignored

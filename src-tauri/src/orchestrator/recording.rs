@@ -1,5 +1,5 @@
 use super::coordinator::{Stage, TranscriptionCoordinator};
-use super::{audio_level, load_config_from_app, map_state_to_stage, ErrorContext, RecordingState, TranscriptionQueue};
+use super::{audio_level, load_config_from_app, ErrorContext, RecordingState, TranscriptionQueue};
 use crate::audio::vad::build_vad;
 use crate::audio::AudioRecorder;
 use crate::config::VadConfig;
@@ -38,11 +38,41 @@ fn install_vad(recorder: &AudioRecorder, app: &AppHandle, vad_config: &VadConfig
 }
 
 /// Map Coordinator Stage back to RecordingState for legacy event surface.
-fn stage_to_state(stage: Stage) -> RecordingState {
+///
+/// SRP: pure mapping, exposed `pub(crate)` so tests can verify the contract.
+pub(crate) fn stage_to_state(stage: Stage) -> RecordingState {
     match stage {
         Stage::Idle => RecordingState::Idle,
         Stage::Recording => RecordingState::Recording,
         Stage::Processing => RecordingState::Transcribing,
+    }
+}
+
+#[cfg(test)]
+mod stage_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn test_stage_idle_maps_to_state_idle() {
+        assert_eq!(stage_to_state(Stage::Idle), RecordingState::Idle);
+    }
+
+    #[test]
+    fn test_stage_recording_maps_to_state_recording() {
+        assert_eq!(stage_to_state(Stage::Recording), RecordingState::Recording);
+    }
+
+    #[test]
+    fn test_stage_processing_maps_to_state_transcribing() {
+        assert_eq!(stage_to_state(Stage::Processing), RecordingState::Transcribing);
+    }
+
+    #[test]
+    fn test_stage_mapping_is_total() {
+        // Compile-time guarantee + smoke test: every Stage maps to a state.
+        for stage in [Stage::Idle, Stage::Recording, Stage::Processing] {
+            let _ = stage_to_state(stage);
+        }
     }
 }
 
@@ -247,7 +277,4 @@ impl RecordingCoordinator {
     }
 }
 
-/// Helper consumed by tests/orchestrator integration.
-pub(crate) fn map_recording_state_to_stage(state: &RecordingState) -> Stage {
-    map_state_to_stage(state)
-}
+

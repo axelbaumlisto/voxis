@@ -35,39 +35,41 @@ impl ThemeLoaderState {
 
 pub const BAR_COUNT: usize = 32;
 
+/// Parameter Object for `create_overlay` (SOLID: groups related params; clippy:
+/// avoids `too_many_arguments`).
+pub struct CreateOverlayParams<'a> {
+    pub enabled: bool,
+    pub position: OverlayPositionConfig,
+    pub size: OverlaySizeConfig,
+    pub margin: i32,
+    pub theme: &'a str,
+    pub audio_boost: f32,
+    pub theme_loader: ThemeLoaderHandle,
+    pub backend: &'a str,
+    pub app_handle: Option<tauri::AppHandle>,
+}
+
 /// Create an overlay backend based on configuration.
 ///
-/// `backend` selects implementation:
+/// `params.backend` selects implementation:
 /// - `"auto"` (default) — Linux: NativeOverlay; macOS/Windows: Subprocess fallback
 /// - `"native"` — NativeOverlay (egui, all platforms when available)
 /// - `"subprocess"` — SubprocessOverlay (separate binary)
 /// - `"nspanel"` — NSPanel webview on macOS (opt-in, requires `app_handle`)
 /// - `"none"` — NoopOverlay
-///
-/// `app_handle` is required only for `"nspanel"` backend; otherwise pass `None`.
-pub fn create_overlay(
-    enabled: bool,
-    position: OverlayPositionConfig,
-    size: OverlaySizeConfig,
-    margin: i32,
-    theme: &str,
-    audio_boost: f32,
-    theme_loader: ThemeLoaderHandle,
-    backend: &str,
-    app_handle: Option<tauri::AppHandle>,
-) -> Box<dyn OverlayBackend> {
-    if !enabled || backend == "none" {
+ pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend> {
+    if !params.enabled || params.backend == "none" {
         return Box::new(NoopOverlay::new());
     }
 
     let make_native = || -> Box<dyn OverlayBackend> {
         Box::new(NativeOverlay::new_with_config(
-            position.clone(),
-            size.clone(),
-            margin,
-            theme,
-            audio_boost,
-            Arc::clone(&theme_loader),
+            params.position,
+            params.size,
+            params.margin,
+            params.theme,
+            params.audio_boost,
+            Arc::clone(&params.theme_loader),
         ))
     };
     let make_subprocess = || -> Option<Box<dyn OverlayBackend>> {
@@ -75,7 +77,7 @@ pub fn create_overlay(
     };
 
     // Explicit backend selection.
-    match backend {
+    match params.backend {
         "native" => {
             if NativeOverlay::is_available() {
                 return make_native();
@@ -90,7 +92,7 @@ pub fn create_overlay(
         }
         "nspanel" => {
             #[cfg(target_os = "macos")]
-            if let Some(app) = app_handle.as_ref() {
+            if let Some(app) = params.app_handle.as_ref() {
                 match nspanel::NsPanelOverlay::new(app.clone()) {
                     Ok(o) => return Box::new(o),
                     Err(e) => tracing::warn!("NSPanel overlay failed: {}; falling back", e),
@@ -100,11 +102,14 @@ pub fn create_overlay(
             }
             #[cfg(not(target_os = "macos"))]
             {
-                let _ = &app_handle;
+                let _ = &params.app_handle;
                 tracing::warn!("NSPanel is macOS-only; falling back to auto");
             }
         }
-        "auto" | _ => {} // fall through to auto chain
+        "auto" => {} // fall through to auto chain
+        other => {
+            tracing::warn!("Unknown overlay backend '{}'; falling back to auto", other);
+        }
     }
 
     // Auto chain: Linux prefers Native, others prefer Subprocess.
@@ -136,69 +141,40 @@ mod tests {
         Arc::new(RwLock::new(loader))
     }
 
+    fn params<'a>(backend: &'a str, enabled: bool) -> CreateOverlayParams<'a> {
+        CreateOverlayParams {
+            enabled,
+            position: OverlayPositionConfig::default(),
+            size: OverlaySizeConfig::default(),
+            margin: 30,
+            theme: "default",
+            audio_boost: 800.0,
+            theme_loader: test_loader(),
+            backend,
+            app_handle: None,
+        }
+    }
+
     #[test]
     fn test_create_overlay_disabled_returns_noop() {
-        let overlay = create_overlay(
-            false,
-            OverlayPositionConfig::default(),
-            OverlaySizeConfig::default(),
-            30,
-            "default",
-            800.0,
-            test_loader(),
-            "auto",
-            None,
-        );
+        let overlay = create_overlay(params("auto", false));
         assert!(!overlay.is_running());
     }
 
     #[test]
     fn test_create_overlay_backend_none_returns_noop() {
-        let overlay = create_overlay(
-            true,
-            OverlayPositionConfig::default(),
-            OverlaySizeConfig::default(),
-            30,
-            "default",
-            800.0,
-            test_loader(),
-            "none",
-            None,
-        );
+        let overlay = create_overlay(params("none", true));
         assert!(!overlay.is_running());
     }
 
     #[test]
     fn test_create_overlay_nspanel_without_handle_falls_back() {
-        // No AppHandle provided → NSPanel can't construct → fallback to auto chain.
-        // Test must not panic. is_running() may be true or false depending on
-        // whether subprocess/native overlays are available in the test env.
-        let _overlay = create_overlay(
-            true,
-            OverlayPositionConfig::default(),
-            OverlaySizeConfig::default(),
-            30,
-            "default",
-            800.0,
-            test_loader(),
-            "nspanel",
-            None,
-        );
+        // No AppHandle → NSPanel can't construct → fallback to auto chain.
+        let _overlay = create_overlay(params("nspanel", true));
     }
 
     #[test]
     fn test_create_overlay_unknown_backend_falls_through_to_auto() {
-        // Unknown backend should not panic, should fall through to auto chain.
-        let _overlay = create_overlay(
-            true,
-            OverlayPositionConfig::default(),
-            OverlaySizeConfig::default(),
-            30,
-            "default",
-            800.0,
-            test_loader(),
-            "exotic-unknown",
-            None,
-        );
+        let _overlay = create_overlay(params("exotic-unknown", true));
     }
 }

@@ -1361,40 +1361,6 @@ async fn test_polling_cancel_on_rapid_recordings() {
 use crate::overlay_native::OverlayState;
 
 #[test]
-fn test_map_state_to_stage_idle() {
-    use crate::orchestrator::coordinator::Stage;
-    use crate::orchestrator::map_state_to_stage;
-    assert_eq!(map_state_to_stage(&RecordingState::Idle), Stage::Idle);
-}
-
-#[test]
-fn test_map_state_to_stage_error_is_idle() {
-    use crate::orchestrator::coordinator::Stage;
-    use crate::orchestrator::map_state_to_stage;
-    assert_eq!(map_state_to_stage(&RecordingState::Error), Stage::Idle);
-}
-
-#[test]
-fn test_map_state_to_stage_recording() {
-    use crate::orchestrator::coordinator::Stage;
-    use crate::orchestrator::map_state_to_stage;
-    assert_eq!(
-        map_state_to_stage(&RecordingState::Recording),
-        Stage::Recording
-    );
-}
-
-#[test]
-fn test_map_state_to_stage_transcribing_is_processing() {
-    use crate::orchestrator::coordinator::Stage;
-    use crate::orchestrator::map_state_to_stage;
-    assert_eq!(
-        map_state_to_stage(&RecordingState::Transcribing),
-        Stage::Processing
-    );
-}
-
-#[test]
 fn test_coordinator_can_be_created_and_observes_idle() {
     use crate::orchestrator::coordinator::{Stage, TranscriptionCoordinator};
     let coord = TranscriptionCoordinator::new();

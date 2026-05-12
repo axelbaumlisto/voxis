@@ -65,6 +65,7 @@ pub async fn save_config(
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
     use crate::config::AppConfig;
     use crate::storage::test_utils::create_temp_paths;

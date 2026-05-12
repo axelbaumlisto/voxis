@@ -26,21 +26,10 @@ use tauri::AppHandle;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use coordinator::{Stage, TranscriptionCoordinator};
+use coordinator::TranscriptionCoordinator;
 use dispatch::TranscriptionDispatcher;
 use overlay_manager::OverlayManager;
 use recording::RecordingCoordinator;
-
-/// Map TALRI `RecordingState` to Coordinator `Stage`.
-///
-/// SRP: pure mapping function for stage comparison in Phase 4.1.
-pub(crate) fn map_state_to_stage(state: &RecordingState) -> Stage {
-    match state {
-        RecordingState::Idle | RecordingState::Error => Stage::Idle,
-        RecordingState::Recording => Stage::Recording,
-        RecordingState::Transcribing => Stage::Processing,
-    }
-}
 
 pub(crate) fn load_config_from_app(app: &AppHandle) -> AppConfig {
     if let Some(paths) = storage::get_app_paths(app) {
