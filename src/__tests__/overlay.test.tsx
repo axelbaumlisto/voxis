@@ -1,15 +1,14 @@
 /**
- * Tests for the overlay webview entry component.
+ * Smoke tests for the overlay webview entry shell.
  *
- * Post-Handy-port architecture: OverlayApp is a thin shell composing
- * `useOverlayState` + `useTheme` + `<OverlayCanvas>`. The behavioural
- * contract is exercised at the hook/component layer; this suite only
- * verifies the shell wiring (root className, theme/family data-attrs).
+ * HandyPill is stubbed; this suite only verifies that the shell wires the
+ * snapshot + smoothed bars + cancel command into HandyPill.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, act, screen } from "@testing-library/react";
 
 type EventHandler = (event: { payload: unknown }) => void;
+
 const listenMock = vi.fn();
 const invokeMock = vi.fn();
 const handlers = new Map<string, EventHandler>();
@@ -21,29 +20,39 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
-// Stub the canvas — its own unit tests cover routing semantics.
-vi.mock("../components/overlay/OverlayCanvas", () => ({
-  default: ({ snapshot, theme }: { snapshot: { mode: string; themeId: string }; theme: { id: string; family: string } | null }) => (
+vi.mock("../components/overlay/HandyPill", () => ({
+  default: ({
+    mode,
+    bars,
+    visible,
+    onCancel,
+  }: {
+    mode: string;
+    bars: number[];
+    visible: boolean;
+    onCancel?: () => void;
+  }) => (
     <div
-      data-testid="overlay-canvas-stub"
-      data-mode={snapshot.mode}
-      data-theme={theme?.id ?? snapshot.themeId}
-      data-family={theme?.family ?? "loading"}
+      data-testid="handy-pill-stub"
+      data-mode={mode}
+      data-visible={String(visible)}
+      data-bar-count={bars.length}
+      data-bar-sample={bars[0] ?? 0}
+      onClick={() => onCancel?.()}
     />
   ),
 }));
 
 import { OverlayApp } from "../overlay";
 
-describe("OverlayApp", () => {
+describe("OverlayApp (HandyPill shell)", () => {
   beforeEach(() => {
     handlers.clear();
     listenMock.mockImplementation(async (event: string, handler: EventHandler) => {
       handlers.set(event, handler);
       return () => {};
     });
-    // Default: getOverlayThemeData rejects → useTheme stays at null
-    invokeMock.mockRejectedValue(new Error("test theme not loaded"));
+    invokeMock.mockResolvedValue({ status: "ok", data: null });
   });
 
   afterEach(() => {
@@ -51,12 +60,12 @@ describe("OverlayApp", () => {
     invokeMock.mockReset();
   });
 
-  it("mounts with idle mode and exposes data attributes", () => {
+  it("renders HandyPill with idle mode, hidden, 9 bars by default", () => {
     render(<OverlayApp />);
-    const root = screen.getByTestId("overlay-root");
-    expect(root.className).toContain("overlay-idle");
-    expect(root.dataset.theme).toBe("winamp_classic"); // default
-    expect(root.dataset.family).toBe("loading"); // useTheme rejected
+    const pill = screen.getByTestId("handy-pill-stub");
+    expect(pill.dataset.mode).toBe("idle");
+    expect(pill.dataset.visible).toBe("false");
+    expect(Number(pill.dataset.barCount)).toBe(9);
   });
 
   it("subscribes to all four overlay events", async () => {
@@ -75,7 +84,7 @@ describe("OverlayApp", () => {
     );
   });
 
-  it("updates root className when state event arrives", async () => {
+  it("becomes visible when state moves out of idle", async () => {
     render(<OverlayApp />);
     await act(async () => {
       await Promise.resolve();
@@ -83,29 +92,33 @@ describe("OverlayApp", () => {
     await act(async () => {
       handlers.get("overlay://state")!({ payload: "recording" });
     });
-    expect(screen.getByTestId("overlay-root").className).toContain("overlay-recording");
+    const pill = screen.getByTestId("handy-pill-stub");
+    expect(pill.dataset.mode).toBe("recording");
+    expect(pill.dataset.visible).toBe("true");
   });
 
-  it("forwards mode to OverlayCanvas via snapshot prop", async () => {
+  it("forwards smoothed spectrum bins (length 9) to HandyPill", async () => {
     render(<OverlayApp />);
     await act(async () => {
       await Promise.resolve();
     });
     await act(async () => {
-      handlers.get("overlay://state")!({ payload: { state: "transcribing" } });
+      const bins = new Array(32).fill(1);
+      handlers.get("overlay://spectrum-bins")!({ payload: bins });
     });
-    expect(screen.getByTestId("overlay-canvas-stub").dataset.mode).toBe("transcribing");
+    const pill = screen.getByTestId("handy-pill-stub");
+    expect(Number(pill.dataset.barCount)).toBe(9);
+    // First call: 0*0.7 + 1*0.3 = 0.3
+    expect(Number(pill.dataset.barSample)).toBeCloseTo(0.3, 3);
   });
 
-  it("survives missing Tauri APIs (non-Tauri environment)", async () => {
-    listenMock.mockRejectedValueOnce(new Error("not in Tauri"));
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("calls cancel_operation when HandyPill triggers onCancel", async () => {
     render(<OverlayApp />);
     await act(async () => {
       await Promise.resolve();
     });
-    // Renders without crashing, stays at defaults.
-    expect(screen.getByTestId("overlay-root")).toBeInTheDocument();
-    consoleWarn.mockRestore();
+    const pill = screen.getByTestId("handy-pill-stub");
+    pill.click();
+    expect(invokeMock).toHaveBeenCalledWith("cancel_operation");
   });
 });

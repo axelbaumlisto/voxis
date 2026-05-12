@@ -1,32 +1,38 @@
 /**
- * Overlay webview entry point.
+ * Overlay webview entry point \u2014 Handy-style pill (172\u00d736).
  *
  * Architecture (SOLID + KISS):
- * - SRP: this module is a thin shell. State aggregation lives in
- *   `useOverlayState`, theme loading in `useTheme`, rendering in
- *   `OverlayCanvas` (which itself dispatches by family + mode).
- * - DIP: depends only on hook + component interfaces, not on Tauri
- *   internals or any specific backend (NSPanel, subprocess, …).
- * - KISS: zero local state. Two hooks + one component.
+ * - SRP: this shell only wires events \u2192 hooks \u2192 HandyPill render.
+ * - DIP: depends on `useOverlayState` (events) and `commands.cancelOperation`
+ *        (Tauri command), not on any concrete backend.
+ * - KISS: zero local state. HandyPill is the sole visual component.
  */
 import ReactDOM from "react-dom/client";
 import { useOverlayState } from "./hooks/useOverlayState";
-import { useTheme } from "./hooks/useTheme";
-import OverlayCanvas from "./components/overlay/OverlayCanvas";
+import { useSmoothBars } from "./hooks/useSmoothBars";
+import HandyPill from "./components/overlay/HandyPill";
+import { commands } from "./bindings";
+
+const SMOOTH_ALPHA = 0.3; // Handy's smoothing factor
+const PILL_BAR_COUNT = 9; // Handy's pill renders 9 bars
 
 export function OverlayApp() {
   const snapshot = useOverlayState();
-  const theme = useTheme(snapshot.themeId);
+  const bars = useSmoothBars(snapshot.spectrumBins, {
+    size: PILL_BAR_COUNT,
+    alpha: SMOOTH_ALPHA,
+  });
+  const visible = snapshot.mode !== "idle";
 
   return (
-    <div
-      className={`overlay overlay-${snapshot.mode}`}
-      data-testid="overlay-root"
-      data-theme={theme?.id ?? snapshot.themeId}
-      data-family={theme?.family ?? "loading"}
-    >
-      <OverlayCanvas snapshot={snapshot} theme={theme} />
-    </div>
+    <HandyPill
+      mode={snapshot.mode}
+      bars={bars}
+      visible={visible}
+      onCancel={() => {
+        void commands.cancelOperation();
+      }}
+    />
   );
 }
 

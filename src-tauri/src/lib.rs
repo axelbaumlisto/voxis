@@ -132,6 +132,7 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
         crate::commands::recording::type_text,
         crate::commands::recording::manual_start_recording,
         crate::commands::recording::manual_stop_recording,
+        crate::commands::recording::cancel_operation,
         // suggestions
         crate::commands::suggestions::get_pending_suggestions,
         crate::commands::suggestions::get_pending_count,

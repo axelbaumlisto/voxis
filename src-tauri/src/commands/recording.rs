@@ -141,6 +141,15 @@ pub async fn manual_stop_recording(state: State<'_, OrchestratorState>) -> Resul
     Ok(())
 }
 
+/// Cancel any in-progress recording (Handy-style overlay cancel button).
+/// Has no effect while transcription is already in flight.
+#[tauri::command]
+#[specta::specta]
+pub async fn cancel_operation(state: State<'_, OrchestratorState>) -> Result<(), String> {
+    state.orchestrator.cancel();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

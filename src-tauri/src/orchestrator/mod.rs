@@ -121,6 +121,13 @@ impl Orchestrator {
     pub async fn manual_stop(&self) {
         self.on_hotkey_released().await;
     }
+
+    /// Cancel any in-progress recording. Delegates to the Coordinator's
+    /// state machine; has no effect while `Processing` (the pipeline runs
+    /// to completion in that case).
+    pub fn cancel(&self) {
+        self.coordinator.cancel();
+    }
     pub fn shutdown(&self) {
         self.recording.shutdown();
     }
