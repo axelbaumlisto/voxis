@@ -1,4 +1,5 @@
-use super::{audio_level, load_config_from_app, ErrorContext, RecordingState, TranscriptionQueue};
+use super::coordinator::{Stage, TranscriptionCoordinator};
+use super::{audio_level, load_config_from_app, map_state_to_stage, ErrorContext, RecordingState, TranscriptionQueue};
 use crate::audio::vad::build_vad;
 use crate::audio::AudioRecorder;
 use crate::config::VadConfig;
@@ -11,14 +12,12 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 /// Resolve the bundled Silero VAD model path via Tauri's resource directory.
-/// Returns `None` if the resource is missing (e.g. unbundled dev build).
 fn resolve_silero_model_path(app: &AppHandle) -> Option<PathBuf> {
     let resource_dir = app.path().resource_dir().ok()?;
     let candidate = resource_dir.join("resources/silero_vad_v4.onnx");
     if candidate.exists() {
         return Some(candidate);
     }
-    // Dev mode fallback: project resources/ directory next to Cargo.toml
     let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("resources")
         .join("silero_vad_v4.onnx");
@@ -28,8 +27,6 @@ fn resolve_silero_model_path(app: &AppHandle) -> Option<PathBuf> {
     None
 }
 
-/// Install VAD on the recorder according to config.
-/// Side-effect only: failures are logged and gracefully degrade to no VAD.
 fn install_vad(recorder: &AudioRecorder, app: &AppHandle, vad_config: &VadConfig) {
     let model_path = if vad_config.backend == "silero" {
         resolve_silero_model_path(app)
@@ -40,10 +37,28 @@ fn install_vad(recorder: &AudioRecorder, app: &AppHandle, vad_config: &VadConfig
     recorder.set_vad(vad);
 }
 
+/// Map Coordinator Stage back to RecordingState for legacy event surface.
+fn stage_to_state(stage: Stage) -> RecordingState {
+    match stage {
+        Stage::Idle => RecordingState::Idle,
+        Stage::Recording => RecordingState::Recording,
+        Stage::Processing => RecordingState::Transcribing,
+    }
+}
+
+/// Phase 4.2: Coordinator is the single source of truth for recording state.
+///
+/// The legacy `Arc<Mutex<RecordingState>>` is kept only as a downstream cache
+/// for the transcription pipeline (which still uses it to mark Idle/Error).
+/// All gate checks and state transitions go through `TranscriptionCoordinator`,
+/// which serializes events through its worker thread.
 pub struct RecordingCoordinator {
     app: AppHandle,
     recorder: Arc<AudioRecorder>,
-    state: Arc<Mutex<RecordingState>>,
+    /// Downstream cache used by dispatch/pipeline. Mirrors `coordinator` stage
+    /// plus a transient `Error` state for the user-visible event surface.
+    state_cache: Arc<Mutex<RecordingState>>,
+    coordinator: Arc<TranscriptionCoordinator>,
     queue: Arc<TranscriptionQueue>,
     overlay: Arc<Mutex<Box<dyn OverlayBackend>>>,
     polling_cancel: Arc<Mutex<Option<CancellationToken>>>,
@@ -53,7 +68,8 @@ impl RecordingCoordinator {
     pub fn new(
         app: AppHandle,
         recorder: Arc<AudioRecorder>,
-        state: Arc<Mutex<RecordingState>>,
+        state_cache: Arc<Mutex<RecordingState>>,
+        coordinator: Arc<TranscriptionCoordinator>,
         queue: Arc<TranscriptionQueue>,
         overlay: Arc<Mutex<Box<dyn OverlayBackend>>>,
         polling_cancel: Arc<Mutex<Option<CancellationToken>>>,
@@ -61,20 +77,32 @@ impl RecordingCoordinator {
         Self {
             app,
             recorder,
-            state,
+            state_cache,
+            coordinator,
             queue,
             overlay,
             polling_cancel,
         }
     }
 
+    /// Mirror coordinator's current Stage into the legacy state cache and
+    /// emit `state-changed` for the frontend.
+    async fn mirror_state(&self) -> RecordingState {
+        let stage = self.coordinator.current_stage();
+        let state = stage_to_state(stage);
+        let mut cache = self.state_cache.lock().await;
+        *cache = state;
+        drop(cache);
+        self.emit_state(state);
+        state
+    }
+
     pub async fn on_hotkey_pressed(&self) {
-        let mut state = self.state.lock().await;
-        if !matches!(*state, RecordingState::Idle | RecordingState::Transcribing) {
-            tracing::debug!(
-                "Ignoring hotkey press - cannot record (state: {:?})",
-                *state
-            );
+        let stage = self.coordinator.current_stage();
+        // TALRI semantics: allow press from Idle (start fresh) or Processing
+        // (queue a new recording while previous transcription finishes).
+        if !matches!(stage, Stage::Idle | Stage::Processing) {
+            tracing::debug!("Ignoring hotkey press - stage: {:?}", stage);
             return;
         }
         if !create_permission_checker()
@@ -95,13 +123,15 @@ impl RecordingCoordinator {
         };
         install_vad(&self.recorder, &self.app, &config.vad);
         if let Err(e) = self.recorder.start(&device) {
-            self.handle_error(&mut state, &e.to_string(), ErrorContext::Hotkey)
-                .await;
+            self.handle_error(&e.to_string(), ErrorContext::Hotkey).await;
             return;
         }
 
-        *state = RecordingState::Recording;
-        self.emit_state(RecordingState::Recording);
+        // Drive Coordinator + wait for the worker to apply the transition.
+        self.coordinator.on_press();
+        self.await_stage(Stage::Recording).await;
+        self.mirror_state().await;
+
         if config.overlay.enabled {
             self.overlay.lock().await.show(OverlayState::Recording);
             let token = CancellationToken::new();
@@ -124,28 +154,24 @@ impl RecordingCoordinator {
             token.cancel();
         }
 
-        let mut state = self.state.lock().await;
-        if *state != RecordingState::Recording {
-            tracing::debug!(
-                "Ignoring hotkey release - not recording (state: {:?})",
-                *state
-            );
+        if self.coordinator.current_stage() != Stage::Recording {
+            tracing::debug!("Ignoring hotkey release - not recording");
             return;
         }
 
         let audio_data = match self.recorder.stop() {
             Ok(data) => data,
             Err(e) => {
-                self.handle_error(&mut state, &e.to_string(), ErrorContext::Hotkey)
-                    .await;
+                self.handle_error(&e.to_string(), ErrorContext::Hotkey).await;
                 self.overlay.lock().await.hide();
                 return;
             }
         };
 
         let queue_size = self.queue.push(audio_data).await;
-        *state = RecordingState::Transcribing;
-        self.emit_state(RecordingState::Transcribing);
+        self.coordinator.on_release();
+        self.await_stage(Stage::Processing).await;
+        self.mirror_state().await;
 
         let config = load_config_from_app(&self.app);
         if config.overlay.enabled {
@@ -158,8 +184,15 @@ impl RecordingCoordinator {
     }
 
     pub async fn get_state(&self) -> RecordingState {
-        *self.state.lock().await
+        // Read from the cache: it includes transient Error overlay set by
+        // handle_error / pipeline / error.rs which Stage alone can't represent.
+        let cached = *self.state_cache.lock().await;
+        if matches!(cached, RecordingState::Error) {
+            return cached;
+        }
+        stage_to_state(self.coordinator.current_stage())
     }
+
     pub fn shutdown(&self) {
         self.recorder.close();
     }
@@ -176,13 +209,45 @@ impl RecordingCoordinator {
         }
     }
 
-    async fn handle_error(&self, state: &mut RecordingState, error: &str, context: ErrorContext) {
+    async fn handle_error(&self, error: &str, context: ErrorContext) {
         tracing::error!("{:?} error: {}", context, error);
         self.emit_error(error);
-        *state = RecordingState::Error;
+
+        // Set the cache to Error directly; Coordinator stays in its current
+        // stage (Cancel will return it to Idle).
+        {
+            let mut cache = self.state_cache.lock().await;
+            *cache = RecordingState::Error;
+        }
         self.emit_state(RecordingState::Error);
+
+        // Cancel coordinator so it returns to Idle from Recording.
+        self.coordinator.cancel();
+
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        *state = RecordingState::Idle;
-        self.emit_state(RecordingState::Idle);
+
+        // Recover: sync cache to whatever stage we ended up in.
+        self.mirror_state().await;
     }
+
+    /// Wait briefly for the Coordinator worker to apply a transition.
+    /// Uses a deterministic poll loop with a tight bound (max 100ms).
+    async fn await_stage(&self, expected: Stage) {
+        for _ in 0..50 {
+            if self.coordinator.current_stage() == expected {
+                return;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
+        }
+        tracing::warn!(
+            "Coordinator stage did not reach {:?} (currently {:?})",
+            expected,
+            self.coordinator.current_stage()
+        );
+    }
+}
+
+/// Helper consumed by tests/orchestrator integration.
+pub(crate) fn map_recording_state_to_stage(state: &RecordingState) -> Stage {
+    map_state_to_stage(state)
 }

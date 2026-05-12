@@ -1,3 +1,4 @@
+use super::coordinator::TranscriptionCoordinator;
 use super::{load_config_from_app, transcription, RecordingState, TranscriptionQueue};
 use crate::output::OutputHandler;
 use crate::overlay_native::{OverlayBackend, OverlayState};
@@ -14,6 +15,7 @@ impl TranscriptionDispatcher {
         output: Arc<OutputHandler>,
         state: Arc<Mutex<RecordingState>>,
         overlay: Arc<Mutex<Box<dyn OverlayBackend>>>,
+        coordinator: Arc<TranscriptionCoordinator>,
     ) {
         tauri::async_runtime::spawn(async move {
             loop {
@@ -25,15 +27,20 @@ impl TranscriptionDispatcher {
                 );
 
                 let config = load_config_from_app(&app);
-                let ctx = transcription::TranscriptionContext::new(
+                let ctx = transcription::TranscriptionContext::new_with_coordinator(
                     app.clone(),
                     Arc::clone(&output),
                     Arc::clone(&state),
                     Arc::clone(&overlay),
                     item.audio_data.clone(),
+                    Some(Arc::clone(&coordinator)),
                 );
 
                 transcription::transcribe_and_output(ctx, item.audio_data, config).await;
+
+                // Notify Coordinator that pipeline finished. If a new recording
+                // started already, Coordinator stays in Recording (per its rules).
+                coordinator.notify_processing_finished();
 
                 let remaining = queue.len().await;
                 if remaining > 0 {
