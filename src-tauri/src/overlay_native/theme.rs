@@ -72,7 +72,7 @@ pub enum VisualizationFamily {
     OrganicRing,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct OrganicRingShape {
     pub gap_degrees: f32,
     pub base_thickness: f32,
@@ -81,7 +81,7 @@ pub struct OrganicRingShape {
     pub active_zones: u8,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct OrganicRingMotion {
     pub idle_breathing: f32,
     pub speech_responsiveness: f32,
@@ -89,10 +89,38 @@ pub struct OrganicRingMotion {
     pub settle_speed: f32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct OrganicRingTheme {
     pub shape: OrganicRingShape,
     pub motion: OrganicRingMotion,
+}
+
+/// Full theme payload for the webview overlay. Combines colors + family hint
+/// + organic_ring shape/motion so the React side has one DTO to consume.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct OverlayThemeData {
+    pub id: String,
+    pub name: String,
+    /// `"bars"` | `"organic_ring"`.
+    pub family: String,
+    pub colors: ThemeColors,
+    pub organic_ring: Option<OrganicRingTheme>,
+}
+
+impl OverlayThemeData {
+    pub fn from_theme(theme: &VisualizationTheme) -> Self {
+        let family = match theme.family {
+            VisualizationFamily::Bars => "bars".to_string(),
+            VisualizationFamily::OrganicRing => "organic_ring".to_string(),
+        };
+        Self {
+            id: theme.id.clone(),
+            name: theme.name.clone(),
+            family,
+            colors: theme.to_colors(),
+            organic_ring: theme.organic_ring.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

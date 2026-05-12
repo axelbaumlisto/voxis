@@ -144,6 +144,19 @@ pub fn get_theme_colors(
     VisualizationTheme::by_name(&theme_id, &theme_loader.handle).to_colors()
 }
 
+/// Get full overlay theme data for the webview overlay (colors + family +
+/// organic_ring). Single DTO so the React layer can drive both bar and ring
+/// rendering without multiple round-trips.
+#[tauri::command]
+#[specta::specta]
+pub fn get_overlay_theme_data(
+    theme_id: String,
+    theme_loader: State<'_, ThemeLoaderState>,
+) -> crate::overlay_native::OverlayThemeData {
+    let theme = VisualizationTheme::by_name(&theme_id, &theme_loader.handle);
+    crate::overlay_native::OverlayThemeData::from_theme(&theme)
+}
+
 /// Run overlay demo mode (debug only).
 /// Shows recording state with simulated audio levels.
 #[cfg(debug_assertions)]

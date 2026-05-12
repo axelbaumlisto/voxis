@@ -382,6 +382,14 @@ async getThemeColors(themeId: string) : Promise<ThemeColors> {
     return await TAURI_INVOKE("get_theme_colors", { themeId });
 },
 /**
+ * Get full overlay theme data for the webview overlay (colors + family +
+ * organic_ring). Single DTO so the React layer can drive both bar and ring
+ * rendering without multiple round-trips.
+ */
+async getOverlayThemeData(themeId: string) : Promise<OverlayThemeData> {
+    return await TAURI_INVOKE("get_overlay_theme_data", { themeId });
+},
+/**
  * List available audio input devices.
  * Requires microphone permission to access audio hardware.
  */
@@ -649,6 +657,9 @@ export type LlmModel = { id: string; name: string }
  * An LLM provider configuration.
  */
 export type LlmProvider = { id: string; name: string; api_url: string; models: LlmModel[]; default_model: string; builtin?: boolean }
+export type OrganicRingMotion = { idle_breathing: number; speech_responsiveness: number; drift: number; settle_speed: number }
+export type OrganicRingShape = { gap_degrees: number; base_thickness: number; taper: number; roundness: number; active_zones: number }
+export type OrganicRingTheme = { shape: OrganicRingShape; motion: OrganicRingMotion }
 /**
  * Recording overlay settings.
  */
@@ -679,6 +690,15 @@ export type OverlayPosition = "bottom_left" | "bottom_right" | "top_left" | "top
  * Overlay state for display.
  */
 export type OverlayState = "hidden" | "idle" | "recording" | "transcribing" | { error: string }
+/**
+ * Full theme payload for the webview overlay. Combines colors + family hint
+ * + organic_ring shape/motion so the React side has one DTO to consume.
+ */
+export type OverlayThemeData = { id: string; name: string; 
+/**
+ * `"bars"` | `"organic_ring"`.
+ */
+family: string; colors: ThemeColors; organic_ring: OrganicRingTheme | null }
 /**
  * Pending suggestion entry for frontend display.
  */

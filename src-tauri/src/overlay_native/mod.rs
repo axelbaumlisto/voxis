@@ -9,7 +9,9 @@ use std::sync::{Arc, RwLock};
 pub use backend::{NoopOverlay, OverlayBackend};
 pub use native::{amplify_level, NativeOverlay, Position, WaveformLevels};
 pub use subprocess::SubprocessOverlay;
-pub use theme::{ThemeColors, ThemeInfo, ThemeLoader, ThemeTestResult, VisualizationTheme};
+pub use theme::{
+    OverlayThemeData, ThemeColors, ThemeInfo, ThemeLoader, ThemeTestResult, VisualizationTheme,
+};
 
 pub type OverlayState = crate::overlay::types::OverlayState;
 pub type OverlayPositionConfig = crate::overlay::types::PositionConfig;
