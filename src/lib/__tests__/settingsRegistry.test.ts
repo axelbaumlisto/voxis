@@ -300,6 +300,16 @@ describe("settingsRegistry.ts", () => {
       expect(setting?.options).toBeUndefined();
     });
 
+    it("overlay.backend uses the platform-aware custom selector", () => {
+      const setting = SETTINGS_REGISTRY.find((s) => s.key === "overlay.backend");
+      expect(setting).toBeDefined();
+      expect(setting?.widgetType).toBe("custom");
+      expect(setting?.customComponent).toBe("overlay-backend-select");
+      // Options for `overlay.backend` are owned by the custom component
+      // (so it can render per-option `disabled` based on platform).
+      expect(setting?.options).toBeUndefined();
+    });
+
     it("LLM section has llm.enabled", () => {
       const settings = getSettingsBySection("LLM");
       const keys = settings.map((s) => s.key);

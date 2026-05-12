@@ -7,7 +7,6 @@
 
 import {
   AUDIO_BOOST_OPTIONS,
-  OVERLAY_BACKEND_OPTIONS,
   VAD_BACKEND_OPTIONS,
   BACKEND_OPTIONS,
   CLOUD_PROVIDER_OPTIONS,
@@ -177,10 +176,10 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
   {
     key: "overlay.backend",
     label: "Backend",
-    widgetType: "select",
+    widgetType: "custom",
     section: "Overlay",
     description: "Overlay rendering backend (advanced)",
-    options: OVERLAY_BACKEND_OPTIONS,
+    customComponent: "overlay-backend-select",
   },
 
   // VAD section
