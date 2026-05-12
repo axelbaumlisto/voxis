@@ -10,6 +10,7 @@ mod level;
 mod recorder;
 mod stream;
 mod sync;
+pub mod vad;
 
 pub use devices::{get_device, list_devices, AudioDevice};
 pub use encoder::{downsample, samples_to_wav, TRANSCRIPTION_SAMPLE_RATE};

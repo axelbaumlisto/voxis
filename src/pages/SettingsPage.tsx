@@ -1,4 +1,6 @@
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import i18n from "../i18n";
 import { useSettings } from "../hooks/useSettings";
 import { useAudioDevices } from "../hooks/useAudioDevices";
 import { getConfigValue } from "../lib/config";
@@ -13,6 +15,7 @@ import { renderCustomWidget } from "../lib/customWidgetRegistry";
 import "../styles/settings.css";
 
 function SettingsPage() {
+  const { t } = useTranslation();
   const {
     config,
     loading,
@@ -54,10 +57,10 @@ function SettingsPage() {
     return (
       <div>
         <header className="page-header">
-          <h1 className="page-title">Settings</h1>
+          <h1 className="page-title">{t("settings.title")}</h1>
         </header>
         <div className="card">
-          <p style={{ color: "var(--text-secondary)" }}>Loading...</p>
+          <p style={{ color: "var(--text-secondary)" }}>{t("common.loading")}</p>
         </div>
       </div>
     );
@@ -67,11 +70,11 @@ function SettingsPage() {
     return (
       <div>
         <header className="page-header">
-          <h1 className="page-title">Settings</h1>
+          <h1 className="page-title">{t("settings.title")}</h1>
         </header>
         <div className="card">
           <p style={{ color: "var(--error)" }}>
-            Failed to load settings: {error}
+            {t("settings.failedToLoad", { error })}
           </p>
         </div>
       </div>
@@ -120,19 +123,28 @@ function SettingsPage() {
       <header className="page-header">
         <div className="page-header-content">
           <div>
-            <h1 className="page-title">Settings</h1>
+            <h1 className="page-title">{t("settings.title")}</h1>
             <p className="page-description">
-              Configure your voice dictation preferences
+              {t("settings.description")}
             </p>
           </div>
           <div className="page-header-actions">
+            <select
+              className="language-select"
+              value={i18n.language.startsWith("ru") ? "ru" : "en"}
+              onChange={(e) => i18n.changeLanguage(e.target.value)}
+              aria-label={t("common.language")}
+            >
+              <option value="en">English</option>
+              <option value="ru">Русский</option>
+            </select>
             {error && <span className="settings-error">{error}</span>}
             <button
               className="primary"
               onClick={handleSave}
               disabled={!hasChanges || saving}
             >
-              {saving ? "Saving..." : "Save"}
+              {saving ? t("common.saving") : t("common.save")}
             </button>
           </div>
         </div>

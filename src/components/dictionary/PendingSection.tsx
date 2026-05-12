@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { PendingSuggestion } from "../../lib/commands";
 import EntryDisplay from "./EntryDisplay";
 
@@ -20,11 +21,12 @@ function PendingSection({
   onGenerateFromHistory,
   generating,
 }: PendingSectionProps) {
+  const { t } = useTranslation();
   return (
     <div className="card pending-section">
       <div className="pending-header">
         <h3 className="pending-title">
-          Pending Suggestions ({suggestions.length})
+          {t("dictionary.pendingTitle", { count: suggestions.length })}
         </h3>
         <div style={{ display: "flex", gap: "8px" }}>
           {onGenerateFromHistory && (
@@ -33,25 +35,23 @@ function PendingSection({
               onClick={onGenerateFromHistory}
               disabled={generating}
             >
-              {generating ? "Generating..." : "Generate from History"}
+              {generating ? t("common.generating") : t("home.generateFromHistory")}
             </button>
           )}
           {suggestions.length > 1 && (
             <button className="primary" onClick={onApproveAll}>
-              Approve All
+              {t("common.approveAll")}
             </button>
           )}
         </div>
       </div>
       {suggestions.length > 0 ? (
         <p className="pending-description">
-          LLM suggested these dictionary entries. Approve to add them or reject
-          to ignore.
+          {t("dictionary.pendingDescriptionActive")}
         </p>
       ) : (
         <p className="pending-description">
-          No pending suggestions. Click "Generate from History" to analyze your
-          transcription history and find terms for your dictionary.
+          {t("dictionary.pendingDescriptionEmpty")}
         </p>
       )}
 
@@ -83,6 +83,7 @@ function PendingSuggestionItem({
   onApprove,
   onReject,
 }: PendingSuggestionItemProps) {
+  const { t } = useTranslation();
   const progress = Math.min((suggestion.count / threshold) * 100, 100);
   const isReady = suggestion.count >= threshold;
 
@@ -94,29 +95,29 @@ function PendingSuggestionItem({
           replacement={suggestion.replacement}
           classPrefix="pending"
         />
-        <span className="pending-count" title={`Seen ${suggestion.count} time(s)`}>
+        <span className="pending-count" title={t("dictionary.seenCount", { count: suggestion.count })}>
           {suggestion.count}/{threshold}
         </span>
         <div
           className="pending-progress"
           style={{ width: `${progress}%` }}
-          title={`${Math.round(progress)}% to auto-add`}
+          title={t("dictionary.progressPercent", { percent: Math.round(progress) })}
         />
       </div>
       <div className="pending-item-actions">
         <button
           className="primary"
           onClick={() => onApprove(suggestion.id)}
-          title="Add to dictionary"
+          title={t("dictionary.addToDict")}
         >
-          Approve
+          {t("common.approve")}
         </button>
         <button
           className="secondary"
           onClick={() => onReject(suggestion.id)}
-          title="Ignore this suggestion"
+          title={t("dictionary.ignoreSuggestion")}
         >
-          Reject
+          {t("common.reject")}
         </button>
       </div>
     </div>

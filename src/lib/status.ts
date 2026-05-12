@@ -22,12 +22,24 @@ export function getStatusClass(state: RecordingState, error: string | null): str
 
 /**
  * Get status text to display.
+ * Accepts optional t() function for i18n; falls back to English.
  */
-export function getStatusText(info: StatusInfo): string {
+export function getStatusText(info: StatusInfo, t?: (key: string, opts?: Record<string, unknown>) => string): string {
   const { state, error, hotkey } = info;
 
   if (error) {
     return `! ${error}`;
+  }
+
+  if (t) {
+    switch (state) {
+      case "recording":
+        return t("status.recording", { hotkey });
+      case "transcribing":
+        return t("status.transcribing");
+      default:
+        return t("status.ready", { hotkey });
+    }
   }
 
   switch (state) {

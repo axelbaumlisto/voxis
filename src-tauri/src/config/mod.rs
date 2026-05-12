@@ -109,6 +109,15 @@ pub struct VadConfig {
     pub enabled: bool,
     #[serde(default = "default_vad_threshold")]
     pub threshold: f32,
+    /// Consecutive voice frames required to trigger speech start.
+    #[serde(default = "default_vad_onset_frames")]
+    pub onset_frames: u32,
+    /// Silence frames tolerated before ending speech.
+    #[serde(default = "default_vad_hangover_frames")]
+    pub hangover_frames: u32,
+    /// Past frames included when speech starts (captures word beginning).
+    #[serde(default = "default_vad_prefill_frames")]
+    pub prefill_frames: u32,
 }
 
 impl Default for VadConfig {
@@ -116,6 +125,9 @@ impl Default for VadConfig {
         Self {
             enabled: true,
             threshold: DEFAULT_VAD_THRESHOLD,
+            onset_frames: 3,
+            hangover_frames: 5,
+            prefill_frames: 2,
         }
     }
 }
@@ -365,6 +377,18 @@ fn default_learning_mode() -> String {
 
 fn default_vad_threshold() -> f32 {
     DEFAULT_VAD_THRESHOLD
+}
+
+fn default_vad_onset_frames() -> u32 {
+    3
+}
+
+fn default_vad_hangover_frames() -> u32 {
+    5
+}
+
+fn default_vad_prefill_frames() -> u32 {
+    2
 }
 
 fn default_overlay_position() -> String {

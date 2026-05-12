@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 interface EditDictionaryEntryFormProps {
   source: string;
   replacement: string;
@@ -21,6 +23,7 @@ function EditDictionaryEntryForm({
   onCancel,
   saving,
 }: EditDictionaryEntryFormProps) {
+  const { t } = useTranslation();
   const canSave = source.trim().length > 0 && replacement.trim().length > 0;
 
   return (
@@ -29,7 +32,7 @@ function EditDictionaryEntryForm({
         type="text"
         value={source}
         onChange={(e) => onSourceChange(e.target.value)}
-        placeholder="Source"
+        placeholder={t("dictionary.sourcePlaceholder")}
         className="dictionary-input"
       />
       <span className="dictionary-arrow">→</span>
@@ -37,7 +40,7 @@ function EditDictionaryEntryForm({
         type="text"
         value={replacement}
         onChange={(e) => onReplacementChange(e.target.value)}
-        placeholder="Replacement"
+        placeholder={t("dictionary.replacementPlaceholder")}
         className="dictionary-input"
       />
       <div className="dictionary-entry-actions">
@@ -46,10 +49,10 @@ function EditDictionaryEntryForm({
           onClick={onSave}
           disabled={saving || !canSave}
         >
-          {saving ? "..." : "Save"}
+          {saving ? "..." : t("common.save")}
         </button>
         <button className="secondary" onClick={onCancel} disabled={saving}>
-          Cancel
+          {t("common.cancel")}
         </button>
       </div>
     </div>

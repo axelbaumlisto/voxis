@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useLocation, Navigate } from "react-router-dom";
 import { useEffect, useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useRecordingContext } from "../contexts/RecordingContext";
 import SpectrumVisualizer from "./SpectrumVisualizer";
 import PermissionBanner from "./PermissionBanner";
@@ -22,13 +23,14 @@ import {
   PermissionInfo,
 } from "../lib/commands";
 
-const navItems = [
-  { path: "/history", label: "History" },
-  { path: "/dictionary", label: "Dictionary" },
-  { path: "/settings", label: "Settings" },
+const navKeys = [
+  { path: "/history", labelKey: "nav.history" },
+  { path: "/dictionary", labelKey: "nav.dictionary" },
+  { path: "/settings", labelKey: "nav.settings" },
 ];
 
 function Layout() {
+  const { t } = useTranslation();
   const location = useLocation();
   const { state, error, lastTranscription } = useRecordingContext();
 
@@ -87,7 +89,7 @@ function Layout() {
 
   // Computed status values using shared utilities
   const statusClass = getStatusClass(state as RecordingState, error);
-  const statusText = getStatusText({ state: state as RecordingState, error, hotkey });
+  const statusText = getStatusText({ state: state as RecordingState, error, hotkey }, t);
   const statusIcon = getStatusIcon(state as RecordingState, error);
 
   // Redirect to history if on home page
@@ -97,7 +99,7 @@ function Layout() {
     <div className="layout">
       {/* Header - Textual style */}
       <header className="header">
-        <span className="header-title">SoupaWhisper 2</span>
+        <span className="header-title">{t("common.appTitle")}</span>
         {error && <span className="header-error">{error}</span>}
         <span className="header-time">{currentTime}</span>
       </header>
@@ -117,7 +119,7 @@ function Layout() {
 
       {/* Tabs - TUI style */}
       <nav className="tabs">
-        {navItems.map(({ path, label }) => (
+        {navKeys.map(({ path, labelKey }) => (
           <NavLink
             key={path}
             to={path}
@@ -125,7 +127,7 @@ function Layout() {
               `tab ${isActive || (isHome && path === "/history") ? "active" : ""}`
             }
           >
-            {label}
+            {t(labelKey)}
           </NavLink>
         ))}
       </nav>

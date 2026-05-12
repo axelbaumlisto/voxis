@@ -16,8 +16,8 @@ describe("EditDictionaryEntryForm", () => {
   it("renders source and replacement inputs with values", () => {
     render(<EditDictionaryEntryForm {...defaultProps} />);
 
-    const sourceInput = screen.getByPlaceholderText("Source");
-    const replacementInput = screen.getByPlaceholderText("Replacement");
+    const sourceInput = screen.getByPlaceholderText(/Source word/);
+    const replacementInput = screen.getByPlaceholderText(/Replacement/);
 
     expect(sourceInput).toHaveValue("test");
     expect(replacementInput).toHaveValue("TEST");
@@ -34,7 +34,7 @@ describe("EditDictionaryEntryForm", () => {
       <EditDictionaryEntryForm {...defaultProps} onSourceChange={onSourceChange} />
     );
 
-    const sourceInput = screen.getByPlaceholderText("Source");
+    const sourceInput = screen.getByPlaceholderText(/Source word/);
     fireEvent.change(sourceInput, { target: { value: "new-source" } });
 
     expect(onSourceChange).toHaveBeenCalledWith("new-source");
@@ -49,7 +49,7 @@ describe("EditDictionaryEntryForm", () => {
       />
     );
 
-    const replacementInput = screen.getByPlaceholderText("Replacement");
+    const replacementInput = screen.getByPlaceholderText(/Replacement/);
     fireEvent.change(replacementInput, { target: { value: "NEW-REPLACEMENT" } });
 
     expect(onReplacementChange).toHaveBeenCalledWith("NEW-REPLACEMENT");

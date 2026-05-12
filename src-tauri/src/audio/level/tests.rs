@@ -215,3 +215,160 @@ fn test_bar_values_in_valid_range() {
         );
     }
 }
+
+#[test]
+fn test_noise_floor_adapts_to_ambient() {
+    let mut analyzer = SpectrumAnalyzer::new();
+
+    // Feed 50 frames of low-level noise to let noise floor adapt
+    let noise: Vec<f32> = (0..FFT_SIZE)
+        .map(|i| ((i as f32 * 12345.6789).sin() * 43758.5453).fract() * 0.001)
+        .collect();
+    for _ in 0..50 {
+        analyzer.analyze(&noise, 4.0);
+    }
+    let noise_floor_after_quiet = analyzer.noise_floor.clone();
+
+    // Now feed a loud signal — noise floor should NOT jump up
+    // (it only adapts when signal is quiet)
+    let loud: Vec<f32> = (0..FFT_SIZE)
+        .map(|i| (2.0 * PI * 440.0 * i as f32 / SAMPLE_RATE).sin())
+        .collect();
+    analyzer.analyze(&loud, 4.0);
+    let noise_floor_after_loud = analyzer.noise_floor.clone();
+
+    // Noise floor should barely move when loud signal plays
+    for (bucket, (&quiet, &loud_val)) in noise_floor_after_quiet
+        .iter()
+        .zip(noise_floor_after_loud.iter())
+        .enumerate()
+    {
+        let delta = (loud_val - quiet).abs();
+        assert!(
+            delta < 5.0,
+            "Bucket {} noise floor jumped by {} dB (quiet={}, loud={})",
+            bucket, delta, quiet, loud_val
+        );
+    }
+}
+
+#[test]
+fn test_noise_floor_initial_values() {
+    let analyzer = SpectrumAnalyzer::new();
+    assert_eq!(analyzer.noise_floor.len(), SPECTRUM_BARS);
+    for &nf in &analyzer.noise_floor {
+        assert!((nf - (-40.0)).abs() < f32::EPSILON, "Initial noise floor should be -40.0 dB");
+    }
+}
+
+#[test]
+fn test_hann_window_applied() {
+    // Verify Hann window properties: edges near zero, center near 1.0
+    let analyzer = SpectrumAnalyzer::new();
+
+    // Hann window: first and last values should be ~0
+    assert!(
+        analyzer.window[0].abs() < 0.01,
+        "Hann window start should be near 0, got {}",
+        analyzer.window[0]
+    );
+    assert!(
+        analyzer.window[FFT_SIZE - 1].abs() < 0.01,
+        "Hann window end should be near 0, got {}",
+        analyzer.window[FFT_SIZE - 1]
+    );
+
+    // Center should be ~1.0
+    let center = analyzer.window[FFT_SIZE / 2];
+    assert!(
+        (center - 1.0).abs() < 0.01,
+        "Hann window center should be near 1.0, got {}",
+        center
+    );
+}
+
+#[test]
+fn test_gain_and_curve_shaping() {
+    let mut analyzer = SpectrumAnalyzer::new();
+
+    // Generate a moderate 440 Hz signal
+    let samples: Vec<f32> = (0..FFT_SIZE)
+        .map(|i| 0.3 * (2.0 * PI * 440.0 * i as f32 / SAMPLE_RATE).sin())
+        .collect();
+
+    let bars = analyzer.analyze(&samples, 4.0);
+
+    // With gain (1.3) and curve shaping (pow 0.7), moderate signals
+    // should produce visible output (not near-zero)
+    let peak = bars.iter().cloned().fold(0.0f32, f32::max);
+    assert!(
+        peak > 0.05,
+        "Gain+curve shaping should boost moderate signals, peak={}",
+        peak
+    );
+}
+
+#[test]
+fn test_output_clamped_0_to_1() {
+    let mut analyzer = SpectrumAnalyzer::new();
+
+    // Very loud signal that could exceed range without clamping
+    let samples: Vec<f32> = (0..FFT_SIZE)
+        .map(|i| 5.0 * (2.0 * PI * 440.0 * i as f32 / SAMPLE_RATE).sin())
+        .collect();
+
+    // Use extreme boost
+    let bars = analyzer.analyze(&samples, 100.0);
+
+    for (i, &val) in bars.iter().enumerate() {
+        assert!(
+            (0.0..=1.0).contains(&val),
+            "Bar {} value {} must be in [0.0, 1.0]",
+            i,
+            val
+        );
+    }
+}
+
+#[test]
+fn test_dc_removal() {
+    let mut analyzer = SpectrumAnalyzer::new();
+
+    // Signal with large DC offset — should not leak into spectrum
+    let samples: Vec<f32> = (0..FFT_SIZE)
+        .map(|i| 10.0 + 0.1 * (2.0 * PI * 440.0 * i as f32 / SAMPLE_RATE).sin())
+        .collect();
+
+    let bars = analyzer.analyze(&samples, 4.0);
+
+    // Bar 0 (lowest freq) should not be disproportionately large
+    // because DC offset has been subtracted
+    let bar0 = bars[0];
+    let mid_energy: f32 = bars[8..16].iter().sum::<f32>() / 8.0;
+    // With DC removal, bar 0 shouldn't dominate
+    // (Without removal, DC component would overwhelm everything)
+    assert!(
+        bar0 < 0.5 || mid_energy > 0.01,
+        "DC removal: bar0={} should not dominate, mid_energy={}",
+        bar0, mid_energy
+    );
+}
+
+#[test]
+fn test_reset_clears_noise_floor() {
+    let mut analyzer = SpectrumAnalyzer::new();
+
+    // Feed some data to change noise floor
+    let noise: Vec<f32> = (0..FFT_SIZE)
+        .map(|i| ((i as f32 * 12345.6789).sin() * 43758.5453).fract() * 0.001)
+        .collect();
+    for _ in 0..20 {
+        analyzer.analyze(&noise, 4.0);
+    }
+
+    // Reset should restore initial values
+    analyzer.reset();
+    for &nf in &analyzer.noise_floor {
+        assert!((nf - (-40.0)).abs() < f32::EPSILON, "After reset, noise floor should be -40.0");
+    }
+}
