@@ -39,7 +39,7 @@ tauri-plugin-os = "2.0.0-rc.1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 
 # Type-safe Tauri command bindings — autogenerates src/bindings.ts
-specta = "=2.0.0-rc.22"
+specta = { version = "=2.0.0-rc.22", features = ["chrono"] }
 specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 
@@ -69,6 +69,9 @@ hound = "3.5"
 
 # FFT for spectrum analyzer visualization
 rustfft = "6.2"
+
+# Silero VAD (ONNX-based voice activity detection)
+vad-rs = { git = "https://github.com/cjpais/vad-rs", default-features = false }
 
 # HTTP client for transcription API
 reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"], default-features = false }

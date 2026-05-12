@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 const MAX_ENTRIES: usize = 3;
 
 /// Metadata for a failed transcription attempt.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct FailedTranscription {
     /// Unique identifier (e.g., "001", "002", "003")
     pub id: String,

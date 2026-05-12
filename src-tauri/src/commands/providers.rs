@@ -8,18 +8,21 @@ use super::get_factory;
 
 /// Get all LLM providers.
 #[tauri::command]
+#[specta::specta]
 pub fn get_llm_providers(paths: State<AppPaths>) -> Result<Vec<LlmProvider>, String> {
     get_factory(&paths).providers().get_all().cmd_err()
 }
 
 /// Add a new LLM provider.
 #[tauri::command]
+#[specta::specta]
 pub fn add_llm_provider(provider: LlmProvider, paths: State<AppPaths>) -> Result<(), String> {
     get_factory(&paths).providers().add(&provider).cmd_err()
 }
 
 /// Remove an LLM provider (only non-builtin).
 #[tauri::command]
+#[specta::specta]
 pub fn remove_llm_provider(id: String, paths: State<AppPaths>) -> Result<(), String> {
     get_factory(&paths).providers().remove(&id).cmd_err()?;
     Ok(())
@@ -27,6 +30,7 @@ pub fn remove_llm_provider(id: String, paths: State<AppPaths>) -> Result<(), Str
 
 /// Update an existing LLM provider.
 #[tauri::command]
+#[specta::specta]
 pub fn update_llm_provider(provider: LlmProvider, paths: State<AppPaths>) -> Result<(), String> {
     get_factory(&paths).providers().update(&provider).cmd_err()
 }

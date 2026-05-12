@@ -16,7 +16,7 @@ use std::path::PathBuf;
 const MAX_AUDIO_FILES: usize = 3;
 
 /// Debug log entry for a single recording session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DebugEntry {
     pub timestamp: String,
     pub audio_file: Option<String>,
@@ -26,7 +26,7 @@ pub struct DebugEntry {
 }
 
 /// Transcription debug info.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TranscriptionLog {
     pub provider: String,
     pub model: String,
@@ -36,7 +36,7 @@ pub struct TranscriptionLog {
 }
 
 /// LLM debug info.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct LlmLog {
     pub provider: String,
     pub model: String,

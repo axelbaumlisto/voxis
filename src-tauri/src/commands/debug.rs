@@ -6,6 +6,7 @@ use tauri::State;
 
 /// Get recent debug entries.
 #[tauri::command]
+#[specta::specta]
 pub fn get_debug_entries(
     limit: Option<usize>,
     paths: State<AppPaths>,
@@ -21,6 +22,7 @@ pub fn get_debug_entries(
 
 /// Clear all debug files.
 #[tauri::command]
+#[specta::specta]
 pub fn clear_debug(paths: State<AppPaths>) -> Result<(), String> {
     let debug_dir = paths.debug_dir();
     if !debug_dir.exists() {
@@ -33,6 +35,7 @@ pub fn clear_debug(paths: State<AppPaths>) -> Result<(), String> {
 
 /// Get debug directory path.
 #[tauri::command]
+#[specta::specta]
 pub fn get_debug_dir(paths: State<AppPaths>) -> String {
     paths.debug_dir().to_string_lossy().to_string()
 }

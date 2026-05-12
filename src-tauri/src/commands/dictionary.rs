@@ -36,6 +36,7 @@ pub fn get_dictionary(paths: State<AppPaths>) -> Result<Vec<DictionaryEntry>, St
 
 /// Add a new dictionary entry.
 #[tauri::command]
+#[specta::specta]
 pub fn add_dictionary_entry(
     source: String,
     replacement: String,
@@ -49,6 +50,7 @@ pub fn add_dictionary_entry(
 
 /// Delete a dictionary entry by id (line index).
 #[tauri::command]
+#[specta::specta]
 pub fn delete_dictionary_entry(id: i64, paths: State<AppPaths>) -> Result<(), String> {
     get_factory(&paths)
         .dictionary()
@@ -58,6 +60,7 @@ pub fn delete_dictionary_entry(id: i64, paths: State<AppPaths>) -> Result<(), St
 
 /// Update a dictionary entry by id (line index).
 #[tauri::command]
+#[specta::specta]
 pub fn update_dictionary_entry(
     id: i64,
     source: String,

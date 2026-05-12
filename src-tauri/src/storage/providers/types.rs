@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 /// A model available for an LLM provider.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct LlmModel {
     pub id: String,
     pub name: String,
 }
 
 /// An LLM provider configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct LlmProvider {
     pub id: String,
     pub name: String,

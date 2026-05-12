@@ -19,7 +19,7 @@ pub use types::{OverlayState as NativeOverlayState, PositionConfig, SizeConfig};
 static CURRENT_STATE: Lazy<Mutex<OverlayState>> = Lazy::new(|| Mutex::new(OverlayState::Hidden));
 
 /// Overlay state for display.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum OverlayState {
     Hidden,
@@ -30,7 +30,7 @@ pub enum OverlayState {
 }
 
 /// Overlay position on screen.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum OverlayPosition {
     #[default]

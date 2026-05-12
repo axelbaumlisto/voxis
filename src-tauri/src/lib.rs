@@ -74,11 +74,72 @@ pub struct HotkeyState {
 /// specta coverage incrementally without breaking runtime command dispatch.
 pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
+        // config
         crate::commands::config::get_config,
         crate::commands::config::save_config,
+        // history
         crate::commands::history::get_history,
+        crate::commands::history::add_history_entry,
         crate::commands::history::clear_history,
+        crate::commands::history::delete_history_entry,
+        crate::commands::history::search_history,
+        // dictionary
         crate::commands::dictionary::get_dictionary,
+        crate::commands::dictionary::add_dictionary_entry,
+        crate::commands::dictionary::delete_dictionary_entry,
+        crate::commands::dictionary::update_dictionary_entry,
+        // debug
+        crate::commands::debug::get_debug_entries,
+        crate::commands::debug::clear_debug,
+        crate::commands::debug::get_debug_dir,
+        // failed transcriptions
+        crate::commands::failed::get_failed_transcriptions,
+        crate::commands::failed::dismiss_failed_transcription,
+        crate::commands::failed::retry_transcription,
+        // permissions
+        crate::commands::permissions::check_permissions,
+        crate::commands::permissions::open_permission_settings,
+        crate::commands::permissions::request_microphone_permission,
+        crate::commands::permissions::request_accessibility_permission,
+        crate::commands::permissions::restart_app,
+        crate::commands::permissions::bring_to_front,
+        // providers
+        crate::commands::providers::get_llm_providers,
+        crate::commands::providers::add_llm_provider,
+        crate::commands::providers::remove_llm_provider,
+        crate::commands::providers::update_llm_provider,
+        // overlay
+        crate::commands::overlay::show_overlay,
+        crate::commands::overlay::hide_overlay,
+        crate::commands::overlay::update_overlay_position,
+        crate::commands::overlay::get_overlay_state,
+        crate::commands::overlay::get_visualization_themes,
+        crate::commands::overlay::validate_visualization_theme,
+        crate::commands::overlay::get_themes_dir,
+        crate::commands::overlay::export_builtin_theme,
+        crate::commands::overlay::reload_visualization_themes,
+        crate::commands::overlay::preview_visualization_theme,
+        crate::commands::overlay::get_theme_colors,
+        // recording
+        crate::commands::recording::list_audio_devices,
+        crate::commands::recording::start_recording,
+        crate::commands::recording::stop_recording,
+        crate::commands::recording::get_recording_status,
+        crate::commands::recording::get_audio_level,
+        crate::commands::recording::get_spectrum_bins,
+        crate::commands::recording::transcribe_audio,
+        crate::commands::recording::copy_to_clipboard,
+        crate::commands::recording::type_text,
+        crate::commands::recording::manual_start_recording,
+        crate::commands::recording::manual_stop_recording,
+        // suggestions
+        crate::commands::suggestions::get_pending_suggestions,
+        crate::commands::suggestions::get_pending_count,
+        crate::commands::suggestions::approve_suggestion,
+        crate::commands::suggestions::approve_suggestion_by_source,
+        crate::commands::suggestions::reject_suggestion,
+        crate::commands::suggestions::reject_suggestion_by_source,
+        crate::commands::suggestions::reprocess_history_for_suggestions,
     ])
 }
 

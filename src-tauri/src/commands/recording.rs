@@ -21,6 +21,7 @@ fn check_microphone_permission() -> Result<(), String> {
 /// List available audio input devices.
 /// Requires microphone permission to access audio hardware.
 #[tauri::command]
+#[specta::specta]
 pub fn list_audio_devices() -> Result<Vec<AudioDevice>, String> {
     check_microphone_permission()?;
     crate::audio::AudioRecorder::list_devices().cmd_err()
@@ -29,6 +30,7 @@ pub fn list_audio_devices() -> Result<Vec<AudioDevice>, String> {
 /// Start audio recording.
 /// Requires microphone permission to access audio hardware.
 #[tauri::command]
+#[specta::specta]
 pub fn start_recording(device_id: Option<String>, state: State<AudioState>) -> Result<(), String> {
     check_microphone_permission()?;
     let device = device_id.unwrap_or_else(|| "default".to_string());
@@ -37,6 +39,7 @@ pub fn start_recording(device_id: Option<String>, state: State<AudioState>) -> R
 
 /// Stop recording and return audio data.
 #[tauri::command]
+#[specta::specta]
 pub fn stop_recording(state: State<AudioState>) -> Result<(), String> {
     let audio_data = state.recorder.stop().cmd_err()?;
 
@@ -49,12 +52,14 @@ pub fn stop_recording(state: State<AudioState>) -> Result<(), String> {
 
 /// Get current recording status.
 #[tauri::command]
+#[specta::specta]
 pub fn get_recording_status(state: State<AudioState>) -> bool {
     state.recorder.is_recording()
 }
 
 /// Get current audio level (0-100).
 #[tauri::command]
+#[specta::specta]
 pub fn get_audio_level(state: State<AudioState>) -> u32 {
     state.recorder.audio_level()
 }
@@ -62,6 +67,7 @@ pub fn get_audio_level(state: State<AudioState>) -> u32 {
 /// Get FFT spectrum bins for visualization (32 frequency magnitudes, 0.0-1.0).
 /// Returns empty array if not recording or not enough samples.
 #[tauri::command]
+#[specta::specta]
 pub fn get_spectrum_bins(state: State<AudioState>) -> Vec<f32> {
     use crate::audio::{SpectrumAnalyzer, SPECTRUM_BARS};
 
@@ -84,6 +90,7 @@ pub fn get_spectrum_bins(state: State<AudioState>) -> Vec<f32> {
 
 /// Transcribe pending audio using Groq API.
 #[tauri::command]
+#[specta::specta]
 pub async fn transcribe_audio(
     state: State<'_, AudioState>,
     api_key: String,
@@ -106,18 +113,21 @@ pub async fn transcribe_audio(
 
 /// Copy text to clipboard.
 #[tauri::command]
+#[specta::specta]
 pub fn copy_to_clipboard(text: String, state: State<OutputState>) -> Result<(), String> {
     state.output.copy_to_clipboard(&text).cmd_err()
 }
 
 /// Auto-type text.
 #[tauri::command]
+#[specta::specta]
 pub fn type_text(text: String, state: State<OutputState>) -> Result<(), String> {
     state.output.type_text(&text).cmd_err()
 }
 
 /// Manual start recording (for UI button).
 #[tauri::command]
+#[specta::specta]
 pub async fn manual_start_recording(state: State<'_, OrchestratorState>) -> Result<(), String> {
     state.orchestrator.manual_start().await;
     Ok(())
@@ -125,6 +135,7 @@ pub async fn manual_start_recording(state: State<'_, OrchestratorState>) -> Resu
 
 /// Manual stop recording (for UI button).
 #[tauri::command]
+#[specta::specta]
 pub async fn manual_stop_recording(state: State<'_, OrchestratorState>) -> Result<(), String> {
     state.orchestrator.manual_stop().await;
     Ok(())

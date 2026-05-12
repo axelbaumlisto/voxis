@@ -41,6 +41,17 @@ async getHistory(limit: number | null) : Promise<Result<HistoryEntry[], string>>
 }
 },
 /**
+ * Add a new history entry.
+ */
+async addHistoryEntry(text: string, language: string | null, duration: number | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_history_entry", { text, language, duration }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Clear all history entries.
  */
 async clearHistory() : Promise<Result<null, string>> {
@@ -52,11 +63,505 @@ async clearHistory() : Promise<Result<null, string>> {
 }
 },
 /**
+ * Delete a history entry by ID.
+ */
+async deleteHistoryEntry(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_history_entry", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Search history.
+ */
+async searchHistory(query: string, limit: number | null) : Promise<Result<HistoryEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("search_history", { query, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get all dictionary entries.
  */
 async getDictionary() : Promise<Result<DictionaryEntry[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_dictionary") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Add a new dictionary entry.
+ */
+async addDictionaryEntry(source: string, replacement: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_dictionary_entry", { source, replacement }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a dictionary entry by id (line index).
+ */
+async deleteDictionaryEntry(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_dictionary_entry", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Update a dictionary entry by id (line index).
+ */
+async updateDictionaryEntry(id: number, source: string, replacement: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_dictionary_entry", { id, source, replacement }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get recent debug entries.
+ */
+async getDebugEntries(limit: number | null) : Promise<Result<DebugEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_debug_entries", { limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Clear all debug files.
+ */
+async clearDebug() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_debug") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get debug directory path.
+ */
+async getDebugDir() : Promise<string> {
+    return await TAURI_INVOKE("get_debug_dir");
+},
+/**
+ * Get all failed transcriptions.
+ */
+async getFailedTranscriptions() : Promise<Result<FailedTranscription[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_failed_transcriptions") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Dismiss (remove) a failed transcription by ID.
+ */
+async dismissFailedTranscription(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("dismiss_failed_transcription", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Retry a failed transcription.
+ * 
+ * Loads the audio from storage, runs transcription again with current config,
+ * and on success adds the result to history and removes from failed storage.
+ */
+async retryTranscription(id: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("retry_transcription", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Check all required permissions and return their status.
+ */
+async checkPermissions() : Promise<PermissionInfo[]> {
+    return await TAURI_INVOKE("check_permissions");
+},
+/**
+ * Open system settings for a specific permission.
+ */
+async openPermissionSettings(permission: string) : Promise<void> {
+    await TAURI_INVOKE("open_permission_settings", { permission });
+},
+/**
+ * Request microphone permission (triggers system dialog on macOS).
+ * This is needed for the app to appear in Privacy > Microphone list.
+ * Uses AVFoundation via osascript to safely trigger permission dialog without crash.
+ */
+async requestMicrophonePermission() : Promise<boolean> {
+    return await TAURI_INVOKE("request_microphone_permission");
+},
+/**
+ * Request accessibility permission (triggers system dialog on macOS).
+ * This is needed for auto-typing functionality.
+ * Uses System Events via osascript to safely trigger permission dialog.
+ */
+async requestAccessibilityPermission() : Promise<boolean> {
+    return await TAURI_INVOKE("request_accessibility_permission");
+},
+/**
+ * Restart the application to apply permission changes.
+ * macOS requires restart for Accessibility and Input Monitoring permissions
+ * to take effect (TCC loads permissions at process start).
+ */
+async restartApp() : Promise<void> {
+    await TAURI_INVOKE("restart_app");
+},
+/**
+ * Bring the app window to the front.
+ * Useful after returning from System Settings.
+ */
+async bringToFront() : Promise<void> {
+    await TAURI_INVOKE("bring_to_front");
+},
+/**
+ * Get all LLM providers.
+ */
+async getLlmProviders() : Promise<Result<LlmProvider[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_llm_providers") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Add a new LLM provider.
+ */
+async addLlmProvider(provider: LlmProvider) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_llm_provider", { provider }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove an LLM provider (only non-builtin).
+ */
+async removeLlmProvider(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_llm_provider", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Update an existing LLM provider.
+ */
+async updateLlmProvider(provider: LlmProvider) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_llm_provider", { provider }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Show the overlay window with the given state.
+ */
+async showOverlay(state: OverlayState) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("show_overlay", { state }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Hide the overlay window.
+ */
+async hideOverlay() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("hide_overlay") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Update the overlay position.
+ */
+async updateOverlayPosition(position: OverlayPosition, margin: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_overlay_position", { position, margin }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get the current overlay state (pull-based initialization).
+ * Frontend calls this after setting up listeners to get missed state.
+ */
+async getOverlayState() : Promise<OverlayState> {
+    return await TAURI_INVOKE("get_overlay_state");
+},
+/**
+ * Get all available visualization themes.
+ */
+async getVisualizationThemes() : Promise<ThemeInfo[]> {
+    return await TAURI_INVOKE("get_visualization_themes");
+},
+/**
+ * Validate a visualization theme.
+ */
+async validateVisualizationTheme(themeId: string) : Promise<ThemeTestResult> {
+    return await TAURI_INVOKE("validate_visualization_theme", { themeId });
+},
+/**
+ * Get path to themes directory.
+ */
+async getThemesDir() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_themes_dir") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Export a builtin theme to a theme folder for user customization.
+ */
+async exportBuiltinTheme(themeId: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_builtin_theme", { themeId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Reload visualization themes from disk.
+ */
+async reloadVisualizationThemes() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reload_visualization_themes") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Preview a visualization theme without saving config.
+ */
+async previewVisualizationTheme(themeId: string, reloadFromDisk: boolean | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("preview_visualization_theme", { themeId, reloadFromDisk }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get theme colors for frontend CSS synchronization.
+ */
+async getThemeColors(themeId: string) : Promise<ThemeColors> {
+    return await TAURI_INVOKE("get_theme_colors", { themeId });
+},
+/**
+ * List available audio input devices.
+ * Requires microphone permission to access audio hardware.
+ */
+async listAudioDevices() : Promise<Result<AudioDevice[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_audio_devices") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Start audio recording.
+ * Requires microphone permission to access audio hardware.
+ */
+async startRecording(deviceId: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_recording", { deviceId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stop recording and return audio data.
+ */
+async stopRecording() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_recording") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get current recording status.
+ */
+async getRecordingStatus() : Promise<boolean> {
+    return await TAURI_INVOKE("get_recording_status");
+},
+/**
+ * Get current audio level (0-100).
+ */
+async getAudioLevel() : Promise<number> {
+    return await TAURI_INVOKE("get_audio_level");
+},
+/**
+ * Get FFT spectrum bins for visualization (32 frequency magnitudes, 0.0-1.0).
+ * Returns empty array if not recording or not enough samples.
+ */
+async getSpectrumBins() : Promise<number[]> {
+    return await TAURI_INVOKE("get_spectrum_bins");
+},
+/**
+ * Transcribe pending audio using Groq API.
+ */
+async transcribeAudio(apiKey: string, model: string | null, language: string | null) : Promise<Result<TranscriptionResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("transcribe_audio", { apiKey, model, language }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Copy text to clipboard.
+ */
+async copyToClipboard(text: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("copy_to_clipboard", { text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Auto-type text.
+ */
+async typeText(text: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("type_text", { text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Manual start recording (for UI button).
+ */
+async manualStartRecording() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("manual_start_recording") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Manual stop recording (for UI button).
+ */
+async manualStopRecording() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("manual_stop_recording") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get all pending suggestions.
+ */
+async getPendingSuggestions() : Promise<Result<PendingSuggestion[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_pending_suggestions") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get count of pending suggestions.
+ */
+async getPendingCount() : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_pending_count") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Approve a pending suggestion and add to dictionary.
+ */
+async approveSuggestion(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("approve_suggestion", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Approve a suggestion by source and replacement.
+ */
+async approveSuggestionBySource(source: string, replacement: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("approve_suggestion_by_source", { source, replacement }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Reject a pending suggestion.
+ */
+async rejectSuggestion(id: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reject_suggestion", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Reject a suggestion by source and replacement.
+ */
+async rejectSuggestionBySource(source: string, replacement: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reject_suggestion_by_source", { source, replacement }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Reprocess history entries through LLM to generate suggestions.
+ */
+async reprocessHistoryForSuggestions(limit: number | null) : Promise<Result<ReprocessResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reprocess_history_for_suggestions", { limit }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -85,6 +590,14 @@ async getDictionary() : Promise<Result<DictionaryEntry[], string>> {
  */
 export type AppConfig = { api_key?: string; model?: string; language?: string; hotkey?: string; auto_type?: boolean; auto_enter?: boolean; typing_delay?: number; notifications?: boolean; backend?: string; debug?: boolean; audio_device?: string; history_enabled?: boolean; history_days?: number; active_provider?: string; cloud_provider?: string; local_backend?: string; text_processing?: boolean; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
 /**
+ * Audio device info for UI display.
+ */
+export type AudioDevice = { id: string; name: string; is_default: boolean }
+/**
+ * Debug log entry for a single recording session.
+ */
+export type DebugEntry = { timestamp: string; audio_file: string | null; audio_size_bytes: number; transcription: TranscriptionLog | null; llm: LlmLog | null }
+/**
  * Dictionary and learning settings.
  */
 export type DictionaryConfig = { path?: string; learning_mode?: string; learning_threshold?: number }
@@ -93,6 +606,30 @@ export type DictionaryConfig = { path?: string; learning_mode?: string; learning
  */
 export type DictionaryEntry = { id: number; source: string; replacement: string }
 /**
+ * Metadata for a failed transcription attempt.
+ */
+export type FailedTranscription = { 
+/**
+ * Unique identifier (e.g., "001", "002", "003")
+ */
+id: string; 
+/**
+ * Error message that caused the failure
+ */
+error: string; 
+/**
+ * Partial Whisper transcription text (if any)
+ */
+whisper_text: string | null; 
+/**
+ * Timestamp when the failure occurred
+ */
+timestamp: string; 
+/**
+ * Provider that was used (e.g., "groq", "openai")
+ */
+provider: string }
+/**
  * History entry for frontend display.
  */
 export type HistoryEntry = { id: number; timestamp: string; text: string; language: string | null; duration: number | null }
@@ -100,6 +637,18 @@ export type HistoryEntry = { id: number; timestamp: string; text: string; langua
  * LLM post-processing settings.
  */
 export type LlmConfig = { enabled?: boolean; provider?: string; api_url?: string; api_key?: string; model?: string; prompt?: string }
+/**
+ * LLM debug info.
+ */
+export type LlmLog = { provider: string; model: string; prompt: string; input_text: string; output_text: string; duration_ms: number }
+/**
+ * A model available for an LLM provider.
+ */
+export type LlmModel = { id: string; name: string }
+/**
+ * An LLM provider configuration.
+ */
+export type LlmProvider = { id: string; name: string; api_url: string; models: LlmModel[]; default_model: string; builtin?: boolean }
 /**
  * Recording overlay settings.
  */
@@ -117,6 +666,37 @@ audio_boost?: number;
  * Visualization theme name.
  */
 theme?: string }
+/**
+ * Overlay position on screen.
+ */
+export type OverlayPosition = "bottom_left" | "bottom_right" | "top_left" | "top_right" | "center" | "top_center" | "bottom_center" | "left_center" | "right_center"
+/**
+ * Overlay state for display.
+ */
+export type OverlayState = "hidden" | "idle" | "recording" | "transcribing" | { error: string }
+/**
+ * Pending suggestion entry for frontend display.
+ */
+export type PendingSuggestion = { id: number; source: string; replacement: string; count: number; first_seen: string; last_seen: string }
+/**
+ * Permission status response for frontend.
+ */
+export type PermissionInfo = { name: string; status: string; description: string }
+/**
+ * Result of reprocessing history through LLM.
+ */
+export type ReprocessResult = { processed: number; suggestions_found: number }
+export type ThemeColors = { use_gradient: boolean; gradient_bottom: string; gradient_middle: string; gradient_top: string; recording: string; transcribing: string; idle: string }
+export type ThemeInfo = { id: string; name: string; description: string }
+export type ThemeTestResult = { valid: boolean; warnings: string[]; errors: string[] }
+/**
+ * Transcription debug info.
+ */
+export type TranscriptionLog = { provider: string; model: string; language: string | null; duration_ms: number; text: string }
+/**
+ * Transcription result from API.
+ */
+export type TranscriptionResult = { text: string; language?: string | null; duration?: number | null }
 /**
  * Voice Activity Detection settings.
  */

@@ -39,9 +39,11 @@ pub trait VoiceActivityDetector: Send + Sync {
     fn reset(&mut self) {}
 }
 
+mod silero;
 mod smoothed;
 mod threshold;
 
+pub use silero::{SileroVad, SILERO_FRAME_SAMPLES};
 pub use smoothed::SmoothedVad;
 pub use threshold::ThresholdVad;
 

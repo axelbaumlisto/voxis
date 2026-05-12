@@ -102,7 +102,7 @@ fn process_llm_suggestions(
 // =============================================================================
 
 /// Pending suggestion entry for frontend display.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct PendingSuggestion {
     pub id: i64,
     pub source: String,
@@ -126,7 +126,7 @@ impl From<TrackedSuggestion> for PendingSuggestion {
 }
 
 /// Result of reprocessing history through LLM.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ReprocessResult {
     pub processed: usize,
     pub suggestions_found: usize,
@@ -138,6 +138,7 @@ pub struct ReprocessResult {
 
 /// Get all pending suggestions.
 #[tauri::command]
+#[specta::specta]
 pub fn get_pending_suggestions(paths: State<AppPaths>) -> Result<Vec<PendingSuggestion>, String> {
     let pending = get_factory(&paths).corrections().get_pending().cmd_err()?;
     Ok(pending.into_iter().map(PendingSuggestion::from).collect())
@@ -145,12 +146,14 @@ pub fn get_pending_suggestions(paths: State<AppPaths>) -> Result<Vec<PendingSugg
 
 /// Get count of pending suggestions.
 #[tauri::command]
+#[specta::specta]
 pub fn get_pending_count(paths: State<AppPaths>) -> Result<usize, String> {
     get_factory(&paths).corrections().pending_count().cmd_err()
 }
 
 /// Approve a pending suggestion and add to dictionary.
 #[tauri::command]
+#[specta::specta]
 pub fn approve_suggestion(id: i64, paths: State<AppPaths>) -> Result<(), String> {
     execute_suggestion_action(
         &get_factory(&paths),
@@ -161,6 +164,7 @@ pub fn approve_suggestion(id: i64, paths: State<AppPaths>) -> Result<(), String>
 
 /// Approve a suggestion by source and replacement.
 #[tauri::command]
+#[specta::specta]
 pub fn approve_suggestion_by_source(
     source: String,
     replacement: String,
@@ -175,6 +179,7 @@ pub fn approve_suggestion_by_source(
 
 /// Reject a pending suggestion.
 #[tauri::command]
+#[specta::specta]
 pub fn reject_suggestion(id: i64, paths: State<AppPaths>) -> Result<(), String> {
     execute_suggestion_action(
         &get_factory(&paths),
@@ -185,6 +190,7 @@ pub fn reject_suggestion(id: i64, paths: State<AppPaths>) -> Result<(), String> 
 
 /// Reject a suggestion by source and replacement.
 #[tauri::command]
+#[specta::specta]
 pub fn reject_suggestion_by_source(
     source: String,
     replacement: String,
@@ -199,6 +205,7 @@ pub fn reject_suggestion_by_source(
 
 /// Reprocess history entries through LLM to generate suggestions.
 #[tauri::command]
+#[specta::specta]
 pub async fn reprocess_history_for_suggestions(
     limit: Option<usize>,
     paths: State<'_, AppPaths>,

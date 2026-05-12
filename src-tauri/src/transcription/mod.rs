@@ -29,7 +29,7 @@ pub enum TranscriptionError {
 }
 
 /// Transcription result from API.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TranscriptionResult {
     pub text: String,
     #[serde(default)]

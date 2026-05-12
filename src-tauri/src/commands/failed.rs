@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, State};
 
 /// Get all failed transcriptions.
 #[tauri::command]
+#[specta::specta]
 pub fn get_failed_transcriptions(
     paths: State<'_, AppPaths>,
 ) -> Result<Vec<FailedTranscription>, String> {
@@ -21,6 +22,7 @@ pub fn get_failed_transcriptions(
 
 /// Dismiss (remove) a failed transcription by ID.
 #[tauri::command]
+#[specta::specta]
 pub fn dismiss_failed_transcription(id: String, paths: State<'_, AppPaths>) -> Result<(), String> {
     let storage = FailedAudioStorage::new(paths.config_dir())?;
     storage.remove(&id)
@@ -62,6 +64,7 @@ pub async fn retry_inner(paths: &AppPaths, id: &str, config: &AppConfig) -> Resu
 /// Loads the audio from storage, runs transcription again with current config,
 /// and on success adds the result to history and removes from failed storage.
 #[tauri::command]
+#[specta::specta]
 pub async fn retry_transcription(
     id: String,
     app: AppHandle,

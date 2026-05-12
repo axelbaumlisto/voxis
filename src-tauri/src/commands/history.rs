@@ -53,6 +53,7 @@ pub fn get_history(
 
 /// Add a new history entry.
 #[tauri::command]
+#[specta::specta]
 pub fn add_history_entry(
     text: String,
     language: Option<String>,
@@ -75,12 +76,14 @@ pub fn clear_history(paths: State<AppPaths>) -> Result<(), String> {
 
 /// Delete a history entry by ID.
 #[tauri::command]
+#[specta::specta]
 pub fn delete_history_entry(id: i64, paths: State<AppPaths>) -> Result<(), String> {
     get_factory(&paths).history().delete(id).cmd_err()
 }
 
 /// Search history.
 #[tauri::command]
+#[specta::specta]
 pub fn search_history(
     query: String,
     limit: Option<usize>,

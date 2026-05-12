@@ -8,7 +8,7 @@ use crate::permissions::{
 use serde::Serialize;
 
 /// Permission status response for frontend.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct PermissionInfo {
     pub name: String,
     pub status: String,
@@ -17,6 +17,7 @@ pub struct PermissionInfo {
 
 /// Check all required permissions and return their status.
 #[tauri::command]
+#[specta::specta]
 pub fn check_permissions() -> Vec<PermissionInfo> {
     let checker = create_permission_checker();
 
@@ -36,6 +37,7 @@ pub fn check_permissions() -> Vec<PermissionInfo> {
 
 /// Open system settings for a specific permission.
 #[tauri::command]
+#[specta::specta]
 pub fn open_permission_settings(permission: String) {
     let checker = create_permission_checker();
 
@@ -53,6 +55,7 @@ pub fn open_permission_settings(permission: String) {
 /// This is needed for the app to appear in Privacy > Microphone list.
 /// Uses AVFoundation via osascript to safely trigger permission dialog without crash.
 #[tauri::command]
+#[specta::specta]
 pub async fn request_microphone_permission() -> bool {
     request_microphone_permission_impl()
 }
@@ -105,6 +108,7 @@ pub fn trigger_microphone_permission_request() {
 /// This is needed for auto-typing functionality.
 /// Uses System Events via osascript to safely trigger permission dialog.
 #[tauri::command]
+#[specta::specta]
 pub async fn request_accessibility_permission() -> bool {
     request_accessibility_permission_impl()
 }
@@ -145,6 +149,7 @@ fn request_accessibility_permission_impl() -> bool {
 /// macOS requires restart for Accessibility and Input Monitoring permissions
 /// to take effect (TCC loads permissions at process start).
 #[tauri::command]
+#[specta::specta]
 pub fn restart_app() {
     #[cfg(target_os = "macos")]
     crate::permissions::macos::restart_app();
@@ -159,6 +164,7 @@ pub fn restart_app() {
 /// Bring the app window to the front.
 /// Useful after returning from System Settings.
 #[tauri::command]
+#[specta::specta]
 pub fn bring_to_front() {
     #[cfg(target_os = "macos")]
     crate::permissions::macos::bring_app_to_front();

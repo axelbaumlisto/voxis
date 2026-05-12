@@ -16,7 +16,7 @@ fn safe_default_host() -> Result<cpal::Host, AudioError> {
 }
 
 /// Audio device info for UI display.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct AudioDevice {
     pub id: String,
     pub name: String,

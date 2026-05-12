@@ -11,18 +11,21 @@ use tauri::State;
 
 /// Show the overlay window with the given state.
 #[tauri::command]
+#[specta::specta]
 pub fn show_overlay(state: OverlayState, app: AppHandle) -> Result<(), String> {
     overlay::show_overlay(&app, state)
 }
 
 /// Hide the overlay window.
 #[tauri::command]
+#[specta::specta]
 pub fn hide_overlay(app: AppHandle) -> Result<(), String> {
     overlay::hide_overlay(&app)
 }
 
 /// Update the overlay position.
 #[tauri::command]
+#[specta::specta]
 pub fn update_overlay_position(
     position: OverlayPosition,
     margin: i32,
@@ -34,6 +37,7 @@ pub fn update_overlay_position(
 /// Get the current overlay state (pull-based initialization).
 /// Frontend calls this after setting up listeners to get missed state.
 #[tauri::command]
+#[specta::specta]
 pub fn get_overlay_state() -> OverlayState {
     let state = overlay::get_current_state();
     tracing::info!("get_overlay_state called, returning: {:?}", state);
@@ -42,12 +46,14 @@ pub fn get_overlay_state() -> OverlayState {
 
 /// Get all available visualization themes.
 #[tauri::command]
+#[specta::specta]
 pub fn get_visualization_themes(theme_loader: State<'_, ThemeLoaderState>) -> Vec<ThemeInfo> {
     VisualizationTheme::available_themes(&theme_loader.handle)
 }
 
 /// Validate a visualization theme.
 #[tauri::command]
+#[specta::specta]
 pub fn validate_visualization_theme(
     theme_id: String,
     theme_loader: State<'_, ThemeLoaderState>,
@@ -58,6 +64,7 @@ pub fn validate_visualization_theme(
 
 /// Get path to themes directory.
 #[tauri::command]
+#[specta::specta]
 pub fn get_themes_dir(app: AppHandle) -> Result<String, String> {
     let paths = AppPaths::new(&app).map_err(|e| e.to_string())?;
     let dir = paths.ensure_themes_dir().map_err(|e| e.to_string())?;
@@ -66,6 +73,7 @@ pub fn get_themes_dir(app: AppHandle) -> Result<String, String> {
 
 /// Export a builtin theme to a theme folder for user customization.
 #[tauri::command]
+#[specta::specta]
 pub fn export_builtin_theme(theme_id: String, app: AppHandle) -> Result<String, String> {
     let paths = AppPaths::new(&app).map_err(|e| e.to_string())?;
     let themes_dir = paths.ensure_themes_dir().map_err(|e| e.to_string())?;
@@ -103,6 +111,7 @@ fn export_builtin_theme_to_dir(
 
 /// Reload visualization themes from disk.
 #[tauri::command]
+#[specta::specta]
 pub fn reload_visualization_themes(
     theme_loader: State<'_, ThemeLoaderState>,
 ) -> Result<(), String> {
@@ -111,6 +120,7 @@ pub fn reload_visualization_themes(
 
 /// Preview a visualization theme without saving config.
 #[tauri::command]
+#[specta::specta]
 pub async fn preview_visualization_theme(
     theme_id: String,
     reload_from_disk: Option<bool>,
@@ -126,6 +136,7 @@ pub async fn preview_visualization_theme(
 
 /// Get theme colors for frontend CSS synchronization.
 #[tauri::command]
+#[specta::specta]
 pub fn get_theme_colors(
     theme_id: String,
     theme_loader: State<'_, ThemeLoaderState>,
