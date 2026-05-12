@@ -77,8 +77,19 @@ pub fn start_audio_level_polling(
                 );
             }
 
-            // Send spectrum bins to overlay
-            overlay.lock().await.send_spectrum_bins(spectrum);
+            // Derive scalar audio level for webview overlays (peak of spectrum).
+            // SRP: spectrum analyzer keeps owning FFT math; this is just a
+            // collapse to a single visualizer input that NSPanel/webview needs.
+            let audio_level = spectrum.iter().cloned().fold(0.0f32, f32::max).min(1.0);
+
+            // Send both signals to the overlay backend. Backends that don't
+            // need a separate level (e.g. egui subprocess) get a no-op on
+            // send_audio_level; NSPanel forwards it as `overlay://audio-level`.
+            {
+                let overlay_guard = overlay.lock().await;
+                overlay_guard.send_audio_level(audio_level);
+                overlay_guard.send_spectrum_bins(spectrum);
+            }
 
             count += 1;
 
