@@ -13,7 +13,6 @@
 //! - commands: Tauri commands exposed to frontend
 //! - setup: Application initialization and configuration
 
-pub mod apple_intelligence;
 pub mod audio;
 pub mod commands;
 pub mod config;

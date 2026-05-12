@@ -13,12 +13,12 @@
 //! - engine.rs: Pipeline orchestration + request execution
 //! - parser.rs: JSON parsing strategies + result parsing facade
 //! - processor.rs: LlmProcessor facade (high-level, returns structured LlmResult)
-//! - provider/: pluggable `LlmProvider` trait + HTTP / Apple Intelligence impls
+//! - provider/: pluggable `LlmProvider` trait + HTTP impl
 
 mod client;
 mod config;
 mod engine;
-mod parser;
+pub mod parser;
 mod processor;
 pub mod provider;
 mod types;
@@ -27,6 +27,3 @@ pub use config::LlmConfig;
 pub use processor::LlmProcessor;
 pub use provider::{HttpLlmProvider, LlmProvider};
 pub use types::{DictionarySuggestion, LlmResult};
-
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub use provider::AppleIntelligenceProvider;
