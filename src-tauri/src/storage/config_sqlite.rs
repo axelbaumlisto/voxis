@@ -81,6 +81,42 @@ impl ConfigSqliteStorage {
         Ok(())
     }
 
+    /// Read + serde-deserialize a JSON-encoded value. Returns `default`
+    /// when the key is absent, the value is empty, or deserialization
+    /// fails (corrupt blob never crashes the load path — user keeps
+    /// the default for that key and the rest of the config loads).
+    ///
+    /// DRY: replaces the three slightly-different copies that lived
+    /// in the old `load()` for auto_submit_key, shortcut_bindings, and
+    /// the per-field retention/hotkey_mode whitelists.
+    fn get_json<T: serde::de::DeserializeOwned>(
+        &self,
+        conn: &Connection,
+        key: &str,
+        default: T,
+    ) -> T {
+        let Some(raw) = self.get(conn, key) else {
+            return default;
+        };
+        if raw.is_empty() {
+            return default;
+        }
+        serde_json::from_str::<T>(&raw).unwrap_or(default)
+    }
+
+    /// Serialize + upsert a JSON-encoded value. Errors are propagated
+    /// so the save path stays atomic-ish (one bad key fails the whole
+    /// save, surfacing the bug instead of silently dropping it).
+    fn set_json<T: serde::Serialize>(
+        &self,
+        conn: &Connection,
+        key: &str,
+        value: &T,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let json = serde_json::to_string(value)?;
+        self.set(conn, key, &json)
+    }
+
     /// Load config from SQLite database.
     pub fn load(&self) -> Result<AppConfig, Box<dyn std::error::Error>> {
         if !self.path.exists() {
@@ -113,14 +149,14 @@ impl ConfigSqliteStorage {
             "translate_to_english",
             config.translate_to_english,
         );
-        if let Some(v) = self.get(&conn, "auto_submit_key") {
-            if let Ok(parsed) = serde_json::from_str::<
-                crate::output::auto_submit::AutoSubmitKey,
-            >(&format!("\"{v}\""))
-            {
-                config.auto_submit_key = parsed;
-            }
-        }
+        // auto_submit_key serialized as JSON (e.g. "off", "cmd_enter")
+        // — stored with the quotes via set_json so get_json reads it
+        // back symmetrically.
+        config.auto_submit_key = self.get_json(
+            &conn,
+            "auto_submit_key",
+            config.auto_submit_key,
+        );
         config.audio_feedback.enabled = self.get_bool(
             &conn,
             "audio_feedback_enabled",
@@ -131,17 +167,13 @@ impl ConfigSqliteStorage {
             "audio_feedback_volume",
             config.audio_feedback.volume,
         );
-        // shortcut_bindings stored as a single JSON column — simpler
-        // than a side table for a list whose total size is < 4 KB.
-        if let Some(json) = self.get(&conn, "shortcut_bindings") {
-            if let Ok(parsed) = serde_json::from_str::<
-                Vec<crate::shortcut::ShortcutBinding>,
-            >(&json)
-            {
-                if !parsed.is_empty() {
-                    config.shortcut_bindings = parsed;
-                }
-            }
+        // shortcut_bindings: single JSON column (DRY storage pattern).
+        // Empty array on disk still overrides the default if we let it;
+        // we keep the seeded defaults via the only-when-non-empty guard.
+        let stored_bindings: Vec<crate::shortcut::ShortcutBinding> = self
+            .get_json(&conn, "shortcut_bindings", Vec::new());
+        if !stored_bindings.is_empty() {
+            config.shortcut_bindings = stored_bindings;
         }
         config.first_run_completed = self.get_bool(
             &conn,
@@ -270,12 +302,7 @@ impl ConfigSqliteStorage {
             "translate_to_english",
             &config.translate_to_english.to_string(),
         )?;
-        // serde produces e.g. ""cmd_enter"" — trim quotes for storage.
-        let auto_submit_str = serde_json::to_string(&config.auto_submit_key)
-            .unwrap_or_else(|_| "\"off\"".to_string())
-            .trim_matches('"')
-            .to_string();
-        self.set(&conn, "auto_submit_key", &auto_submit_str)?;
+        self.set_json(&conn, "auto_submit_key", &config.auto_submit_key)?;
         self.set(
             &conn,
             "audio_feedback_enabled",
@@ -286,9 +313,7 @@ impl ConfigSqliteStorage {
             "audio_feedback_volume",
             &config.audio_feedback.volume.to_string(),
         )?;
-        if let Ok(json) = serde_json::to_string(&config.shortcut_bindings) {
-            self.set(&conn, "shortcut_bindings", &json)?;
-        }
+        self.set_json(&conn, "shortcut_bindings", &config.shortcut_bindings)?;
         self.set(
             &conn,
             "first_run_completed",
@@ -426,6 +451,59 @@ mod tests {
         assert_eq!(loaded.hotkey, "f12");
         assert!(!loaded.auto_type);
         assert_eq!(loaded.llm.api_key, "llm-key-456");
+    }
+
+    #[test]
+    fn json_helpers_roundtrip_via_save_and_load() {
+        // Covers the get_json / set_json contract via the public
+        // save/load API: a complex value (auto_submit_key enum,
+        // shortcut_bindings list, audio_feedback nested struct) must
+        // round-trip identically.
+        let file = NamedTempFile::new().unwrap();
+        let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
+
+        let mut config = AppConfig {
+            auto_submit_key: crate::output::auto_submit::AutoSubmitKey::CmdEnter,
+            ..AppConfig::default()
+        };
+        config.audio_feedback.enabled = true;
+        config.audio_feedback.volume = 0.42;
+        config.shortcut_bindings[0].current_binding = "f9".to_string();
+
+        storage.save(&config).unwrap();
+        let loaded = storage.load().unwrap();
+
+        assert_eq!(
+            loaded.auto_submit_key,
+            crate::output::auto_submit::AutoSubmitKey::CmdEnter
+        );
+        assert!(loaded.audio_feedback.enabled);
+        assert!((loaded.audio_feedback.volume - 0.42).abs() < 1e-6);
+        assert_eq!(loaded.shortcut_bindings[0].current_binding, "f9");
+    }
+
+    #[test]
+    fn json_helpers_handle_corrupt_blob_gracefully() {
+        // Manually inject a malformed JSON for auto_submit_key; load
+        // must keep the default rather than panicking. The defensive
+        // unwrap_or(default) in get_json is what makes this safe.
+        let file = NamedTempFile::new().unwrap();
+        let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
+        // First save a valid config to create the table.
+        storage.save(&AppConfig::default()).unwrap();
+        // Then corrupt the value at the SQL level.
+        let conn = storage.connect().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO config (key, value) VALUES ('auto_submit_key', '{ not json }')",
+            [],
+        )
+        .unwrap();
+
+        let loaded = storage.load().unwrap();
+        assert_eq!(
+            loaded.auto_submit_key,
+            crate::output::auto_submit::AutoSubmitKey::Off
+        );
     }
 
     #[test]
