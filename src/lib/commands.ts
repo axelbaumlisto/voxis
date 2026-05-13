@@ -4,13 +4,33 @@ import { invoke } from "@tauri-apps/api/core";
 // Types
 // =============================================================================
 
+/**
+ * Hand-maintained TypeScript view of the Rust `AppConfig` struct.
+ *
+ * Kept in sync with `src-tauri/src/config/mod.rs::AppConfig`. The
+ * auto-generated `src/bindings.ts` has the canonical shape but uses
+ * `?: T | undefined` for every field (specta default), which is
+ * inconvenient for the settings UI — hand-curated required-fields
+ * version stays here.
+ *
+ * When adding a field in Rust, ALSO add it here. The two are
+ * regression-checked indirectly via the e2e settings save test
+ * (which round-trips every key).
+ */
 export interface AppConfig {
   api_key: string;
   model: string;
   language: string;
   hotkey: string;
+  hotkey_hold_ms: number;
+  hotkey_mode: string;
   auto_type: boolean;
   auto_enter: boolean;
+  append_trailing_space: boolean;
+  translate_to_english: boolean;
+  auto_submit_key: "off" | "enter" | "cmd_enter" | "shift_enter";
+  audio_feedback: { enabled: boolean; volume: number };
+  always_on_microphone: boolean;
   typing_delay: number;
   notifications: boolean;
   backend: string;
@@ -18,11 +38,14 @@ export interface AppConfig {
   audio_device: string;
   history_enabled: boolean;
   history_days: number;
+  retention_period: string;
+  retention_limit: number;
   active_provider: string;
   cloud_provider: string;
   local_backend: string;
   text_processing: boolean;
   paste_shortcuts: string;
+  first_run_completed: boolean;
   vad: VadConfig;
   overlay: OverlayConfig;
   llm: LlmConfig;
