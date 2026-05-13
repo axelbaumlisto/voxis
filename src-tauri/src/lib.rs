@@ -14,6 +14,7 @@
 //! - setup: Application initialization and configuration
 
 pub mod audio;
+pub mod audio_feedback;
 pub mod commands;
 pub mod config;
 pub mod error;
