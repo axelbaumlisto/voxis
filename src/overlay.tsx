@@ -19,6 +19,7 @@ import {
 import { useSmoothBars } from "./hooks/useSmoothBars";
 import HandyPill from "./components/overlay/HandyPill";
 import ClassicBars from "./components/overlay/ClassicBars";
+import OrganicRing from "./components/overlay/OrganicRing";
 import { commands } from "./bindings";
 import {
   HandyThemeProvider,
@@ -76,8 +77,36 @@ function PillContent({ snapshot }: { snapshot: OverlaySnapshot }) {
     );
   }
 
-  // Both 'handy' and 'organic_ring' currently render via HandyPill.
-  // T8.2 will wire OrganicRing as a dedicated renderer for the latter.
+  if (theme.family === "organic_ring") {
+    // OrganicRing expects the legacy OrganicRingShape/Motion DTO types.
+    // Our HandyPillRing has the same field names, so we can pass it
+    // through directly; the DTO is just a serde-renamed view.
+    return (
+      <OrganicRing
+        spectrumBins={bars}
+        audioLevel={snapshot.audioLevel}
+        mode={effectiveMode}
+        themeShape={{
+          gap_degrees: theme.ring.gap_degrees,
+          base_thickness: theme.ring.base_thickness,
+          taper: theme.ring.taper,
+          roundness: theme.ring.roundness,
+          active_zones: theme.ring.active_zones,
+        }}
+        themeMotion={{
+          speech_responsiveness: theme.ring.speech_responsiveness,
+          drift: theme.ring.drift,
+          settle_speed: theme.ring.settle_speed,
+          // idle_breathing is in the common animation block, not ring.
+          idle_breathing: theme.animation.idle_breathing_amplitude,
+        }}
+        color={theme.palette.icon_color}
+        width={172}
+        height={36}
+      />
+    );
+  }
+
   return (
     <HandyPill
       mode={effectiveMode}

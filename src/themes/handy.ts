@@ -70,11 +70,24 @@ export interface HandyPillBars {
   gradient_top: string;
 }
 
+/** Per-family organic-ring configuration (only used when `family === "organic_ring"`). */
+export interface HandyPillRing {
+  gap_degrees: number;
+  base_thickness: number;
+  taper: number;
+  roundness: number;
+  active_zones: number;
+  speech_responsiveness: number;
+  drift: number;
+  settle_speed: number;
+}
+
 export interface HandyPillTheme {
   family: HandyPillFamily;
   palette: HandyPillPalette;
   animation: HandyPillAnimation;
   bars: HandyPillBars;
+  ring: HandyPillRing;
 }
 
 /** Math hand-off for useSmoothBars / HandyBars. */
@@ -117,11 +130,24 @@ const DEFAULT_BARS: HandyPillBars = {
   gradient_top: "#64b5f6",
 };
 
+/** Default organic-ring config — mirrors living_reed (balanced profile). */
+const DEFAULT_RING: HandyPillRing = {
+  gap_degrees: 42.0,
+  base_thickness: 7.2,
+  taper: 0.7,
+  roundness: 0.9,
+  active_zones: 3,
+  speech_responsiveness: 0.92,
+  drift: 0.38,
+  settle_speed: 0.6,
+};
+
 export const DEFAULT_HANDY_THEME: HandyPillTheme = {
   family: "handy",
   palette: { ...DEFAULT_PALETTE },
   animation: { ...DEFAULT_ANIMATION },
   bars: { ...DEFAULT_BARS },
+  ring: { ...DEFAULT_RING },
 };
 
 const MIN_MS = 1;
@@ -258,11 +284,13 @@ export function resolveHandyTheme(input: unknown): HandyPillTheme {
     family?: unknown;
     bars?: unknown;
   };
+  const legacyRing = (input as { organic_ring?: unknown }).organic_ring;
   return {
     family: resolveFamily(handyPill.family, root.family),
     palette: resolvePalette(handyPill.palette),
     animation: resolveAnimation(handyPill.animation),
     bars: resolveBars(handyPill.bars, root.gradient),
+    ring: resolveRing((handyPill as { ring?: unknown }).ring, legacyRing),
   };
 }
 
@@ -272,6 +300,81 @@ function cloneDefault(): HandyPillTheme {
     palette: { ...DEFAULT_PALETTE },
     animation: { ...DEFAULT_ANIMATION },
     bars: { ...DEFAULT_BARS },
+    ring: { ...DEFAULT_RING },
+  };
+}
+
+function resolveRing(input: unknown, legacy: unknown): HandyPillRing {
+  const src = (input ?? {}) as Partial<HandyPillRing>;
+  const legacyTyped = (legacy ?? {}) as {
+    shape?: Partial<{
+      gap_degrees: number;
+      base_thickness: number;
+      taper: number;
+      roundness: number;
+      active_zones: number;
+    }>;
+    motion?: Partial<{
+      speech_responsiveness: number;
+      drift: number;
+      settle_speed: number;
+    }>;
+  };
+  const lShape = legacyTyped.shape ?? {};
+  const lMotion = legacyTyped.motion ?? {};
+  const clampN = (v: number, lo: number, hi: number) => clamp(v, lo, hi);
+  return {
+    gap_degrees: clampN(
+      asNumber(src.gap_degrees ?? lShape.gap_degrees, DEFAULT_RING.gap_degrees),
+      0,
+      359,
+    ),
+    base_thickness: Math.max(
+      0.1,
+      asNumber(
+        src.base_thickness ?? lShape.base_thickness,
+        DEFAULT_RING.base_thickness,
+      ),
+    ),
+    taper: clampN(
+      asNumber(src.taper ?? lShape.taper, DEFAULT_RING.taper),
+      0,
+      1,
+    ),
+    roundness: clampN(
+      asNumber(src.roundness ?? lShape.roundness, DEFAULT_RING.roundness),
+      0,
+      1,
+    ),
+    active_zones: clampN(
+      asNumber(
+        src.active_zones ?? lShape.active_zones,
+        DEFAULT_RING.active_zones,
+      ),
+      1,
+      12,
+    ),
+    speech_responsiveness: clampN(
+      asNumber(
+        src.speech_responsiveness ?? lMotion.speech_responsiveness,
+        DEFAULT_RING.speech_responsiveness,
+      ),
+      0,
+      2,
+    ),
+    drift: clampN(
+      asNumber(src.drift ?? lMotion.drift, DEFAULT_RING.drift),
+      0,
+      2,
+    ),
+    settle_speed: clampN(
+      asNumber(
+        src.settle_speed ?? lMotion.settle_speed,
+        DEFAULT_RING.settle_speed,
+      ),
+      0,
+      2,
+    ),
   };
 }
 
