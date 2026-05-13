@@ -1,5 +1,24 @@
-/* HandyPill layout & animations — ported 1:1 from Handy's RecordingOverlay.css
- * (github.com/cjpais/Handy/src/overlay/RecordingOverlay.css).
+/* HandyPill layout & animations.
+ *
+ * Originally ported 1:1 from Handy's RecordingOverlay.css
+ * (github.com/cjpais/Handy/src/overlay/RecordingOverlay.css);
+ * now driven by `--hp-*` CSS variables published by
+ * <HandyThemeProvider> (src/themes/HandyThemeProvider.tsx) so every
+ * theme's palette + timings live in one JSON file per theme.
+ *
+ * All values have a literal fallback after the var() reference so the
+ * pill stays fully styled even without a Provider (e.g. in unit tests).
+ *
+ * --hp-* variables (19 total) come from src/themes/handy.ts:
+ *   palette (6):    --hp-icon, --hp-bar, --hp-bar-glow, --hp-shadow,
+ *                   --hp-transcribing-text, --hp-cancel-hover-bg
+ *   animation (13): --hp-smoothing-alpha, --hp-power-curve,
+ *                   --hp-peak-decay, --hp-bar-min-height-px,
+ *                   --hp-bar-min-opacity, --hp-bar-opacity-gain,
+ *                   --hp-bar-height-ms, --hp-bar-opacity-ms,
+ *                   --hp-pill-fade-ms, --hp-transcribing-pulse-ms,
+ *                   --hp-breathing-amplitude, --hp-breathing-period-ms,
+ *                   --hp-cancel-hover-ms
  */
 .recording-overlay {
   height: 36px;
@@ -10,13 +29,12 @@
   padding: 6px;
   /* Fully transparent in ALL modes — only the icons and bars are
    * drawn over the desktop. The pill never "capsules" the icon.
-   * To keep glyphs legible against light desktops, individual
-   * elements (icons, bars) carry their own subtle drop-shadow.
-   */
+   * Per-element drop-shadow (--hp-shadow) keeps glyphs legible on
+   * light wallpapers. */
   background: transparent;
   border-radius: 18px;
   opacity: 0;
-  transition: opacity 300ms ease-out;
+  transition: opacity var(--hp-pill-fade-ms, 300ms) ease-out;
   box-sizing: border-box;
 }
 
@@ -25,9 +43,7 @@
 .overlay-right {
   display: flex;
   align-items: center;
-  /* Drop-shadow makes the pink glyphs legible on light desktops without
-   * a dark capsule behind them. */
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+  filter: drop-shadow(0 1px 2px var(--hp-shadow, rgba(0, 0, 0, 0.45)));
 }
 
 .overlay-middle {
@@ -42,12 +58,33 @@
   opacity: 1;
 }
 
+/* Idle-state breathing on the left icon.
+ * amplitude = 0 (default) → keyframes have no visible effect.
+ * amplitude > 0 → opacity oscillates between (1 - amplitude) and 1.
+ * Period configurable per theme via --hp-breathing-period-ms.
+ */
+@keyframes hp-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: calc(1 - var(--hp-breathing-amplitude, 0));
+  }
+}
+
+.recording-overlay[data-mode="idle"] .overlay-left {
+  animation: hp-breathe var(--hp-breathing-period-ms, 3000ms) ease-in-out
+    infinite;
+}
+
 .transcribing-text {
-  color: white;
+  color: var(--hp-transcribing-text, #ffffff);
   font-size: 12px;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  animation: transcribing-pulse 1.5s infinite ease-in-out;
+  animation: transcribing-pulse var(--hp-transcribing-pulse-ms, 1500ms)
+    infinite ease-in-out;
   /* Text drop-shadow for readability against any wallpaper. */
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
@@ -74,13 +111,13 @@
   border: none;
   padding: 0;
   transition:
-    background-color 150ms ease-out,
+    background-color var(--hp-cancel-hover-ms, 150ms) ease-out,
     transform 100ms ease-out;
   flex-shrink: 0;
 }
 
 .cancel-button:hover {
-  background: #faa2ca33;
+  background: var(--hp-cancel-hover-bg, rgba(250, 162, 202, 0.2));
   transform: scale(1.05);
 }
 
