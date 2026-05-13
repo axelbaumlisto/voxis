@@ -167,6 +167,11 @@ impl ConfigSqliteStorage {
             "retention_limit",
             config.retention_limit,
         );
+        config.always_on_microphone = self.get_bool(
+            &conn,
+            "always_on_microphone",
+            config.always_on_microphone,
+        );
         config.typing_delay = self.get_typed(&conn, "typing_delay", config.typing_delay);
         config.notifications = self.get_bool(&conn, "notifications", config.notifications);
         config.backend = self.get_str(&conn, "backend", &config.backend);
@@ -295,6 +300,11 @@ impl ConfigSqliteStorage {
             &conn,
             "retention_limit",
             &config.retention_limit.to_string(),
+        )?;
+        self.set(
+            &conn,
+            "always_on_microphone",
+            &config.always_on_microphone.to_string(),
         )?;
         self.set(&conn, "typing_delay", &config.typing_delay.to_string())?;
         self.set(&conn, "notifications", &config.notifications.to_string())?;

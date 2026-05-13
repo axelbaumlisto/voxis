@@ -362,6 +362,22 @@ pub struct AppConfig {
     #[serde(default = "default_retention_limit")]
     pub retention_limit: u32,
 
+    /// Always-on microphone (#8). When enabled, the capture stream
+    /// stays warm between recordings so the first sample reaches the
+    /// buffer with zero cold-start delay.
+    ///
+    /// **Platform behaviour**:
+    ///  - macOS: the audio thread already implements pause/resume
+    ///    (see `recorder::stop_macos_pause`) so the stream is
+    ///    effectively always-on regardless of this flag — we surface
+    ///    the toggle for UX parity with Linux/Windows and for the
+    ///    privacy notice.
+    ///  - Linux/Windows: TODO — currently the cpal stream is dropped
+    ///    on `stop()`. Wiring is left for a follow-up commit; the
+    ///    flag is honoured in the config schema today.
+    #[serde(default)]
+    pub always_on_microphone: bool,
+
     // Paste shortcuts (Linux only) - comma-separated list
     #[serde(default = "default_paste_shortcuts")]
     pub paste_shortcuts: String,
@@ -411,6 +427,7 @@ impl Default for AppConfig {
             hotkey_mode: default_hotkey_mode(),
             retention_period: default_retention_period(),
             retention_limit: default_retention_limit(),
+            always_on_microphone: false,
             paste_shortcuts: DEFAULT_PASTE_SHORTCUTS.into(),
             api_url_override: None,
             vad: VadConfig::default(),

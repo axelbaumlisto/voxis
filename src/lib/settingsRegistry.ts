@@ -102,7 +102,7 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
   },
   {
     key: "hotkey_mode",
-    label: "Hotkey activation",
+    label: "Activation mode",
     widgetType: "select",
     section: "Recording",
     description:
@@ -111,6 +111,15 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
       { label: "Hold (legacy)", value: "hold" },
       { label: "Toggle (tap to start/stop)", value: "toggle" },
     ],
+  },
+  {
+    key: "always_on_microphone",
+    label: "Always-on microphone",
+    widgetType: "custom",
+    section: "Recording",
+    description:
+      "Keep the audio capture stream alive between recordings to remove the cold-start delay on the first sample of each take.",
+    customComponent: "always-on-microphone",
   },
   {
     key: "audio_device",

@@ -860,7 +860,23 @@ retention_period?: string;
  * How many recent entries `retention_period = preserve_limit`
  * should keep. Ignored for other policies.
  */
-retention_limit?: number; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
+retention_limit?: number; 
+/**
+ * Always-on microphone (#8). When enabled, the capture stream
+ * stays warm between recordings so the first sample reaches the
+ * buffer with zero cold-start delay.
+ * 
+ * **Platform behaviour**:
+ * - macOS: the audio thread already implements pause/resume
+ * (see `recorder::stop_macos_pause`) so the stream is
+ * effectively always-on regardless of this flag — we surface
+ * the toggle for UX parity with Linux/Windows and for the
+ * privacy notice.
+ * - Linux/Windows: TODO — currently the cpal stream is dropped
+ * on `stop()`. Wiring is left for a follow-up commit; the
+ * flag is honoured in the config schema today.
+ */
+always_on_microphone?: boolean; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
 /**
  * Audio device info for UI display.
  */

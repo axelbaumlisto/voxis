@@ -1,4 +1,5 @@
 import React from "react";
+import AlwaysOnMicrophone from "../components/settings/AlwaysOnMicrophone";
 import AudioFeedback from "../components/settings/AudioFeedback";
 import AutoSubmitSelector from "../components/settings/AutoSubmitSelector";
 import LlmPromptManager from "../components/settings/LlmPromptManager";
@@ -109,6 +110,25 @@ registerCustomWidget("auto-submit-select", ({
 
 // Multi-binding shortcut list (#2 from Handy recommendations).
 registerCustomWidget("shortcut-binding-list", () => <ShortcutBindingList />);
+
+// Always-on microphone toggle + privacy warning (#8 from Handy recommendations).
+registerCustomWidget("always-on-microphone", ({
+  label,
+  description,
+  config,
+  settingKey,
+  onChange,
+}) => (
+  <AlwaysOnMicrophone
+    label={label}
+    description={description}
+    value={
+      (config as unknown as { always_on_microphone?: boolean })
+        .always_on_microphone ?? false
+    }
+    onChange={(value) => onChange(settingKey, value)}
+  />
+));
 
 // Audio feedback toggle + volume slider (#6 from Handy recommendations).
 registerCustomWidget("audio-feedback", ({
