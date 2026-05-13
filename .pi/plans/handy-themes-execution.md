@@ -540,10 +540,10 @@ describe("themeBarMath", () => {
 | T3.2 GREEN Rust + command | ✅ 9 GREEN (764 total) | 7298825 | 2026-05-13 10:11 |
 | T4.1 Populate 7 themes | ✅ +1 distinct test (765 total) | f7784ef | 2026-05-13 10:18 |
 | T5.1 getHandyTheme wire | ✅ 1003 vitest + 7 e2e | 68f1009 | 2026-05-13 10:25 |
-| T5.2 Debug commands | 🔜 (pending live gallery) | — | — |
+| T5.2 Debug commands | ✅ 4 cmds + socket | 2bf09d8 | 2026-05-13 11:14 |
 | T5.3 Synthetic e2e | ✅ 15 new · 128 total | 9add194 | 2026-05-13 10:35 |
-| T5.4 E2E helpers | — | — | — |
-| T5.5 Live gallery spec | — | — | — |
+| T5.4 E2E helpers | ✅ (squashed into T5.5) | ddf4c74 | 2026-05-13 11:24 |
+| T5.5 Live gallery spec | ✅ 8 themes × 8 frames = 64 PNG | ddf4c74 | 2026-05-13 11:24 |
 | T5.6 Animations + index | — | — | — |
 | T6.1 list_handy_themes | — | — | — |
 | T6.2 ThemeSelector | — | — | — |
