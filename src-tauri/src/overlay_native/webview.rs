@@ -159,9 +159,19 @@ fn build_overlay_window(
         builder = builder.devtools(true);
     }
 
-    let _window = builder
+    let window = builder
         .build()
         .map_err(|e| format!("Failed to build overlay webview: {e}"))?;
+
+    // Some compositors (notably GNOME/Mutter, Plasma/KWin) ignore inner_size
+    // for borderless transparent windows during build. Re-assert both size
+    // and position explicitly post-build so the pill always lands at exactly
+    // PILL_WIDTH x PILL_HEIGHT.
+    let _ = window.set_size(LogicalSize::new(
+        PILL_WIDTH as f64,
+        PILL_HEIGHT as f64,
+    ));
+    let _ = window.set_position(LogicalPosition::new(x, y));
     Ok(())
 }
 
