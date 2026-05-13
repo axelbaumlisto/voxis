@@ -59,9 +59,22 @@ export interface HandyPillAnimation {
   cancel_hover_ms: number;
 }
 
+/** Visualisation family — picks which renderer the OverlayApp uses. */
+export type HandyPillFamily = "bars" | "organic_ring" | "handy";
+
+/** Per-family bars configuration (only used when `family === "bars"`). */
+export interface HandyPillBars {
+  count: number;
+  gradient_bottom: string;
+  gradient_middle: string;
+  gradient_top: string;
+}
+
 export interface HandyPillTheme {
+  family: HandyPillFamily;
   palette: HandyPillPalette;
   animation: HandyPillAnimation;
+  bars: HandyPillBars;
 }
 
 /** Math hand-off for useSmoothBars / HandyBars. */
@@ -96,9 +109,19 @@ const DEFAULT_ANIMATION: HandyPillAnimation = {
   cancel_hover_ms: 150,
 };
 
+/** Default bars config — Material Blue gradient (legacy `default` theme). */
+const DEFAULT_BARS: HandyPillBars = {
+  count: 16,
+  gradient_bottom: "#1e88e5",
+  gradient_middle: "#42a5f5",
+  gradient_top: "#64b5f6",
+};
+
 export const DEFAULT_HANDY_THEME: HandyPillTheme = {
+  family: "handy",
   palette: { ...DEFAULT_PALETTE },
   animation: { ...DEFAULT_ANIMATION },
+  bars: { ...DEFAULT_BARS },
 };
 
 const MIN_MS = 1;
@@ -222,18 +245,72 @@ function resolveAnimation(input: unknown): HandyPillAnimation {
  */
 export function resolveHandyTheme(input: unknown): HandyPillTheme {
   if (input == null || typeof input !== "object") {
-    return { ...DEFAULT_HANDY_THEME, palette: { ...DEFAULT_PALETTE },
-             animation: { ...DEFAULT_ANIMATION } };
+    return cloneDefault();
   }
-  const root = input as { handy_pill?: unknown };
-  if (root.handy_pill == null || typeof root.handy_pill !== "object") {
-    return { palette: { ...DEFAULT_PALETTE },
-             animation: { ...DEFAULT_ANIMATION } };
-  }
-  const hp = root.handy_pill as { palette?: unknown; animation?: unknown };
+  const root = input as {
+    handy_pill?: unknown;
+    family?: unknown;
+    gradient?: unknown;
+  };
+  const handyPill = (root.handy_pill ?? {}) as {
+    palette?: unknown;
+    animation?: unknown;
+    family?: unknown;
+    bars?: unknown;
+  };
   return {
-    palette: resolvePalette(hp.palette),
-    animation: resolveAnimation(hp.animation),
+    family: resolveFamily(handyPill.family, root.family),
+    palette: resolvePalette(handyPill.palette),
+    animation: resolveAnimation(handyPill.animation),
+    bars: resolveBars(handyPill.bars, root.gradient),
+  };
+}
+
+function cloneDefault(): HandyPillTheme {
+  return {
+    family: DEFAULT_HANDY_THEME.family,
+    palette: { ...DEFAULT_PALETTE },
+    animation: { ...DEFAULT_ANIMATION },
+    bars: { ...DEFAULT_BARS },
+  };
+}
+
+function resolveFamily(
+  handyFamily: unknown,
+  rootFamily: unknown,
+): HandyPillFamily {
+  const norm = (v: unknown): HandyPillFamily | null =>
+    v === "bars" || v === "organic_ring" || v === "handy"
+      ? (v as HandyPillFamily)
+      : null;
+  return norm(handyFamily) ?? norm(rootFamily) ?? DEFAULT_HANDY_THEME.family;
+}
+
+function resolveBars(input: unknown, legacyGradient: unknown): HandyPillBars {
+  const src = (input ?? {}) as Partial<HandyPillBars>;
+  const legacy = (legacyGradient ?? {}) as {
+    bottom?: unknown;
+    middle?: unknown;
+    top?: unknown;
+  };
+  const count = Math.max(
+    2,
+    Math.min(64, asNumber(src.count, DEFAULT_BARS.count)),
+  );
+  return {
+    count,
+    gradient_bottom: asString(
+      src.gradient_bottom ?? legacy.bottom,
+      DEFAULT_BARS.gradient_bottom,
+    ),
+    gradient_middle: asString(
+      src.gradient_middle ?? legacy.middle,
+      DEFAULT_BARS.gradient_middle,
+    ),
+    gradient_top: asString(
+      src.gradient_top ?? legacy.top,
+      DEFAULT_BARS.gradient_top,
+    ),
   };
 }
 

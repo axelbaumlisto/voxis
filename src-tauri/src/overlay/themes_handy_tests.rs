@@ -26,10 +26,62 @@ fn json(s: &str) -> serde_json::Value {
 }
 
 #[test]
-fn missing_handy_pill_block_returns_default() {
+fn missing_handy_pill_block_returns_default_palette_and_animation() {
+    // Even without a `handy_pill` block, the legacy `family` field at
+    // the JSON root is honoured (organic_ring → OrganicRing family).
+    // Palette and animation still fall back to DEFAULT.
     let v = json(r#"{ "name": "anything", "family": "organic_ring" }"#);
     let t = resolve_from_json(&v);
-    assert_eq!(t, default_theme());
+    assert_eq!(t.palette, default_theme().palette);
+    assert_eq!(t.animation, default_theme().animation);
+    // Family is taken from the legacy root field.
+    assert_eq!(
+        t.family,
+        crate::overlay::themes::handy::HandyPillFamily::OrganicRing
+    );
+}
+
+#[test]
+fn empty_json_falls_back_to_handy_family() {
+    let v = json(r#"{ }"#);
+    let t = resolve_from_json(&v);
+    assert_eq!(
+        t.family,
+        crate::overlay::themes::handy::HandyPillFamily::Handy
+    );
+}
+
+#[test]
+fn legacy_bars_family_root_field_resolves_to_Bars() {
+    let v = json(r#"{ "family": "bars" }"#);
+    let t = resolve_from_json(&v);
+    assert_eq!(
+        t.family,
+        crate::overlay::themes::handy::HandyPillFamily::Bars
+    );
+}
+
+#[test]
+fn handy_pill_family_override_wins_over_legacy() {
+    let v = json(
+        r#"{ "family": "organic_ring", "handy_pill": { "family": "handy" } }"#,
+    );
+    let t = resolve_from_json(&v);
+    assert_eq!(
+        t.family,
+        crate::overlay::themes::handy::HandyPillFamily::Handy
+    );
+}
+
+#[test]
+fn legacy_gradient_block_feeds_handy_pill_bars() {
+    let v = json(
+        r##"{ "gradient": { "bottom": "#001100", "middle": "#005500", "top": "#00ff00" } }"##,
+    );
+    let t = resolve_from_json(&v);
+    assert_eq!(t.bars.gradient_bottom.to_lowercase(), "#001100");
+    assert_eq!(t.bars.gradient_middle.to_lowercase(), "#005500");
+    assert_eq!(t.bars.gradient_top.to_lowercase(), "#00ff00");
 }
 
 #[test]

@@ -50,10 +50,38 @@ pub struct HandyPillAnimation {
     pub cancel_hover_ms: u32,
 }
 
+/// Visualisation family — picks which React component renders the pill.
+/// Defaults to `Handy` (icon + bars + cancel) when omitted in JSON.
+///
+/// `Bars` — classic Winamp-style spectrum analyzer (full-width, no icon).
+/// `OrganicRing` — breathing animated ring (legacy organic_ring rendering).
+/// `Handy` — the compact icon + 9-bar + cancel pill ported from upstream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum HandyPillFamily {
+    Bars,
+    OrganicRing,
+    #[default]
+    Handy,
+}
+
+/// Per-family `bars` configuration. Only consumed by `Family::Bars`
+/// themes; ignored for the others. Pulled from `theme.json` block
+/// `handy_pill.bars` with fallbacks to the legacy root `gradient` block.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct HandyPillBars {
+    pub count: u32,
+    pub gradient_bottom: String,
+    pub gradient_middle: String,
+    pub gradient_top: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct HandyPillTheme {
+    pub family: HandyPillFamily,
     pub palette: HandyPillPalette,
     pub animation: HandyPillAnimation,
+    pub bars: HandyPillBars,
 }
 
 // Manual Eq so f32-bearing animation field doesn't block PartialEq usage
@@ -63,9 +91,21 @@ impl HandyPillTheme {
     /// Build a fresh copy of the canonical Handy pink theme.
     fn handy_default() -> Self {
         Self {
+            family: HandyPillFamily::default(),
             palette: default_palette(),
             animation: default_animation(),
+            bars: default_bars(),
         }
+    }
+}
+
+fn default_bars() -> HandyPillBars {
+    // Material Blue gradient — matches the legacy `default` theme look.
+    HandyPillBars {
+        count: 16,
+        gradient_bottom: "#1e88e5".to_string(),
+        gradient_middle: "#42a5f5".to_string(),
+        gradient_top: "#64b5f6".to_string(),
     }
 }
 
@@ -134,13 +174,37 @@ struct PartialAnimation {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct PartialBars {
+    count: Option<u32>,
+    gradient_bottom: Option<String>,
+    gradient_middle: Option<String>,
+    gradient_top: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct PartialHandyPill {
+    family: Option<HandyPillFamily>,
     palette: Option<PartialPalette>,
     animation: Option<PartialAnimation>,
+    bars: Option<PartialBars>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LegacyGradient {
+    bottom: Option<String>,
+    middle: Option<String>,
+    top: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 struct PartialThemeFile {
+    /// Legacy family field at the root of theme.json ("bars",
+    /// "organic_ring"). Used as a fallback when `handy_pill.family`
+    /// is omitted.
+    family: Option<String>,
+    /// Legacy `gradient` block; consumed as a fallback for
+    /// `handy_pill.bars.gradient_*`.
+    gradient: Option<LegacyGradient>,
     handy_pill: Option<PartialHandyPill>,
 }
 
@@ -224,6 +288,41 @@ fn resolve_animation(a: Option<PartialAnimation>) -> HandyPillAnimation {
     }
 }
 
+fn resolve_family(
+    handy_family: Option<HandyPillFamily>,
+    legacy_family: Option<String>,
+) -> HandyPillFamily {
+    if let Some(f) = handy_family {
+        return f;
+    }
+    match legacy_family.as_deref() {
+        Some("bars") => HandyPillFamily::Bars,
+        Some("organic_ring") => HandyPillFamily::OrganicRing,
+        Some("handy") | None | Some(_) => HandyPillFamily::Handy,
+    }
+}
+
+fn resolve_bars(
+    bars: Option<PartialBars>,
+    legacy_gradient: Option<LegacyGradient>,
+) -> HandyPillBars {
+    let d = default_bars();
+    let bars = bars.unwrap_or_default();
+    let legacy = legacy_gradient.unwrap_or_default();
+    HandyPillBars {
+        count: bars.count.unwrap_or(d.count).clamp(2, 64),
+        gradient_bottom: bars
+            .gradient_bottom
+            .or(legacy.bottom)
+            .unwrap_or(d.gradient_bottom),
+        gradient_middle: bars
+            .gradient_middle
+            .or(legacy.middle)
+            .unwrap_or(d.gradient_middle),
+        gradient_top: bars.gradient_top.or(legacy.top).unwrap_or(d.gradient_top),
+    }
+}
+
 /// Normalise an arbitrary parsed JSON value into a full
 /// [`HandyPillTheme`]. Falls back to [`DEFAULT_HANDY_THEME`] for any
 /// missing or malformed field. Never returns an error.
@@ -232,8 +331,10 @@ pub fn resolve_from_json(value: &serde_json::Value) -> HandyPillTheme {
         serde_json::from_value(value.clone()).unwrap_or_default();
     let block = partial.handy_pill.unwrap_or_default();
     HandyPillTheme {
+        family: resolve_family(block.family, partial.family),
         palette: resolve_palette(block.palette),
         animation: resolve_animation(block.animation),
+        bars: resolve_bars(block.bars, partial.gradient),
     }
 }
 

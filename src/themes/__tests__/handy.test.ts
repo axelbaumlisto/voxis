@@ -29,10 +29,33 @@ describe("HandyPillTheme · resolver", () => {
     expect(resolveHandyTheme(undefined)).toEqual(DEFAULT_HANDY_THEME);
   });
 
-  it("returns DEFAULT_HANDY_THEME when input lacks `handy_pill` block", () => {
-    expect(
-      resolveHandyTheme({ name: "anything", family: "organic_ring" }),
-    ).toEqual(DEFAULT_HANDY_THEME);
+  it("returns DEFAULT palette+animation when input lacks `handy_pill` block, BUT honours legacy `family`", () => {
+    const r = resolveHandyTheme({ name: "anything", family: "organic_ring" });
+    expect(r.palette).toEqual(DEFAULT_HANDY_THEME.palette);
+    expect(r.animation).toEqual(DEFAULT_HANDY_THEME.animation);
+    // Family is taken from the legacy root field.
+    expect(r.family).toBe("organic_ring");
+  });
+
+  it("defaults family to 'handy' when no family field is present at all", () => {
+    expect(resolveHandyTheme({}).family).toBe("handy");
+  });
+
+  it("handy_pill.family wins over legacy root family", () => {
+    const r = resolveHandyTheme({
+      family: "organic_ring",
+      handy_pill: { family: "bars" },
+    });
+    expect(r.family).toBe("bars");
+  });
+
+  it("legacy gradient block feeds handy_pill.bars", () => {
+    const r = resolveHandyTheme({
+      gradient: { bottom: "#001100", middle: "#005500", top: "#00ff00" },
+    });
+    expect(r.bars.gradient_bottom).toBe("#001100");
+    expect(r.bars.gradient_middle).toBe("#005500");
+    expect(r.bars.gradient_top).toBe("#00ff00");
   });
 
   it("merges partial palette with default animation", () => {

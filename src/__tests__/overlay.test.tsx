@@ -43,6 +43,28 @@ vi.mock("../components/overlay/HandyPill", () => ({
   ),
 }));
 
+// ClassicBars stub — for `bars` family routing (Winamp + default + dark + etc.).
+vi.mock("../components/overlay/ClassicBars", () => ({
+  default: ({
+    bars,
+    barCount,
+    gradient,
+  }: {
+    bars: number[];
+    barCount?: number;
+    gradient: { bottom: string; middle: string; top: string };
+  }) => (
+    <div
+      data-testid="classic-bars-stub"
+      data-bar-count={bars.length}
+      data-requested-bar-count={barCount ?? 16}
+      data-bar-sample={bars[0] ?? 0}
+      data-gradient-bottom={gradient.bottom}
+      data-gradient-top={gradient.top}
+    />
+  ),
+}));
+
 import { OverlayApp } from "../overlay";
 
 describe("OverlayApp (HandyPill shell)", () => {
@@ -60,14 +82,15 @@ describe("OverlayApp (HandyPill shell)", () => {
     invokeMock.mockReset();
   });
 
-  it("renders HandyPill with idle mode, hidden, 9 bars by default", () => {
+  it("renders ClassicBars for the default bars-family theme (winamp_classic)", () => {
+    // Default themeId from useOverlayState is 'winamp_classic'
+    // (family=bars) — so the OverlayApp now routes to ClassicBars
+    // rather than HandyPill. The bars stub exposes its props for
+    // verification.
     render(<OverlayApp />);
-    const pill = screen.getByTestId("handy-pill-stub");
-    expect(pill.dataset.mode).toBe("idle");
-    // Pill is always visible at OS level; the mode prop drives icon/bars
-    // animation but the pill never fades out (user requirement).
-    expect(pill.dataset.visible).toBe("true");
-    expect(Number(pill.dataset.barCount)).toBe(9);
+    const bars = screen.getByTestId("classic-bars-stub");
+    expect(Number(bars.dataset.requestedBarCount)).toBeGreaterThan(0);
+    expect(bars.dataset.gradientBottom).toBeTruthy();
   });
 
   it("subscribes to all four overlay events", async () => {

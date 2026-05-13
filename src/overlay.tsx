@@ -18,10 +18,12 @@ import {
 } from "./hooks/useOverlayState";
 import { useSmoothBars } from "./hooks/useSmoothBars";
 import HandyPill from "./components/overlay/HandyPill";
+import ClassicBars from "./components/overlay/ClassicBars";
 import { commands } from "./bindings";
 import {
   HandyThemeProvider,
   useHandyBarMath,
+  useHandyTheme,
 } from "./themes/HandyThemeProvider";
 import { useFetchedHandyTheme } from "./themes/useFetchedHandyTheme";
 
@@ -29,10 +31,16 @@ const PILL_BAR_COUNT = 9; // Handy's pill renders 9 bars
 
 /**
  * Inner component — must live below {@link HandyThemeProvider} so
- * {@link useHandyBarMath} sees the active theme.
+ * {@link useHandyBarMath} and {@link useHandyTheme} see the active theme.
+ *
+ * Family router (SOLID/OCP):
+ *  - `bars` family   → <ClassicBars> (Winamp-style spectrum analyzer)
+ *  - `organic_ring`  → <HandyPill>  (fallback until OrganicRing wires in)
+ *  - `handy`         → <HandyPill>  (icon + bars + cancel)
  */
 function PillContent({ snapshot }: { snapshot: OverlaySnapshot }) {
   const math = useHandyBarMath();
+  const theme = useHandyTheme();
   // E2E hook: `/overlay.html?mode=recording` forces recording mode without
   // depending on Tauri events. Used by Playwright pixel tests.
   const forcedMode =
@@ -44,11 +52,32 @@ function PillContent({ snapshot }: { snapshot: OverlaySnapshot }) {
     forcedMode === "recording"
       ? Array.from({ length: 32 }, (_, i) => 0.4 + 0.3 * Math.sin(i))
       : snapshot.spectrumBins;
+
+  // For bars family use more bars; for the others stay at PILL_BAR_COUNT.
+  const barCount =
+    theme.family === "bars" ? theme.bars.count : PILL_BAR_COUNT;
   const bars = useSmoothBars(effectiveBins, {
-    size: PILL_BAR_COUNT,
+    size: barCount,
     alpha: math.smoothing_alpha,
     peak_decay: math.peak_decay,
   });
+
+  if (theme.family === "bars") {
+    return (
+      <ClassicBars
+        bars={bars}
+        gradient={{
+          bottom: theme.bars.gradient_bottom,
+          middle: theme.bars.gradient_middle,
+          top: theme.bars.gradient_top,
+        }}
+        barCount={barCount}
+      />
+    );
+  }
+
+  // Both 'handy' and 'organic_ring' currently render via HandyPill.
+  // T8.2 will wire OrganicRing as a dedicated renderer for the latter.
   return (
     <HandyPill
       mode={effectiveMode}

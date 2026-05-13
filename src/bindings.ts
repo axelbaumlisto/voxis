@@ -764,10 +764,25 @@ export type HandyPillAnimation = { smoothing_alpha: number; power_curve: number;
  */
 idle_breathing_amplitude: number; idle_breathing_period_ms: number; cancel_hover_ms: number }
 /**
+ * Per-family `bars` configuration. Only consumed by `Family::Bars`
+ * themes; ignored for the others. Pulled from `theme.json` block
+ * `handy_pill.bars` with fallbacks to the legacy root `gradient` block.
+ */
+export type HandyPillBars = { count: number; gradient_bottom: string; gradient_middle: string; gradient_top: string }
+/**
+ * Visualisation family — picks which React component renders the pill.
+ * Defaults to `Handy` (icon + bars + cancel) when omitted in JSON.
+ * 
+ * `Bars` — classic Winamp-style spectrum analyzer (full-width, no icon).
+ * `OrganicRing` — breathing animated ring (legacy organic_ring rendering).
+ * `Handy` — the compact icon + 9-bar + cancel pill ported from upstream.
+ */
+export type HandyPillFamily = "bars" | "organic_ring" | "handy"
+/**
  * Six palette colours drive every coloured pixel in the pill UI.
  */
 export type HandyPillPalette = { icon_color: string; bar_color: string; bar_glow: string; shadow: string; transcribing_text: string; cancel_hover_bg: string }
-export type HandyPillTheme = { palette: HandyPillPalette; animation: HandyPillAnimation }
+export type HandyPillTheme = { family: HandyPillFamily; palette: HandyPillPalette; animation: HandyPillAnimation; bars: HandyPillBars }
 /**
  * History entry for frontend display.
  */
