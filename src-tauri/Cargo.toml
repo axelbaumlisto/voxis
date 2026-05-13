@@ -94,11 +94,10 @@ rdev = { git = "https://github.com/Narsil/rdev", rev = "73123959276f0f29972b94e6
 enigo = { version = "0.6", default-features = false, features = ["x11rb"] }
 
 # Phase 7 cleanup removed the native egui/glfw overlay backend.
-# Only `egui = Color32` (a tiny u8x4 color type) is still used by
-# `overlay_native/theme.rs` for palette storage. The heavy renderers
-# (egui_overlay, glfw, wgpu, three_d, eframe) are gone — saved several
-# minutes of build time + ~150 MB of cached artifacts.
-egui = { version = "0.29", default-features = false }
+# Post-cleanup: replaced the lone `egui::Color32` usage with a tiny
+# in-tree color type (overlay_native/color.rs), so the egui dep is
+# fully gone now. Cuts ~30 transitive crates and several seconds of
+# cold compile time.
 
 # macOS: AppKit private APIs for NSPanel (focus-stealing-free overlay).
 [target.'cfg(target_os = "macos")'.dependencies]
