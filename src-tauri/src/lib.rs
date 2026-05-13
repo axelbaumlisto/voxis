@@ -122,6 +122,8 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
         crate::commands::shortcut_bindings::list_shortcut_bindings,
         crate::commands::shortcut_bindings::update_shortcut_binding,
         crate::commands::shortcut_bindings::reset_shortcut_binding,
+        crate::commands::onboarding::is_first_run,
+        crate::commands::onboarding::mark_first_run_complete,
         // overlay
         crate::commands::overlay::show_overlay,
         crate::commands::overlay::hide_overlay,

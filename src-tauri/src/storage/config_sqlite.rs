@@ -143,6 +143,11 @@ impl ConfigSqliteStorage {
                 }
             }
         }
+        config.first_run_completed = self.get_bool(
+            &conn,
+            "first_run_completed",
+            config.first_run_completed,
+        );
         config.typing_delay = self.get_typed(&conn, "typing_delay", config.typing_delay);
         config.notifications = self.get_bool(&conn, "notifications", config.notifications);
         config.backend = self.get_str(&conn, "backend", &config.backend);
@@ -260,6 +265,11 @@ impl ConfigSqliteStorage {
         if let Ok(json) = serde_json::to_string(&config.shortcut_bindings) {
             self.set(&conn, "shortcut_bindings", &json)?;
         }
+        self.set(
+            &conn,
+            "first_run_completed",
+            &config.first_run_completed.to_string(),
+        )?;
         self.set(&conn, "typing_delay", &config.typing_delay.to_string())?;
         self.set(&conn, "notifications", &config.notifications.to_string())?;
         self.set(&conn, "backend", &config.backend)?;

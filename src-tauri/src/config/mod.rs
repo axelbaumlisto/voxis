@@ -337,6 +337,11 @@ pub struct AppConfig {
     #[serde(default = "crate::shortcut::default_bindings")]
     pub shortcut_bindings: Vec<crate::shortcut::ShortcutBinding>,
 
+    /// `true` once the user has completed the onboarding flow (#10).
+    /// The frontend gates `/onboarding` redirect on this flag.
+    #[serde(default)]
+    pub first_run_completed: bool,
+
     // Paste shortcuts (Linux only) - comma-separated list
     #[serde(default = "default_paste_shortcuts")]
     pub paste_shortcuts: String,
@@ -382,6 +387,7 @@ impl Default for AppConfig {
             auto_submit_key: crate::output::auto_submit::AutoSubmitKey::Off,
             audio_feedback: crate::audio_feedback::AudioFeedbackSettings::default(),
             shortcut_bindings: crate::shortcut::default_bindings(),
+            first_run_completed: false,
             paste_shortcuts: DEFAULT_PASTE_SHORTCUTS.into(),
             api_url_override: None,
             vad: VadConfig::default(),
