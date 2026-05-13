@@ -16,6 +16,7 @@
  */
 import { useEffect, useState } from "react";
 import { commands } from "../bindings";
+import { getBuiltinHandyTheme } from "./builtinHandyThemes";
 import {
   DEFAULT_HANDY_THEME,
   type HandyPillTheme,
@@ -27,7 +28,12 @@ import {
  * as `commands.getHandyTheme(themeId)` returns.
  */
 export function useFetchedHandyTheme(themeId: string): HandyPillTheme {
-  const [theme, setTheme] = useState<HandyPillTheme>(DEFAULT_HANDY_THEME);
+  // Initial value: pull the builtin (compile-time-embedded) theme so
+  // synthetic environments (Chrome, vitest, Vite preview) get the right
+  // palette immediately without a Tauri round-trip. Falls back to the
+  // Handy pink default for unknown ids.
+  const initial = getBuiltinHandyTheme(themeId) ?? DEFAULT_HANDY_THEME;
+  const [theme, setTheme] = useState<HandyPillTheme>(initial);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,8 +58,10 @@ export function useFetchedHandyTheme(themeId: string): HandyPillTheme {
       })
       .catch(() => {
         // In non-Tauri environments (e.g. Vite preview, vitest's jsdom)
-        // the command throws — fall back to defaults silently.
-        if (!cancelled) setTheme(DEFAULT_HANDY_THEME);
+        // the command throws — keep the builtin theme picked at mount.
+        if (!cancelled) {
+          setTheme(getBuiltinHandyTheme(themeId) ?? DEFAULT_HANDY_THEME);
+        }
       });
     return () => {
       cancelled = true;

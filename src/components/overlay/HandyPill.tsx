@@ -72,7 +72,7 @@ export default function HandyPill({
   bars,
   visible = true,
   onCancel,
-  iconColor = DEFAULT_ICON_COLOR,
+  iconColor,
   barColor,
   labels,
 }: HandyPillProps) {
@@ -80,14 +80,19 @@ export default function HandyPill({
   const rootClass = [styles["recording-overlay"], visible ? styles["fade-in"] : ""]
     .filter(Boolean)
     .join(" ");
+  // Icons fill='currentColor', so setting `color` on the root lets the
+  // active theme drive the palette. `iconColor` prop (when given)
+  // overrides the CSS variable for one-off tests/Storybook.
+  const rootColor = iconColor ?? `var(--hp-icon, ${DEFAULT_ICON_COLOR})`;
 
   return (
     <div
       className={`${rootClass} recording-overlay${visible ? " fade-in" : ""}`}
       data-mode={mode}
+      style={{ color: rootColor }}
     >
       <div className={`${styles["overlay-left"]} overlay-left`}>
-        <IconSlot mode={mode} color={iconColor} />
+        <IconSlot mode={mode} color="currentColor" />
       </div>
 
       <div className={`${styles["overlay-middle"]} overlay-middle`}>
@@ -114,7 +119,7 @@ export default function HandyPill({
             aria-label="Cancel recording"
             onClick={() => onCancel?.()}
           >
-            <CancelIcon color={iconColor} />
+            <CancelIcon color="currentColor" />
           </button>
         )}
       </div>
