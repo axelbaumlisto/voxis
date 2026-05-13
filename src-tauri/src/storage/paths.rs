@@ -88,6 +88,11 @@ impl AppPaths {
         self.config_dir.join("providers.db")
     }
 
+    /// Path to prompts.db SQLite database (multi-prompt LLM templates).
+    pub fn prompts_db(&self) -> PathBuf {
+        self.config_dir.join("prompts.db")
+    }
+
     /// Path to themes directory for external visualization themes.
     pub fn themes_dir(&self) -> PathBuf {
         self.config_dir.join("themes")

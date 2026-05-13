@@ -342,6 +342,54 @@ async updateLlmProvider(provider: LlmProvider) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async listLlmPrompts() : Promise<Result<LlmPrompt[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_llm_prompts") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async createLlmPrompt(id: string, name: string, prompt: string) : Promise<Result<LlmPrompt, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_llm_prompt", { id, name, prompt }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateLlmPrompt(id: string, name: string, prompt: string) : Promise<Result<LlmPrompt, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_llm_prompt", { id, name, prompt }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteLlmPrompt(id: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_llm_prompt", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getActiveLlmPromptId() : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_active_llm_prompt_id") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setActiveLlmPromptId(id: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_active_llm_prompt_id", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Show the overlay window with the given state.
  */
@@ -835,6 +883,12 @@ export type LlmLog = { provider: string; model: string; prompt: string; input_te
  * A model available for an LLM provider.
  */
 export type LlmModel = { id: string; name: string }
+/**
+ * A single named LLM prompt template. `id` is the stable string key
+ * used by the rest of the system (config selection, SQLite primary
+ * key). `name` is the human-readable label rendered in the UI.
+ */
+export type LlmPrompt = { id: string; name: string; prompt: string }
 /**
  * An LLM provider configuration.
  */

@@ -17,6 +17,7 @@ pub mod factory;
 pub mod failed_audio;
 pub mod history;
 pub mod history_sqlite;
+pub mod prompts_sqlite;
 pub mod paths;
 pub mod providers;
 pub mod sqlite_base;

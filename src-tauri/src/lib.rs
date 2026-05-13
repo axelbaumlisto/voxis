@@ -111,6 +111,12 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
         crate::commands::providers::add_llm_provider,
         crate::commands::providers::remove_llm_provider,
         crate::commands::providers::update_llm_provider,
+        crate::commands::prompts::list_llm_prompts,
+        crate::commands::prompts::create_llm_prompt,
+        crate::commands::prompts::update_llm_prompt,
+        crate::commands::prompts::delete_llm_prompt,
+        crate::commands::prompts::get_active_llm_prompt_id,
+        crate::commands::prompts::set_active_llm_prompt_id,
         // overlay
         crate::commands::overlay::show_overlay,
         crate::commands::overlay::hide_overlay,
