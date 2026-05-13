@@ -9,5 +9,7 @@
 //! `binding::ShortcutAction` for the action enum.
 
 pub mod binding;
+pub mod dispatcher;
 
 pub use binding::{default_bindings, find_by_id, ShortcutAction, ShortcutBinding};
+pub use dispatcher::{resolve, ResolvedAction};
