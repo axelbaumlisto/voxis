@@ -92,6 +92,15 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
       "Minimum hold time before recording starts. Short presses are treated as key combinations (e.g. AltGr+R).",
   },
   {
+    key: "shortcut_bindings",
+    label: "Shortcut bindings",
+    widgetType: "custom",
+    section: "Recording",
+    description:
+      "Map keys to different actions (raw transcribe / transcribe + LLM post-process). The legacy single Hotkey above stays for back-compat.",
+    customComponent: "shortcut-binding-list",
+  },
+  {
     key: "audio_device",
     label: "Audio Device",
     widgetType: "select",
