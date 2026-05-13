@@ -5,6 +5,9 @@
 pub mod themes;
 pub mod types;
 
+#[cfg(test)]
+mod themes_handy_tests;
+
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
