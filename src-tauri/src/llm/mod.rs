@@ -18,6 +18,7 @@ mod client;
 mod config;
 mod engine;
 pub mod parser;
+pub mod prompts;
 pub mod provider;
 mod types;
 
