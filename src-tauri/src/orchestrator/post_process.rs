@@ -13,6 +13,7 @@ use crate::learning::{CorrectionTracker, LearningMode};
 use crate::llm::prompts::{find_by_id, LlmPrompt};
 use crate::llm::provider::{build_llm_provider, LlmProvider};
 use crate::llm::{parser, DictionarySuggestion, LlmResult};
+use crate::shortcut::{resolve as resolve_binding_action, ResolvedAction};
 use crate::storage;
 use crate::storage::prompts_sqlite::LlmPromptsStorage;
 use std::time::Instant;
@@ -38,19 +39,60 @@ pub(crate) fn resolve_prompt<'a>(
     legacy
 }
 
+/// Pure resolver that picks the FINAL prompt_id to use, given:
+///   - the config's shortcut bindings (each may pin a prompt to a
+///     binding via TranscribePostProcess { prompt_id: Some(...) }),
+///   - the binding id that just fired (`active_binding_id`),
+///   - the user's global «active prompt» selection from
+///     LlmPromptsStorage (`storage_active_id`).
+///
+/// Precedence (highest to lowest):
+///   1. The fired binding's pinned prompt_id (per-action override).
+///   2. The storage-wide active prompt id.
+///   3. None (caller falls back to `config.llm.prompt`).
+///
+/// Extracted as a pure function so the precedence is unit-testable
+/// (SOLID-SRP). Keeping all three inputs in the signature also makes
+/// the data dependencies explicit — no hidden state access.
+pub(crate) fn effective_active_prompt_id(
+    config: &AppConfig,
+    active_binding_id: &str,
+    storage_active_id: Option<String>,
+) -> Option<String> {
+    if let Some(ResolvedAction::TranscribePostProcess {
+        prompt_id: Some(id),
+    }) = resolve_binding_action(&config.shortcut_bindings, active_binding_id)
+    {
+        return Some(id);
+    }
+    storage_active_id
+}
+
 /// SQLite-backed resolver used by the live post-process pipeline. Wraps
 /// the pure `resolve_prompt` with the storage I/O so callers don't have
 /// to wire it themselves.
-fn resolve_active_prompt_string(app: &AppHandle, legacy: &str) -> String {
+///
+/// `active_binding_id` is the id of the ShortcutBinding that fired
+/// (currently always `"transcribe"` until the rdev listener supports
+/// multi-binding dispatch). When the binding has
+/// TranscribePostProcess { prompt_id: Some(id) }, that id wins over
+/// the storage-wide active selection (per-binding override).
+fn resolve_active_prompt_string(
+    app: &AppHandle,
+    config: &AppConfig,
+    active_binding_id: &str,
+    legacy: &str,
+) -> String {
     let Some(paths) = app.try_state::<crate::storage::AppPaths>() else {
         return legacy.to_string();
     };
     let store = LlmPromptsStorage::new(paths.prompts_db());
     // Best-effort seed — idempotent.
     let _ = store.seed_defaults_if_empty();
-    let active_id = store.get_active_id().ok().flatten();
+    let storage_active = store.get_active_id().ok().flatten();
+    let effective = effective_active_prompt_id(config, active_binding_id, storage_active);
     let list = store.list().unwrap_or_default();
-    resolve_prompt(active_id.as_deref(), &list, legacy).to_string()
+    resolve_prompt(effective.as_deref(), &list, legacy).to_string()
 }
 
 /// Result of post-processing.
@@ -83,7 +125,16 @@ pub async fn apply_post_processing(
     let word_count = final_text.split_whitespace().count();
     if config.llm.enabled && word_count > 2 {
         if let Some(provider) = build_llm_provider(&config.llm) {
-            let prompt = resolve_active_prompt_string(app, &config.llm.prompt);
+            // 'transcribe' is the binding id that the single-key rdev
+            // listener currently fires. When multi-binding listener
+            // support lands, the orchestrator will plumb the real
+            // binding_id through and this constant becomes a parameter.
+            let prompt = resolve_active_prompt_string(
+                app,
+                config,
+                "transcribe",
+                &config.llm.prompt,
+            );
             let result = apply_llm_via_provider(app, config, provider.as_ref(), &prompt, &final_text).await;
             llm_duration_ms = result.llm_duration_ms;
             if let Some(ref llm) = result.llm_result {
@@ -254,6 +305,68 @@ mod tests {
     fn resolve_prompt_handles_empty_prompts_list() {
         let resolved = resolve_prompt(Some("anything"), &[], "legacy");
         assert_eq!(resolved, "legacy");
+    }
+
+    // --- effective_active_prompt_id precedence -----------------------
+
+    #[test]
+    fn effective_returns_storage_active_when_binding_has_no_pin() {
+        // Default bindings have action=Transcribe (no pinned prompt)
+        // for 'transcribe' and TranscribePostProcess(None) for
+        // 'transcribe_post_process'. Neither pins anything — so the
+        // storage-wide active selection wins.
+        let config = AppConfig::default();
+        let got = effective_active_prompt_id(
+            &config,
+            "transcribe",
+            Some("email_tone".to_string()),
+        );
+        assert_eq!(got, Some("email_tone".to_string()));
+    }
+
+    #[test]
+    fn effective_returns_binding_pin_when_set() {
+        use crate::shortcut::{ShortcutAction, ShortcutBinding};
+        let config = AppConfig {
+            shortcut_bindings: vec![ShortcutBinding {
+            id: "transcribe".to_string(),
+            name: "Transcribe".to_string(),
+            description: String::new(),
+            default_binding: "alt_r".to_string(),
+            current_binding: "alt_r".to_string(),
+            action: ShortcutAction::TranscribePostProcess {
+                prompt_id: Some("bullet_list".to_string()),
+            },
+            }],
+            ..AppConfig::default()
+        };
+        // Storage says 'email_tone' is the user's preferred default;
+        // the per-binding pin must override it.
+        let got = effective_active_prompt_id(
+            &config,
+            "transcribe",
+            Some("email_tone".to_string()),
+        );
+        assert_eq!(got, Some("bullet_list".to_string()));
+    }
+
+    #[test]
+    fn effective_returns_none_when_no_pin_and_no_storage_active() {
+        let config = AppConfig::default();
+        let got = effective_active_prompt_id(&config, "transcribe", None);
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn effective_returns_storage_when_binding_unknown() {
+        // Stale or typo'd binding id — fall back to storage active.
+        let config = AppConfig::default();
+        let got = effective_active_prompt_id(
+            &config,
+            "definitely_not_a_real_binding",
+            Some("summarize".to_string()),
+        );
+        assert_eq!(got, Some("summarize".to_string()));
     }
 
     /// Shared handle to mock-provider call log (system_prompt, user_text).
