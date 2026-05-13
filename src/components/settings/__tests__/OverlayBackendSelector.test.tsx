@@ -57,12 +57,12 @@ describe("OverlayBackendSelector", () => {
     render(
       <OverlayBackendSelector
         label="Backend"
-        value="subprocess"
+        value="webview"
         onChange={() => {}}
       />,
     );
     const select = screen.getByRole("combobox") as HTMLSelectElement;
-    expect(select.value).toBe("subprocess");
+    expect(select.value).toBe("webview");
   });
 
   it("calls onChange with the new value when user selects another option", () => {
@@ -152,13 +152,13 @@ describe("OverlayBackendSelector", () => {
 
     // User changes value.
     fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: "subprocess" },
+      target: { value: "webview" },
     });
     // Parent reflects new value back.
     rerender(
       <OverlayBackendSelector
         label="Backend"
-        value="subprocess"
+        value="webview"
         onChange={onChange}
       />,
     );
@@ -172,12 +172,12 @@ describe("OverlayBackendSelector", () => {
     );
 
     fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: "subprocess" },
+      target: { value: "webview" },
     });
     rerender(
       <OverlayBackendSelector
         label="Backend"
-        value="subprocess"
+        value="webview"
         onChange={onChange}
       />,
     );
