@@ -154,6 +154,19 @@ impl ConfigSqliteStorage {
                 config.hotkey_mode = v;
             }
         }
+        if let Some(v) = self.get(&conn, "retention_period") {
+            if matches!(
+                v.as_str(),
+                "never" | "preserve_limit" | "days_3" | "weeks_2" | "months_3"
+            ) {
+                config.retention_period = v;
+            }
+        }
+        config.retention_limit = self.get_typed(
+            &conn,
+            "retention_limit",
+            config.retention_limit,
+        );
         config.typing_delay = self.get_typed(&conn, "typing_delay", config.typing_delay);
         config.notifications = self.get_bool(&conn, "notifications", config.notifications);
         config.backend = self.get_str(&conn, "backend", &config.backend);
@@ -277,6 +290,12 @@ impl ConfigSqliteStorage {
             &config.first_run_completed.to_string(),
         )?;
         self.set(&conn, "hotkey_mode", &config.hotkey_mode)?;
+        self.set(&conn, "retention_period", &config.retention_period)?;
+        self.set(
+            &conn,
+            "retention_limit",
+            &config.retention_limit.to_string(),
+        )?;
         self.set(&conn, "typing_delay", &config.typing_delay.to_string())?;
         self.set(&conn, "notifications", &config.notifications.to_string())?;
         self.set(&conn, "backend", &config.backend)?;

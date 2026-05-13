@@ -350,6 +350,18 @@ pub struct AppConfig {
     #[serde(default = "default_hotkey_mode")]
     pub hotkey_mode: String,
 
+    /// Recording history retention policy (#5):
+    /// 'never' | 'preserve_limit' | 'days_3' | 'weeks_2' | 'months_3'.
+    /// 'never' (default) preserves all entries forever. The cleanup
+    /// task runs on app startup once per launch.
+    #[serde(default = "default_retention_period")]
+    pub retention_period: String,
+
+    /// How many recent entries `retention_period = preserve_limit`
+    /// should keep. Ignored for other policies.
+    #[serde(default = "default_retention_limit")]
+    pub retention_limit: u32,
+
     // Paste shortcuts (Linux only) - comma-separated list
     #[serde(default = "default_paste_shortcuts")]
     pub paste_shortcuts: String,
@@ -397,6 +409,8 @@ impl Default for AppConfig {
             shortcut_bindings: crate::shortcut::default_bindings(),
             first_run_completed: false,
             hotkey_mode: default_hotkey_mode(),
+            retention_period: default_retention_period(),
+            retention_limit: default_retention_limit(),
             paste_shortcuts: DEFAULT_PASTE_SHORTCUTS.into(),
             api_url_override: None,
             vad: VadConfig::default(),
@@ -429,6 +443,14 @@ fn default_hotkey_hold_ms() -> u32 {
 
 fn default_hotkey_mode() -> String {
     "hold".to_string()
+}
+
+fn default_retention_period() -> String {
+    "never".to_string()
+}
+
+fn default_retention_limit() -> u32 {
+    100
 }
 
 fn default_typing_delay() -> u32 {

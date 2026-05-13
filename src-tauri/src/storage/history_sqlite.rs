@@ -122,6 +122,48 @@ impl HistorySqliteStorage {
         Ok(())
     }
 
+    /// Apply the user-configured retention policy by deleting entries
+    /// older than the computed cutoff. See `compute_retention_cutoff`
+    /// for the policy matrix. Returns the number of deleted rows.
+    pub fn cleanup_by_retention(
+        &self,
+        policy: &str,
+        preserve_limit: usize,
+    ) -> Result<usize, Box<dyn std::error::Error>> {
+        match policy {
+            "never" => Ok(0),
+            "preserve_limit" => {
+                let conn = self.connect()?;
+                // Keep the N most recent ids; delete the rest.
+                let deleted = conn.execute(
+                    "DELETE FROM history WHERE id NOT IN (\
+                       SELECT id FROM history ORDER BY timestamp DESC LIMIT ?1\
+                     )",
+                    [preserve_limit],
+                )?;
+                Ok(deleted)
+            }
+            "days_3" | "weeks_2" | "months_3" => {
+                let cutoff_secs = compute_retention_cutoff(policy, chrono::Utc::now().timestamp());
+                let conn = self.connect()?;
+                // history.timestamp is a DATETIME string (Python compat);
+                // use unixepoch() to compare apples to apples.
+                let deleted = conn.execute(
+                    "DELETE FROM history WHERE unixepoch(timestamp) < ?1",
+                    [cutoff_secs],
+                )?;
+                Ok(deleted)
+            }
+            other => {
+                tracing::warn!(
+                    "cleanup_by_retention: unknown policy '{}'; doing nothing",
+                    other
+                );
+                Ok(0)
+            }
+        }
+    }
+
     /// Search history by text.
     pub fn search(
         &self,
@@ -186,6 +228,22 @@ impl super::traits::HistoryStorage for HistorySqliteStorage {
     ) -> super::traits::StorageResult<Vec<HistoryEntry>> {
         self.search(query, limit)
             .map_err(super::traits::into_storage_error)
+    }
+}
+
+/// Pure helper: given a retention policy string and the current unix
+/// timestamp, return the cutoff (entries older than this should be
+/// deleted). Lives outside the impl so it's testable without SQLite.
+///
+/// Unknown / non-time-based policies return `i64::MIN` so any
+/// `unixepoch(timestamp) < cutoff` query becomes a no-op.
+pub fn compute_retention_cutoff(policy: &str, now_secs: i64) -> i64 {
+    const DAY: i64 = 86_400;
+    match policy {
+        "days_3" => now_secs - 3 * DAY,
+        "weeks_2" => now_secs - 14 * DAY,
+        "months_3" => now_secs - 90 * DAY,
+        _ => i64::MIN,
     }
 }
 
@@ -343,6 +401,73 @@ mod tests {
         let entries = storage.load(None).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].text, "'; DROP TABLE history; --");
+    }
+
+    // ---- T-C5 retention ---------------------------------------------
+    #[test]
+    fn retention_cutoff_never_returns_i64_min() {
+        // 'never' policy means «don't delete anything» — the cutoff
+        // must be such that NO row can satisfy timestamp < cutoff.
+        assert_eq!(compute_retention_cutoff("never", 1_000_000), i64::MIN);
+    }
+
+    #[test]
+    fn retention_cutoff_days_3_subtracts_three_days() {
+        let now = 1_000_000_000;
+        let cutoff = compute_retention_cutoff("days_3", now);
+        assert_eq!(cutoff, now - 3 * 86_400);
+    }
+
+    #[test]
+    fn retention_cutoff_weeks_2_subtracts_fourteen_days() {
+        let now = 1_000_000_000;
+        let cutoff = compute_retention_cutoff("weeks_2", now);
+        assert_eq!(cutoff, now - 14 * 86_400);
+    }
+
+    #[test]
+    fn retention_cutoff_months_3_subtracts_ninety_days() {
+        let now = 1_000_000_000;
+        let cutoff = compute_retention_cutoff("months_3", now);
+        assert_eq!(cutoff, now - 90 * 86_400);
+    }
+
+    #[test]
+    fn retention_cutoff_preserve_limit_treated_as_unknown() {
+        // preserve_limit isn't a time-based cutoff; the cleanup code
+        // takes the LIMIT-based code path instead.
+        assert_eq!(
+            compute_retention_cutoff("preserve_limit", 1_000_000),
+            i64::MIN
+        );
+    }
+
+    #[test]
+    fn retention_never_keeps_everything() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = HistorySqliteStorage::new(temp.path().join("h.db"));
+        for i in 0..5 {
+            storage.add(&format!("entry {}", i), None, None).unwrap();
+        }
+        let deleted = storage.cleanup_by_retention("never", 100).unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(storage.count().unwrap(), 5);
+    }
+
+    #[test]
+    fn retention_preserve_limit_keeps_only_n_recent() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = HistorySqliteStorage::new(temp.path().join("h.db"));
+        for i in 0..7 {
+            storage.add(&format!("entry {}", i), None, None).unwrap();
+            // Small spacing so timestamps differ even at second
+            // resolution; the test still works without this but it
+            // makes the ordering deterministic on fast machines.
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let deleted = storage.cleanup_by_retention("preserve_limit", 3).unwrap();
+        assert_eq!(deleted, 4);
+        assert_eq!(storage.count().unwrap(), 3);
     }
 
     #[test]

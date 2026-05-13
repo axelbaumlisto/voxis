@@ -57,6 +57,25 @@ pub fn configure_app(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
     debug_socket::spawn(app.handle().clone());
 
+    // T-C5 · apply recording-retention policy on startup. Best-effort,
+    // never fatal — a corrupt history.db must not block app launch.
+    // We clone the inner AppPaths (Clone) out of the State<> reference
+    // so the spawned thread owns a 'static value.
+    let history_path = paths_ref.history_file();
+    let retention_policy = config.retention_period.clone();
+    let retention_limit = config.retention_limit as usize;
+    std::thread::spawn(move || {
+        let storage =
+            crate::storage::history_sqlite::HistorySqliteStorage::new(history_path);
+        match storage.cleanup_by_retention(&retention_policy, retention_limit) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(
+                "retention cleanup: deleted {n} history rows under policy '{retention_policy}'"
+            ),
+            Err(e) => tracing::warn!("retention cleanup failed: {e}"),
+        }
+    });
+
     tracing::info!("Setup: complete!");
     Ok(())
 }
