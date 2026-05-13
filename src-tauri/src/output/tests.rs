@@ -108,3 +108,37 @@ fn test_type_text_with_special_chars() {
         ["line1\n\tline2"]
     );
 }
+
+// --- T-A7 \xb7 append_trailing_space ----------------------------------------
+//
+// `format_output_text(text, append_trailing_space)` is the pure output-shaping
+// step the OutputHandler runs before copy/type. Keeping it side-effect-free
+// lets us cover the toggle in isolation without exercising clipboard / typer
+// plumbing (SOLID-SRP).
+
+#[test]
+fn output_with_trailing_space_appends_one_space() {
+    assert_eq!(format_output_text("hello", true), "hello ");
+}
+
+#[test]
+fn output_without_trailing_space_unchanged() {
+    assert_eq!(format_output_text("hello", false), "hello");
+}
+
+#[test]
+fn output_trailing_space_idempotent_on_already_trailing() {
+    // If the transcript already ends with whitespace we MUST NOT append
+    // a second space — otherwise repeated dictations accumulate ugly
+    // gaps. The function is intentionally idempotent on the right edge.
+    assert_eq!(format_output_text("hello ", true), "hello ");
+    assert_eq!(format_output_text("hello\n", true), "hello\n");
+}
+
+#[test]
+fn output_trailing_space_preserves_empty_input() {
+    // Empty in -> empty out regardless of flag. We don't want to type
+    // a stray space when the transcription pipeline produced nothing.
+    assert_eq!(format_output_text("", true), "");
+    assert_eq!(format_output_text("", false), "");
+}
