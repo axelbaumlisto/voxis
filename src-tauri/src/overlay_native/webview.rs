@@ -129,6 +129,10 @@ fn build_overlay_window(
     x: f64,
     y: f64,
 ) -> Result<(), String> {
+    // `inner_size` and `position` accept f64 in logical pixels; we use
+    // explicit min_inner_size + max_inner_size to pin the pill to the
+    // Handy 172×36 footprint on Linux/GTK which otherwise can ignore
+    // size hints for transparent windows.
     let mut builder = tauri::WebviewWindowBuilder::new(
         app,
         label,
@@ -136,6 +140,8 @@ fn build_overlay_window(
     )
     .title("Recording Overlay")
     .inner_size(PILL_WIDTH as f64, PILL_HEIGHT as f64)
+    .min_inner_size(PILL_WIDTH as f64, PILL_HEIGHT as f64)
+    .max_inner_size(PILL_WIDTH as f64, PILL_HEIGHT as f64)
     .position(x, y)
     .decorations(false)
     .resizable(false)
