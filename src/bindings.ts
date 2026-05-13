@@ -634,7 +634,13 @@ async reprocessHistoryForSuggestions(limit: number | null) : Promise<Result<Repr
  * - llm: LLM post-processing settings
  * - dictionary: Dictionary and learning settings
  */
-export type AppConfig = { api_key?: string; model?: string; language?: string; hotkey?: string; auto_type?: boolean; auto_enter?: boolean; typing_delay?: number; notifications?: boolean; backend?: string; debug?: boolean; audio_device?: string; history_enabled?: boolean; history_days?: number; active_provider?: string; cloud_provider?: string; local_backend?: string; text_processing?: boolean; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
+export type AppConfig = { api_key?: string; model?: string; language?: string; hotkey?: string; 
+/**
+ * Minimum hold time (ms) before the hotkey activates. Presses
+ * shorter than this are ignored — allows AltGr/Ctrl to keep working
+ * as a key modifier for combinations.
+ */
+hotkey_hold_ms?: number; auto_type?: boolean; auto_enter?: boolean; typing_delay?: number; notifications?: boolean; backend?: string; debug?: boolean; audio_device?: string; history_enabled?: boolean; history_days?: number; active_provider?: string; cloud_provider?: string; local_backend?: string; text_processing?: boolean; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
 /**
  * Audio device info for UI display.
  */

@@ -8,11 +8,24 @@
   grid-template-columns: auto 1fr auto;
   align-items: center;
   padding: 6px;
-  background: #000000cc;
+  /* Idle: fully transparent — only the small TranscriptionIcon is visible.
+   * The pill itself becomes a visible "dark capsule" only when the user
+   * is recording / transcribing / showing an error (see overrides below). */
+  background: transparent;
   border-radius: 18px;
   opacity: 0;
-  transition: opacity 300ms ease-out;
+  transition:
+    opacity 300ms ease-out,
+    background-color 200ms ease-out;
   box-sizing: border-box;
+}
+
+/* Active modes — show a dark, translucent pill so the bars / cancel button
+ * stay readable against any desktop background. */
+.recording-overlay[data-mode="recording"],
+.recording-overlay[data-mode="transcribing"],
+.recording-overlay[data-mode="error"] {
+  background: rgba(0, 0, 0, 0.8);
 }
 
 .overlay-left {

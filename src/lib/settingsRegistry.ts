@@ -83,6 +83,15 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     getOptions: getHotkeyOptions,
   },
   {
+    key: "hotkey_hold_ms",
+    label: "Hold Threshold (ms)",
+    widgetType: "input",
+    section: "Recording",
+    placeholder: "300",
+    description:
+      "Minimum hold time before recording starts. Short presses are treated as key combinations (e.g. AltGr+R).",
+  },
+  {
     key: "audio_device",
     label: "Audio Device",
     widgetType: "select",

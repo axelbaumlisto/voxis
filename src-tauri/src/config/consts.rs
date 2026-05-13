@@ -119,6 +119,13 @@ pub const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/audio/transcripti
 /// Default hotkey for recording.
 pub const DEFAULT_HOTKEY: &str = "ctrl_r";
 
+/// Minimum hold time (ms) before the hotkey actually activates recording.
+/// Below this threshold, the press is treated as a modifier in a key
+/// combination and silently ignored. Default 300 ms balances perceived
+/// responsiveness (start feels instant) and tolerance for AltGr / Ctrl
+/// being used in shortcuts like AltGr+R, Ctrl+C, etc.
+pub const DEFAULT_HOTKEY_HOLD_MS: u32 = 300;
+
 /// Default typing delay in milliseconds.
 pub const DEFAULT_TYPING_DELAY: u32 = 12;
 
