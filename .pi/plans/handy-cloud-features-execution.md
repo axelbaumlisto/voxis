@@ -491,38 +491,61 @@ Vitest tests (≥4): шаги проходимы по очереди, кнопк
 
 | Task | Status | Commit | Date |
 |------|--------|--------|------|
-| T0.1 baseline | — | — | — |
+| T0.1 baseline (771 / 1018 / 133) | ✅ | (snapshot) | 2026-05-13 |
 | **Phase A · hit-hard wins** | | | |
-| T-A7.1 RED trailing space | — | — | — |
-| T-A7.2 GREEN trailing space | — | — | — |
-| T-A9.1 RED translate-to-english | — | — | — |
-| T-A9.2 GREEN translate-to-english | — | — | — |
-| T-A1.1 RED LlmPrompt schema | — | — | — |
-| T-A1.2 GREEN LlmPrompt schema | — | — | — |
-| T-A1.3 SQLite CRUD | — | — | — |
-| T-A1.4 Active prompt in LLM call | — | — | — |
-| T-A1.5 PromptManager UI | — | — | — |
-| T-A4.1 RED auto-submit | — | — | — |
-| T-A4.2 GREEN auto-submit | — | — | — |
-| T-A4.3 AutoSubmit UI | — | — | — |
+| T-A7.1 RED trailing space | ✅ | db58648 | 2026-05-13 |
+| T-A7.2 GREEN trailing space | ✅ | 287b94a | 2026-05-13 |
+| T-A9.1 RED translate-to-english | ✅ | d2437d2 | 2026-05-13 |
+| T-A9.2 GREEN translate-to-english | ✅ | 08987fd | 2026-05-13 |
+| T-A1.1+1.2 LlmPrompt schema | ✅ squashed | 58f1b14 | 2026-05-13 |
+| T-A1.3 SQLite CRUD | ✅ | db116be | 2026-05-13 |
+| T-A1.4 Active prompt in LLM call | ✅ | 8eba36f | 2026-05-13 |
+| T-A1.5 PromptManager UI | ✅ | fc2c95a | 2026-05-13 |
+| T-A4.1+4.2 auto-submit dispatcher | ✅ squashed | a6dd455 | 2026-05-13 |
+| T-A4.3 AutoSubmit UI + wire | ✅ | 2653b76 | 2026-05-13 |
 | **Phase B · depth** | | | |
-| T-B6.1 RED audio_feedback | — | — | — |
-| T-B6.2 GREEN audio_feedback | — | — | — |
-| T-B6.3 Audio feedback wire+UI | — | — | — |
-| T-B2.1 RED multi-binding schema | — | — | — |
-| T-B2.2 GREEN multi-binding storage | — | — | — |
-| T-B2.3 Action dispatcher | — | — | — |
-| T-B2.4 Binding UI | — | — | — |
-| T-B10.1 first_run_completed flag | — | — | — |
-| T-B10.2 Onboarding pages | — | — | — |
+| T-B6.1 RED audio_feedback | ✅ | c7cef17 | 2026-05-13 |
+| T-B6.2 GREEN audio_feedback (rodio) | ✅ | 4a62e4f | 2026-05-13 |
+| T-B6.3 Audio feedback wire+UI | ✅ | 1c41e1b | 2026-05-13 |
+| T-B2.1+2.2 multi-binding schema+storage | ✅ | f881f92 | 2026-05-13 |
+| T-B2.3 Action dispatcher (pure) | ✅ | 45a117b | 2026-05-13 |
+| T-B2.4 Binding UI | ✅ schema/UI only — listener rewiring deferred | 0c5c2f3 | 2026-05-13 |
+| T-B10.1 first_run_completed flag | ✅ | e1d9994 | 2026-05-13 |
+| T-B10.2 Onboarding pages | ✅ | 25f8b50 | 2026-05-13 |
 | **Phase C · polish** | | | |
-| T-C3.1 RED hotkey mode | — | — | — |
-| T-C3.2 GREEN hotkey mode | — | — | — |
-| T-C5.1 RED retention | — | — | — |
-| T-C5.2 GREEN retention | — | — | — |
-| T-C8.1 RED always-on | — | — | — |
-| T-C8.2 GREEN always-on | — | — | — |
-| T-C8.3 AlwaysOn UI + warning | — | — | — |
+| T-C3.1+3.2 hotkey mode toggle/hold | ✅ squashed | 93966fd | 2026-05-13 |
+| T-C5.1+5.2 retention period | ✅ squashed | dc7375b | 2026-05-13 |
+| T-C8.1–3 always-on mic | ✅ schema+UI — Linux runtime deferred | 6ff8f31 | 2026-05-13 |
+| **Tech-debt cleanup pass** | | | |
+| unwrapResult helper (DRY – 3 dupes) | ✅ | f437689 | 2026-05-13 |
+| AppConfig type sync + kill `as unknown as` | ✅ | 3a789cd | 2026-05-13 |
+| Storage get_json/set_json (DRY) | ✅ | 27739e7 | 2026-05-13 |
+| Drop egui dep, in-tree Color32 | ✅ | 3e6a3ac | 2026-05-13 |
+| Fold dead 'native'/'subprocess' arms | ✅ | 09505e9 | 2026-05-13 |
+
+## Final stack (2026-05-13)
+
+| Layer | Final | Baseline | Delta |
+|-------|-------|----------|-------|
+| cargo lib tests | **837** | 771 | +66 |
+| vitest | **1052** | 1018 | +34 |
+| e2e | **133 passed / 9 skipped** | 113 | clean throughout |
+| clippy | **0 warnings** | 0 | clean throughout |
+| Cargo deps (heavy) | -1 (egui gone) | — | — |
+
+## Known deferred work (back-compat compatible)
+
+1. **#2 listener runtime rewiring** — the hotkey rdev listener still
+   uses the legacy single `AppConfig.hotkey` path. `ShortcutBinding`
+   schema, storage, dispatcher (`shortcut::resolve`) and UI are ready;
+   wiring N hotkeys + per-binding dispatch is a self-contained
+   follow-up.
+2. **#8 Linux/Windows always-on stream pause/resume** — macOS already
+   keeps the cpal stream warm via `stop_macos_pause`. The flag,
+   storage and UI exist; the non-macOS branch in `audio::recorder::
+   stop_linux` still drops the stream.
+
+Both are tracked in their commit bodies (`0c5c2f3`, `6ff8f31`).
 
 ## Totals
 
