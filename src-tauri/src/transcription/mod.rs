@@ -240,6 +240,51 @@ mod tests {
         assert!(json.contains("\"text\":\"Test\""));
         assert!(json.contains("\"language\":\"en\""));
     }
+
+    // --- T-A9 \xb7 translate_to_english ----------------------------------
+    //
+    // build_form_text_params() is the pure helper that produces the
+    // multipart text fields the Whisper-compatible /transcriptions
+    // endpoint accepts (model, language?, response_format, translate?).
+    // It is extracted so the toggle can be unit-tested without spinning
+    // up an HTTP mock (SOLID-SRP). The Whisper-compatible spec uses a
+    // SEPARATE endpoint for translation (POST /audio/translations) but
+    // Groq + several others honour a `task=translate` field on the
+    // standard endpoint; we send the latter for broadest compat.
+
+    fn find(params: &[(&'static str, String)], key: &str) -> Option<String> {
+        params.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn form_params_omits_translate_when_disabled() {
+        let params = build_form_text_params("whisper-large-v3-turbo", None, false);
+        assert!(find(&params, "task").is_none(), "task must NOT be set when translate=false");
+        assert_eq!(find(&params, "model").as_deref(), Some("whisper-large-v3-turbo"));
+        assert_eq!(find(&params, "response_format").as_deref(), Some("verbose_json"));
+    }
+
+    #[test]
+    fn form_params_includes_translate_when_enabled() {
+        let params = build_form_text_params("whisper-large-v3-turbo", None, true);
+        assert_eq!(find(&params, "task").as_deref(), Some("translate"),
+            "task=translate is the documented field that tells Groq / OpenAI Whisper\n             to emit English regardless of the source language");
+    }
+
+    #[test]
+    fn form_params_passes_through_language_when_set() {
+        let params = build_form_text_params("whisper-large-v3-turbo", Some("ru"), false);
+        assert_eq!(find(&params, "language").as_deref(), Some("ru"));
+    }
+
+    #[test]
+    fn form_params_language_and_translate_coexist() {
+        // Whisper translation still benefits from language hint (faster
+        // / more accurate). The form is allowed to carry both.
+        let params = build_form_text_params("whisper-large-v3-turbo", Some("ru"), true);
+        assert_eq!(find(&params, "language").as_deref(), Some("ru"));
+        assert_eq!(find(&params, "task").as_deref(), Some("translate"));
+    }
 }
 
 // =============================================================================
