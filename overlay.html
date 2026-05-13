@@ -15,6 +15,15 @@
         -webkit-user-select: none;
         user-select: none;
       }
+      /* Center the pill inside whatever OS window we got. Some Linux
+       * compositors ignore inner_size hints for transparent borderless
+       * windows and force a minimum (~200x200); this keeps the visual
+       * coherent: the pink icon stays centered, the rest is transparent. */
+      #root {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
     </style>
   </head>
   <body>
