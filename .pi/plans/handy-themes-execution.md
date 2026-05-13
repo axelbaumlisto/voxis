@@ -544,10 +544,43 @@ describe("themeBarMath", () => {
 | T5.3 Synthetic e2e | ✅ 15 new · 128 total | 9add194 | 2026-05-13 10:35 |
 | T5.4 E2E helpers | ✅ (squashed into T5.5) | ddf4c74 | 2026-05-13 11:24 |
 | T5.5 Live gallery spec | ✅ 8 themes × 8 frames = 64 PNG | ddf4c74 | 2026-05-13 11:24 |
-| T5.6 Animations + index | — | — | — |
-| T6.1 list_handy_themes | — | — | — |
-| T6.2 ThemeSelector | — | — | — |
-| T7.1 Cleanup legacy | — | — | — |
+| T5.6 Animations + index | ✅ index.html + GIF helpers in handyGallery.ts | (in T5.5) | 2026-05-13 11:24 |
+| T6.1 list_handy_themes | ✅ reused get_visualization_themes (already in commands/overlay.rs) | (no change) | 2026-05-13 13:14 |
+| T6.2 ThemeSelector | ✅ swatch grid + 5 vitest tests | af43c8d | 2026-05-13 13:14 |
+| T7.1 Cleanup legacy | ✅ −3466 LoC: egui native + subprocess + overlay_bin tree | 796f1f5 | 2026-05-13 13:50 |
+
+## Phase 8 (extension beyond original plan) — per-family rendering
+
+The original plan assumed all themes would unify to a single Handy pill
+form. User requested that legacy themes preserve their **native** look
+(Winamp EQ bars stay as bars, organic_ring themes stay as rings). This
+phase added the family router and new components.
+
+| Task | Status | Commit | Date |
+|------|--------|--------|------|
+| T8.1 ClassicBars component (16 gradient bars, Winamp EQ) | ✅ +8 vitest | 84a2a18 | 2026-05-13 12:00 |
+| T8.2 OrganicRing wiring (HandyPillRing schema, 3 ring themes route to canvas) | ✅ +0 lib, ring shape via theme | f3985d7 | 2026-05-13 12:08 |
+| T8.3 Family router in src/overlay.tsx (bars / organic_ring / handy branches) | ✅ +3 vitest | 581ecd8 | 2026-05-13 11:55 |
+| T8.6 Family-aware live gallery (per-family probe + threshold + countOpaqueNonWhitePixels) | ✅ 8/8 GREEN | 53de3a9 | 2026-05-13 12:23 |
+| Winamp peak-hold-and-decay (1:1 with classic Winamp, useBarPeaks hook) | ✅ +5 vitest + 2 ClassicBars | c2c4330 | 2026-05-13 12:14 |
+| Linux build fix (nspanel non-macos stub args) | ✅ 770 GREEN on Linux too | 36fc00f | 2026-05-13 13:00 |
+| Silent mic warning (~1s of zero RMS during recording) | ✅ one-shot warn in audio_level.rs | e84baa7 | 2026-05-13 14:14 |
+
+## Final stats (2026-05-13)
+
+| Layer | Final | Baseline | Delta |
+|-------|-------|----------|-------|
+| cargo lib tests | 771 | 755 | +16 |
+| vitest | 1018 | 976 | +42 |
+| e2e | 133 passed / 9 skipped | 113 | +20 |
+| clippy warnings | 0 | 0 | clean |
+| LoC delta (Phase 7 cleanup) | −3466 net | — | −3466 |
+
+All 7 original phases + Phase 8 extension are complete and pushed to
+`gitverse.ru/zverozabr/voice` main. Live audio → spectrum → bars/ring
+flow proven on real microphone with TTS playback (see
+`test-results/live-winamp-with-tts.png` and
+`test-results/live-living-reed-with-tts.png`).
 
 ---
 
