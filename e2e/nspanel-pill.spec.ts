@@ -21,8 +21,11 @@ import { readFileSync, existsSync } from "node:fs";
 const execFileAsync = promisify(execFile);
 
 test.describe("HandyPill -- webview content (dev URL)", () => {
-  test("overlay.html mounts the pill grid (idle)", async ({ page }) => {
-    await page.goto("/overlay.html");
+  // Pin handy family via ?theme=handy — default theme is now
+  // winamp_classic (bars family) which does NOT render the
+  // overlay-left/middle/right grid these assertions describe.
+  test("overlay.html mounts the pill grid (idle, handy family)", async ({ page }) => {
+    await page.goto("/overlay.html?theme=handy");
     await page.waitForSelector(".recording-overlay");
     await expect(page.locator(".recording-overlay")).toHaveAttribute(
       "data-mode",
@@ -33,6 +36,8 @@ test.describe("HandyPill -- webview content (dev URL)", () => {
     await expect(page.locator(".overlay-right")).toHaveCount(1);
   });
 
+  // Background transparency must hold for ALL families, not just handy —
+  // covered regardless of the active theme.
   test("body background is transparent", async ({ page }) => {
     await page.goto("/overlay.html");
     await page.waitForSelector(".recording-overlay");

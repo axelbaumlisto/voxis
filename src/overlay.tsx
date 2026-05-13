@@ -65,15 +65,21 @@ function PillContent({ snapshot }: { snapshot: OverlaySnapshot }) {
 
   if (theme.family === "bars") {
     return (
-      <ClassicBars
-        bars={bars}
-        gradient={{
-          bottom: theme.bars.gradient_bottom,
-          middle: theme.bars.gradient_middle,
-          top: theme.bars.gradient_top,
-        }}
-        barCount={barCount}
-      />
+      <div
+        className="recording-overlay"
+        data-family="bars"
+        data-mode={effectiveMode}
+      >
+        <ClassicBars
+          bars={bars}
+          gradient={{
+            bottom: theme.bars.gradient_bottom,
+            middle: theme.bars.gradient_middle,
+            top: theme.bars.gradient_top,
+          }}
+          barCount={barCount}
+        />
+      </div>
     );
   }
 
@@ -82,28 +88,34 @@ function PillContent({ snapshot }: { snapshot: OverlaySnapshot }) {
     // Our HandyPillRing has the same field names, so we can pass it
     // through directly; the DTO is just a serde-renamed view.
     return (
-      <OrganicRing
-        spectrumBins={bars}
-        audioLevel={snapshot.audioLevel}
-        mode={effectiveMode}
-        themeShape={{
-          gap_degrees: theme.ring.gap_degrees,
-          base_thickness: theme.ring.base_thickness,
-          taper: theme.ring.taper,
-          roundness: theme.ring.roundness,
-          active_zones: theme.ring.active_zones,
-        }}
-        themeMotion={{
-          speech_responsiveness: theme.ring.speech_responsiveness,
-          drift: theme.ring.drift,
-          settle_speed: theme.ring.settle_speed,
-          // idle_breathing is in the common animation block, not ring.
-          idle_breathing: theme.animation.idle_breathing_amplitude,
-        }}
-        color={theme.palette.icon_color}
-        width={172}
-        height={36}
-      />
+      <div
+        className="recording-overlay"
+        data-family="organic_ring"
+        data-mode={effectiveMode}
+      >
+        <OrganicRing
+          spectrumBins={bars}
+          audioLevel={snapshot.audioLevel}
+          mode={effectiveMode}
+          themeShape={{
+            gap_degrees: theme.ring.gap_degrees,
+            base_thickness: theme.ring.base_thickness,
+            taper: theme.ring.taper,
+            roundness: theme.ring.roundness,
+            active_zones: theme.ring.active_zones,
+          }}
+          themeMotion={{
+            speech_responsiveness: theme.ring.speech_responsiveness,
+            drift: theme.ring.drift,
+            settle_speed: theme.ring.settle_speed,
+            // idle_breathing is in the common animation block, not ring.
+            idle_breathing: theme.animation.idle_breathing_amplitude,
+          }}
+          color={theme.palette.icon_color}
+          width={172}
+          height={36}
+        />
+      </div>
     );
   }
 
