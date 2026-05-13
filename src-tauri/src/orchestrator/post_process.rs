@@ -10,11 +10,48 @@
 
 use crate::config::AppConfig;
 use crate::learning::{CorrectionTracker, LearningMode};
+use crate::llm::prompts::{find_by_id, LlmPrompt};
 use crate::llm::provider::{build_llm_provider, LlmProvider};
 use crate::llm::{parser, DictionarySuggestion, LlmResult};
 use crate::storage;
+use crate::storage::prompts_sqlite::LlmPromptsStorage;
 use std::time::Instant;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
+
+/// Pure resolver for the LLM prompt body that should drive this
+/// post-process run. Falls back to the legacy `llm.prompt` string
+/// (back-compat for users who never opened the new prompt manager).
+///
+/// Extracted as a pure function so the multi-prompt behaviour can be
+/// unit-tested without spinning up SQLite or the storage factory
+/// (SOLID-SRP).
+pub(crate) fn resolve_prompt<'a>(
+    active_id: Option<&str>,
+    available: &'a [LlmPrompt],
+    legacy: &'a str,
+) -> &'a str {
+    if let Some(id) = active_id {
+        if let Some(found) = find_by_id(available, id) {
+            return &found.prompt;
+        }
+    }
+    legacy
+}
+
+/// SQLite-backed resolver used by the live post-process pipeline. Wraps
+/// the pure `resolve_prompt` with the storage I/O so callers don't have
+/// to wire it themselves.
+fn resolve_active_prompt_string(app: &AppHandle, legacy: &str) -> String {
+    let Some(paths) = app.try_state::<crate::storage::AppPaths>() else {
+        return legacy.to_string();
+    };
+    let store = LlmPromptsStorage::new(paths.prompts_db());
+    // Best-effort seed — idempotent.
+    let _ = store.seed_defaults_if_empty();
+    let active_id = store.get_active_id().ok().flatten();
+    let list = store.list().unwrap_or_default();
+    resolve_prompt(active_id.as_deref(), &list, legacy).to_string()
+}
 
 /// Result of post-processing.
 pub struct PostProcessResult {
@@ -46,7 +83,8 @@ pub async fn apply_post_processing(
     let word_count = final_text.split_whitespace().count();
     if config.llm.enabled && word_count > 2 {
         if let Some(provider) = build_llm_provider(&config.llm) {
-            let result = apply_llm_via_provider(app, config, provider.as_ref(), &final_text).await;
+            let prompt = resolve_active_prompt_string(app, &config.llm.prompt);
+            let result = apply_llm_via_provider(app, config, provider.as_ref(), &prompt, &final_text).await;
             llm_duration_ms = result.llm_duration_ms;
             if let Some(ref llm) = result.llm_result {
                 final_text = llm.text.clone();
@@ -92,11 +130,12 @@ async fn apply_llm_via_provider(
     app: &AppHandle,
     config: &AppConfig,
     provider: &dyn LlmProvider,
+    prompt: &str,
     text: &str,
 ) -> PostProcessResult {
     let llm_start = Instant::now();
 
-    match provider.process(&config.llm.prompt, text).await {
+    match provider.process(prompt, text).await {
         Ok(content) => {
             let result = match parser::parse_result(&content, text) {
                 Ok(parsed) => parsed,
@@ -177,8 +216,45 @@ fn process_suggestions(app: &AppHandle, config: &AppConfig, suggestions: &[Dicti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::prompts::default_prompts;
     use async_trait::async_trait;
     use std::sync::{Arc, Mutex};
+
+    // --- T-A1.4 \xb7 pure prompt resolver ----------------------------------
+
+    #[test]
+    fn resolve_prompt_falls_back_to_legacy_when_no_active_id() {
+        let prompts = default_prompts();
+        let legacy = "my legacy prompt";
+        let resolved = resolve_prompt(None, &prompts, legacy);
+        assert_eq!(resolved, legacy);
+    }
+
+    #[test]
+    fn resolve_prompt_uses_match_when_active_id_known() {
+        let prompts = default_prompts();
+        let legacy = "my legacy prompt";
+        let resolved = resolve_prompt(Some("email_tone"), &prompts, legacy);
+        assert!(resolved.contains("email"));
+        assert_ne!(resolved, legacy);
+    }
+
+    #[test]
+    fn resolve_prompt_falls_back_to_legacy_when_active_id_unknown() {
+        // Stale active_id (e.g. user deleted the prompt) must not crash
+        // or return an empty string — fall back to the legacy single-prompt
+        // string so behavior is identical to the pre-multi-prompt era.
+        let prompts = default_prompts();
+        let legacy = "my legacy prompt";
+        let resolved = resolve_prompt(Some("ghost_id_no_such_prompt"), &prompts, legacy);
+        assert_eq!(resolved, legacy);
+    }
+
+    #[test]
+    fn resolve_prompt_handles_empty_prompts_list() {
+        let resolved = resolve_prompt(Some("anything"), &[], "legacy");
+        assert_eq!(resolved, "legacy");
+    }
 
     /// Shared handle to mock-provider call log (system_prompt, user_text).
     /// SRP: dedicated alias keeps `MockProvider::new()` signature readable
