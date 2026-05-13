@@ -536,9 +536,9 @@ describe("themeBarMath", () => {
 | T2.2 GREEN Provider | ✅ 8 GREEN (1002 total) | 9a20248 | 2026-05-13 09:55 |
 | T2.3 CSS vars refactor | ✅ 1002 still GREEN | 37fef6c | 2026-05-13 09:57 |
 | T2.4 Wire OverlayApp | ✅ 1003 + 7 e2e GREEN | e57d42f | 2026-05-13 10:01 |
-| T3.1 RED Rust | — | — | — |
-| T3.2 GREEN Rust + command | — | — | — |
-| T4.1 Populate 7 themes | — | — | — |
+| T3.1 RED Rust | ✅ 9 RED | (in T3.2 commit) | 2026-05-13 10:08 |
+| T3.2 GREEN Rust + command | ✅ 9 GREEN (764 total) | 7298825 | 2026-05-13 10:11 |
+| T4.1 Populate 7 themes | ✅ +1 distinct test (765 total) | f7784ef | 2026-05-13 10:18 |
 | T5.1 getHandyTheme wire | — | — | — |
 | T5.2 Debug commands | — | — | — |
 | T5.3 Synthetic e2e | — | — | — |
