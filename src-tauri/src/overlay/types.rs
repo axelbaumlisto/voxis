@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 const BASE_WIDTH: u32 = 200;
 const BASE_HEIGHT: u32 = 50;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum OverlayState {
     #[default]
