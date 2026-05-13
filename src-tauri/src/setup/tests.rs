@@ -40,3 +40,78 @@ fn test_init_x11_threads_does_not_panic() {
 fn test_init_logging_can_be_called() {
     let _ = std::any::type_name_of_val(&init_logging);
 }
+
+/// Architectural lock: every command registered with specta
+/// (collect_commands! in lib.rs) MUST also be registered with the
+/// runtime dispatcher (generate_handler! in setup/mod.rs), otherwise
+/// the frontend gets 'Command X not found' at runtime even though the
+/// TS bindings look fine.
+///
+/// This test parses both source files and asserts the two command lists
+/// match (modulo ordering). Catches the kind of bug where we add a new
+/// Tauri command to one list but forget the other.
+#[test]
+fn specta_commands_match_generate_handler_commands() {
+    fn extract_commands(
+        path: &str,
+        start_marker: &str,
+        end_marker: &str,
+    ) -> std::collections::BTreeSet<String> {
+        let src = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("read {path}: {e}"));
+        let start = src
+            .find(start_marker)
+            .unwrap_or_else(|| panic!("start marker '{start_marker}' not found in {path}"));
+        let after_start = &src[start + start_marker.len()..];
+        let end = after_start
+            .find(end_marker)
+            .unwrap_or_else(|| panic!("end marker '{end_marker}' not found in {path}"));
+        let block = &after_start[..end];
+        block
+            .lines()
+            .filter_map(|line| {
+                // Strip comment, trailing comma, whitespace.
+                let line = line.split("//").next().unwrap_or(line).trim();
+                let line = line.trim_end_matches(',').trim();
+                if line.is_empty() || line.starts_with('#') {
+                    return None;
+                }
+                // Only keep lines that look like a path::to::command.
+                if !line.contains("::") {
+                    return None;
+                }
+                // Normalize: strip 'crate::' prefix so the two files
+                // can use different prefixes (lib.rs uses crate::,
+                // setup/mod.rs uses 'commands' via `use crate::commands`).
+                let normalized = line
+                    .strip_prefix("crate::commands::")
+                    .or_else(|| line.strip_prefix("commands::"))
+                    .unwrap_or(line);
+                Some(normalized.to_string())
+            })
+            .collect()
+    }
+
+    let specta = extract_commands(
+        "src/lib.rs",
+        "tauri_specta::collect_commands![",
+        "])",
+    );
+    let runtime = extract_commands(
+        "src/setup/mod.rs",
+        "tauri::generate_handler![",
+        "]\n}",
+    );
+
+    let only_in_specta: Vec<&String> = specta.difference(&runtime).collect();
+    let only_in_runtime: Vec<&String> = runtime.difference(&specta).collect();
+
+    assert!(
+        only_in_specta.is_empty() && only_in_runtime.is_empty(),
+        "specta / generate_handler! command lists drift detected:\n\
+         only in specta (will fail at runtime with 'Command X not found'):\n  {:#?}\n\
+         only in generate_handler (missing from TS bindings):\n  {:#?}",
+        only_in_specta,
+        only_in_runtime,
+    );
+}
