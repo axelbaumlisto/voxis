@@ -450,6 +450,26 @@ impl VisualizationTheme {
             .map_err(|e| e.to_string())
     }
 
+    /// Resolve the on-disk `theme.json` path for the named theme id, if
+    /// the loader is aware of it. Returns `None` when the theme is
+    /// builtin-only (no file on disk) or the id is unknown.
+    ///
+    /// Used by command handlers (e.g. `get_handy_theme`) that need to
+    /// re-parse the raw JSON for fields not yet exposed via
+    /// `VisualizationTheme`.
+    pub fn path_for_id(
+        theme_id: &str,
+        theme_loader: &super::ThemeLoaderHandle,
+    ) -> Option<std::path::PathBuf> {
+        let dir = Self::themes_dir(theme_loader).join(theme_id);
+        let candidate = dir.join("theme.json");
+        if candidate.exists() {
+            Some(candidate)
+        } else {
+            None
+        }
+    }
+
     pub fn themes_dir(theme_loader: &super::ThemeLoaderHandle) -> std::path::PathBuf {
         theme_loader
             .read()

@@ -90,6 +90,7 @@ pub fn command_handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 
         commands::overlay::reload_visualization_themes,
         commands::overlay::preview_visualization_theme,
         commands::overlay::get_theme_colors,
+        commands::overlay::get_handy_theme,
         #[cfg(debug_assertions)]
         commands::overlay::overlay_demo,
         commands::recording::list_audio_devices,

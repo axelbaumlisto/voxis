@@ -390,6 +390,14 @@ async getOverlayThemeData(themeId: string) : Promise<OverlayThemeData> {
     return await TAURI_INVOKE("get_overlay_theme_data", { themeId });
 },
 /**
+ * Get the Handy-pill theme for the named theme id (palette + animation).
+ * Falls back to the default Handy pink palette for unknown ids or themes
+ * without a `handy_pill` block in `theme.json`. Never errors.
+ */
+async getHandyTheme(themeId: string) : Promise<HandyPillTheme> {
+    return await TAURI_INVOKE("get_handy_theme", { themeId });
+},
+/**
  * Diagnostic command — lets the overlay webview log a marker to the Rust
  * tracing stream. Used during E2E development to verify that the React
  * app inside the NSPanel actually runs and receives state events.
@@ -681,6 +689,22 @@ timestamp: string;
  * Provider that was used (e.g., "groq", "openai")
  */
 provider: string }
+/**
+ * Thirteen animation knobs.
+ * 
+ * Three of them (`smoothing_alpha`, `power_curve`, `peak_decay`) drive
+ * JS bar math; the remaining surface as `--hp-*` CSS variables.
+ */
+export type HandyPillAnimation = { smoothing_alpha: number; power_curve: number; peak_decay: number; bar_min_height_px: number; bar_min_opacity: number; bar_opacity_gain: number; bar_height_ms: number; bar_opacity_ms: number; pill_fade_ms: number; transcribing_pulse_ms: number; 
+/**
+ * 0 disables idle breathing; 0.3 is the upper visual bound.
+ */
+idle_breathing_amplitude: number; idle_breathing_period_ms: number; cancel_hover_ms: number }
+/**
+ * Six palette colours drive every coloured pixel in the pill UI.
+ */
+export type HandyPillPalette = { icon_color: string; bar_color: string; bar_glow: string; shadow: string; transcribing_text: string; cancel_hover_bg: string }
+export type HandyPillTheme = { palette: HandyPillPalette; animation: HandyPillAnimation }
 /**
  * History entry for frontend display.
  */

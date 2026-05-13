@@ -157,6 +157,36 @@ pub fn get_overlay_theme_data(
     crate::overlay_native::OverlayThemeData::from_theme(&theme)
 }
 
+/// Get the Handy-pill theme for the named theme id (palette + animation).
+/// Falls back to the default Handy pink palette for unknown ids or themes
+/// without a `handy_pill` block in `theme.json`. Never errors.
+#[tauri::command]
+#[specta::specta]
+pub fn get_handy_theme(
+    theme_id: String,
+    theme_loader: State<'_, ThemeLoaderState>,
+) -> crate::overlay::themes::handy::HandyPillTheme {
+    // Resolve the theme by id to get its on-disk JSON path, then re-parse
+    // the raw JSON to access the `handy_pill` block. We deliberately read
+    // the file again (rather than relying on the in-memory
+    // `VisualizationTheme` cache) so that the Handy parser depends only
+    // on serde, not on the legacy `ThemeFile` struct — future cleanup
+    // (Phase 7) can drop the legacy struct without churning this command.
+    use crate::overlay::themes::handy::{resolve_from_json, DEFAULT_HANDY_THEME};
+
+    let path = VisualizationTheme::path_for_id(&theme_id, &theme_loader.handle);
+    let Some(path) = path else {
+        return DEFAULT_HANDY_THEME.clone();
+    };
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return DEFAULT_HANDY_THEME.clone();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return DEFAULT_HANDY_THEME.clone();
+    };
+    resolve_from_json(&value)
+}
+
 /// Diagnostic command — lets the overlay webview log a marker to the Rust
 /// tracing stream. Used during E2E development to verify that the React
 /// app inside the NSPanel actually runs and receives state events.

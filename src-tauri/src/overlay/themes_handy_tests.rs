@@ -8,12 +8,18 @@
 //! These tests MUST fail on first run (the module
 //! `crate::overlay::themes::handy` does not exist yet) — T3.2 then
 //! implements `handy.rs` to turn them green.
-#![cfg(test)]
+//!
+//! Wired via `#[cfg(test)] mod themes_handy_tests;` in overlay/mod.rs;
+//! no inner `#![cfg(test)]` needed.
 
 use crate::overlay::themes::handy::{
     HandyPillAnimation, HandyPillPalette, HandyPillTheme, resolve_from_json,
     DEFAULT_HANDY_THEME,
 };
+
+fn default_theme() -> HandyPillTheme {
+    DEFAULT_HANDY_THEME.clone()
+}
 
 fn json(s: &str) -> serde_json::Value {
     serde_json::from_str(s).expect("test fixture must be valid JSON")
@@ -23,14 +29,14 @@ fn json(s: &str) -> serde_json::Value {
 fn missing_handy_pill_block_returns_default() {
     let v = json(r#"{ "name": "anything", "family": "organic_ring" }"#);
     let t = resolve_from_json(&v);
-    assert_eq!(t, DEFAULT_HANDY_THEME);
+    assert_eq!(t, default_theme());
 }
 
 #[test]
 fn empty_handy_pill_returns_default() {
     let v = json(r#"{ "handy_pill": {} }"#);
     let t = resolve_from_json(&v);
-    assert_eq!(t, DEFAULT_HANDY_THEME);
+    assert_eq!(t, default_theme());
 }
 
 #[test]
@@ -41,16 +47,11 @@ fn partial_palette_keeps_default_animation() {
     let t = resolve_from_json(&v);
     assert_eq!(t.palette.icon_color, "#7cc287");
     // remaining palette → defaults
-    assert_eq!(t.palette.bar_color, DEFAULT_HANDY_THEME.palette.bar_color);
+    let d = default_theme();
+    assert_eq!(t.palette.bar_color, d.palette.bar_color);
     // animation block untouched
-    assert_eq!(
-        t.animation.smoothing_alpha,
-        DEFAULT_HANDY_THEME.animation.smoothing_alpha
-    );
-    assert_eq!(
-        t.animation.idle_breathing_amplitude,
-        DEFAULT_HANDY_THEME.animation.idle_breathing_amplitude
-    );
+    assert!((t.animation.smoothing_alpha - d.animation.smoothing_alpha).abs() < f32::EPSILON);
+    assert!((t.animation.idle_breathing_amplitude - d.animation.idle_breathing_amplitude).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -60,7 +61,7 @@ fn partial_animation_keeps_default_palette() {
     );
     let t = resolve_from_json(&v);
     assert!((t.animation.smoothing_alpha - 0.55).abs() < f32::EPSILON);
-    assert_eq!(t.palette.icon_color, DEFAULT_HANDY_THEME.palette.icon_color);
+    assert_eq!(t.palette.icon_color, default_theme().palette.icon_color);
 }
 
 #[test]
@@ -158,14 +159,16 @@ fn all_seven_repository_themes_parse_without_panic() {
 
 #[test]
 fn default_palette_uses_handy_pink() {
-    let p: &HandyPillPalette = &DEFAULT_HANDY_THEME.palette;
+    let d = default_theme();
+    let p: &HandyPillPalette = &d.palette;
     assert_eq!(p.icon_color, "#FAA2CA");
     assert_eq!(p.bar_color, "#ffe5ee");
 }
 
 #[test]
 fn default_animation_matches_handy_reference() {
-    let a: &HandyPillAnimation = &DEFAULT_HANDY_THEME.animation;
+    let d = default_theme();
+    let a: &HandyPillAnimation = &d.animation;
     assert!((a.smoothing_alpha - 0.3).abs() < f32::EPSILON);
     assert!((a.power_curve - 0.7).abs() < f32::EPSILON);
     assert!((a.peak_decay - 0.85).abs() < f32::EPSILON);
