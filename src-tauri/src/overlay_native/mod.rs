@@ -3,6 +3,7 @@ mod native;
 pub mod nspanel;
 mod subprocess;
 pub mod theme;
+pub mod webview;
 
 use std::sync::{Arc, RwLock};
 
@@ -58,6 +59,7 @@ pub struct CreateOverlayParams<'a> {
 /// - `"native"` — NativeOverlay (egui, all platforms when available)
 /// - `"subprocess"` — SubprocessOverlay (separate binary)
 /// - `"nspanel"` — NSPanel webview on macOS (opt-in, requires `app_handle`)
+/// - `"webview"` — plain Tauri WebviewWindow (cross-platform, default on Linux/Win)
 /// - `"none"` — NoopOverlay
  pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend> {
     if !params.enabled || params.backend == "none" {
@@ -112,13 +114,49 @@ pub struct CreateOverlayParams<'a> {
                 tracing::warn!("NSPanel is macOS-only; falling back to auto");
             }
         }
+        "webview" => {
+            if let Some(app) = params.app_handle.as_ref() {
+                match webview::WebviewOverlay::new(
+                    app.clone(),
+                    params.position,
+                    params.margin,
+                ) {
+                    Ok(o) => return Box::new(o),
+                    Err(e) => {
+                        tracing::warn!("Webview overlay failed: {}; falling back", e)
+                    }
+                }
+            } else {
+                tracing::warn!("Webview overlay requires app_handle; falling back");
+            }
+        }
         "auto" => {} // fall through to auto chain
         other => {
             tracing::warn!("Unknown overlay backend '{}'; falling back to auto", other);
         }
     }
 
-    // Auto chain: Linux prefers Native, others prefer Subprocess.
+    // ----------------------------------------------------------------
+    // Auto chain (Linux / Windows / macOS-as-fallback):
+    //   1. Tauri Webview overlay (Handy pill)  — preferred if we have AppHandle
+    //   2. Native egui overlay (organic ring)  — if compositor supports passthrough
+    //   3. Subprocess overlay                  — last-resort separate binary
+    //   4. NoopOverlay                         — absolutely nothing renders
+    // On macOS the explicit "nspanel" branch above is the preferred path.
+    // ----------------------------------------------------------------
+    if let Some(app) = params.app_handle.as_ref() {
+        match webview::WebviewOverlay::new(
+            app.clone(),
+            params.position,
+            params.margin,
+        ) {
+            Ok(o) => return Box::new(o),
+            Err(e) => tracing::warn!(
+                "auto: webview backend unavailable ({e}); trying native / subprocess"
+            ),
+        }
+    }
+
     #[cfg(target_os = "linux")]
     if NativeOverlay::is_available() {
         return make_native();
