@@ -157,6 +157,69 @@ async getDebugDir() : Promise<string> {
     return await TAURI_INVOKE("get_debug_dir");
 },
 /**
+ * Switch the overlay theme at runtime by emitting `overlay://theme`.
+ * 
+ * Effect:
+ * - the overlay webview's `useOverlayState` listener pulls `themeId`
+ * from the payload → `useFetchedHandyTheme` re-fetches → the
+ * `HandyThemeProvider` republishes 19 CSS variables on `:root`
+ * → the pill repaints in the new palette + animation timings.
+ * 
+ * Does NOT persist to config.db, so the user's stored preference is
+ * preserved.
+ */
+async debugSetHandyTheme(themeId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("debug_set_handy_theme", { themeId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Force the overlay into a specific {@link OverlayState} mode by
+ * emitting `overlay://state`. Bypasses orchestrator gating so test
+ * suites can capture every visual state (idle / recording /
+ * transcribing / error) without driving real audio.
+ */
+async debugSetOverlayState(state: OverlayState) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("debug_set_overlay_state", { state }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Inject synthetic spectrum bins into the overlay (e.g. simulate a
+ * loud burst for peak-decay screenshots).
+ * 
+ * `bins` must have exactly `crate::audio::SPECTRUM_BARS` entries
+ * (currently 32) or the command returns an error.
+ */
+async debugEmitSpectrum(bins: number[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("debug_emit_spectrum", { bins }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Sugar over [`debug_emit_spectrum`] with all zeros — makes the bars
+ * fall back to the configured peak-decay rate so a slow theme like
+ * `quiet_reed` (peak_decay=0.95) keeps high bars visible while `neon`
+ * (peak_decay=0.70) drops them fast.
+ */
+async debugEmitSilence() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("debug_emit_silence") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get all failed transcriptions.
  */
 async getFailedTranscriptions() : Promise<Result<FailedTranscription[], string>> {
@@ -754,6 +817,7 @@ backend?: string }
  * Overlay position on screen.
  */
 export type OverlayPosition = "bottom_left" | "bottom_right" | "top_left" | "top_right" | "center" | "top_center" | "bottom_center" | "left_center" | "right_center"
+export type OverlayState = "hidden" | "idle" | "recording" | "transcribing" | { queued: number }
 /**
  * Overlay state for display.
  */

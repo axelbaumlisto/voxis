@@ -91,6 +91,10 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
         crate::commands::debug::get_debug_entries,
         crate::commands::debug::clear_debug,
         crate::commands::debug::get_debug_dir,
+        crate::commands::debug::debug_set_handy_theme,
+        crate::commands::debug::debug_set_overlay_state,
+        crate::commands::debug::debug_emit_spectrum,
+        crate::commands::debug::debug_emit_silence,
         // failed transcriptions
         crate::commands::failed::get_failed_transcriptions,
         crate::commands::failed::dismiss_failed_transcription,
