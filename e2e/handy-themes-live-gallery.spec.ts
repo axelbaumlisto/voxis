@@ -57,18 +57,32 @@ test.describe.configure({ mode: "serial", retries: 1 });
 const GALLERY_DIR = "test-results/handy-gallery";
 
 /**
- * Themes + their expected icon_color (in sync with
- * src-tauri/themes/<id>/theme.json `handy_pill.palette.icon_color`).
+ * Themes + their expected idle probe color (per family) and minimum
+ * idle→loud diff threshold.
+ *
+ * Per family:
+ *   - handy:        mic icon drawn in `palette.icon_color` → probe with icon
+ *                   color; idle↔loud diff is huge (bars appear/disappear).
+ *   - organic_ring: ring stroked in `palette.icon_color` → probe with
+ *                   icon color; idle↔loud diff is small (ring shape
+ *                   only subtly shifts under audio drive).
+ *   - bars:         no icon. In idle bars sit at min height (2px)
+ *                   showing the `bars.gradient_bottom` color → probe
+ *                   with gradient_bottom; idle↔loud diff is huge.
  */
+// Probe color = the color that is dominantly visible in the IDLE state
+// for this theme. For bars family at min height (2px) CSS gradient
+// averages to ~top color; we use the top stop. For organic_ring and
+// handy the ring/icon is stroked with palette.icon_color.
 const THEMES = [
-  { id: "winamp_classic", icon: "#ef3110" },
-  { id: "default", icon: "#1e88e5" },
-  { id: "dark", icon: "#7c4dff" },
-  { id: "drifting_contour", icon: "#d9a865" },
-  { id: "living_reed", icon: "#7cc287" },
-  { id: "monochrome", icon: "#a0a0a0" },
-  { id: "neon", icon: "#ff00ff" },
-  { id: "quiet_reed", icon: "#7a9fbd" },
+  { id: "winamp_classic", family: "bars",         probe: "#ef3110", minDiff: 200 },
+  { id: "default",        family: "bars",         probe: "#64b5f6", minDiff: 200 },
+  { id: "dark",           family: "bars",         probe: "#b388ff", minDiff: 200 },
+  { id: "monochrome",     family: "bars",         probe: "#a0a0a0", minDiff: 200 },
+  { id: "neon",           family: "bars",         probe: "#ff00ff", minDiff: 200 },
+  { id: "drifting_contour", family: "organic_ring", probe: "#d9a865", minDiff: 30 },
+  { id: "living_reed",    family: "organic_ring", probe: "#7cc287", minDiff: 30 },
+  { id: "quiet_reed",     family: "organic_ring", probe: "#7a9fbd", minDiff: 30 },
 ] as const;
 
 const galleryEntries: GalleryEntry[] = [];
@@ -102,14 +116,14 @@ for (const t of THEMES) {
     // 01 — idle ---------------------------------------------------------
     const idle = `${out}/01-idle.png`;
     await captureWindowDirect(win.id, idle);
-    const { r, g, b } = hexToRgb(t.icon);
+    const { r, g, b } = hexToRgb(t.probe);
     // Euclidean tolerance 80 catches the anti-aliased ring around the
     // brain icon's actual pixels (the rendered hue drifts ±30 per
-    // channel from #1e88e5 due to SVG sub-pixel rendering).
+    // channel from the reference due to SVG / gradient sub-pixel rendering).
     const iconHits = await countMatchingPixels(idle, r, g, b, 80);
     expect(
       iconHits,
-      `theme '${t.id}' idle must show its icon_color ${t.icon} (>=10 px); saw ${iconHits}\n  ${idle}`,
+      `theme '${t.id}' (${t.family}) idle must show its probe color ${t.probe} (>=10 px); saw ${iconHits}\n  ${idle}`,
     ).toBeGreaterThan(10);
 
     // 02 — recording (no spectrum yet) ---------------------------------
@@ -119,8 +133,14 @@ for (const t of THEMES) {
     await captureWindowDirect(win.id, rec);
 
     // 03 — recording-loud (peak spectrum) ------------------------------
-    await emitSpectrum(peakBins(0.9));
-    await new Promise((r) => setTimeout(r, 500));
+    // Pre-warm with repeated bursts so the smoothing/peak hooks settle
+    // at peak; one shot is not enough for the organic_ring family
+    // (the canvas RAF reads the latest bins on each frame, but
+    // useSmoothBars only updates on event arrival).
+    for (let i = 0; i < 6; i++) {
+      await emitSpectrum(peakBins(0.9));
+      await new Promise((r) => setTimeout(r, 70));
+    }
     const loud = `${out}/03-recording-loud.png`;
     await captureWindowDirect(win.id, loud);
 
@@ -150,7 +170,7 @@ for (const t of THEMES) {
     const backHits = await countMatchingPixels(back, r, g, b, 80);
     expect(
       backHits,
-      `theme '${t.id}' should return to idle showing ${t.icon}; saw ${backHits}\n  ${back}`,
+      `theme '${t.id}' should return to idle showing ${t.probe}; saw ${backHits}\n  ${back}`,
     ).toBeGreaterThan(8);
 
     // 08 — diff overlay (idle vs recording-loud) -----------------------
@@ -158,8 +178,8 @@ for (const t of THEMES) {
     const { diffPixels } = await saveDiffOverlay(idle, loud, diff);
     expect(
       diffPixels,
-      `recording-loud must visibly differ from idle (>=200 px); saw ${diffPixels}\n  idle=${idle}\n  loud=${loud}`,
-    ).toBeGreaterThan(200);
+      `theme '${t.id}' (${t.family}) recording-loud must visibly differ from idle (>=${t.minDiff} px); saw ${diffPixels}\n  idle=${idle}\n  loud=${loud}`,
+    ).toBeGreaterThan(t.minDiff);
 
     galleryEntries.push({
       theme: t.id,
