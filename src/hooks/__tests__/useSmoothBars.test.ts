@@ -109,4 +109,48 @@ describe("useSmoothBars", () => {
     });
     expect(result.current[0]).toBeGreaterThan(first);
   });
+
+  // ---------- peak_decay tracker (T1.3) ----------
+
+  it("peak_decay=1.0 (default) behaves like the original smoother", () => {
+    // Original (no peak tracker): after silence the bar drops by
+    // 30 % per step (alpha=0.3). With peak_decay=1.0 the visible bar
+    // is just max(smoothed, peak) where peak immediately decays to
+    // current value, so output equals plain smoothed.
+    const { result, rerender } = renderHook(
+      ({ input }) => useSmoothBars(input, { size: 1, alpha: 0.3, peak_decay: 1.0 }),
+      { initialProps: { input: [1] } },
+    );
+    // Ramp up to ~0.9 over a few iterations.
+    for (let i = 0; i < 7; i++) rerender({ input: [1] });
+    const peak = result.current[0];
+    rerender({ input: [0] });
+    // After silence with peak_decay=1.0 we drop by (1 - alpha) = 0.7.
+    expect(result.current[0]).toBeCloseTo(peak * 0.7, 3);
+  });
+
+  it("peak_decay<1.0 holds the peak above the smoothed value", () => {
+    const { result, rerender } = renderHook(
+      ({ input }) => useSmoothBars(input, { size: 1, alpha: 0.3, peak_decay: 0.9 }),
+      { initialProps: { input: [1] } },
+    );
+    // Ramp up to a high value.
+    for (let i = 0; i < 7; i++) rerender({ input: [1] });
+    const peak = result.current[0];
+    rerender({ input: [0] });
+    // smoothed drops to peak*0.7; peak tracker decays to peak*0.9.
+    // Output = max(smoothed, peak_tracker) = peak*0.9, not peak*0.7.
+    expect(result.current[0]).toBeCloseTo(peak * 0.9, 3);
+  });
+
+  it("peak_decay tracker decays to zero after silence", () => {
+    const { result, rerender } = renderHook(
+      ({ input }) => useSmoothBars(input, { size: 1, alpha: 0.3, peak_decay: 0.5 }),
+      { initialProps: { input: [1] } },
+    );
+    for (let i = 0; i < 7; i++) rerender({ input: [1] });
+    // 20 iterations of silence — peak tracker should have fully decayed.
+    for (let i = 0; i < 20; i++) rerender({ input: [0] });
+    expect(result.current[0]).toBeLessThan(0.001);
+  });
 });
