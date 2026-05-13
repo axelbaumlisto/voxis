@@ -236,3 +236,46 @@ pub fn resolve_from_json(value: &serde_json::Value) -> HandyPillTheme {
         animation: resolve_animation(block.animation),
     }
 }
+
+// =============================================================================
+// Built-in themes (compile-time embedded JSON)
+// =============================================================================
+//
+// We `include_str!` every repository theme so the Rust side has the same
+// 7-theme registry the TS side gets through Vite's `import.meta.glob`.
+// This avoids the legacy code path that hardcodes one `builtin_by_id`
+// match arm per theme and lets `get_handy_theme(id)` resolve any
+// repository theme without copying files to ~/Library/Application Support.
+//
+// Drift safeguard: `all_builtin_themes_have_handy_pill` test in
+// `overlay/themes_handy_tests.rs` parses every entry and asserts the
+// resolved `icon_color` matches the JSON value (not the DEFAULT pink).
+
+const BUILTIN_THEME_FILES: &[(&str, &str)] = &[
+    ("winamp_classic",   include_str!("../../../themes/winamp_classic/theme.json")),
+    ("default",          include_str!("../../../themes/default/theme.json")),
+    ("dark",             include_str!("../../../themes/dark/theme.json")),
+    ("monochrome",       include_str!("../../../themes/monochrome/theme.json")),
+    ("neon",             include_str!("../../../themes/neon/theme.json")),
+    ("drifting_contour", include_str!("../../../themes/drifting_contour/theme.json")),
+    ("living_reed",      include_str!("../../../themes/living_reed/theme.json")),
+    ("quiet_reed",       include_str!("../../../themes/quiet_reed/theme.json")),
+];
+
+/// Returns the embedded built-in theme by id, or `None` if no such id
+/// exists. Used by `commands::overlay::get_handy_theme` so that the
+/// Tauri command can resolve any of the 7 repository themes regardless
+/// of whether the user has a copy under their config dir.
+pub fn builtin_handy_theme(theme_id: &str) -> Option<HandyPillTheme> {
+    let (_, raw) = BUILTIN_THEME_FILES.iter().find(|(id, _)| *id == theme_id)?;
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    Some(resolve_from_json(&value))
+}
+
+/// Sorted list of every built-in theme id. Convenient for selectors /
+/// e2e gallery suites that want to iterate all themes.
+pub fn list_builtin_handy_theme_ids() -> Vec<&'static str> {
+    let mut ids: Vec<&'static str> = BUILTIN_THEME_FILES.iter().map(|(id, _)| *id).collect();
+    ids.sort_unstable();
+    ids
+}

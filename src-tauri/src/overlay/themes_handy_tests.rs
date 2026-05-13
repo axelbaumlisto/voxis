@@ -128,7 +128,7 @@ fn clamps_amplitude_alpha_and_ms_ranges() {
 }
 
 #[test]
-fn all_seven_repository_themes_parse_without_panic() {
+fn all_repository_themes_parse_without_panic() {
     let themes_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("themes");
     let entries = std::fs::read_dir(&themes_dir)
@@ -154,11 +154,30 @@ fn all_seven_repository_themes_parse_without_panic() {
         let _t: HandyPillTheme = resolve_from_json(&v);
         parsed += 1;
     }
-    assert!(parsed >= 7, "expected to parse >= 7 theme files, got {parsed}");
+    assert!(
+        parsed >= 8,
+        "expected to parse >= 8 theme files (incl. winamp_classic), got {parsed}"
+    );
 }
 
 #[test]
-fn all_seven_repository_themes_have_distinct_icon_colors() {
+fn winamp_classic_uses_legacy_bars_palette() {
+    // The Winamp Classic theme is a 'bars' family theme, not organic_ring.
+    // Its handy_pill block should still use the recording-red color (#ef3110)
+    // so the migrated pill remains recognisable as the Winamp legacy theme.
+    use crate::overlay::themes::handy::builtin_handy_theme;
+    let t = builtin_handy_theme("winamp_classic")
+        .expect("winamp_classic must be in the builtin registry");
+    assert_eq!(t.palette.icon_color.to_lowercase(), "#ef3110");
+    assert_eq!(t.palette.bar_color.to_lowercase(), "#ffffff");
+    // No idle breathing for a classic-EQ feel.
+    assert!((t.animation.idle_breathing_amplitude - 0.0).abs() < f32::EPSILON);
+    // Faster animation than the default (40 ms vs 60).
+    assert!(t.animation.bar_height_ms <= 50);
+}
+
+#[test]
+fn all_repository_themes_have_distinct_icon_colors() {
     // After T4.1 every repository theme declares its own `handy_pill.palette`.
     // Distinct icon colours guarantee that pixel-diff e2e (Phase 5.5) can
     // tell the themes apart.
@@ -176,8 +195,8 @@ fn all_seven_repository_themes_have_distinct_icon_colors() {
         icon_colors.insert(t.palette.icon_color.to_lowercase());
     }
     assert!(
-        icon_colors.len() >= 7,
-        "expected >= 7 distinct icon_color values across themes, got {} ({:?})",
+        icon_colors.len() >= 8,
+        "expected >= 8 distinct icon_color values across themes, got {} ({:?})",
         icon_colors.len(),
         icon_colors
     );

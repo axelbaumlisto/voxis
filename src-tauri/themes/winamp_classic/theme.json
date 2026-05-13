@@ -1,0 +1,40 @@
+{
+  "name": "Winamp Classic",
+  "description": "The classic Winamp green→yellow→red bars on black. Aggressive animation, no breathing.",
+  "family": "bars",
+  "colors": {
+    "background": "#00000000",
+    "idle": "#299400",
+    "recording": "#ef3110",
+    "recording_peak": "#ffffff",
+    "transcribing": "#29ce10",
+    "queued": "#d6b521",
+    "text": "#ffffff"
+  },
+  "use_gradient": true,
+  "gradient": {
+    "bottom": "#299400",
+    "middle": "#d6b521",
+    "top": "#ef3110"
+  },
+  "organic_ring": null,
+  "handy_pill": {
+    "palette": {
+      "icon_color": "#ef3110",
+      "bar_color": "#ffffff",
+      "bar_glow": "#ef3110",
+      "shadow": "rgba(0, 0, 0, 0.55)",
+      "transcribing_text": "#ffffff",
+      "cancel_hover_bg": "rgba(255, 255, 255, 0.15)"
+    },
+    "animation": {
+      "smoothing_alpha": 0.5,
+      "power_curve": 0.5,
+      "peak_decay": 0.75,
+      "bar_height_ms": 40,
+      "bar_opacity_ms": 60,
+      "idle_breathing_amplitude": 0,
+      "idle_breathing_period_ms": 3000
+    }
+  }
+}
