@@ -2,6 +2,7 @@ import React from "react";
 import AudioFeedback from "../components/settings/AudioFeedback";
 import AutoSubmitSelector from "../components/settings/AutoSubmitSelector";
 import LlmPromptManager from "../components/settings/LlmPromptManager";
+import ShortcutBindingList from "../components/settings/ShortcutBindingList";
 import OverlayBackendSelector from "../components/settings/OverlayBackendSelector";
 import PasteShortcutCheckboxes from "../components/settings/PasteShortcutCheckboxes";
 import ProviderSelect from "../components/settings/ProviderSelect";
@@ -105,6 +106,9 @@ registerCustomWidget("auto-submit-select", ({
     onChange={(value) => onChange(settingKey, value)}
   />
 ));
+
+// Multi-binding shortcut list (#2 from Handy recommendations).
+registerCustomWidget("shortcut-binding-list", () => <ShortcutBindingList />);
 
 // Audio feedback toggle + volume slider (#6 from Handy recommendations).
 registerCustomWidget("audio-feedback", ({
