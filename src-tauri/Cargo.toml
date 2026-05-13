@@ -16,9 +16,10 @@ doctest = false
 name = "voice"
 path = "src/main.rs"
 
-[[bin]]
-name = "soupawhisper-overlay"
-path = "src/overlay_bin.rs"
+# Phase 7 cleanup: the `soupawhisper-overlay` egui-based subprocess
+# binary was removed. Its renderer (organic ring + bars) was ported
+# to React (ClassicBars + OrganicRing) inside the webview overlay,
+# which now covers all platforms.
 
 [[bin]]
 name = "typing_bench"
@@ -88,23 +89,15 @@ rdev = { git = "https://github.com/Narsil/rdev", rev = "73123959276f0f29972b94e6
 # Cross-platform text input (fast typing via x11rb, not xdotool)
 enigo = { version = "0.6", default-features = false, features = ["x11rb"] }
 
-# Native overlay (egui + GLFW passthrough)
-egui = "0.29"
-egui_window_glfw_passthrough = "0.9"
-crossbeam-channel = "0.5"
-egui_render_three_d = "0.9"
+# Phase 7 cleanup removed the native egui/glfw overlay backend.
+# Only `egui = Color32` (a tiny u8x4 color type) is still used by
+# `overlay_native/theme.rs` for palette storage. The heavy renderers
+# (egui_overlay, glfw, wgpu, three_d, eframe) are gone — saved several
+# minutes of build time + ~150 MB of cached artifacts.
+egui = { version = "0.29", default-features = false }
 
-# Linux/Windows: use OpenGL via three_d
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-egui_overlay = { version = "0.9", default-features = true }
-egui_render_three_d = "0.9"
-
-# macOS: use wgpu because Apple deprecated OpenGL
+# macOS: AppKit private APIs for NSPanel (focus-stealing-free overlay).
 [target.'cfg(target_os = "macos")'.dependencies]
-egui_overlay = { version = "0.9", default-features = false, features = ["wgpu", "glfw_default", "egui_default"] }
-egui_render_wgpu = "0.9"
-objc = "0.2"
-cocoa = "0.26"
 core-graphics = "0.24"
 core-foundation = "0.10"
 tauri-plugin-macos-permissions = "2.3.0"

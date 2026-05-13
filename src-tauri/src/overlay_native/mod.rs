@@ -1,15 +1,11 @@
 mod backend;
-mod native;
 pub mod nspanel;
-mod subprocess;
 pub mod theme;
 pub mod webview;
 
 use std::sync::{Arc, RwLock};
 
 pub use backend::{NoopOverlay, OverlayBackend};
-pub use native::{amplify_level, NativeOverlay, Position, WaveformLevels};
-pub use subprocess::SubprocessOverlay;
 pub use theme::{
     OverlayThemeData, ThemeColors, ThemeInfo, ThemeLoader, ThemeTestResult, VisualizationTheme,
 };
@@ -55,45 +51,37 @@ pub struct CreateOverlayParams<'a> {
 /// Create an overlay backend based on configuration.
 ///
 /// `params.backend` selects implementation:
-/// - `"auto"` (default) — Linux: NativeOverlay; macOS/Windows: Subprocess fallback
-/// - `"native"` — NativeOverlay (egui, all platforms when available)
-/// - `"subprocess"` — SubprocessOverlay (separate binary)
-/// - `"nspanel"` — NSPanel webview on macOS (opt-in, requires `app_handle`)
-/// - `"webview"` — plain Tauri WebviewWindow (cross-platform, default on Linux/Win)
+/// - `"auto"` (default) — NSPanel on macOS (if AppHandle), Webview elsewhere
+/// - `"nspanel"` — macOS-only NSPanel webview (requires `app_handle`)
+/// - `"webview"` — plain Tauri WebviewWindow (cross-platform)
 /// - `"none"` — NoopOverlay
- pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend> {
+///
+/// Phase 7 cleanup: the legacy `native` (in-process egui+glfw) and
+/// `subprocess` (separate egui binary) backends were removed. They
+/// were superseded by the React HandyPill / ClassicBars / OrganicRing
+/// running inside the webview backend, which now covers all platforms.
+pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend> {
     if !params.enabled || params.backend == "none" {
         return Box::new(NoopOverlay::new());
     }
 
-    let make_native = || -> Box<dyn OverlayBackend> {
-        Box::new(NativeOverlay::new_with_config(
+    let try_webview = || -> Option<Box<dyn OverlayBackend>> {
+        let app = params.app_handle.as_ref()?;
+        match webview::WebviewOverlay::new(
+            app.clone(),
             params.position,
-            params.size,
             params.margin,
-            params.theme,
-            params.audio_boost,
-            Arc::clone(&params.theme_loader),
-        ))
-    };
-    let make_subprocess = || -> Option<Box<dyn OverlayBackend>> {
-        SubprocessOverlay::new().map(|s| Box::new(s) as Box<dyn OverlayBackend>)
+        ) {
+            Ok(o) => Some(Box::new(o)),
+            Err(e) => {
+                tracing::warn!("Webview overlay failed: {}", e);
+                None
+            }
+        }
     };
 
     // Explicit backend selection.
     match params.backend {
-        "native" => {
-            if NativeOverlay::is_available() {
-                return make_native();
-            }
-            tracing::warn!("native overlay unavailable; falling back to auto");
-        }
-        "subprocess" => {
-            if let Some(s) = make_subprocess() {
-                return s;
-            }
-            tracing::warn!("subprocess overlay unavailable; falling back to auto");
-        }
         "nspanel" => {
             #[cfg(target_os = "macos")]
             if let Some(app) = params.app_handle.as_ref() {
@@ -115,59 +103,43 @@ pub struct CreateOverlayParams<'a> {
             }
         }
         "webview" => {
-            if let Some(app) = params.app_handle.as_ref() {
-                match webview::WebviewOverlay::new(
-                    app.clone(),
-                    params.position,
-                    params.margin,
-                ) {
-                    Ok(o) => return Box::new(o),
-                    Err(e) => {
-                        tracing::warn!("Webview overlay failed: {}; falling back", e)
-                    }
-                }
-            } else {
-                tracing::warn!("Webview overlay requires app_handle; falling back");
+            if let Some(o) = try_webview() {
+                return o;
             }
         }
         "auto" => {} // fall through to auto chain
+        // Phase 7 removed backends — fall through to auto chain.
+        "native" | "subprocess" => {
+            tracing::warn!(
+                "backend '{}' removed in Phase 7 cleanup; using auto (webview)",
+                params.backend
+            );
+        }
         other => {
             tracing::warn!("Unknown overlay backend '{}'; falling back to auto", other);
         }
     }
 
     // ----------------------------------------------------------------
-    // Auto chain (Linux / Windows / macOS-as-fallback):
-    //   1. Tauri Webview overlay (Handy pill)  — preferred if we have AppHandle
-    //   2. Native egui overlay (organic ring)  — if compositor supports passthrough
-    //   3. Subprocess overlay                  — last-resort separate binary
-    //   4. NoopOverlay                         — absolutely nothing renders
-    // On macOS the explicit "nspanel" branch above is the preferred path.
+    // Auto chain:
+    //   1. NSPanel webview on macOS (preferred for borderless pill)
+    //   2. Tauri Webview overlay everywhere else
+    //   3. NoopOverlay if no AppHandle available
     // ----------------------------------------------------------------
+    #[cfg(target_os = "macos")]
     if let Some(app) = params.app_handle.as_ref() {
-        match webview::WebviewOverlay::new(
+        match nspanel::NsPanelOverlay::new(
             app.clone(),
             params.position,
             params.margin,
         ) {
             Ok(o) => return Box::new(o),
-            Err(e) => tracing::warn!(
-                "auto: webview backend unavailable ({e}); trying native / subprocess"
-            ),
+            Err(e) => tracing::warn!("auto: NSPanel failed ({e}); trying webview"),
         }
     }
 
-    #[cfg(target_os = "linux")]
-    if NativeOverlay::is_available() {
-        return make_native();
-    }
-
-    if let Some(s) = make_subprocess() {
-        return s;
-    }
-
-    if NativeOverlay::is_available() {
-        return make_native();
+    if let Some(o) = try_webview() {
+        return o;
     }
 
     Box::new(NoopOverlay::new())
@@ -220,5 +192,19 @@ mod tests {
     #[test]
     fn test_create_overlay_unknown_backend_falls_through_to_auto() {
         let _overlay = create_overlay(params("exotic-unknown", true));
+    }
+
+    #[test]
+    fn test_create_overlay_removed_backends_fall_through_to_auto() {
+        // Phase 7: 'native' and 'subprocess' were removed; both must
+        // resolve cleanly to the auto chain (Noop in this test env
+        // since AppHandle is absent).
+        for backend in ["native", "subprocess"] {
+            let overlay = create_overlay(params(backend, true));
+            assert!(
+                !overlay.is_running(),
+                "backend '{backend}' should fall through to Noop without AppHandle"
+            );
+        }
     }
 }

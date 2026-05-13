@@ -229,6 +229,29 @@ print(n)
   return parseInt(stdout.trim(), 10);
 }
 
+/**
+ * Count opaque pixels that are NOT background-white (i.e. any visible
+ * theme color). Used for the bars-family idle assertion where the
+ * gradient at 2px min height is anti-aliased through all three stops
+ * and the resulting hue can't be matched against a specific reference.
+ *
+ * "Non-white" = max RGB channel < 240 (anything reasonably saturated).
+ */
+export async function countOpaqueNonWhitePixels(png: string): Promise<number> {
+  const py = `
+from PIL import Image
+img = Image.open(${JSON.stringify(png)}).convert("RGBA")
+n = 0
+for (R, G, B, A) in img.getdata():
+    if A < 32: continue
+    if R >= 240 and G >= 240 and B >= 240: continue
+    n += 1
+print(n)
+`;
+  const { stdout } = await execFileAsync("python3", ["-c", py]);
+  return parseInt(stdout.trim(), 10);
+}
+
 export function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const clean = hex.replace("#", "").toLowerCase();
   if (clean.length === 3) {
