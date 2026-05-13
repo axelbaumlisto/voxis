@@ -1,92 +1,118 @@
 /**
  * Helpers for the live Handy-theme gallery e2e suite.
  *
- * SRP/DRY: each helper does one thing; nothing here is duplicated from
- * `captureScreen.ts` — we re-use `captureWindowDirect` and `diffPixelCount`.
+ * Three driver categories:
+ *  1) Socket-based command driver (sends JSON-RPC to the running voice
+ *     process via $APP_CONFIG/com.soupawhisper.voice/debug.sock).
+ *  2) Frame capture + animation utilities (uses `screencapture` and
+ *     Python+PIL through `execFile` — no extra npm deps).
+ *  3) Palette-aware pixel counters + HTML gallery builder.
  *
- * KISS: zero abstractions over Tauri events / screencapture / PIL.
- *       Tests call these directly; helpers shell out to `python3` and
- *       `screencapture` so we don't pull in pngjs / pixelmatch / sharp.
- *
- * Three classes of helper:
- *   1) Theme + state drivers — call Tauri commands by name through the
- *      voice process (works because debug commands always emit, no
- *      orchestrator gating).
- *   2) Frame capture + animation utilities — sequence of PNGs +
- *      optional GIF rendering through PIL.
- *   3) Palette-aware pixel counters — distinguish "this looks like
- *      living_reed" from "this looks like neon" purely by counting
- *      pixels close to the theme's icon_color.
+ * SOLID/DRY/KISS:
+ *  - SRP: each function does one thing; nothing duplicates `captureScreen.ts`.
+ *  - DIP: tests depend on these helpers, not on Tauri/Playwright internals.
+ *  - DRY: socket path + command shape match `setup/debug_socket.rs`.
+ *  - KISS: net.createConnection over a Unix socket; no MessagePack / WS.
  */
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { homedir, platform } from "node:os";
+import { createConnection } from "node:net";
 
 import { captureWindowDirect } from "./captureScreen";
 
 const execFileAsync = promisify(execFile);
 
-// ---------- 1) Theme + state drivers ----------
+// ============================================================================
+// 1) Socket driver — talk to voice's debug RPC
+// ============================================================================
 
 /**
- * Tauri command invocation against a running voice process via the
- * built-in `tauri-cli` JS shim is NOT available outside the webview.
- * Instead, we emit the same events via a tiny Tauri-app trick: we
- * dispatch them through the dev-mode webview by `evaluate`-ing inside
- * Playwright. For NSPanel-backed runs we drive Tauri via a
- * Node-side IPC bridge…
- *
- * Simplest reliable path: just call the commands through a Playwright
- * tab opened against `/?` (the SoupaWhisper main window). It mounts
- * Tauri's runtime so `window.__TAURI_INTERNALS__.invoke()` works.
- *
- * To avoid coupling the gallery spec to the main UI, we keep this
- * helper invocation-agnostic: the caller passes a `page` already on
- * `/` (or anywhere with Tauri runtime active) and we call invoke
- * inside it.
+ * Resolve the path to `debug.sock` for the current platform. Matches the
+ * Tauri `app_config_dir()` resolution in `setup/debug_socket.rs`.
  */
-export async function setHandyTheme(
-  page: import("@playwright/test").Page,
-  themeId: string,
-): Promise<void> {
-  await page.evaluate(async (id: string) => {
-    // @ts-expect-error window typing for Tauri runtime
-    return window.__TAURI_INTERNALS__.invoke("debug_set_handy_theme", {
-      themeId: id,
+export function debugSocketPath(): string {
+  const home = homedir();
+  if (platform() === "darwin") {
+    return join(
+      home,
+      "Library",
+      "Application Support",
+      "com.soupawhisper.voice",
+      "debug.sock",
+    );
+  }
+  // Linux / others
+  return join(home, ".config", "soupawhisper", "debug.sock");
+}
+
+/**
+ * Send one JSON-RPC message to the debug socket and wait for the reply.
+ * Returns the parsed `{ok, error?}` response.
+ */
+export async function rpcCall(
+  payload: unknown,
+  timeoutMs = 2000,
+): Promise<{ ok: boolean; error?: string }> {
+  const path = debugSocketPath();
+  return new Promise((resolve, reject) => {
+    const client = createConnection(path);
+    let buffer = "";
+    const timer = setTimeout(() => {
+      client.destroy();
+      reject(new Error(`debug socket rpc timeout after ${timeoutMs} ms`));
+    }, timeoutMs);
+    client.on("connect", () => {
+      client.write(`${JSON.stringify(payload)}\n`);
     });
-  }, themeId);
-}
-
-export async function debugSetOverlayState(
-  page: import("@playwright/test").Page,
-  state: "idle" | "recording" | "transcribing" | "error",
-): Promise<void> {
-  await page.evaluate(async (s: string) => {
-    // @ts-expect-error window typing
-    return window.__TAURI_INTERNALS__.invoke("debug_set_overlay_state", {
-      state: s,
+    client.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      const nl = buffer.indexOf("\n");
+      if (nl >= 0) {
+        clearTimeout(timer);
+        const line = buffer.slice(0, nl);
+        client.destroy();
+        try {
+          resolve(JSON.parse(line));
+        } catch (e) {
+          reject(new Error(`bad reply: ${line} (${e})`));
+        }
+      }
     });
-  }, state);
-}
-
-export async function debugEmitSpectrum(
-  page: import("@playwright/test").Page,
-  bins: number[],
-): Promise<void> {
-  await page.evaluate(async (b: number[]) => {
-    // @ts-expect-error
-    return window.__TAURI_INTERNALS__.invoke("debug_emit_spectrum", { bins: b });
-  }, bins);
-}
-
-export async function debugEmitSilence(
-  page: import("@playwright/test").Page,
-): Promise<void> {
-  await page.evaluate(async () => {
-    // @ts-expect-error
-    return window.__TAURI_INTERNALS__.invoke("debug_emit_silence");
+    client.on("error", (e) => {
+      clearTimeout(timer);
+      reject(
+        new Error(
+          `debug socket connect failed (${e.message}); ` +
+            `is voice running in debug mode? expected ${path}`,
+        ),
+      );
+    });
   });
+}
+
+export async function setHandyTheme(themeId: string): Promise<void> {
+  const r = await rpcCall({ cmd: "set_handy_theme", theme: themeId });
+  if (!r.ok) throw new Error(`set_handy_theme(${themeId}): ${r.error}`);
+}
+
+export async function setOverlayState(
+  state: "hidden" | "idle" | "recording" | "transcribing",
+): Promise<void> {
+  const r = await rpcCall({ cmd: "set_overlay_state", state });
+  if (!r.ok) throw new Error(`set_overlay_state(${state}): ${r.error}`);
+}
+
+export async function emitSpectrum(bins: number[]): Promise<void> {
+  const r = await rpcCall({ cmd: "emit_spectrum", bins });
+  if (!r.ok) throw new Error(`emit_spectrum: ${r.error}`);
+}
+
+export async function emitSilence(): Promise<void> {
+  const r = await rpcCall({ cmd: "emit_silence" });
+  if (!r.ok) throw new Error(`emit_silence: ${r.error}`);
 }
 
 /** Build a synthetic peak bin array — uniform high spectrum. */
@@ -94,7 +120,9 @@ export function peakBins(level = 0.9, count = 32): number[] {
   return Array.from({ length: count }, () => level);
 }
 
-// ---------- 2) Frame capture + animation ----------
+// ============================================================================
+// 2) Frame capture + animation
+// ============================================================================
 
 /**
  * Capture `count` PNGs of `windowId` spaced `intervalMs` apart.
@@ -127,12 +155,12 @@ export async function captureFrames(
 
 /**
  * Combine PNG frames into an animated GIF via Python+PIL.
- *   frame_duration_ms: per-frame display time in the GIF
+ *   frameDurationMs: per-frame display time in the GIF
  */
 export async function saveGif(
   frames: string[],
   out: string,
-  frame_duration_ms = 500,
+  frameDurationMs = 500,
 ): Promise<void> {
   await mkdir(dirname(out), { recursive: true });
   const framesJson = JSON.stringify(frames);
@@ -144,13 +172,13 @@ for p in paths:
     try:
         imgs.append(Image.open(p).convert("RGBA"))
     except Exception:
-        pass  # skip missing/corrupt frames
+        pass
 if imgs:
     imgs[0].save(
         ${JSON.stringify(out)},
         save_all=True,
         append_images=imgs[1:],
-        duration=${frame_duration_ms},
+        duration=${frameDurationMs},
         loop=0,
         disposal=2,
     )
@@ -158,26 +186,42 @@ if imgs:
   await execFileAsync("python3", ["-c", py]);
 }
 
-// ---------- 3) Palette-aware pixel counters ----------
+// ============================================================================
+// 3) Palette-aware pixel counters + HTML gallery
+// ============================================================================
 
 /**
- * Count pixels in `png` whose RGB is within `tolerance` of the given
- * target color. Tolerance is per-channel.
+ * Count pixels in `png` whose RGB is "close to" (r, g, b) by Euclidean
+ * distance. `tolerance` is the maximum squared distance for a match
+ * (default 80**2 = 6400 — catches most anti-aliased edges of the target
+ * hue while excluding wallpaper colours and other themes).
+ *
+ * Why Euclidean instead of per-channel:
+ *  - Anti-aliased SVGs produce pixels that mix the target with the
+ *    surrounding (white wallpaper / dark backdrop). Per-channel diff
+ *    of e.g. 30 in G is normal even though the pixel is clearly the
+ *    target hue. Euclidean distance handles this naturally because
+ *    distance is small even when one channel is heavily mixed.
+ *  - Example: neon target (255, 0, 255). Anti-aliased rendition
+ *    (224, 48, 240) — per-channel max diff 48 (FAIL @ tolerance 36);
+ *    Euclidean distance √(31² + 48² + 15²) = √3490 = 59 (PASS @ 80).
  */
 export async function countMatchingPixels(
   png: string,
   r: number,
   g: number,
   b: number,
-  tolerance = 14,
+  tolerance = 80,
 ): Promise<number> {
   const py = `
 from PIL import Image
 img = Image.open(${JSON.stringify(png)}).convert("RGBA")
+tol2 = ${tolerance * tolerance}
 n = 0
 for (R, G, B, A) in img.getdata():
     if A < 32: continue
-    if abs(R-${r}) <= ${tolerance} and abs(G-${g}) <= ${tolerance} and abs(B-${b}) <= ${tolerance}:
+    d2 = (R-${r})*(R-${r}) + (G-${g})*(G-${g}) + (B-${b})*(B-${b})
+    if d2 <= tol2:
         n += 1
 print(n)
 `;
@@ -185,10 +229,6 @@ print(n)
   return parseInt(stdout.trim(), 10);
 }
 
-/**
- * Parse a hex color "#RRGGBB" or "#RGB" → {r, g, b}. Lowercase, throws
- * on invalid input.
- */
 export function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const clean = hex.replace("#", "").toLowerCase();
   if (clean.length === 3) {
@@ -208,10 +248,6 @@ export function hexToRgb(hex: string): { r: number; g: number; b: number } {
   throw new Error(`hexToRgb: cannot parse '${hex}'`);
 }
 
-/**
- * Overlay PIL-diff (red where pixels differ by > threshold).
- * Useful for visual diff artefacts in PR attachments.
- */
 export async function saveDiffOverlay(
   a: string,
   b: string,
@@ -246,34 +282,28 @@ print(count)
   return { diffPixels: parseInt(stdout.trim(), 10) };
 }
 
-// ---------- 4) HTML gallery builder ----------
-
 export interface GalleryEntry {
   theme: string;
   frames: { label: string; path: string }[];
   gifs?: { label: string; path: string }[];
 }
 
-/**
- * Render a self-contained `index.html` in the gallery dir that shows
- * one row per theme, columns = frames + gifs. Used by the
- * globalTeardown to summarise live screenshots in a single artefact.
- */
 export async function buildGalleryIndexHtml(
   galleryDir: string,
   entries: GalleryEntry[],
 ): Promise<void> {
+  const rel = (p: string) => p.replace(`${galleryDir}/`, "");
   const rows = entries
     .map((e) => {
       const cells = [
         `<td class="label">${e.theme}</td>`,
         ...e.frames.map(
           (f) =>
-            `<td class="frame"><div class="cap">${f.label}</div><img src="${f.path.replace(galleryDir + "/", "")}" alt="${f.label}"/></td>`,
+            `<td class="frame"><div class="cap">${f.label}</div><img src="${rel(f.path)}" alt="${f.label}"/></td>`,
         ),
         ...(e.gifs ?? []).map(
           (g) =>
-            `<td class="frame"><div class="cap">${g.label}</div><img src="${g.path.replace(galleryDir + "/", "")}" alt="${g.label}"/></td>`,
+            `<td class="frame"><div class="cap">${g.label}</div><img src="${rel(g.path)}" alt="${g.label}"/></td>`,
         ),
       ];
       return `<tr>${cells.join("")}</tr>`;
@@ -293,7 +323,7 @@ export async function buildGalleryIndexHtml(
   h1 { margin-top: 0; font-weight: 400; }
 </style></head>
 <body>
-<h1>Handy themes — live screenshot gallery</h1>
+<h1>Handy themes — live screenshot gallery (${entries.length} themes)</h1>
 <table>
 ${rows}
 </table>
@@ -301,10 +331,5 @@ ${rows}
   await writeFile(`${galleryDir}/index.html`, html);
 }
 
-// ---------- 5) Spawn a Playwright-driven Tauri runtime tab ----------
-
 // Re-export the lower-level screencapture helper for convenience.
 export { captureWindowDirect } from "./captureScreen";
-
-// Silence unused-import warning on spawn (kept for future PID utilities).
-void spawn;
