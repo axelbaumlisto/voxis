@@ -94,6 +94,41 @@ fn default_settings_are_off_with_safe_volume() {
 }
 
 #[test]
+fn synthesize_beep_produces_correct_length_per_kind() {
+    // Start = 100ms @ 48kHz → 4800 samples
+    let start = synthesize_beep(SoundType::Start);
+    assert!(
+        (4700..=4900).contains(&start.len()),
+        "start beep should be ~4800 samples, got {}",
+        start.len()
+    );
+    // Error = 250ms @ 48kHz → 12000 samples
+    let error = synthesize_beep(SoundType::Error);
+    assert!(
+        (11700..=12300).contains(&error.len()),
+        "error beep should be ~12000 samples, got {}",
+        error.len()
+    );
+    // Error MUST be longer than Start (so the user can audibly
+    // distinguish them).
+    assert!(error.len() > start.len());
+}
+
+#[test]
+fn synthesize_beep_samples_in_signed_range() {
+    // Linear envelope * 0.35 amplitude means peak ≈ ±0.35.
+    // Anything outside [-1, 1] would clip on output.
+    let samples = synthesize_beep(SoundType::Start);
+    for (i, s) in samples.iter().enumerate() {
+        assert!(
+            (-1.0..=1.0).contains(s),
+            "sample {} out of range: {}",
+            i, s
+        );
+    }
+}
+
+#[test]
 fn sound_type_serialize_is_snake_case() {
     // Stable storage form for the SQLite kv table + Tauri events.
     assert_eq!(

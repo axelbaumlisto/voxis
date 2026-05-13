@@ -68,6 +68,10 @@ async-trait = "0.1"
 cpal = "0.15"
 hound = "3.5"
 
+# Audio feedback playback (start/stop/error beeps). Small, well-tested
+# wrapper over cpal; no GUI deps. Only used by `audio_feedback` module.
+rodio = { version = "0.20", default-features = false, features = ["wav"] }
+
 # FFT for spectrum analyzer visualization
 rustfft = "6.2"
 

@@ -85,5 +85,90 @@ pub fn play(
     player.play_sound(kind, v)
 }
 
+// =============================================================================
+// Production player (rodio + synthesized sine beeps)
+// =============================================================================
+
+/// Sample rate used for the generated beeps. 48 kHz works on every
+/// audio device we've encountered and gives a clean tone.
+const SAMPLE_RATE: u32 = 48_000;
+
+/// Generate a short PCM mono beep for the given event kind.
+///
+/// Three distinct frequencies + lengths so the user can audibly tell
+/// them apart without learning a code book:
+///   Start  — A5 (880 Hz), 100 ms
+///   Stop   — A4 (440 Hz), 100 ms
+///   Error  — A3 (220 Hz), 250 ms
+///
+/// A simple linear attack/release envelope (5 ms each edge) avoids the
+/// audible click that a raw sine truncation would produce.
+pub(crate) fn synthesize_beep(kind: SoundType) -> Vec<f32> {
+    let (freq, duration) = match kind {
+        SoundType::Start => (880.0_f32, 0.10_f32),
+        SoundType::Stop => (440.0, 0.10),
+        SoundType::Error => (220.0, 0.25),
+    };
+    let n = (SAMPLE_RATE as f32 * duration) as usize;
+    let edge = (SAMPLE_RATE as f32 * 0.005) as usize; // 5ms attack/release
+    let two_pi_f = 2.0 * std::f32::consts::PI * freq;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / SAMPLE_RATE as f32;
+            let env = if i < edge {
+                i as f32 / edge as f32
+            } else if i >= n.saturating_sub(edge) {
+                n.saturating_sub(i) as f32 / edge as f32
+            } else {
+                1.0
+            };
+            (two_pi_f * t).sin() * env * 0.35
+        })
+        .collect()
+}
+
+/// Production `SoundPlayer` backed by `rodio`. Each call spawns a
+/// short-lived thread that owns its own `OutputStream` for the
+/// lifetime of the beep and then drops it. Trade-off: a few ms of
+/// init overhead per call vs. a long-lived audio thread we'd have
+/// to manage. The overhead is negligible compared to the orchestrator
+/// work happening around it.
+pub struct RodioPlayer;
+
+impl SoundPlayer for RodioPlayer {
+    fn play_sound(&self, kind: SoundType, volume: f32) -> Result<(), String> {
+        let samples = synthesize_beep(kind);
+        let duration_ms = (samples.len() as u64 * 1000) / SAMPLE_RATE as u64 + 50;
+        std::thread::spawn(move || {
+            let (stream, handle) = match rodio::OutputStream::try_default() {
+                Ok(pair) => pair,
+                Err(e) => {
+                    tracing::warn!("audio_feedback: rodio init failed: {e}");
+                    return;
+                }
+            };
+            let sink = match rodio::Sink::try_new(&handle) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("audio_feedback: rodio sink failed: {e}");
+                    return;
+                }
+            };
+            sink.set_volume(volume);
+            sink.append(rodio::buffer::SamplesBuffer::new(
+                1,
+                SAMPLE_RATE,
+                samples,
+            ));
+            // Hold the thread until playback completes; otherwise the
+            // stream gets dropped mid-beep and the user hears nothing.
+            std::thread::sleep(std::time::Duration::from_millis(duration_ms));
+            drop(sink);
+            drop(stream);
+        });
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests;

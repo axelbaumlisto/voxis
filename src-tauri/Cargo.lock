@@ -4101,6 +4101,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3df6368f71f205ff9c33c076d170dd56ebf68e8161c733c0caa07a7a5509ed53"
 
 [[package]]
+name = "rodio"
+version = "0.20.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7ceb6607dd738c99bc8cb28eff249b7cd5c8ec88b9db96c0608c1480d140fb1"
+dependencies = [
+ "cpal",
+ "hound",
+]
+
+[[package]]
 name = "rusqlite"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5999,6 +6009,7 @@ dependencies = [
  "rdev",
  "regex",
  "reqwest 0.12.28",
+ "rodio",
  "rusqlite",
  "rust-ini",
  "rustfft",
