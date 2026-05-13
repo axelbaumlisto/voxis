@@ -848,7 +848,19 @@ first_run_completed?: boolean;
  * Stored as a string for forward-compat; unrecognized values
  * default to 'hold'.
  */
-hotkey_mode?: string; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
+hotkey_mode?: string; 
+/**
+ * Recording history retention policy (#5):
+ * 'never' | 'preserve_limit' | 'days_3' | 'weeks_2' | 'months_3'.
+ * 'never' (default) preserves all entries forever. The cleanup
+ * task runs on app startup once per launch.
+ */
+retention_period?: string; 
+/**
+ * How many recent entries `retention_period = preserve_limit`
+ * should keep. Ignored for other policies.
+ */
+retention_limit?: number; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
 /**
  * Audio device info for UI display.
  */

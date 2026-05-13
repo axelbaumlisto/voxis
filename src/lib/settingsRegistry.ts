@@ -314,6 +314,32 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     customComponent: "llm-prompt-manager",
   },
 
+  // History / privacy section
+  {
+    key: "retention_period",
+    label: "History retention",
+    widgetType: "select",
+    section: "History",
+    description:
+      "Auto-delete old transcription history. 'Never' keeps everything; 'preserve_limit' keeps only the N most recent (see Recent Limit below).",
+    options: [
+      { label: "Never (keep everything)", value: "never" },
+      { label: "Only the N most recent", value: "preserve_limit" },
+      { label: "3 days", value: "days_3" },
+      { label: "2 weeks", value: "weeks_2" },
+      { label: "3 months", value: "months_3" },
+    ],
+  },
+  {
+    key: "retention_limit",
+    label: "Recent limit (preserve_limit policy)",
+    widgetType: "input",
+    section: "History",
+    placeholder: "100",
+    description:
+      "How many recent entries to keep when 'History retention' is set to 'Only the N most recent'.",
+  },
+
   // Advanced section
   {
     key: "text_processing",
