@@ -140,6 +140,15 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     customComponent: "auto-submit-select",
   },
   {
+    key: "audio_feedback",
+    label: "Audio feedback",
+    widgetType: "custom",
+    section: "Output",
+    description:
+      "Short beeps on recording start, stop, and failure so you know the hotkey registered without looking at the overlay.",
+    customComponent: "audio-feedback",
+  },
+  {
     key: "typing_delay",
     label: "Typing Delay (ms)",
     widgetType: "input",

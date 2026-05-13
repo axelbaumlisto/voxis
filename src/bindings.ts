@@ -782,11 +782,26 @@ translate_to_english?: boolean;
  * ChatGPT, etc.) send the typed message without the user touching
  * the keyboard. See `output::auto_submit`.
  */
-auto_submit_key?: AutoSubmitKey; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
+auto_submit_key?: AutoSubmitKey; 
+/**
+ * Audio feedback beeps on recording start / stop / error.
+ * Off by default. See `audio_feedback`.
+ */
+audio_feedback?: AudioFeedbackSettings; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
 /**
  * Audio device info for UI display.
  */
 export type AudioDevice = { id: string; name: string; is_default: boolean }
+/**
+ * User-facing settings for the audio feedback feature. Live in
+ * `AppConfig` (added in T-B6.3 wiring) and flow through to `play()`.
+ */
+export type AudioFeedbackSettings = { enabled: boolean; 
+/**
+ * Linear volume in [0.0, 1.0]. Values outside that range are
+ * clamped at call time \u2014 see `clamp_volume`.
+ */
+volume: number }
 /**
  * Which key combo to fire after typing. `Off` skips entirely \u2014 this
  * is the safe default for users who don't want their messages

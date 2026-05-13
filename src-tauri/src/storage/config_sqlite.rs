@@ -121,6 +121,16 @@ impl ConfigSqliteStorage {
                 config.auto_submit_key = parsed;
             }
         }
+        config.audio_feedback.enabled = self.get_bool(
+            &conn,
+            "audio_feedback_enabled",
+            config.audio_feedback.enabled,
+        );
+        config.audio_feedback.volume = self.get_typed(
+            &conn,
+            "audio_feedback_volume",
+            config.audio_feedback.volume,
+        );
         config.typing_delay = self.get_typed(&conn, "typing_delay", config.typing_delay);
         config.notifications = self.get_bool(&conn, "notifications", config.notifications);
         config.backend = self.get_str(&conn, "backend", &config.backend);
@@ -225,6 +235,16 @@ impl ConfigSqliteStorage {
             .trim_matches('"')
             .to_string();
         self.set(&conn, "auto_submit_key", &auto_submit_str)?;
+        self.set(
+            &conn,
+            "audio_feedback_enabled",
+            &config.audio_feedback.enabled.to_string(),
+        )?;
+        self.set(
+            &conn,
+            "audio_feedback_volume",
+            &config.audio_feedback.volume.to_string(),
+        )?;
         self.set(&conn, "typing_delay", &config.typing_delay.to_string())?;
         self.set(&conn, "notifications", &config.notifications.to_string())?;
         self.set(&conn, "backend", &config.backend)?;

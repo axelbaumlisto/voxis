@@ -186,10 +186,25 @@ impl RecordingCoordinator {
         tracing::info!("on_hotkey_pressed: starting recorder, device={device}");
         if let Err(e) = self.recorder.start(&device) {
             tracing::error!("on_hotkey_pressed: recorder.start failed: {e}");
+            // Audio feedback for the error path so the user gets
+            // immediate auditory confirmation that something went
+            // wrong (mic permission denied, device disconnected, ...).
+            let _ = crate::audio_feedback::play(
+                crate::audio_feedback::SoundType::Error,
+                config.audio_feedback,
+                &crate::audio_feedback::RodioPlayer,
+            );
             self.handle_error(&e.to_string(), ErrorContext::Hotkey).await;
             return;
         }
         tracing::info!("on_hotkey_pressed: recorder started OK");
+        // Audio feedback for successful recording start. Non-blocking
+        // (RodioPlayer spawns its own short-lived audio thread).
+        let _ = crate::audio_feedback::play(
+            crate::audio_feedback::SoundType::Start,
+            config.audio_feedback,
+            &crate::audio_feedback::RodioPlayer,
+        );
 
         // Drive Coordinator + wait for the worker to apply the transition.
         self.coordinator.on_press();
@@ -248,14 +263,30 @@ impl RecordingCoordinator {
             return;
         }
 
+        // Read config once for the release path (audio_feedback used
+        // both in the error branch and the happy-path stop beep).
+        let release_config = load_config_from_app(&self.app);
+
         let audio_data = match self.recorder.stop() {
             Ok(data) => data,
             Err(e) => {
+                let _ = crate::audio_feedback::play(
+                    crate::audio_feedback::SoundType::Error,
+                    release_config.audio_feedback,
+                    &crate::audio_feedback::RodioPlayer,
+                );
                 self.handle_error(&e.to_string(), ErrorContext::Hotkey).await;
                 self.overlay.lock().await.hide();
                 return;
             }
         };
+
+        // Stop beep — short, mid-pitch, signals 'recording captured'.
+        let _ = crate::audio_feedback::play(
+            crate::audio_feedback::SoundType::Stop,
+            release_config.audio_feedback,
+            &crate::audio_feedback::RodioPlayer,
+        );
 
         let queue_size = self.queue.push(audio_data).await;
         self.coordinator.on_release();

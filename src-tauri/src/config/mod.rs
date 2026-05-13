@@ -324,6 +324,11 @@ pub struct AppConfig {
     #[serde(default)]
     pub auto_submit_key: crate::output::auto_submit::AutoSubmitKey,
 
+    /// Audio feedback beeps on recording start / stop / error.
+    /// Off by default. See `audio_feedback`.
+    #[serde(default)]
+    pub audio_feedback: crate::audio_feedback::AudioFeedbackSettings,
+
     // Paste shortcuts (Linux only) - comma-separated list
     #[serde(default = "default_paste_shortcuts")]
     pub paste_shortcuts: String,
@@ -367,6 +372,7 @@ impl Default for AppConfig {
             append_trailing_space: false,
             translate_to_english: false,
             auto_submit_key: crate::output::auto_submit::AutoSubmitKey::Off,
+            audio_feedback: crate::audio_feedback::AudioFeedbackSettings::default(),
             paste_shortcuts: DEFAULT_PASTE_SHORTCUTS.into(),
             api_url_override: None,
             vad: VadConfig::default(),

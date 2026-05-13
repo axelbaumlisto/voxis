@@ -1,4 +1,5 @@
 import React from "react";
+import AudioFeedback from "../components/settings/AudioFeedback";
 import AutoSubmitSelector from "../components/settings/AutoSubmitSelector";
 import LlmPromptManager from "../components/settings/LlmPromptManager";
 import OverlayBackendSelector from "../components/settings/OverlayBackendSelector";
@@ -101,6 +102,26 @@ registerCustomWidget("auto-submit-select", ({
     label={label}
     description={description}
     value={(config as unknown as { auto_submit_key?: string }).auto_submit_key ?? "off"}
+    onChange={(value) => onChange(settingKey, value)}
+  />
+));
+
+// Audio feedback toggle + volume slider (#6 from Handy recommendations).
+registerCustomWidget("audio-feedback", ({
+  label,
+  description,
+  config,
+  settingKey,
+  onChange,
+}) => (
+  <AudioFeedback
+    label={label}
+    description={description}
+    value={
+      (config as unknown as {
+        audio_feedback?: { enabled: boolean; volume: number };
+      }).audio_feedback ?? { enabled: false, volume: 0.6 }
+    }
     onChange={(value) => onChange(settingKey, value)}
   />
 ));
