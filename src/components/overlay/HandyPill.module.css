@@ -8,40 +8,33 @@
   grid-template-columns: auto 1fr auto;
   align-items: center;
   padding: 6px;
-  /* Idle: fully transparent — only the small TranscriptionIcon is visible.
-   * The pill itself becomes a visible "dark capsule" only when the user
-   * is recording / transcribing / showing an error (see overrides below). */
+  /* Fully transparent in ALL modes — only the icons and bars are
+   * drawn over the desktop. The pill never "capsules" the icon.
+   * To keep glyphs legible against light desktops, individual
+   * elements (icons, bars) carry their own subtle drop-shadow.
+   */
   background: transparent;
   border-radius: 18px;
   opacity: 0;
-  transition:
-    opacity 300ms ease-out,
-    background-color 200ms ease-out;
+  transition: opacity 300ms ease-out;
   box-sizing: border-box;
 }
 
-/* Active modes — show a dark, translucent pill so the bars / cancel button
- * stay readable against any desktop background. */
-.recording-overlay[data-mode="recording"],
-.recording-overlay[data-mode="transcribing"],
-.recording-overlay[data-mode="error"] {
-  background: rgba(0, 0, 0, 0.8);
-}
-
-.overlay-left {
+.overlay-left,
+.overlay-middle,
+.overlay-right {
   display: flex;
   align-items: center;
+  /* Drop-shadow makes the pink glyphs legible on light desktops without
+   * a dark capsule behind them. */
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 }
 
 .overlay-middle {
-  display: flex;
-  align-items: center;
   justify-content: center;
 }
 
 .overlay-right {
-  display: flex;
-  align-items: center;
   justify-content: flex-end;
 }
 
@@ -55,6 +48,8 @@
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   animation: transcribing-pulse 1.5s infinite ease-in-out;
+  /* Text drop-shadow for readability against any wallpaper. */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
 @keyframes transcribing-pulse {
