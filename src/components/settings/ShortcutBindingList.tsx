@@ -19,13 +19,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { commands } from "../../bindings";
 import type { ShortcutBinding } from "../../bindings";
-
-function unwrap<T>(result: { status: string; data?: T; error?: unknown }): T {
-  if (result.status !== "ok") {
-    throw new Error(String(result.error ?? "command failed"));
-  }
-  return result.data as T;
-}
+import { unwrapResult } from "../../lib/commandResult";
 
 export default function ShortcutBindingList() {
   const [bindings, setBindings] = useState<ShortcutBinding[]>([]);
@@ -37,7 +31,7 @@ export default function ShortcutBindingList() {
     setError(null);
     try {
       const list =
-        (unwrap(await commands.listShortcutBindings()) ?? []) as ShortcutBinding[];
+        (unwrapResult(await commands.listShortcutBindings()) ?? []) as ShortcutBinding[];
       setBindings(list);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -52,7 +46,7 @@ export default function ShortcutBindingList() {
 
   const onUpdate = async (id: string, newCombo: string) => {
     try {
-      unwrap(await commands.updateShortcutBinding(id, newCombo));
+      unwrapResult(await commands.updateShortcutBinding(id, newCombo));
       // Optimistic local update so the input stays responsive without\n      // a full refetch round-trip.
       setBindings((prev) =>
         prev.map((b) =>
@@ -66,7 +60,7 @@ export default function ShortcutBindingList() {
 
   const onReset = async (id: string) => {
     try {
-      const reset = unwrap(await commands.resetShortcutBinding(id));
+      const reset = unwrapResult(await commands.resetShortcutBinding(id));
       setBindings((prev) => prev.map((b) => (b.id === id ? reset : b)));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

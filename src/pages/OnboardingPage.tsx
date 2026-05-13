@@ -15,15 +15,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { commands } from "../bindings";
+import { unwrapResult } from "../lib/commandResult";
 
 type Step = 0 | 1 | 2;
-
-function unwrap<T>(result: { status: string; data?: T; error?: unknown }): T {
-  if (result.status !== "ok") {
-    throw new Error(String(result.error ?? "command failed"));
-  }
-  return result.data as T;
-}
 
 function StepNav({ step }: { step: Step }) {
   return (
@@ -68,7 +62,7 @@ export default function OnboardingPage() {
 
   const onDone = async () => {
     try {
-      unwrap(await commands.markFirstRunComplete());
+      unwrapResult(await commands.markFirstRunComplete());
       navigate("/");
     } catch (e) {
       console.error("markFirstRunComplete failed:", e);
