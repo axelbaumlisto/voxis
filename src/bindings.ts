@@ -774,11 +774,25 @@ append_trailing_space?: boolean;
  * users: speak Russian, get English in the clipboard. Honoured by
  * the transcription client at request-build time.
  */
-translate_to_english?: boolean; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
+translate_to_english?: boolean; 
+/**
+ * Auto-submit key combo emitted at the end of the output pipeline.
+ * `Off` = no extra keystroke (default). `Enter` / `CmdEnter` /
+ * `ShiftEnter` press the chord so chat clients (Slack, Telegram,
+ * ChatGPT, etc.) send the typed message without the user touching
+ * the keyboard. See `output::auto_submit`.
+ */
+auto_submit_key?: AutoSubmitKey; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
 /**
  * Audio device info for UI display.
  */
 export type AudioDevice = { id: string; name: string; is_default: boolean }
+/**
+ * Which key combo to fire after typing. `Off` skips entirely \u2014 this
+ * is the safe default for users who don't want their messages
+ * auto-sent.
+ */
+export type AutoSubmitKey = "off" | "enter" | "cmd_enter" | "shift_enter"
 /**
  * Debug log entry for a single recording session.
  */

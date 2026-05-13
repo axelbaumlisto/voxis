@@ -131,6 +131,15 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
       "Ask Whisper to translate the audio to English instead of transcribing in the source language (Groq / OpenAI task=translate).",
   },
   {
+    key: "auto_submit_key",
+    label: "Auto-submit after typing",
+    widgetType: "custom",
+    section: "Output",
+    description:
+      "Press Enter (or Cmd/Super/Shift + Enter) after the transcription is typed so chat clients send the message without you touching the keyboard.",
+    customComponent: "auto-submit-select",
+  },
+  {
     key: "typing_delay",
     label: "Typing Delay (ms)",
     widgetType: "input",

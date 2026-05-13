@@ -1,4 +1,5 @@
 import React from "react";
+import AutoSubmitSelector from "../components/settings/AutoSubmitSelector";
 import LlmPromptManager from "../components/settings/LlmPromptManager";
 import OverlayBackendSelector from "../components/settings/OverlayBackendSelector";
 import PasteShortcutCheckboxes from "../components/settings/PasteShortcutCheckboxes";
@@ -87,3 +88,19 @@ registerCustomWidget("overlay-backend-select", ({
 // Self-contained — talks directly to commands.* for CRUD, so the
 // generic config save flow is bypassed for this section.
 registerCustomWidget("llm-prompt-manager", () => <LlmPromptManager />);
+
+// Auto-submit key combo selector (#4 from Handy recommendations).
+registerCustomWidget("auto-submit-select", ({
+  label,
+  description,
+  config,
+  settingKey,
+  onChange,
+}) => (
+  <AutoSubmitSelector
+    label={label}
+    description={description}
+    value={(config as unknown as { auto_submit_key?: string }).auto_submit_key ?? "off"}
+    onChange={(value) => onChange(settingKey, value)}
+  />
+));

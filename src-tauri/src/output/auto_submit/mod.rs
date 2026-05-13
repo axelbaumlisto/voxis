@@ -62,5 +62,40 @@ pub fn emit(key: AutoSubmitKey, emitter: &dyn KeyboardEmitter) -> Result<(), Str
     Ok(())
 }
 
+/// Production emitter backed by `enigo` (already a project dep used
+/// by `output::platform::EnigoTyper`). Kept thin so the dispatcher
+/// stays the only place that knows the chord shape.
+pub struct EnigoEmitter;
+
+fn key_for(name: &str) -> Result<enigo::Key, String> {
+    match name {
+        "Enter" => Ok(enigo::Key::Return),
+        "Meta" => Ok(enigo::Key::Meta),
+        "Shift" => Ok(enigo::Key::Shift),
+        other => Err(format!("auto_submit: unknown key name '{other}'")),
+    }
+}
+
+impl KeyboardEmitter for EnigoEmitter {
+    fn press(&self, name: &'static str) -> Result<(), String> {
+        use enigo::{Direction, Enigo, Keyboard, Settings};
+        let key = key_for(name)?;
+        let mut enigo = Enigo::new(&Settings::default())
+            .map_err(|e| format!("auto_submit: failed to init enigo: {e}"))?;
+        enigo
+            .key(key, Direction::Press)
+            .map_err(|e| format!("auto_submit: enigo press error: {e}"))
+    }
+    fn release(&self, name: &'static str) -> Result<(), String> {
+        use enigo::{Direction, Enigo, Keyboard, Settings};
+        let key = key_for(name)?;
+        let mut enigo = Enigo::new(&Settings::default())
+            .map_err(|e| format!("auto_submit: failed to init enigo: {e}"))?;
+        enigo
+            .key(key, Direction::Release)
+            .map_err(|e| format!("auto_submit: enigo release error: {e}"))
+    }
+}
+
 #[cfg(test)]
 mod tests;

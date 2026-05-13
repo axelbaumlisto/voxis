@@ -113,6 +113,14 @@ impl ConfigSqliteStorage {
             "translate_to_english",
             config.translate_to_english,
         );
+        if let Some(v) = self.get(&conn, "auto_submit_key") {
+            if let Ok(parsed) = serde_json::from_str::<
+                crate::output::auto_submit::AutoSubmitKey,
+            >(&format!("\"{v}\""))
+            {
+                config.auto_submit_key = parsed;
+            }
+        }
         config.typing_delay = self.get_typed(&conn, "typing_delay", config.typing_delay);
         config.notifications = self.get_bool(&conn, "notifications", config.notifications);
         config.backend = self.get_str(&conn, "backend", &config.backend);
@@ -211,6 +219,12 @@ impl ConfigSqliteStorage {
             "translate_to_english",
             &config.translate_to_english.to_string(),
         )?;
+        // serde produces e.g. ""cmd_enter"" — trim quotes for storage.
+        let auto_submit_str = serde_json::to_string(&config.auto_submit_key)
+            .unwrap_or_else(|_| "\"off\"".to_string())
+            .trim_matches('"')
+            .to_string();
+        self.set(&conn, "auto_submit_key", &auto_submit_str)?;
         self.set(&conn, "typing_delay", &config.typing_delay.to_string())?;
         self.set(&conn, "notifications", &config.notifications.to_string())?;
         self.set(&conn, "backend", &config.backend)?;

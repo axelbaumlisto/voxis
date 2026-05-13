@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use crate::output::auto_submit;
 use crate::output::{format_output_text, OutputHandler};
 use crate::storage;
 use std::time::Instant;
@@ -42,6 +43,15 @@ pub fn finalize_output(
         if let Err(e) = output.restore_clipboard(saved) {
             tracing::debug!("Failed to restore clipboard: {}", e);
         }
+    }
+
+    // Auto-submit: emit Enter / Cmd+Enter / Shift+Enter so chat
+    // clients send the message without user keystroke. Off by default.
+    if let Err(e) = auto_submit::emit(
+        config.auto_submit_key,
+        &auto_submit::EnigoEmitter,
+    ) {
+        tracing::warn!("auto_submit failed (non-fatal): {}", e);
     }
 
     tracing::info!("⏱️ [PERF] Output: {}ms", output_start.elapsed().as_millis());

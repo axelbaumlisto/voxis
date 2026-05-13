@@ -316,6 +316,14 @@ pub struct AppConfig {
     #[serde(default)]
     pub translate_to_english: bool,
 
+    /// Auto-submit key combo emitted at the end of the output pipeline.
+    /// `Off` = no extra keystroke (default). `Enter` / `CmdEnter` /
+    /// `ShiftEnter` press the chord so chat clients (Slack, Telegram,
+    /// ChatGPT, etc.) send the typed message without the user touching
+    /// the keyboard. See `output::auto_submit`.
+    #[serde(default)]
+    pub auto_submit_key: crate::output::auto_submit::AutoSubmitKey,
+
     // Paste shortcuts (Linux only) - comma-separated list
     #[serde(default = "default_paste_shortcuts")]
     pub paste_shortcuts: String,
@@ -358,6 +366,7 @@ impl Default for AppConfig {
             text_processing: true,
             append_trailing_space: false,
             translate_to_english: false,
+            auto_submit_key: crate::output::auto_submit::AutoSubmitKey::Off,
             paste_shortcuts: DEFAULT_PASTE_SHORTCUTS.into(),
             api_url_override: None,
             vad: VadConfig::default(),
