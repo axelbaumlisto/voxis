@@ -108,6 +108,11 @@ impl ConfigSqliteStorage {
             "append_trailing_space",
             config.append_trailing_space,
         );
+        config.translate_to_english = self.get_bool(
+            &conn,
+            "translate_to_english",
+            config.translate_to_english,
+        );
         config.typing_delay = self.get_typed(&conn, "typing_delay", config.typing_delay);
         config.notifications = self.get_bool(&conn, "notifications", config.notifications);
         config.backend = self.get_str(&conn, "backend", &config.backend);
@@ -200,6 +205,11 @@ impl ConfigSqliteStorage {
             &conn,
             "append_trailing_space",
             &config.append_trailing_space.to_string(),
+        )?;
+        self.set(
+            &conn,
+            "translate_to_english",
+            &config.translate_to_english.to_string(),
         )?;
         self.set(&conn, "typing_delay", &config.typing_delay.to_string())?;
         self.set(&conn, "notifications", &config.notifications.to_string())?;

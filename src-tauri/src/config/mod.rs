@@ -309,6 +309,13 @@ pub struct AppConfig {
     #[serde(default)]
     pub append_trailing_space: bool,
 
+    /// When `true`, request Whisper to translate the audio to English
+    /// (`task=translate` on Groq / OpenAI Whisper). Useful for bilingual
+    /// users: speak Russian, get English in the clipboard. Honoured by
+    /// the transcription client at request-build time.
+    #[serde(default)]
+    pub translate_to_english: bool,
+
     // Paste shortcuts (Linux only) - comma-separated list
     #[serde(default = "default_paste_shortcuts")]
     pub paste_shortcuts: String,
@@ -350,6 +357,7 @@ impl Default for AppConfig {
             local_backend: DEFAULT_LOCAL_BACKEND.into(),
             text_processing: true,
             append_trailing_space: false,
+            translate_to_english: false,
             paste_shortcuts: DEFAULT_PASTE_SHORTCUTS.into(),
             api_url_override: None,
             vad: VadConfig::default(),

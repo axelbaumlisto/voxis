@@ -21,7 +21,8 @@ pub async fn run_transcription(
         }
         None => TranscriptionClient::new(&config.api_key, Some(&config.model), language),
     }
-    .map_err(|e| format!("Failed to create transcription client: {}", e))?;
+    .map_err(|e| format!("Failed to create transcription client: {}", e))?
+    .with_translate(config.translate_to_english);
 
     tracing::info!("Transcribing audio ({} bytes)...", audio_data.len());
     client

@@ -719,7 +719,14 @@ hotkey_hold_ms?: number; auto_type?: boolean; auto_enter?: boolean; typing_delay
  * if the text already ends in whitespace. See
  * `output::format_output_text` for the actual transformation.
  */
-append_trailing_space?: boolean; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
+append_trailing_space?: boolean; 
+/**
+ * When `true`, request Whisper to translate the audio to English
+ * (`task=translate` on Groq / OpenAI Whisper). Useful for bilingual
+ * users: speak Russian, get English in the clipboard. Honoured by
+ * the transcription client at request-build time.
+ */
+translate_to_english?: boolean; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
 /**
  * Audio device info for UI display.
  */
