@@ -140,9 +140,12 @@ describe("HandyPillTheme · resolver", () => {
 });
 
 describe("themeToCssVars", () => {
-  it("exports exactly 18 CSS-variable keys (6 palette + 12 animation)", () => {
+  it("exports exactly 19 CSS-variable keys (6 palette + 13 animation)", () => {
+    // 6 palette + 13 animation = 19. The plan originally said "12"
+    // but cancel_hover_ms is a legitimate temporal parameter, so the
+    // final schema settles at 13 animation fields.
     const vars = themeToCssVars(DEFAULT_HANDY_THEME);
-    expect(Object.keys(vars).length).toBe(18);
+    expect(Object.keys(vars).length).toBe(19);
   });
 
   it("includes all expected --hp-* keys", () => {
