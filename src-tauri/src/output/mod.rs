@@ -4,6 +4,31 @@
 //! Follows SRP: Only handles text output, no transcription logic.
 //! DRY/OCP: Platform-specific typing extracted to PlatformTyper trait.
 
+/// Pure output-shaping transform applied right before the text reaches
+/// the clipboard or auto-typer.
+///
+/// Currently only handles `append_trailing_space`: when enabled, a
+/// single ASCII space is appended unless the text already ends in
+/// whitespace (or is empty). Keeping this as a pure function keeps it
+/// trivially testable (SOLID-SRP) and decouples it from clipboard/typer
+/// side effects.
+///
+/// Future shaping steps (e.g. final-period rules, smart casing) belong
+/// here so the entire output transformation stays in one place.
+pub fn format_output_text(text: &str, append_trailing_space: bool) -> String {
+    if !append_trailing_space || text.is_empty() {
+        return text.to_string();
+    }
+    if text
+        .chars()
+        .next_back()
+        .is_some_and(|c| c.is_whitespace())
+    {
+        return text.to_string();
+    }
+    format!("{} ", text)
+}
+
 mod platform;
 mod xkb;
 

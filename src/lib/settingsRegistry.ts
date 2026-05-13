@@ -115,6 +115,14 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     description: "Press Enter after typing",
   },
   {
+    key: "append_trailing_space",
+    label: "Append trailing space",
+    widgetType: "switch",
+    section: "Output",
+    description:
+      "Add a single space after each dictation so consecutive recordings don't merge. No-op if the text already ends in whitespace.",
+  },
+  {
     key: "typing_delay",
     label: "Typing Delay (ms)",
     widgetType: "input",

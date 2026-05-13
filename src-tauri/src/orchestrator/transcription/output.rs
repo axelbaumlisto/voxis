@@ -1,5 +1,5 @@
 use crate::config::AppConfig;
-use crate::output::OutputHandler;
+use crate::output::{format_output_text, OutputHandler};
 use crate::storage;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
@@ -14,6 +14,14 @@ pub fn finalize_output(
     duration: Option<f32>,
 ) {
     let output_start = Instant::now();
+
+    // Apply pure output-shaping (e.g. append_trailing_space) BEFORE
+    // anything touches the clipboard or the typer, and BEFORE we hand
+    // the text to history — we want history to reflect what the user
+    // actually saw in their target app (SRP for the shaping function;
+    // SSOT for the displayed text).
+    let shaped = format_output_text(text, config.append_trailing_space);
+    let text = shaped.as_str();
 
     if config.auto_type {
         // Auto-type mode: type directly, don't touch clipboard

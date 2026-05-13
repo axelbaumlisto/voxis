@@ -103,6 +103,11 @@ impl ConfigSqliteStorage {
         // Behavior
         config.auto_type = self.get_bool(&conn, "auto_type", config.auto_type);
         config.auto_enter = self.get_bool(&conn, "auto_enter", config.auto_enter);
+        config.append_trailing_space = self.get_bool(
+            &conn,
+            "append_trailing_space",
+            config.append_trailing_space,
+        );
         config.typing_delay = self.get_typed(&conn, "typing_delay", config.typing_delay);
         config.notifications = self.get_bool(&conn, "notifications", config.notifications);
         config.backend = self.get_str(&conn, "backend", &config.backend);
@@ -191,6 +196,11 @@ impl ConfigSqliteStorage {
         // Behavior
         self.set(&conn, "auto_type", &config.auto_type.to_string())?;
         self.set(&conn, "auto_enter", &config.auto_enter.to_string())?;
+        self.set(
+            &conn,
+            "append_trailing_space",
+            &config.append_trailing_space.to_string(),
+        )?;
         self.set(&conn, "typing_delay", &config.typing_delay.to_string())?;
         self.set(&conn, "notifications", &config.notifications.to_string())?;
         self.set(&conn, "backend", &config.backend)?;

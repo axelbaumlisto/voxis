@@ -301,6 +301,14 @@ pub struct AppConfig {
     #[serde(default = "default_true")]
     pub text_processing: bool,
 
+    /// Append a single trailing space to the output (after dictionary +
+    /// hallucination filter + optional LLM post-process). Prevents
+    /// successive dictations from merging into one another. Idempotent
+    /// if the text already ends in whitespace. See
+    /// `output::format_output_text` for the actual transformation.
+    #[serde(default)]
+    pub append_trailing_space: bool,
+
     // Paste shortcuts (Linux only) - comma-separated list
     #[serde(default = "default_paste_shortcuts")]
     pub paste_shortcuts: String,
@@ -341,6 +349,7 @@ impl Default for AppConfig {
             cloud_provider: DEFAULT_PROVIDER.into(),
             local_backend: DEFAULT_LOCAL_BACKEND.into(),
             text_processing: true,
+            append_trailing_space: false,
             paste_shortcuts: DEFAULT_PASTE_SHORTCUTS.into(),
             api_url_override: None,
             vad: VadConfig::default(),
