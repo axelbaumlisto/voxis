@@ -19,6 +19,7 @@ pub mod permissions;
 pub mod prompts;
 pub mod providers;
 pub mod recording;
+pub mod shortcut_bindings;
 pub mod suggestions;
 
 use crate::storage::{AppPaths, StorageFactory};

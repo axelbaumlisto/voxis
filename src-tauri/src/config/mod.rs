@@ -329,6 +329,14 @@ pub struct AppConfig {
     #[serde(default)]
     pub audio_feedback: crate::audio_feedback::AudioFeedbackSettings,
 
+    /// Multi-binding shortcut list (#2). Lives in config alongside the
+    /// legacy single `hotkey` string so callers can opt in gradually.
+    /// Empty by default — fresh installs go through
+    /// `storage::shortcut_bindings_sqlite::seed_defaults_if_empty()`
+    /// (T-B2.3) on first run.
+    #[serde(default = "crate::shortcut::default_bindings")]
+    pub shortcut_bindings: Vec<crate::shortcut::ShortcutBinding>,
+
     // Paste shortcuts (Linux only) - comma-separated list
     #[serde(default = "default_paste_shortcuts")]
     pub paste_shortcuts: String,
@@ -373,6 +381,7 @@ impl Default for AppConfig {
             translate_to_english: false,
             auto_submit_key: crate::output::auto_submit::AutoSubmitKey::Off,
             audio_feedback: crate::audio_feedback::AudioFeedbackSettings::default(),
+            shortcut_bindings: crate::shortcut::default_bindings(),
             paste_shortcuts: DEFAULT_PASTE_SHORTCUTS.into(),
             api_url_override: None,
             vad: VadConfig::default(),

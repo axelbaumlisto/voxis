@@ -131,6 +131,18 @@ impl ConfigSqliteStorage {
             "audio_feedback_volume",
             config.audio_feedback.volume,
         );
+        // shortcut_bindings stored as a single JSON column — simpler
+        // than a side table for a list whose total size is < 4 KB.
+        if let Some(json) = self.get(&conn, "shortcut_bindings") {
+            if let Ok(parsed) = serde_json::from_str::<
+                Vec<crate::shortcut::ShortcutBinding>,
+            >(&json)
+            {
+                if !parsed.is_empty() {
+                    config.shortcut_bindings = parsed;
+                }
+            }
+        }
         config.typing_delay = self.get_typed(&conn, "typing_delay", config.typing_delay);
         config.notifications = self.get_bool(&conn, "notifications", config.notifications);
         config.backend = self.get_str(&conn, "backend", &config.backend);
@@ -245,6 +257,9 @@ impl ConfigSqliteStorage {
             "audio_feedback_volume",
             &config.audio_feedback.volume.to_string(),
         )?;
+        if let Ok(json) = serde_json::to_string(&config.shortcut_bindings) {
+            self.set(&conn, "shortcut_bindings", &json)?;
+        }
         self.set(&conn, "typing_delay", &config.typing_delay.to_string())?;
         self.set(&conn, "notifications", &config.notifications.to_string())?;
         self.set(&conn, "backend", &config.backend)?;
