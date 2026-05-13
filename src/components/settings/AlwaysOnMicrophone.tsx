@@ -1,5 +1,5 @@
 /**
- * AlwaysOnMicrophone \u2014 Settings toggle with inline privacy warning
+ * AlwaysOnMicrophone — Settings toggle with inline privacy warning
  * (#8 from .pi/plans/handy-recommendations-cloud-only.md).
  *
  * The toggle itself is a single boolean. The interesting part is the
@@ -47,7 +47,7 @@ export default function AlwaysOnMicrophone({
               lineHeight: 1.4,
             }}
           >
-            <strong>\u26a0\ufe0f Privacy note.</strong> The capture device stays
+            <strong>⚠ Privacy note.</strong> The capture device stays
             active between hotkey presses for zero-latency first sample.
             <strong> Audio is NEVER buffered or sent to the cloud unless
             you actively trigger the hotkey.</strong> Battery use will be

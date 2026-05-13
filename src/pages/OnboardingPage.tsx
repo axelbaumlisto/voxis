@@ -1,10 +1,10 @@
 /**
- * OnboardingPage \u2014 first-run wizard (#10).
+ * OnboardingPage — first-run wizard (#10).
  *
  * 3 sequential steps in one stateful component:
- *   1. Mic permission test \u2014 button + status message.
- *   2. Hotkey reminder    \u2014 explain default + link to Settings.
- *   3. First transcription \u2014 ask user to press AltGr and dictate.
+ *   1. Mic permission test — button + status message.
+ *   2. Hotkey reminder    — explain default + link to Settings.
+ *   3. First transcription — ask user to press AltGr and dictate.
  *
  * Gated by `commands.isFirstRun()` in App.tsx; clicking "Done" on the
  * last step fires `commands.markFirstRunComplete()`.
@@ -51,11 +51,11 @@ export default function OnboardingPage() {
       // If the OS denies mic permission, this throws.
       // The full live waveform test is a stretch goal.
       await commands.listAudioDevices();
-      setMicStatus("\u2705 Microphone access granted");
+      setMicStatus("✅ Microphone access granted");
     } catch (e) {
       setMicStatus(
-        `\u26a0\ufe0f Mic access failed: ${e instanceof Error ? e.message : String(e)}. ` +
-          `Open System Settings \u2192 Privacy \u2192 Microphone and enable this app.`,
+        `⚠ Mic access failed: ${e instanceof Error ? e.message : String(e)}. ` +
+          `Open System Settings → Privacy → Microphone and enable this app.`,
       );
     }
   };
@@ -66,7 +66,7 @@ export default function OnboardingPage() {
       navigate("/");
     } catch (e) {
       console.error("markFirstRunComplete failed:", e);
-      // Navigate anyway \u2014 the user shouldn't be trapped on the
+      // Navigate anyway — the user shouldn't be trapped on the
       // onboarding page because of a one-time persistence glitch.
       navigate("/");
     }
@@ -89,7 +89,7 @@ export default function OnboardingPage() {
 
       {step === 0 && (
         <section data-testid="onboarding-step-mic">
-          <h2>Step 1 \u00b7 Microphone</h2>
+          <h2>Step 1 · Microphone</h2>
           <p>
             We need permission to read your microphone. Click below and your
             OS will prompt you if it hasn't already.
@@ -112,7 +112,7 @@ export default function OnboardingPage() {
               data-testid="onboarding-next-0"
               onClick={() => setStep(1)}
             >
-              Next \u2192
+              Next →
             </button>
           </div>
         </section>
@@ -120,14 +120,14 @@ export default function OnboardingPage() {
 
       {step === 1 && (
         <section data-testid="onboarding-step-hotkey">
-          <h2>Step 2 \u00b7 Hotkey</h2>
+          <h2>Step 2 · Hotkey</h2>
           <p>
             By default you hold <code>AltGr</code> (right Alt) to record. The
             pill overlay shows recording state. Release to transcribe and paste.
           </p>
           <p>
             You can change the key or add per-prompt shortcuts later in
-            Settings \u2192 Recording.
+            Settings → Recording.
           </p>
           <div style={{ display: "flex", gap: 8, marginTop: 24 }}>
             <button
@@ -135,14 +135,14 @@ export default function OnboardingPage() {
               data-testid="onboarding-back-1"
               onClick={() => setStep(0)}
             >
-              \u2190 Back
+              ← Back
             </button>
             <button
               type="button"
               data-testid="onboarding-next-1"
               onClick={() => setStep(2)}
             >
-              Next \u2192
+              Next →
             </button>
           </div>
         </section>
@@ -150,7 +150,7 @@ export default function OnboardingPage() {
 
       {step === 2 && (
         <section data-testid="onboarding-step-try">
-          <h2>Step 3 \u00b7 Try it</h2>
+          <h2>Step 3 · Try it</h2>
           <p>
             Hold <code>AltGr</code> in any text field and say something. The
             transcription will be pasted automatically when you release.
@@ -162,14 +162,14 @@ export default function OnboardingPage() {
               data-testid="onboarding-back-2"
               onClick={() => setStep(1)}
             >
-              \u2190 Back
+              ← Back
             </button>
             <button
               type="button"
               data-testid="onboarding-done"
               onClick={() => void onDone()}
             >
-              Done \u2014 take me to the app
+              Done — take me to the app
             </button>
           </div>
         </section>
