@@ -17,5 +17,16 @@
     "middle": "#9c6dff",
     "top": "#b388ff"
   },
-  "organic_ring": null
+  "organic_ring": null,
+  "handy_pill": {
+    "palette": {
+      "icon_color": "#7c4dff",
+      "bar_color": "#b388ff",
+      "bar_glow": "#7c4dff",
+      "shadow": "rgba(0, 0, 0, 0.45)",
+      "transcribing_text": "#ffffff",
+      "cancel_hover_bg": "rgba(255, 255, 255, 0.15)"
+    },
+    "animation": {}
+  }
 }

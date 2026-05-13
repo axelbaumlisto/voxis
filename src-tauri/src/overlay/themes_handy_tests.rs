@@ -158,6 +158,32 @@ fn all_seven_repository_themes_parse_without_panic() {
 }
 
 #[test]
+fn all_seven_repository_themes_have_distinct_icon_colors() {
+    // After T4.1 every repository theme declares its own `handy_pill.palette`.
+    // Distinct icon colours guarantee that pixel-diff e2e (Phase 5.5) can
+    // tell the themes apart.
+    let themes_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("themes");
+    let mut icon_colors = std::collections::HashSet::new();
+    for entry in std::fs::read_dir(&themes_dir).unwrap().flatten() {
+        let json_path = entry.path().join("theme.json");
+        if !json_path.exists() {
+            continue;
+        }
+        let raw = std::fs::read_to_string(&json_path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let t = resolve_from_json(&v);
+        icon_colors.insert(t.palette.icon_color.to_lowercase());
+    }
+    assert!(
+        icon_colors.len() >= 7,
+        "expected >= 7 distinct icon_color values across themes, got {} ({:?})",
+        icon_colors.len(),
+        icon_colors
+    );
+}
+
+#[test]
 fn default_palette_uses_handy_pink() {
     let d = default_theme();
     let p: &HandyPillPalette = &d.palette;

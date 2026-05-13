@@ -1,6 +1,6 @@
 {
   "name": "Quiet Reed",
-  "description": "Minimal motion, cool blue palette \u2014 ambient always-on indicator.",
+  "description": "Minimal motion, cool blue palette — ambient always-on indicator.",
   "family": "organic_ring",
   "colors": {
     "background": "#00000000",
@@ -30,6 +30,23 @@
       "speech_responsiveness": 0.6,
       "drift": 0.15,
       "settle_speed": 0.8
+    }
+  },
+  "handy_pill": {
+    "palette": {
+      "icon_color": "#7a9fbd",
+      "bar_color": "#b8d0e6",
+      "bar_glow": "#7a9fbd",
+      "shadow": "rgba(0, 0, 0, 0.45)",
+      "transcribing_text": "#ffffff",
+      "cancel_hover_bg": "rgba(255, 255, 255, 0.15)"
+    },
+    "animation": {
+      "smoothing_alpha": 0.41,
+      "bar_height_ms": 56,
+      "idle_breathing_amplitude": 0.05,
+      "idle_breathing_period_ms": 4000,
+      "peak_decay": 0.95
     }
   }
 }

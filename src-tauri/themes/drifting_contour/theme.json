@@ -1,6 +1,6 @@
 {
   "name": "Drifting Contour",
-  "description": "Expressive motion, warm amber palette \u2014 most visually active organic theme.",
+  "description": "Expressive motion, warm amber palette — most visually active organic theme.",
   "family": "organic_ring",
   "colors": {
     "background": "#00000000",
@@ -30,6 +30,23 @@
       "speech_responsiveness": 1.1,
       "drift": 0.55,
       "settle_speed": 0.4
+    }
+  },
+  "handy_pill": {
+    "palette": {
+      "icon_color": "#d9a865",
+      "bar_color": "#f4d9a8",
+      "bar_glow": "#d9a865",
+      "shadow": "rgba(0, 0, 0, 0.45)",
+      "transcribing_text": "#ffffff",
+      "cancel_hover_bg": "rgba(255, 255, 255, 0.15)"
+    },
+    "animation": {
+      "smoothing_alpha": 0.7,
+      "bar_height_ms": 128,
+      "idle_breathing_amplitude": 0.18,
+      "idle_breathing_period_ms": 4500,
+      "peak_decay": 0.92
     }
   }
 }
