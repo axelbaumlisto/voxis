@@ -123,6 +123,14 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
       "Add a single space after each dictation so consecutive recordings don't merge. No-op if the text already ends in whitespace.",
   },
   {
+    key: "translate_to_english",
+    label: "Translate to English",
+    widgetType: "switch",
+    section: "Output",
+    description:
+      "Ask Whisper to translate the audio to English instead of transcribing in the source language (Groq / OpenAI task=translate).",
+  },
+  {
     key: "typing_delay",
     label: "Typing Delay (ms)",
     widgetType: "input",

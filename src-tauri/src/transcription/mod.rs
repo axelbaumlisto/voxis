@@ -49,11 +49,40 @@ struct ApiErrorDetail {
     message: String,
 }
 
+/// Build the multipart **text** params for a Whisper-compatible
+/// /transcriptions request. Audio bytes are added separately by the
+/// caller. Pure function: no I/O, easy to unit-test (SOLID-SRP).
+///
+/// `task=translate` follows the documented Groq + OpenAI Whisper API
+/// behaviour: when present, the endpoint returns English text
+/// regardless of the spoken language. Omitted by default so we stay
+/// faithful to the source-language transcription.
+pub(crate) fn build_form_text_params(
+    model: &str,
+    language: Option<&str>,
+    translate: bool,
+) -> Vec<(&'static str, String)> {
+    let mut params: Vec<(&'static str, String)> = vec![
+        ("model", model.to_string()),
+        ("response_format", "verbose_json".to_string()),
+    ];
+    if let Some(lang) = language {
+        params.push(("language", lang.to_string()));
+    }
+    if translate {
+        params.push(("task", "translate".to_string()));
+    }
+    params
+}
+
 /// Transcription client for Groq API.
 pub struct TranscriptionClient {
     api_key: String,
     model: String,
     language: Option<String>,
+    /// When `true`, request English translation instead of source-language
+    /// transcription (Whisper `task=translate`).
+    translate: bool,
     client: reqwest::Client,
     api_url: String,
 }
@@ -88,9 +117,18 @@ impl TranscriptionClient {
             api_key: api_key.to_string(),
             model: model.unwrap_or(DEFAULT_MODEL).to_string(),
             language: language.filter(|l| *l != "auto").map(|l| l.to_string()),
+            translate: false,
             client,
             api_url: api_url.to_string(),
         })
+    }
+
+    /// Builder-style setter for the `translate` flag. Returns `self` so
+    /// it composes with the existing `with_url` constructor without a
+    /// breaking signature change.
+    pub fn with_translate(mut self, translate: bool) -> Self {
+        self.translate = translate;
+        self
     }
 
     /// Transcribe audio data (WAV bytes).
@@ -107,13 +145,13 @@ impl TranscriptionClient {
             .mime_str("audio/wav")
             .map_err(|e| TranscriptionError::HttpError(e.to_string()))?;
 
-        let mut form = Form::new()
-            .part("file", file_part)
-            .text("model", self.model.clone())
-            .text("response_format", "verbose_json");
-
-        if let Some(ref lang) = self.language {
-            form = form.text("language", lang.clone());
+        let mut form = Form::new().part("file", file_part);
+        for (key, value) in build_form_text_params(
+            &self.model,
+            self.language.as_deref(),
+            self.translate,
+        ) {
+            form = form.text(key, value);
         }
 
         let response = self
@@ -557,6 +595,7 @@ mod integration_tests {
             api_key: "test_key".to_string(),
             model: "whisper-large-v3".to_string(),
             language: None,
+            translate: false,
             client,
             api_url: "http://192.0.2.1:1/transcriptions".to_string(), // Non-routable TEST-NET
         };
