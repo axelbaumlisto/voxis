@@ -166,25 +166,39 @@ pub fn get_handy_theme(
     theme_id: String,
     theme_loader: State<'_, ThemeLoaderState>,
 ) -> crate::overlay::themes::handy::HandyPillTheme {
-    // Resolve the theme by id to get its on-disk JSON path, then re-parse
-    // the raw JSON to access the `handy_pill` block. We deliberately read
-    // the file again (rather than relying on the in-memory
-    // `VisualizationTheme` cache) so that the Handy parser depends only
-    // on serde, not on the legacy `ThemeFile` struct — future cleanup
-    // (Phase 7) can drop the legacy struct without churning this command.
-    use crate::overlay::themes::handy::{resolve_from_json, DEFAULT_HANDY_THEME};
+    tracing::info!("get_handy_theme: requested id={theme_id}");
+    // Resolution order:
+    //   1. compile-time built-in registry (covers all 7 repository themes)
+    //   2. user-copied theme.json on disk
+    //   3. DEFAULT_HANDY_THEME (Handy pink)
+    use crate::overlay::themes::handy::{
+        builtin_handy_theme, resolve_from_json, DEFAULT_HANDY_THEME,
+    };
+
+    if let Some(builtin) = builtin_handy_theme(&theme_id) {
+        tracing::info!(
+            "get_handy_theme: BUILTIN id={theme_id} -> icon={}",
+            builtin.palette.icon_color
+        );
+        return builtin;
+    }
 
     let path = VisualizationTheme::path_for_id(&theme_id, &theme_loader.handle);
     let Some(path) = path else {
+        tracing::warn!("get_handy_theme: no path for id={theme_id}, using DEFAULT");
         return DEFAULT_HANDY_THEME.clone();
     };
     let Ok(raw) = std::fs::read_to_string(&path) else {
+        tracing::warn!("get_handy_theme: cannot read {path:?}, using DEFAULT");
         return DEFAULT_HANDY_THEME.clone();
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        tracing::warn!("get_handy_theme: cannot parse {path:?}, using DEFAULT");
         return DEFAULT_HANDY_THEME.clone();
     };
-    resolve_from_json(&value)
+    let resolved = resolve_from_json(&value);
+    tracing::info!("get_handy_theme: resolved id={theme_id} -> icon={}", resolved.palette.icon_color);
+    resolved
 }
 
 /// Diagnostic command — lets the overlay webview log a marker to the Rust

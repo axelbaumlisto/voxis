@@ -1,5 +1,7 @@
 //! Application setup and initialization.
 
+#[cfg(debug_assertions)]
+mod debug_socket;
 mod hotkey;
 mod logging;
 mod overlay;
@@ -51,6 +53,9 @@ pub fn configure_app(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         let _ = window.set_focus();
         tracing::info!("Setup: main window shown with focus");
     }
+
+    #[cfg(debug_assertions)]
+    debug_socket::spawn(app.handle().clone());
 
     tracing::info!("Setup: complete!");
     Ok(())

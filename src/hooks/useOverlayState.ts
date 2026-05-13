@@ -12,6 +12,7 @@
  */
 import { useEffect, useReducer } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { commands as bindings } from "../bindings";
 
 export type OverlayMode = "idle" | "recording" | "transcribing" | "error";
 
@@ -137,6 +138,11 @@ export function useOverlayState(): OverlaySnapshot {
     };
 
     void subscribe<unknown>("overlay://state", (payload) => {
+      void bindings
+        .debugLogOverlay(
+          `overlay://state rcv payload=${JSON.stringify(payload)}`,
+        )
+        .catch(() => {});
       const mode = coerceMode(payload);
       if (mode) dispatch({ type: "mode", mode });
     });
@@ -152,6 +158,11 @@ export function useOverlayState(): OverlaySnapshot {
     });
 
     void subscribe<unknown>("overlay://theme", (payload) => {
+      void bindings
+        .debugLogOverlay(
+          `overlay://theme rcv payload=${JSON.stringify(payload)}`,
+        )
+        .catch(() => {});
       const themeId = coerceTheme(payload);
       if (themeId) dispatch({ type: "theme", themeId });
     });
