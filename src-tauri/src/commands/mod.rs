@@ -16,6 +16,7 @@ pub mod failed;
 pub mod history;
 pub mod overlay;
 pub mod permissions;
+pub mod onboarding;
 pub mod prompts;
 pub mod providers;
 pub mod recording;

@@ -414,6 +414,22 @@ async resetShortcutBinding(id: string) : Promise<Result<ShortcutBinding, string>
     else return { status: "error", error: e  as any };
 }
 },
+async isFirstRun() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("is_first_run") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async markFirstRunComplete() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mark_first_run_complete") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Show the overlay window with the given state.
  */
@@ -819,7 +835,12 @@ audio_feedback?: AudioFeedbackSettings;
  * `storage::shortcut_bindings_sqlite::seed_defaults_if_empty()`
  * (T-B2.3) on first run.
  */
-shortcut_bindings?: ShortcutBinding[]; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
+shortcut_bindings?: ShortcutBinding[]; 
+/**
+ * `true` once the user has completed the onboarding flow (#10).
+ * The frontend gates `/onboarding` redirect on this flag.
+ */
+first_run_completed?: boolean; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
 /**
  * Audio device info for UI display.
  */
