@@ -103,7 +103,7 @@ registerCustomWidget("auto-submit-select", ({
   <AutoSubmitSelector
     label={label}
     description={description}
-    value={(config as unknown as { auto_submit_key?: string }).auto_submit_key ?? "off"}
+    value={config.auto_submit_key ?? "off"}
     onChange={(value) => onChange(settingKey, value)}
   />
 ));
@@ -122,10 +122,7 @@ registerCustomWidget("always-on-microphone", ({
   <AlwaysOnMicrophone
     label={label}
     description={description}
-    value={
-      (config as unknown as { always_on_microphone?: boolean })
-        .always_on_microphone ?? false
-    }
+    value={config.always_on_microphone ?? false}
     onChange={(value) => onChange(settingKey, value)}
   />
 ));
@@ -141,11 +138,7 @@ registerCustomWidget("audio-feedback", ({
   <AudioFeedback
     label={label}
     description={description}
-    value={
-      (config as unknown as {
-        audio_feedback?: { enabled: boolean; volume: number };
-      }).audio_feedback ?? { enabled: false, volume: 0.6 }
-    }
+    value={config.audio_feedback ?? { enabled: false, volume: 0.6 }}
     onChange={(value) => onChange(settingKey, value)}
   />
 ));
