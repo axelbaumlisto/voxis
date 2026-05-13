@@ -82,7 +82,12 @@ const THEMES = [
   { id: "neon",           family: "bars",         probe: "#ff00ff", minDiff: 200 },
   { id: "drifting_contour", family: "organic_ring", probe: "#d9a865", minDiff: 30 },
   { id: "living_reed",    family: "organic_ring", probe: "#7cc287", minDiff: 30 },
-  { id: "quiet_reed",     family: "organic_ring", probe: "#7a9fbd", minDiff: 30 },
+  // quiet_reed by design has minimal motion (speech_responsiveness=0.6,
+  // idle_breathing=0.05) — the idle↔loud frame-pair diff is tiny
+  // because the ring barely reshapes under audio drive. We still want
+  // a non-zero threshold to catch a fully-static render, just much
+  // lower than the other ring themes.
+  { id: "quiet_reed",     family: "organic_ring", probe: "#7a9fbd", minDiff: 10 },
 ] as const;
 
 const galleryEntries: GalleryEntry[] = [];
