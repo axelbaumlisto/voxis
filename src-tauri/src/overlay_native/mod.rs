@@ -109,15 +109,15 @@ pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend
             }
         }
         "auto" => {} // fall through to auto chain
-        // Phase 7 removed backends — fall through to auto chain.
-        "native" | "subprocess" => {
-            tracing::warn!(
-                "backend '{}' removed in Phase 7 cleanup; using auto (webview)",
-                params.backend
-            );
-        }
         other => {
-            tracing::warn!("Unknown overlay backend '{}'; falling back to auto", other);
+            // Covers Phase 7-removed values 'native' and 'subprocess'
+            // for users upgrading from older configs, plus anything
+            // typo'd into the kv table. All paths drop to the auto
+            // chain below.
+            tracing::warn!(
+                "Unknown overlay backend '{}'; falling back to auto",
+                other
+            );
         }
     }
 
@@ -196,11 +196,12 @@ mod tests {
     }
 
     #[test]
-    fn test_create_overlay_removed_backends_fall_through_to_auto() {
-        // Phase 7: 'native' and 'subprocess' were removed; both must
-        // resolve cleanly to the auto chain (Noop in this test env
-        // since AppHandle is absent).
-        for backend in ["native", "subprocess"] {
+    fn test_create_overlay_legacy_backend_strings_fall_through_to_auto() {
+        // Phase 7-removed backends ('native', 'subprocess') and any
+        // typo all route through the same `other =>` arm. The test
+        // also covers a clearly-invalid string to lock the back-compat
+        // contract: unknown -> auto -> Noop (when no AppHandle).
+        for backend in ["native", "subprocess", "", "xx-random"] {
             let overlay = create_overlay(params(backend, true));
             assert!(
                 !overlay.is_running(),
