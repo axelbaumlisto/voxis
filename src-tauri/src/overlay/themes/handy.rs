@@ -76,12 +76,34 @@ pub struct HandyPillBars {
     pub gradient_top: String,
 }
 
+/// Per-family `ring` configuration. Only consumed by
+/// `Family::OrganicRing` themes. Pulled from `theme.json` block
+/// `handy_pill.ring` with fallbacks to the legacy root
+/// `organic_ring{shape, motion}` block.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct HandyPillRing {
+    pub gap_degrees: f32,
+    pub base_thickness: f32,
+    pub taper: f32,
+    pub roundness: f32,
+    pub active_zones: u8,
+    /// Multiplier for speech-driven jitter (mirrored from
+    /// legacy `organic_ring.motion.speech_responsiveness`).
+    pub speech_responsiveness: f32,
+    /// Hue-drift speed (legacy `organic_ring.motion.drift`).
+    pub drift: f32,
+    /// How quickly the ring snaps back to its idle shape after a peak
+    /// (legacy `organic_ring.motion.settle_speed`).
+    pub settle_speed: f32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct HandyPillTheme {
     pub family: HandyPillFamily,
     pub palette: HandyPillPalette,
     pub animation: HandyPillAnimation,
     pub bars: HandyPillBars,
+    pub ring: HandyPillRing,
 }
 
 // Manual Eq so f32-bearing animation field doesn't block PartialEq usage
@@ -95,7 +117,22 @@ impl HandyPillTheme {
             palette: default_palette(),
             animation: default_animation(),
             bars: default_bars(),
+            ring: default_ring(),
         }
+    }
+}
+
+fn default_ring() -> HandyPillRing {
+    // Mirrors the `living_reed` defaults — a balanced organic profile.
+    HandyPillRing {
+        gap_degrees: 42.0,
+        base_thickness: 7.2,
+        taper: 0.7,
+        roundness: 0.9,
+        active_zones: 3,
+        speech_responsiveness: 0.92,
+        drift: 0.38,
+        settle_speed: 0.6,
     }
 }
 
@@ -182,11 +219,46 @@ struct PartialBars {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct PartialRing {
+    gap_degrees: Option<f32>,
+    base_thickness: Option<f32>,
+    taper: Option<f32>,
+    roundness: Option<f32>,
+    active_zones: Option<u8>,
+    speech_responsiveness: Option<f32>,
+    drift: Option<f32>,
+    settle_speed: Option<f32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LegacyRingShape {
+    gap_degrees: Option<f32>,
+    base_thickness: Option<f32>,
+    taper: Option<f32>,
+    roundness: Option<f32>,
+    active_zones: Option<u8>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LegacyRingMotion {
+    speech_responsiveness: Option<f32>,
+    drift: Option<f32>,
+    settle_speed: Option<f32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LegacyOrganicRing {
+    shape: Option<LegacyRingShape>,
+    motion: Option<LegacyRingMotion>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct PartialHandyPill {
     family: Option<HandyPillFamily>,
     palette: Option<PartialPalette>,
     animation: Option<PartialAnimation>,
     bars: Option<PartialBars>,
+    ring: Option<PartialRing>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -205,6 +277,9 @@ struct PartialThemeFile {
     /// Legacy `gradient` block; consumed as a fallback for
     /// `handy_pill.bars.gradient_*`.
     gradient: Option<LegacyGradient>,
+    /// Legacy `organic_ring{shape, motion}` block; consumed as a
+    /// fallback for `handy_pill.ring.*`.
+    organic_ring: Option<LegacyOrganicRing>,
     handy_pill: Option<PartialHandyPill>,
 }
 
@@ -302,6 +377,59 @@ fn resolve_family(
     }
 }
 
+fn resolve_ring(
+    ring: Option<PartialRing>,
+    legacy: Option<LegacyOrganicRing>,
+) -> HandyPillRing {
+    let d = default_ring();
+    let ring = ring.unwrap_or_default();
+    let legacy = legacy.unwrap_or_default();
+    let legacy_shape = legacy.shape.unwrap_or_default();
+    let legacy_motion = legacy.motion.unwrap_or_default();
+    HandyPillRing {
+        gap_degrees: ring
+            .gap_degrees
+            .or(legacy_shape.gap_degrees)
+            .unwrap_or(d.gap_degrees)
+            .clamp(0.0, 359.0),
+        base_thickness: ring
+            .base_thickness
+            .or(legacy_shape.base_thickness)
+            .unwrap_or(d.base_thickness)
+            .max(0.1),
+        taper: ring
+            .taper
+            .or(legacy_shape.taper)
+            .unwrap_or(d.taper)
+            .clamp(0.0, 1.0),
+        roundness: ring
+            .roundness
+            .or(legacy_shape.roundness)
+            .unwrap_or(d.roundness)
+            .clamp(0.0, 1.0),
+        active_zones: ring
+            .active_zones
+            .or(legacy_shape.active_zones)
+            .unwrap_or(d.active_zones)
+            .clamp(1, 12),
+        speech_responsiveness: ring
+            .speech_responsiveness
+            .or(legacy_motion.speech_responsiveness)
+            .unwrap_or(d.speech_responsiveness)
+            .clamp(0.0, 2.0),
+        drift: ring
+            .drift
+            .or(legacy_motion.drift)
+            .unwrap_or(d.drift)
+            .clamp(0.0, 2.0),
+        settle_speed: ring
+            .settle_speed
+            .or(legacy_motion.settle_speed)
+            .unwrap_or(d.settle_speed)
+            .clamp(0.0, 2.0),
+    }
+}
+
 fn resolve_bars(
     bars: Option<PartialBars>,
     legacy_gradient: Option<LegacyGradient>,
@@ -335,6 +463,7 @@ pub fn resolve_from_json(value: &serde_json::Value) -> HandyPillTheme {
         palette: resolve_palette(block.palette),
         animation: resolve_animation(block.animation),
         bars: resolve_bars(block.bars, partial.gradient),
+        ring: resolve_ring(block.ring, partial.organic_ring),
     }
 }
 

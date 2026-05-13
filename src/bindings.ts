@@ -782,7 +782,28 @@ export type HandyPillFamily = "bars" | "organic_ring" | "handy"
  * Six palette colours drive every coloured pixel in the pill UI.
  */
 export type HandyPillPalette = { icon_color: string; bar_color: string; bar_glow: string; shadow: string; transcribing_text: string; cancel_hover_bg: string }
-export type HandyPillTheme = { family: HandyPillFamily; palette: HandyPillPalette; animation: HandyPillAnimation; bars: HandyPillBars }
+/**
+ * Per-family `ring` configuration. Only consumed by
+ * `Family::OrganicRing` themes. Pulled from `theme.json` block
+ * `handy_pill.ring` with fallbacks to the legacy root
+ * `organic_ring{shape, motion}` block.
+ */
+export type HandyPillRing = { gap_degrees: number; base_thickness: number; taper: number; roundness: number; active_zones: number; 
+/**
+ * Multiplier for speech-driven jitter (mirrored from
+ * legacy `organic_ring.motion.speech_responsiveness`).
+ */
+speech_responsiveness: number; 
+/**
+ * Hue-drift speed (legacy `organic_ring.motion.drift`).
+ */
+drift: number; 
+/**
+ * How quickly the ring snaps back to its idle shape after a peak
+ * (legacy `organic_ring.motion.settle_speed`).
+ */
+settle_speed: number }
+export type HandyPillTheme = { family: HandyPillFamily; palette: HandyPillPalette; animation: HandyPillAnimation; bars: HandyPillBars; ring: HandyPillRing }
 /**
  * History entry for frontend display.
  */

@@ -52,7 +52,7 @@ fn empty_json_falls_back_to_handy_family() {
 }
 
 #[test]
-fn legacy_bars_family_root_field_resolves_to_Bars() {
+fn legacy_bars_family_root_field_resolves_to_bars_family() {
     let v = json(r#"{ "family": "bars" }"#);
     let t = resolve_from_json(&v);
     assert_eq!(
