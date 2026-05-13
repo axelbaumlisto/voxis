@@ -575,7 +575,8 @@ mod tests {
     fn test_nspanel_overlay_stub_on_other_platforms() {
         // On non-macOS, `new()` always returns an error and `unavailable()`
         // remains the only constructor.
-        let result = NsPanelOverlay::new();
+        let result =
+            NsPanelOverlay::new(OverlayPositionConfig::default(), 0);
         assert!(result.is_err(), "expected stub error on non-macOS");
         let overlay = NsPanelOverlay::unavailable();
         assert!(!overlay.is_running());
