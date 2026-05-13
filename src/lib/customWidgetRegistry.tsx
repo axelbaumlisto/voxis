@@ -1,4 +1,5 @@
 import React from "react";
+import LlmPromptManager from "../components/settings/LlmPromptManager";
 import OverlayBackendSelector from "../components/settings/OverlayBackendSelector";
 import PasteShortcutCheckboxes from "../components/settings/PasteShortcutCheckboxes";
 import ProviderSelect from "../components/settings/ProviderSelect";
@@ -81,3 +82,8 @@ registerCustomWidget("overlay-backend-select", ({
     onChange={(value) => onChange(settingKey, value)}
   />
 ));
+
+// Multi-prompt LLM templates (#1 from Handy recommendations).
+// Self-contained — talks directly to commands.* for CRUD, so the
+// generic config save flow is bypassed for this section.
+registerCustomWidget("llm-prompt-manager", () => <LlmPromptManager />);

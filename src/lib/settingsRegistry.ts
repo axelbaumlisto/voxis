@@ -265,6 +265,15 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     section: "LLM",
     placeholder: "Leave empty to use main API key",
   },
+  {
+    key: "llm.prompts",
+    label: "Prompt templates",
+    widgetType: "custom",
+    section: "LLM",
+    description:
+      "Multiple named prompts for the LLM post-processor. The selected template wins; if none is selected the legacy llm.prompt string is used (back-compat).",
+    customComponent: "llm-prompt-manager",
+  },
 
   // Advanced section
   {
