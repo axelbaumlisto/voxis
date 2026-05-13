@@ -539,9 +539,9 @@ describe("themeBarMath", () => {
 | T3.1 RED Rust | ✅ 9 RED | (in T3.2 commit) | 2026-05-13 10:08 |
 | T3.2 GREEN Rust + command | ✅ 9 GREEN (764 total) | 7298825 | 2026-05-13 10:11 |
 | T4.1 Populate 7 themes | ✅ +1 distinct test (765 total) | f7784ef | 2026-05-13 10:18 |
-| T5.1 getHandyTheme wire | — | — | — |
-| T5.2 Debug commands | — | — | — |
-| T5.3 Synthetic e2e | — | — | — |
+| T5.1 getHandyTheme wire | ✅ 1003 vitest + 7 e2e | 68f1009 | 2026-05-13 10:25 |
+| T5.2 Debug commands | 🔜 (pending live gallery) | — | — |
+| T5.3 Synthetic e2e | ✅ 15 new · 128 total | 9add194 | 2026-05-13 10:35 |
 | T5.4 E2E helpers | — | — | — |
 | T5.5 Live gallery spec | — | — | — |
 | T5.6 Animations + index | — | — | — |
