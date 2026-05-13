@@ -64,6 +64,16 @@ pub struct RecordingCoordinator {
     queue: Arc<TranscriptionQueue>,
     overlay: Arc<Mutex<Box<dyn OverlayBackend>>>,
     polling_cancel: Arc<Mutex<Option<CancellationToken>>>,
+    /// Token that an in-flight `on_hotkey_pressed` is sleeping on while it
+    /// waits for the debounce threshold. `on_hotkey_released` cancels this
+    /// token so a short press (key used as modifier in a combination)
+    /// never starts recording. Tagged with a monotonically increasing
+    /// press id so a race — release of press N after press N+1 has begun —
+    /// cannot accidentally cancel the wrong token.
+    pending_press: Arc<Mutex<Option<(u64, CancellationToken)>>>,
+    /// Counter for press ids — only used to disambiguate concurrent press
+    /// cycles inside the debounce window.
+    press_seq: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl RecordingCoordinator {
@@ -84,6 +94,8 @@ impl RecordingCoordinator {
             queue,
             overlay,
             polling_cancel,
+            pending_press: Arc::new(Mutex::new(None)),
+            press_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -109,6 +121,48 @@ impl RecordingCoordinator {
             tracing::debug!("Ignoring hotkey press - stage: {:?}", stage);
             return;
         }
+
+        // ---- Debounce: short presses are key-combination modifiers ----
+        // Read the user-configured hold threshold (default 300 ms). Sleep
+        // that long while listening for a cancellation from
+        // `on_hotkey_released`. If the release fires first the user was
+        // pressing AltGr/Ctrl as part of a shortcut — bail out silently.
+        let config_for_hold = load_config_from_app(&self.app);
+        let hold_ms = config_for_hold.hotkey_hold_ms as u64;
+        if hold_ms > 0 {
+            let press_id = self
+                .press_seq
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
+            let token = CancellationToken::new();
+            {
+                let mut slot = self.pending_press.lock().await;
+                if let Some((_, prev)) = slot.take() {
+                    prev.cancel();
+                }
+                *slot = Some((press_id, token.clone()));
+            }
+            let cancelled = tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_millis(hold_ms)) => false,
+                _ = token.cancelled() => true,
+            };
+            // Clear our slot iff it still carries OUR press id (a later
+            // press could have replaced it while we slept).
+            {
+                let mut slot = self.pending_press.lock().await;
+                if matches!(slot.as_ref(), Some((id, _)) if *id == press_id) {
+                    *slot = None;
+                }
+            }
+            if cancelled {
+                tracing::info!(
+                    "on_hotkey_pressed: short press (<{}ms) - treated as key combo, ignored",
+                    hold_ms
+                );
+                return;
+            }
+        }
+
         tracing::info!("on_hotkey_pressed: checking mic permission");
         if !create_permission_checker()
             .check(Permission::Microphone)
@@ -176,6 +230,15 @@ impl RecordingCoordinator {
     }
 
     pub async fn on_hotkey_released(&self) {
+        // If a press is still inside its debounce window, cancel it: the
+        // user lifted the key before the hold threshold so we never wanted
+        // to start recording in the first place.
+        if let Some((_id, token)) = self.pending_press.lock().await.take() {
+            token.cancel();
+            tracing::info!("on_hotkey_released: cancelled pending press (short hold)");
+            return;
+        }
+
         if let Some(token) = self.polling_cancel.lock().await.take() {
             token.cancel();
         }

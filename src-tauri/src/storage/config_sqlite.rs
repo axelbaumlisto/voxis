@@ -97,6 +97,8 @@ impl ConfigSqliteStorage {
 
         // Hotkey
         config.hotkey = self.get_str(&conn, "hotkey", &config.hotkey);
+        config.hotkey_hold_ms =
+            self.get_typed(&conn, "hotkey_hold_ms", config.hotkey_hold_ms);
 
         // Behavior
         config.auto_type = self.get_bool(&conn, "auto_type", config.auto_type);
@@ -184,6 +186,7 @@ impl ConfigSqliteStorage {
 
         // Hotkey
         self.set(&conn, "hotkey", &config.hotkey)?;
+        self.set(&conn, "hotkey_hold_ms", &config.hotkey_hold_ms.to_string())?;
 
         // Behavior
         self.set(&conn, "auto_type", &config.auto_type.to_string())?;
@@ -374,6 +377,7 @@ mod tests {
             model: "custom-model".to_string(),
             language: "ru".to_string(),
             hotkey: "ctrl+shift+r".to_string(),
+            hotkey_hold_ms: 750,
             auto_type: false,
             auto_enter: true,
             typing_delay: 50,
@@ -406,6 +410,10 @@ mod tests {
         assert_eq!(loaded.model, "custom-model");
         assert_eq!(loaded.language, "ru");
         assert_eq!(loaded.hotkey, "ctrl+shift+r");
+        assert_eq!(
+            loaded.hotkey_hold_ms, 750,
+            "custom hotkey hold threshold must persist across save/load"
+        );
         assert!(!loaded.auto_type);
         assert!(loaded.auto_enter);
         assert_eq!(loaded.typing_delay, 50);

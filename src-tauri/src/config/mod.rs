@@ -259,6 +259,11 @@ pub struct AppConfig {
     // Hotkey
     #[serde(default = "default_hotkey")]
     pub hotkey: String,
+    /// Minimum hold time (ms) before the hotkey activates. Presses
+    /// shorter than this are ignored — allows AltGr/Ctrl to keep working
+    /// as a key modifier for combinations.
+    #[serde(default = "default_hotkey_hold_ms")]
+    pub hotkey_hold_ms: u32,
 
     // Behavior
     #[serde(default = "default_true")]
@@ -322,6 +327,7 @@ impl Default for AppConfig {
             model: DEFAULT_MODEL.into(),
             language: DEFAULT_AUTO.into(),
             hotkey: DEFAULT_HOTKEY.into(),
+            hotkey_hold_ms: DEFAULT_HOTKEY_HOLD_MS,
             auto_type: true,
             auto_enter: false,
             typing_delay: DEFAULT_TYPING_DELAY,
@@ -359,6 +365,10 @@ fn default_model() -> String {
 
 fn default_hotkey() -> String {
     DEFAULT_HOTKEY.into()
+}
+
+fn default_hotkey_hold_ms() -> u32 {
+    DEFAULT_HOTKEY_HOLD_MS
 }
 
 fn default_typing_delay() -> u32 {
@@ -458,6 +468,10 @@ mod tests {
         let config = AppConfig::default();
         assert_eq!(config.model, DEFAULT_MODEL);
         assert_eq!(config.hotkey, "ctrl_r");
+        assert_eq!(
+            config.hotkey_hold_ms, 300,
+            "default hold threshold must match user expectation (300 ms)"
+        );
         assert!(config.auto_type);
         assert!(!config.auto_enter);
         assert_eq!(config.typing_delay, 12);
