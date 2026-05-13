@@ -103,5 +103,20 @@ export function useHandyBarMath(): BarMath {
   return themeBarMath(theme);
 }
 
+/**
+ * Same as {@link useHandyBarMath} but returns `themeBarMath(DEFAULT_HANDY_THEME)`
+ * when no {@link HandyThemeProvider} is mounted. Useful for components
+ * (e.g. `HandyBars`) that need to remain renderable in isolated unit
+ * tests and Storybook previews without forcing the test author to set
+ * up a Provider tree.
+ *
+ * ISP: a narrower variant of {@link useHandyBarMath} for callers that
+ * want graceful degradation instead of a runtime throw.
+ */
+export function useHandyBarMathOrDefault(): BarMath {
+  const ctx = useContext(HandyThemeContext);
+  return themeBarMath(ctx ?? DEFAULT_HANDY_THEME);
+}
+
 /** Re-export for convenience so callers don't have to import handy.ts. */
 export { DEFAULT_HANDY_THEME };

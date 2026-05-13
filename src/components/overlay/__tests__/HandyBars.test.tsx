@@ -48,4 +48,19 @@ describe("HandyBars", () => {
     const bar = container.querySelector(".bar") as HTMLElement;
     expect(bar.style.height).toBe("40px");
   });
+
+  it("custom powerCurve changes bar height at v=0.5", () => {
+    // y = 4 + pow(0.5, p) * 16
+    //  p=0.7 -> 4 + 0.6156 * 16 = ~13.85px (default)
+    //  p=2.0 -> 4 + 0.25 * 16 = 8px
+    //  p=0.3 -> 4 + 0.8123 * 16 = ~16.99px (taller)
+    const def = render(<HandyBars bars={[0.5]} />);
+    const flat = render(<HandyBars bars={[0.5]} powerCurve={2.0} />);
+    const steep = render(<HandyBars bars={[0.5]} powerCurve={0.3} />);
+    const h = (c: HTMLElement | null) =>
+      parseFloat((c?.querySelector(".bar") as HTMLElement).style.height);
+    expect(h(def.container as unknown as HTMLElement)).toBeCloseTo(13.85, 0);
+    expect(h(flat.container as unknown as HTMLElement)).toBe(8);
+    expect(h(steep.container as unknown as HTMLElement)).toBeGreaterThan(16);
+  });
 });
