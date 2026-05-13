@@ -390,6 +390,30 @@ async setActiveLlmPromptId(id: string | null) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async listShortcutBindings() : Promise<Result<ShortcutBinding[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_shortcut_bindings") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateShortcutBinding(id: string, newCombo: string) : Promise<Result<ShortcutBinding, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_shortcut_binding", { id, newCombo }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async resetShortcutBinding(id: string) : Promise<Result<ShortcutBinding, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reset_shortcut_binding", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Show the overlay window with the given state.
  */
@@ -787,7 +811,15 @@ auto_submit_key?: AutoSubmitKey;
  * Audio feedback beeps on recording start / stop / error.
  * Off by default. See `audio_feedback`.
  */
-audio_feedback?: AudioFeedbackSettings; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
+audio_feedback?: AudioFeedbackSettings; 
+/**
+ * Multi-binding shortcut list (#2). Lives in config alongside the
+ * legacy single `hotkey` string so callers can opt in gradually.
+ * Empty by default — fresh installs go through
+ * `storage::shortcut_bindings_sqlite::seed_defaults_if_empty()`
+ * (T-B2.3) on first run.
+ */
+shortcut_bindings?: ShortcutBinding[]; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
 /**
  * Audio device info for UI display.
  */
@@ -977,6 +1009,23 @@ export type PermissionInfo = { name: string; status: string; description: string
  * Result of reprocessing history through LLM.
  */
 export type ReprocessResult = { processed: number; suggestions_found: number }
+/**
+ * What the orchestrator should do when this binding fires.
+ * 
+ * `Transcribe` is the legacy behaviour: record, transcribe, paste.
+ * `TranscribePostProcess { prompt_id }` adds LLM post-processing
+ * using the prompt with the given id (resolved against
+ * `LlmPromptsStorage` at dispatch time \u2014 see T-A1.4). A `None`
+ * prompt_id means "use the currently-active prompt" (UI default).
+ */
+export type ShortcutAction = { kind: "transcribe" } | { kind: "transcribe_post_process"; prompt_id?: string | null }
+/**
+ * One configurable hotkey row. `id` is a stable string key (locked by
+ * the `stable_ids` test); `current_binding` is what the listener
+ * registers. `default_binding` is shown next to a "reset" button in
+ * the UI.
+ */
+export type ShortcutBinding = { id: string; name: string; description: string; default_binding: string; current_binding: string; action?: ShortcutAction }
 export type ThemeColors = { use_gradient: boolean; gradient_bottom: string; gradient_middle: string; gradient_top: string; recording: string; transcribing: string; idle: string }
 export type ThemeInfo = { id: string; name: string; description: string }
 export type ThemeTestResult = { valid: boolean; warnings: string[]; errors: string[] }

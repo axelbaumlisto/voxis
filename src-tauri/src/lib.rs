@@ -19,6 +19,7 @@ pub mod commands;
 pub mod config;
 pub mod error;
 pub mod hotkey;
+pub mod shortcut;
 pub mod learning;
 pub mod llm;
 pub mod orchestrator;
@@ -118,6 +119,9 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
         crate::commands::prompts::delete_llm_prompt,
         crate::commands::prompts::get_active_llm_prompt_id,
         crate::commands::prompts::set_active_llm_prompt_id,
+        crate::commands::shortcut_bindings::list_shortcut_bindings,
+        crate::commands::shortcut_bindings::update_shortcut_binding,
+        crate::commands::shortcut_bindings::reset_shortcut_binding,
         // overlay
         crate::commands::overlay::show_overlay,
         crate::commands::overlay::hide_overlay,
