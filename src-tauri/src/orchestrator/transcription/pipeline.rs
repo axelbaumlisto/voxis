@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use crate::orchestrator::hallucination::is_likely_hallucination;
 use crate::orchestrator::post_process::apply_post_processing;
 use crate::orchestrator::state::RecordingState;
 use crate::storage::{self, FailedAudioStorage};
@@ -64,6 +65,40 @@ pub async fn transcribe_and_output(
         transcription_duration_ms,
         result.text
     );
+
+    // Hallucination guard: Whisper invents stock phrases ("Продолжение
+    // следует...", "Thanks for watching", etc.) on near-silent audio.
+    // Drop such outputs BEFORE post-processing / output so they never
+    // hit the clipboard or get auto-typed.
+    if is_likely_hallucination(&result.text) {
+        tracing::info!(
+            "Hallucination guard: discarding stock phrase \"{}\" (тишина / no speech)",
+            result.text
+        );
+        // Persist debug log so the user can see what was discarded.
+        if config.debug {
+            save_debug_log(
+                &ctx.app,
+                &config,
+                debug_audio_file,
+                audio_size,
+                &result.text,
+                "[discarded: hallucination]",
+                result.language.clone(),
+                transcription_duration_ms,
+                &crate::orchestrator::post_process::PostProcessResult {
+                    text: String::new(),
+                    llm_result: None,
+                    llm_duration_ms: 0,
+                },
+            );
+        }
+        show_idle_overlay(&ctx.overlay).await;
+        let mut s = ctx.state.lock().await;
+        *s = RecordingState::Idle;
+        let _ = ctx.app.emit("state-changed", RecordingState::Idle);
+        return;
+    }
 
     // Apply post-processing (dictionary + LLM)
     let post_start = Instant::now();

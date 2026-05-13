@@ -3,6 +3,7 @@
 pub mod audio_level;
 pub mod coordinator;
 pub mod dispatch;
+pub mod hallucination;
 pub mod overlay_manager;
 pub mod post_process;
 pub mod queue;
