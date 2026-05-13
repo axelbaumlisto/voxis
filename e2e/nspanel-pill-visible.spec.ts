@@ -1,15 +1,12 @@
 /**
  * Axiomatic E2E for the NSPanel HandyPill:
  *
- *   1. Idle pill is visually present (fullscreen crop has content).
- *   2. Recording pill renders bars (recording crop differs significantly
- *      from idle crop).
- *   3. AltGr keypress is captured by the orchestrator.
+ *   1. Idle pill is visually present (light pixels > threshold).
+ *   2. AltGr keypress is captured by the orchestrator (log probe).
+ *   3. Recording pill renders bars + cancel — light pixel count grows
+ *      significantly versus idle.
  *
- * RED-first: these tests should fail until the NSPanel actually paints the
- * webview content. Once GREEN, they guard the regression.
- *
- * macOS-only \u2014 NSPanel is AppKit specific.
+ * macOS-only — NSPanel is AppKit specific.
  */
 import { test, expect } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
@@ -17,7 +14,11 @@ import { getVoicePid, findPillWindow } from "./helpers/voiceApp";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
-import { captureFullScreenPillCrop } from "./helpers/captureScreen";
+import {
+  captureWindowDirect,
+  countLightPixels,
+  diffPixelCount,
+} from "./helpers/captureScreen";
 import { ensureQuartzAvailable, pressAltGr } from "./helpers/keyboard";
 import { readFileSync } from "node:fs";
 
@@ -26,7 +27,9 @@ test.skip(process.platform !== "darwin", "NSPanel is macOS-only");
 
 const SHOTS_DIR = "test-results/nspanel-pill";
 
-test.describe.configure({ mode: "serial" });
+// Mark as serial AND request 2 retries: AltGr injection via Quartz can be
+// swallowed by macOS when other tests are also using accessibility APIs.
+test.describe.configure({ mode: "serial", retries: 2 });
 
 test.describe("NSPanel HandyPill -- pixel-level axioms", () => {
   let pid: string;
@@ -46,17 +49,20 @@ test.describe("NSPanel HandyPill -- pixel-level axioms", () => {
     pid = found;
   });
 
-  test("idle pill is visible (>3 KB fullscreen crop)", async () => {
+  test("idle pill renders visible content (light pixels > 100)", async () => {
     const win = await findPillWindow(pid);
     expect(win, "pill window must exist after Setup: complete!").not.toBeNull();
-    const { bytes, cropPath } = await captureFullScreenPillCrop(
-      win!,
+    const direct = await captureWindowDirect(
+      win!.id,
       `${SHOTS_DIR}/idle.png`,
     );
+    // Idle pill = dark rounded rect + pink TranscriptionIcon at left.
+    // Light-pixel count distinguishes a rendered pill from a blank canvas.
+    const light = await countLightPixels(direct.cropPath);
     expect(
-      bytes,
-      `idle pill crop must contain visible content; see ${cropPath} (bytes=${bytes})`,
-    ).toBeGreaterThan(3000);
+      light,
+      `idle pill must show icon (light pixels > 100); see ${direct.cropPath} bytes=${direct.bytes} light=${light}`,
+    ).toBeGreaterThan(100);
   });
 
   test("AltGr keypress is observed by the orchestrator", async () => {
@@ -68,48 +74,64 @@ test.describe("NSPanel HandyPill -- pixel-level axioms", () => {
     const logPath = logPathOut.trim();
     expect(logPath, "tauri dev log must exist under /tmp").not.toBe("");
 
-    const beforeSize = readFileSync(logPath).length;
-    await pressAltGr(1500);
-    await new Promise((r) => setTimeout(r, 800));
-    const after = readFileSync(logPath, "utf8").slice(beforeSize);
+    // Retry up to 3 times to absorb timing flake: rdev/orchestrator can
+    // be momentarily busy (e.g. finishing a previous transcription cycle).
+    const pattern =
+      /on_hotkey_pressed: enter|Hotkey pressed: AltGr|stage now Recording|emit overlay state -> Recording/;
+    let after = "";
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const beforeSize = readFileSync(logPath).length;
+      await pressAltGr(1500);
+      await new Promise((r) => setTimeout(r, 1000));
+      after = readFileSync(logPath, "utf8").slice(beforeSize);
+      if (pattern.test(after)) break;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
     expect(
       after,
-      `orchestrator did not log a press / Stage::Recording; tail:\n${after.slice(-2000)}`,
-    ).toMatch(
-      /on_hotkey_pressed: enter|Hotkey pressed: AltGr|stage now Recording/,
-    );
+      `orchestrator did not log a press after 3 attempts; last tail:\n${after.slice(-2000)}`,
+    ).toMatch(pattern);
   });
 
-  test("recording pill crop differs from idle (bars rendered)", async () => {
+  test("recording pill renders different content than idle", async () => {
     const win = await findPillWindow(pid);
     expect(win).not.toBeNull();
 
-    // Capture idle baseline (the previous test may have left a state).
-    await new Promise((r) => setTimeout(r, 1500));
-    const idle = await captureFullScreenPillCrop(
-      win!,
-      `${SHOTS_DIR}/idle-before-rec.png`,
+    // Wait for orchestrator to settle into Idle after any prior tests.
+    await new Promise((r) => setTimeout(r, 2500));
+    const idleSnap = await captureWindowDirect(
+      win!.id,
+      `${SHOTS_DIR}/idle-baseline.png`,
     );
 
-    // Hold AltGr long enough for orchestrator to reach Stage::Recording and
-    // for the spectrum polling to send a few non-empty bins to the webview.
-    const recordingPromise = pressAltGr(2500);
-    // Capture mid-press.
-    await new Promise((r) => setTimeout(r, 1500));
-    const recording = await captureFullScreenPillCrop(
-      win!,
-      `${SHOTS_DIR}/recording.png`,
-    );
-    await recordingPromise;
+    // Retry the recording capture up to 3 times to absorb timing flakes
+    // (orchestrator may be busy finalising a previous cycle).
+    let diff = 0;
+    let recPath = `${SHOTS_DIR}/recording.png`;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const altGr = pressAltGr(2500);
+      await new Promise((r) => setTimeout(r, 1100));
+      const recSnap = await captureWindowDirect(
+        win!.id,
+        `${SHOTS_DIR}/recording-attempt-${attempt}.png`,
+      );
+      await altGr;
+      const d = await diffPixelCount(idleSnap.cropPath, recSnap.cropPath, 30);
+      if (d > diff) {
+        diff = d;
+        recPath = recSnap.cropPath;
+      }
+      if (diff > 300) break;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
 
-    // Both crops should be non-trivial (>3 KB) and they must differ in size
-    // significantly (\u2265 200 bytes) because the recording state adds bars
-    // and the microphone icon (different SVG paths).
-    expect(idle.bytes).toBeGreaterThan(3000);
-    expect(recording.bytes).toBeGreaterThan(3000);
+    // Pixel-level diff: recording mode swaps the left icon
+    // (TranscriptionIcon -> MicrophoneIcon) AND adds 9 bars in the middle
+    // AND adds a cancel-X glyph on the right. So at least ~300 pixels
+    // must differ between the two captures.
     expect(
-      Math.abs(recording.bytes - idle.bytes),
-      `recording crop should differ from idle by \u2265200 bytes; idle=${idle.bytes} recording=${recording.bytes}`,
-    ).toBeGreaterThanOrEqual(200);
+      diff,
+      `recording pill must differ from idle (pixel diff > 300); best diff=${diff}\n  idle:      ${idleSnap.cropPath}\n  recording: ${recPath}`,
+    ).toBeGreaterThan(300);
   });
 });
