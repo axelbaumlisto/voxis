@@ -115,6 +115,18 @@ impl RecordingCoordinator {
         tracing::info!("on_hotkey_pressed: enter");
         let stage = self.coordinator.current_stage();
         tracing::info!("on_hotkey_pressed: current_stage={:?}", stage);
+
+        // Toggle mode (#3): a press while already Recording stops the
+        // current take instead of being ignored. Hold-mode (default)
+        // keeps the legacy 'only Idle/Processing' guard.
+        let early_config = load_config_from_app(&self.app);
+        let is_toggle_mode = early_config.hotkey_mode == "toggle";
+        if is_toggle_mode && stage == Stage::Recording {
+            tracing::info!("on_hotkey_pressed: toggle mode — stopping current recording");
+            self.on_hotkey_released().await;
+            return;
+        }
+
         // TALRI semantics: allow press from Idle (start fresh) or Processing
         // (queue a new recording while previous transcription finishes).
         if !matches!(stage, Stage::Idle | Stage::Processing) {
@@ -245,6 +257,16 @@ impl RecordingCoordinator {
     }
 
     pub async fn on_hotkey_released(&self) {
+        // Toggle mode (#3): a release does nothing on its own — the
+        // user has to press again to stop. Skip even the debounce-cancel
+        // path so a short tap counts as a 'start' (handled when the
+        // press itself completes).
+        let mode_config = load_config_from_app(&self.app);
+        if mode_config.hotkey_mode == "toggle" {
+            tracing::debug!("on_hotkey_released: toggle mode — ignoring release");
+            return;
+        }
+
         // If a press is still inside its debounce window, cancel it: the
         // user lifted the key before the hold threshold so we never wanted
         // to start recording in the first place.

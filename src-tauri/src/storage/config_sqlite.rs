@@ -148,6 +148,12 @@ impl ConfigSqliteStorage {
             "first_run_completed",
             config.first_run_completed,
         );
+        if let Some(v) = self.get(&conn, "hotkey_mode") {
+            // Forward-compat: only accept known values, otherwise keep default.
+            if matches!(v.as_str(), "hold" | "toggle") {
+                config.hotkey_mode = v;
+            }
+        }
         config.typing_delay = self.get_typed(&conn, "typing_delay", config.typing_delay);
         config.notifications = self.get_bool(&conn, "notifications", config.notifications);
         config.backend = self.get_str(&conn, "backend", &config.backend);
@@ -270,6 +276,7 @@ impl ConfigSqliteStorage {
             "first_run_completed",
             &config.first_run_completed.to_string(),
         )?;
+        self.set(&conn, "hotkey_mode", &config.hotkey_mode)?;
         self.set(&conn, "typing_delay", &config.typing_delay.to_string())?;
         self.set(&conn, "notifications", &config.notifications.to_string())?;
         self.set(&conn, "backend", &config.backend)?;

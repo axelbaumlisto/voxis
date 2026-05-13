@@ -840,7 +840,15 @@ shortcut_bindings?: ShortcutBinding[];
  * `true` once the user has completed the onboarding flow (#10).
  * The frontend gates `/onboarding` redirect on this flag.
  */
-first_run_completed?: boolean; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
+first_run_completed?: boolean; 
+/**
+ * Hotkey activation mode (#3):
+ * 'hold'   — record while hotkey held, stop on release (legacy).
+ * 'toggle' — tap to start, tap again to stop.
+ * Stored as a string for forward-compat; unrecognized values
+ * default to 'hold'.
+ */
+hotkey_mode?: string; paste_shortcuts?: string; api_url_override?: string | null; vad?: VadConfig; overlay?: OverlayConfig; llm?: LlmConfig; dictionary?: DictionaryConfig }
 /**
  * Audio device info for UI display.
  */

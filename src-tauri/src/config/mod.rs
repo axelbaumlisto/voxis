@@ -342,6 +342,14 @@ pub struct AppConfig {
     #[serde(default)]
     pub first_run_completed: bool,
 
+    /// Hotkey activation mode (#3):
+    ///   'hold'   — record while hotkey held, stop on release (legacy).
+    ///   'toggle' — tap to start, tap again to stop.
+    /// Stored as a string for forward-compat; unrecognized values
+    /// default to 'hold'.
+    #[serde(default = "default_hotkey_mode")]
+    pub hotkey_mode: String,
+
     // Paste shortcuts (Linux only) - comma-separated list
     #[serde(default = "default_paste_shortcuts")]
     pub paste_shortcuts: String,
@@ -388,6 +396,7 @@ impl Default for AppConfig {
             audio_feedback: crate::audio_feedback::AudioFeedbackSettings::default(),
             shortcut_bindings: crate::shortcut::default_bindings(),
             first_run_completed: false,
+            hotkey_mode: default_hotkey_mode(),
             paste_shortcuts: DEFAULT_PASTE_SHORTCUTS.into(),
             api_url_override: None,
             vad: VadConfig::default(),
@@ -416,6 +425,10 @@ fn default_hotkey() -> String {
 
 fn default_hotkey_hold_ms() -> u32 {
     DEFAULT_HOTKEY_HOLD_MS
+}
+
+fn default_hotkey_mode() -> String {
+    "hold".to_string()
 }
 
 fn default_typing_delay() -> u32 {
@@ -528,6 +541,22 @@ mod tests {
         assert_eq!(config.overlay.position, "bottom_left");
         assert!(!config.llm.enabled);
         assert_eq!(config.dictionary.learning_threshold, 3);
+
+        // T-C3 · hotkey mode defaults to 'hold' for back-compat.
+        assert_eq!(config.hotkey_mode, "hold");
+        // T-A4 · auto-submit defaults to Off (privacy lock).
+        assert_eq!(
+            config.auto_submit_key,
+            crate::output::auto_submit::AutoSubmitKey::Off
+        );
+        // T-A7 · append_trailing_space defaults to false (no surprise spaces).
+        assert!(!config.append_trailing_space);
+        // T-A9 · translate_to_english defaults to false.
+        assert!(!config.translate_to_english);
+        // T-B10 · first_run_completed defaults to false (run wizard).
+        assert!(!config.first_run_completed);
+        // T-B2 · shortcut_bindings seeded with 2 defaults.
+        assert_eq!(config.shortcut_bindings.len(), 2);
     }
 
     #[test]

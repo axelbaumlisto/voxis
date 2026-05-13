@@ -101,6 +101,18 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     customComponent: "shortcut-binding-list",
   },
   {
+    key: "hotkey_mode",
+    label: "Hotkey activation",
+    widgetType: "select",
+    section: "Recording",
+    description:
+      "Hold: record while the key is held (legacy). Toggle: tap to start, tap again to stop — friendlier for long dictation.",
+    options: [
+      { label: "Hold (legacy)", value: "hold" },
+      { label: "Toggle (tap to start/stop)", value: "toggle" },
+    ],
+  },
+  {
     key: "audio_device",
     label: "Audio Device",
     widgetType: "select",
