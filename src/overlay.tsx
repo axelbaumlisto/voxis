@@ -49,6 +49,10 @@ function PillContent({ snapshot }: { snapshot: OverlaySnapshot }) {
       ? new URLSearchParams(window.location.search).get("mode")
       : null;
   const effectiveMode = (forcedMode ?? snapshot.mode) as typeof snapshot.mode;
+  // Bars react to incoming spectrum events; the orchestrator emits a
+  // burst of silence frames after recording stops (see
+  // audio_level::start_audio_level_polling) so useSmoothBars decays
+  // bars + peaks back to idle min-height naturally.
   const effectiveBins =
     forcedMode === "recording"
       ? Array.from({ length: 32 }, (_, i) => 0.4 + 0.3 * Math.sin(i))

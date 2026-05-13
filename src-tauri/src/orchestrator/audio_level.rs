@@ -140,6 +140,29 @@ pub fn start_audio_level_polling(
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(80)) => {}
             }
         }
+
+        // Loop exited (recording stopped OR token cancelled). The
+        // overlay's React side only updates bars on incoming events,
+        // and `useSmoothBars` decays toward the target only when a
+        // new event arrives — a SINGLE silence frame would leave bars
+        // frozen at ~70% of their last value forever. Emit a short
+        // burst of zeros so the smoothing curve naturally decays the
+        // bars + peak-ticks back to idle min-height.
+        //
+        // ~12 frames × 80 ms = 0.96 s of decay — long enough for
+        // alpha=0.3 smoothing to reach <1% of the peak value.
+        let zeros = [0.0f32; crate::audio::SPECTRUM_BARS];
+        for _ in 0..12 {
+            if cancel_token.is_cancelled() {
+                break;
+            }
+            {
+                let overlay_guard = overlay.lock().await;
+                overlay_guard.send_audio_level(0.0);
+                overlay_guard.send_spectrum_bins(zeros);
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(80)).await;
+        }
     });
 }
 
