@@ -1,6 +1,7 @@
 /**
  * Pure-function tests for the organic ring geometry, ported 1:1 from
- * `src-tauri/src/overlay_bin/platform/macos/ring.rs::tests`.
+ * the original `ring.rs` egui implementation (since removed in Phase 7).
+ * The math is purely geometric — the renderer doesn't change the values.
  *
  * Two implementations of the same math must produce identical contracts:
  * - Rust ring.rs drives the subprocess (egui) overlay.

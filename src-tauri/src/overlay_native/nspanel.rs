@@ -1,9 +1,8 @@
 //! NSPanel-based overlay backend (macOS only).
 //!
-//! Alternative to [`SubprocessOverlay`](super::subprocess::SubprocessOverlay) that
-//! uses [`tauri-nspanel`](https://github.com/ahkohd/tauri-nspanel) to render the
-//! overlay inside a borderless [`NSPanel`]. Compared to the standalone subprocess
-//! overlay, an NSPanel:
+//! Uses [`tauri-nspanel`](https://github.com/ahkohd/tauri-nspanel) to render
+//! the overlay inside a borderless [`NSPanel`]. Compared to a plain Tauri
+//! WebviewWindow, an NSPanel:
 //!
 //! - never steals keyboard focus from the active app (`can_become_key_window: false`)
 //! - is visible across all Spaces (via `CanJoinAllSpaces`) and stays on top

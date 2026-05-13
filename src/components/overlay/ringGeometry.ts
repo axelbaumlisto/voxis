@@ -1,7 +1,7 @@
 /**
  * Pure-function geometry for the organic ring overlay.
  *
- * Ported 1:1 from `src-tauri/src/overlay_bin/platform/macos/ring.rs`. Two
+ * Original math ported from the now-removed egui overlay binary. Two
  * implementations of the same math live side-by-side:
  *   • Rust ring.rs   → subprocess (egui) overlay backend
  *   • TypeScript    → webview (canvas) overlay backend (this file)
