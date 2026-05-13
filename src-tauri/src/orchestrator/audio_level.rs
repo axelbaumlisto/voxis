@@ -151,9 +151,20 @@ pub fn start_audio_level_polling(
         //
         // ~12 frames × 80 ms = 0.96 s of decay — long enough for
         // alpha=0.3 smoothing to reach <1% of the peak value.
+        //
+        // NB: we deliberately IGNORE `cancel_token` here. The token
+        // is set by `on_hotkey_released` BEFORE the main loop bails,
+        // so re-checking it would short-circuit the burst on every
+        // normal stop (which is the common case). The burst is
+        // short, idempotent, and only stops if a fresh recording
+        // restarts (`recorder.is_recording()` flips back to true).
         let zeros = [0.0f32; crate::audio::SPECTRUM_BARS];
         for _ in 0..12 {
-            if cancel_token.is_cancelled() {
+            if recorder.is_recording() {
+                // A new recording started while we were decaying —
+                // its own polling loop will overwrite our zeros, so
+                // bail out instead of fighting it.
+                tracing::debug!("silence burst aborted: new recording started");
                 break;
             }
             {
