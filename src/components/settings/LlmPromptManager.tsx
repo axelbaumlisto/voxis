@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { commands } from "../../bindings";
 import type { LlmPrompt } from "../../bindings";
+import { unwrapResult } from "../../lib/commandResult";
 
 type LoadState = "idle" | "loading" | "error";
 
@@ -40,13 +41,6 @@ function genId(name: string): string {
   return `${base || "prompt"}_${suffix}`;
 }
 
-function unwrap<T>(result: { status: string; data?: T; error?: unknown }): T {
-  if (result.status !== "ok") {
-    throw new Error(String(result.error ?? "command failed"));
-  }
-  return result.data as T;
-}
-
 export default function LlmPromptManager({
   editable = true,
 }: LlmPromptManagerProps) {
@@ -63,8 +57,8 @@ export default function LlmPromptManager({
       // these commands with undefined when the bindings layer is
       // partly mocked. Treat that as "empty list / no active" so the
       // render never crashes (KISS, no separate "undefined" branch).
-      const list = (unwrap(await commands.listLlmPrompts()) ?? []) as LlmPrompt[];
-      const active = (unwrap(await commands.getActiveLlmPromptId()) ?? null) as
+      const list = (unwrapResult(await commands.listLlmPrompts()) ?? []) as LlmPrompt[];
+      const active = (unwrapResult(await commands.getActiveLlmPromptId()) ?? null) as
         | string
         | null;
       setPrompts(list);
@@ -82,7 +76,7 @@ export default function LlmPromptManager({
 
   const onSelectActive = async (id: string | null) => {
     try {
-      unwrap(await commands.setActiveLlmPromptId(id));
+      unwrapResult(await commands.setActiveLlmPromptId(id));
       setActiveId(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -91,7 +85,7 @@ export default function LlmPromptManager({
 
   const onUpdate = async (id: string, name: string, prompt: string) => {
     try {
-      unwrap(await commands.updateLlmPrompt(id, name, prompt));
+      unwrapResult(await commands.updateLlmPrompt(id, name, prompt));
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -102,7 +96,7 @@ export default function LlmPromptManager({
     const name = "New prompt";
     const id = genId(name);
     try {
-      unwrap(
+      unwrapResult(
         await commands.createLlmPrompt(
           id,
           name,
@@ -117,7 +111,7 @@ export default function LlmPromptManager({
 
   const onDelete = async (id: string) => {
     try {
-      unwrap(await commands.deleteLlmPrompt(id));
+      unwrapResult(await commands.deleteLlmPrompt(id));
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
