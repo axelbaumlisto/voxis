@@ -29,6 +29,7 @@ pub fn format_output_text(text: &str, append_trailing_space: bool) -> String {
     format!("{} ", text)
 }
 
+pub mod auto_submit;
 mod platform;
 mod xkb;
 
