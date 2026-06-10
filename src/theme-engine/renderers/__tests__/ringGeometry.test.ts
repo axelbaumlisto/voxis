@@ -11,7 +11,7 @@
  * rendering paths.
  */
 import { describe, it, expect } from "vitest";
-import type { OrganicRingMotion, OrganicRingShape } from "../../../bindings";
+import type { OrganicRingMotion, OrganicRingShape } from "../ringGeometry";
 import {
   applyRingGap,
   buildRingPoints,
