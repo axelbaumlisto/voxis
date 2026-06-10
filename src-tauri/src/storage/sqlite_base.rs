@@ -13,6 +13,25 @@ pub trait FromSqliteRow: Sized {
     fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self>;
 }
 
+/// Trait for SQLite-backed storages with a schema.
+///
+/// DRY: Eliminates duplicated `fn connect()` boilerplate across all
+/// SQLite storage modules. Implementors define `path()` and
+/// `init_schema()`; the default `connect()` delegates to
+/// [`open_with_schema`].
+pub trait SqliteSchema {
+    /// Path to the SQLite database file.
+    fn path(&self) -> &Path;
+
+    /// Initialize / migrate the schema. Called once per connection.
+    fn init_schema(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>>;
+
+    /// Open a connection and ensure schema exists.
+    fn connect(&self) -> Result<Connection, Box<dyn std::error::Error>> {
+        open_with_schema(self.path(), |conn| self.init_schema(conn))
+    }
+}
+
 /// Open a SQLite connection and initialize schema.
 ///
 /// This is the DRY helper for all SQLite storage implementations.
@@ -207,5 +226,71 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].name, "Alice");
         assert_eq!(rows[1].name, "Bob");
+    }
+
+    // -- SqliteSchema trait tests ---------------------------------
+
+    struct DummyStorage {
+        db_path: std::path::PathBuf,
+    }
+
+    impl SqliteSchema for DummyStorage {
+        fn path(&self) -> &Path {
+            &self.db_path
+        }
+
+        fn init_schema(
+            &self,
+            conn: &Connection,
+        ) -> Result<(), Box<dyn std::error::Error>> {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)",
+                [],
+            )?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_sqlite_schema_trait_connect_creates_table() {
+        let file = NamedTempFile::new().unwrap();
+        let storage = DummyStorage {
+            db_path: file.path().to_path_buf(),
+        };
+
+        let conn = storage.connect().unwrap();
+
+        // Table should exist
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM notes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+
+        // Insert and read back
+        conn.execute("INSERT INTO notes (body) VALUES ('hello')", [])
+            .unwrap();
+        let body: String = conn
+            .query_row("SELECT body FROM notes LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(body, "hello");
+    }
+
+    #[test]
+    fn test_sqlite_schema_trait_connect_idempotent() {
+        let file = NamedTempFile::new().unwrap();
+        let storage = DummyStorage {
+            db_path: file.path().to_path_buf(),
+        };
+
+        let _c1 = storage.connect().unwrap();
+        let _c2 = storage.connect().unwrap();
+        let _c3 = storage.connect().unwrap();
+
+        // Should still work
+        let conn = storage.connect().unwrap();
+        conn.execute("INSERT INTO notes (body) VALUES ('still works')", [])
+            .unwrap();
     }
 }
