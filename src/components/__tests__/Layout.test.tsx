@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
+import * as fs from "fs";
+import * as path from "path";
 import Layout from "../Layout";
 import { mockInvoke, resetMocks, mockConfig } from "../../test/mocks/tauri";
 
@@ -285,12 +287,24 @@ describe("Layout", () => {
       });
     });
 
-    it("passes static useGradient=true (accent decoupled from overlay themes)", async () => {
+    it("passes static useGradient=true and CSS vars match default theme", async () => {
+      // Verify the DOM passes useGradient=true to SpectrumVisualizer
       renderLayout();
       await waitFor(() => {
         const spectrum = document.querySelector(".spectrum") as HTMLElement;
         expect(spectrum.dataset.gradient).toBe("true");
       });
+
+      // jsdom doesn't apply external CSS, so read the stylesheet source directly
+      const cssPath = path.resolve(__dirname, "../../styles/index.css");
+      const css = fs.readFileSync(cssPath, "utf-8");
+
+      expect(css).toContain("--spectrum-bottom: #1e88e5;");
+      expect(css).toContain("--spectrum-middle: #42a5f5;");
+      expect(css).toContain("--spectrum-top: #64b5f6;");
+      expect(css).toContain("--spectrum-recording: #1e88e5;");
+      expect(css).toContain("--spectrum-transcribing: #4caf50;");
+      expect(css).toContain("--spectrum-idle: #1e88e5;");
     });
   });
 
