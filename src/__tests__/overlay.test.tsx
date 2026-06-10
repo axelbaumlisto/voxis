@@ -82,8 +82,11 @@ describe("OverlayApp (HandyPill shell)", () => {
     invokeMock.mockReset();
   });
 
-  it("renders ClassicBars for the default bars-family theme (winamp_classic)", () => {
-    // Default themeId from useOverlayState is 'winamp_classic'
+  // transitional: winamp_classic converted to manifest v2 in Task 3.1;
+  // DEFAULT_THEME is now 'neon' (still-legacy bars-family). This test
+  // dies in Phase 6.
+  it("renders ClassicBars for the default bars-family theme (neon)", () => {
+    // Default themeId from useOverlayState is 'neon'
     // (family=bars) — so the OverlayApp now routes to ClassicBars
     // rather than HandyPill. The bars stub exposes its props for
     // verification.

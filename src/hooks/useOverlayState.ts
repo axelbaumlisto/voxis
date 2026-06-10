@@ -27,7 +27,9 @@ export interface OverlaySnapshot {
 }
 
 const SPECTRUM_BAR_COUNT = 32;
-const DEFAULT_THEME = "winamp_classic";
+// Transitional (dies in Phase 6): winamp_classic converted to manifest v2
+// in Task 3.1; use a still-legacy bars-family theme as the overlay default.
+const DEFAULT_THEME = "neon";
 
 const VALID_MODES: ReadonlySet<OverlayMode> = new Set<OverlayMode>([
   "idle",

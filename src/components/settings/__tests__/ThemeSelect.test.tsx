@@ -46,11 +46,13 @@ describe("ThemeSelect (swatch grid)", () => {
     expect(getByTestId("theme-swatch-neon")).toBeInTheDocument();
   });
 
+  // transitional: winamp_classic converted to manifest v2 in Task 3.1;
+  // this test now uses 'neon' (still-legacy bars-family). Dies in Phase 6.
   it("renders a bars swatch (class theme-swatch--bars) for bars family", () => {
     const { getByTestId } = render(
-      <ThemeSelect label="Theme" value="winamp_classic" onChange={() => {}} />,
+      <ThemeSelect label="Theme" value="neon" onChange={() => {}} />,
     );
-    const swatch = getByTestId("theme-swatch-winamp_classic");
+    const swatch = getByTestId("theme-swatch-neon");
     expect(swatch.className).toContain("theme-swatch--bars");
   });
 

@@ -34,6 +34,16 @@ const BUILTIN: Map<string, HandyPillTheme> = (() => {
     if (!match) continue;
     const id = match[1];
     const raw = (mod as { default: unknown }).default;
+    // Transitional (dies in Phase 6): skip manifest v2 theme.json files —
+    // those are new-format code themes and the legacy HandyPill resolver
+    // must not ingest them (they lack family/gradient/handy_pill fields).
+    if (
+      raw != null &&
+      typeof raw === "object" &&
+      (raw as Record<string, unknown>).manifest_version === 2
+    ) {
+      continue;
+    }
     out.set(id, resolveHandyTheme(raw));
   }
   return out;

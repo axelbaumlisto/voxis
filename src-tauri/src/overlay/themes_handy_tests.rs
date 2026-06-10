@@ -214,18 +214,18 @@ fn all_repository_themes_parse_without_panic() {
 
 #[test]
 fn winamp_classic_uses_legacy_bars_palette() {
-    // The Winamp Classic theme is a 'bars' family theme, not organic_ring.
-    // Its handy_pill block should still use the recording-red color (#ef3110)
-    // so the migrated pill remains recognisable as the Winamp legacy theme.
+    // Transitional (dies in Phase 6): winamp_classic converted to manifest v2
+    // in Task 3.1 — the theme.json has no handy_pill / family / gradient fields,
+    // so resolve_from_json falls back to HandyPill defaults.
     use crate::overlay::themes::handy::builtin_handy_theme;
     let t = builtin_handy_theme("winamp_classic")
         .expect("winamp_classic must be in the builtin registry");
-    assert_eq!(t.palette.icon_color.to_lowercase(), "#ef3110");
-    assert_eq!(t.palette.bar_color.to_lowercase(), "#ffffff");
-    // No idle breathing for a classic-EQ feel.
+    // v2 manifest: default pink palette, not the legacy #ef3110.
+    assert_eq!(t.palette.icon_color.to_lowercase(), "#faa2ca");
+    assert_eq!(t.palette.bar_color.to_lowercase(), "#ffe5ee");
+    // Default animations — idle breathing is 0, bar_height_ms is 60.
     assert!((t.animation.idle_breathing_amplitude - 0.0).abs() < f32::EPSILON);
-    // Faster animation than the default (40 ms vs 60).
-    assert!(t.animation.bar_height_ms <= 50);
+    assert_eq!(t.animation.bar_height_ms, 60);
 }
 
 #[test]

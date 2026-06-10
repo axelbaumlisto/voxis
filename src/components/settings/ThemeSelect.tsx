@@ -25,7 +25,7 @@ interface ThemeSelectProps {
 function ThemeSwatch({ themeId }: { themeId: string }) {
   const theme: HandyPillTheme | null = getBuiltinHandyTheme(themeId);
   if (!theme) {
-    return <span className="theme-swatch theme-swatch--missing" aria-hidden />;
+    return <span className="theme-swatch theme-swatch--missing" aria-hidden data-testid={`theme-swatch-${themeId}`} />;
   }
   const family = theme.family;
   if (family === "bars") {
