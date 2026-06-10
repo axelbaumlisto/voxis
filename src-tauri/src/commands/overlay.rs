@@ -188,7 +188,7 @@ pub fn export_theme_dir(loader: &ThemeEngineLoader, theme_id: &str) -> Result<St
                         }
                     }
                     let rewritten = serde_json::to_string_pretty(&json)
-                        .unwrap_or_else(|_| raw);
+                        .unwrap_or(raw);
                     let _ = std::fs::write(&copied_manifest_path, &rewritten);
                 }
             }

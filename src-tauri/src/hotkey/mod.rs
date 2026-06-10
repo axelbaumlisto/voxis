@@ -403,15 +403,12 @@ impl HotkeyListener {
                             }
                         }
                     }
-                    EventType::KeyRelease(key) => {
-                        // Release if this was the key we pressed
-                        if is_pressed && last_pressed_key == Some(key) {
-                            is_pressed = false;
-                            last_pressed_key = None;
-                            tracing::debug!("Hotkey released: {:?}", key);
-                            if let Err(e) = app.emit("hotkey-released", ()) {
-                                tracing::error!("Failed to emit hotkey-released: {}", e);
-                            }
+                    EventType::KeyRelease(key) if is_pressed && last_pressed_key == Some(key) => {
+                        is_pressed = false;
+                        last_pressed_key = None;
+                        tracing::debug!("Hotkey released: {:?}", key);
+                        if let Err(e) = app.emit("hotkey-released", ()) {
+                            tracing::error!("Failed to emit hotkey-released: {}", e);
                         }
                     }
                     _ => {}

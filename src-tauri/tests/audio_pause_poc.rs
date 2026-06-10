@@ -5,9 +5,13 @@
 //!
 //! Run with: cargo test --test audio_pause_poc -- --nocapture
 
+#[cfg(target_os = "macos")]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+#[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 
 /// Test that pause() releases the microphone quickly on macOS.

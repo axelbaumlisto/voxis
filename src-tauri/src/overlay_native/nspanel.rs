@@ -139,11 +139,10 @@ impl OverlayBackend for NsPanelOverlay {
     }
 
     fn hide(&self) {
-        if !self.running.load(Ordering::SeqCst) {
-            return;
+        if self.running.load(Ordering::SeqCst) {
+            #[cfg(target_os = "macos")]
+            self.inner.hide();
         }
-        #[cfg(target_os = "macos")]
-        self.inner.hide();
     }
 
     fn send_audio_level(&self, level: f32) {
