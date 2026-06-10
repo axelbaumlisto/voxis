@@ -46,14 +46,15 @@ describe("ThemeSelect (swatch grid)", () => {
     expect(getByTestId("theme-swatch-neon")).toBeInTheDocument();
   });
 
-  // transitional: winamp_classic converted to manifest v2 in Task 3.1;
-  // this test now uses 'neon' (still-legacy bars-family). Dies in Phase 6.
-  it("renders a bars swatch (class theme-swatch--bars) for bars family", () => {
+  // Transitional (dies in Phase 6): ALL bars-family themes are now manifest v2.
+  // No legacy bars theme remains, so v2 bars ids render the --missing swatch.
+  // Ring themes are still legacy until Task 3.3 — ring-swatch branch has coverage.
+  it("renders a missing swatch for v2 bars themes (no legacy pipeline)", () => {
     const { getByTestId } = render(
-      <ThemeSelect label="Theme" value="neon" onChange={() => {}} />,
+      <ThemeSelect label="Theme" value="winamp_classic" onChange={() => {}} />,
     );
     const swatch = getByTestId("theme-swatch-neon");
-    expect(swatch.className).toContain("theme-swatch--bars");
+    expect(swatch.className).toContain("theme-swatch--missing");
   });
 
   it("renders a ring swatch for organic_ring family", () => {
