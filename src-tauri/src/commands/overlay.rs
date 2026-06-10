@@ -163,7 +163,35 @@ pub fn export_theme_dir(loader: &ThemeEngineLoader, theme_id: &str) -> Result<St
         std::fs::copy(&src_path, &dest_path).map_err(|e| format!("copy {fname:?}: {e}"))?;
     }
 
-    tracing::info!("Exported theme {} to {:?}", theme_id, dest_dir);
+    // Rewrite the copied theme.json so the copy has a unique id and
+    // a distinct name. Without this, the copied dir would either be
+    // invisible (id mismatch between folder name and manifest) or
+    // shadow the original (duplicate id).
+    let copied_manifest_path = dest_dir.join("theme.json");
+    if copied_manifest_path.is_file() {
+        match std::fs::read_to_string(&copied_manifest_path) {
+            Ok(raw) => {
+                if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    json["id"] = serde_json::Value::String(folder_name.clone());
+                    if let Some(name) = json.get_mut("name") {
+                        if let Some(s) = name.as_str() {
+                            *name = serde_json::Value::String(format!("{} (custom)", s));
+                        }
+                    }
+                    let rewritten = serde_json::to_string_pretty(&json)
+                        .unwrap_or_else(|_| raw);
+                    let _ = std::fs::write(&copied_manifest_path, &rewritten);
+                }
+            }
+            Err(e) => tracing::warn!(
+                "export_theme_dir: cannot read copied manifest {:?}: {}",
+                copied_manifest_path,
+                e
+            ),
+        }
+    }
+
+    tracing::info!("Exported theme {} to {}", theme_id, folder_name);
     Ok(dest_dir.to_string_lossy().to_string())
 }
 
@@ -433,5 +461,54 @@ drop(result);
         assert!(exported.join("theme.js").is_file());
         // The symlink must NOT be copied.
         assert!(!exported.join("evil_link").exists());
+    }
+
+    #[test]
+    fn test_export_theme_dir_rewrites_id_and_name_in_copied_manifest() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), "abc");
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        loader.scan().unwrap();
+        let new_dir = super::export_theme_dir(&loader, "abc").unwrap();
+        let exported = std::path::Path::new(&new_dir);
+
+        // Verify the copied theme.json was rewritten.
+        let manifest_raw =
+            std::fs::read_to_string(exported.join("theme.json")).unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_str(&manifest_raw).unwrap();
+        // id must be the new folder name (abc_custom), not the original.
+        assert_eq!(manifest["id"].as_str(), Some("abc_custom"));
+        // name must have " (custom)" appended.
+        let name = manifest["name"].as_str().unwrap();
+        assert!(name.contains("(custom)"), "expected '(custom)' in name, got: {name}");
+    }
+
+    #[test]
+    fn test_scan_after_export_finds_both_with_distinct_ids() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), "abc");
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        loader.scan().unwrap();
+
+        // Export to abc_custom (rewrites id in theme.json).
+        let exported = super::export_theme_dir(&loader, "abc").unwrap();
+        assert!(exported.ends_with("_custom"));
+
+        // Re-scan: both should appear as distinct manifests.
+        let themes = loader.scan().unwrap();
+        let mut ids: Vec<_> = themes.iter().map(|t| t.id.clone()).collect();
+        ids.sort();
+        assert!(
+            ids.contains(&"abc".to_string()),
+            "original id must appear after scan"
+        );
+        assert!(
+            ids.iter().any(|id| id.ends_with("_custom")),
+            "exported custom id must appear after scan"
+        );
+        // Verify the exported theme is reachable by its new id.
+        let custom_id = ids.iter().find(|id| id.ends_with("_custom")).unwrap();
+        assert!(loader.manifest(custom_id).is_some());
     }
 }

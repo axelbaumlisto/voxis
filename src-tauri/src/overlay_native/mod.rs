@@ -35,8 +35,8 @@ pub struct CreateOverlayParams<'a> {
 ///
 /// Phase 7 cleanup: the legacy `native` (in-process egui+glfw) and
 /// `subprocess` (separate egui binary) backends were removed. They
-/// were superseded by the React HandyPill / ClassicBars / OrganicRing
-/// running inside the webview backend, which now covers all platforms.
+/// were superseded by React ThemeHost code themes running inside the
+/// webview backend, which now covers all platforms.
 pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend> {
     if !params.enabled || params.backend == "none" {
         return Box::new(NoopOverlay::new());

@@ -17,9 +17,9 @@ name = "voice"
 path = "src/main.rs"
 
 # Phase 7 cleanup: the `soupawhisper-overlay` egui-based subprocess
-# binary was removed. Its renderer (organic ring + bars) was ported
-# to React (ClassicBars + OrganicRing) inside the webview overlay,
-# which now covers all platforms.
+# binary was removed. Rendering is now handled by the theme-engine
+# (React + WASM/WebGL code themes) inside the webview overlay,
+# which covers all platforms.
 
 [[bin]]
 name = "typing_bench"

@@ -27,10 +27,8 @@ export interface OverlaySnapshot {
 }
 
 const SPECTRUM_BAR_COUNT = 32;
-// Transitional (dies in Phase 6): ALL bars-family themes are now manifest v2.
-// DEFAULT_THEME matches the Rust backend DEFAULT_OVERLAY_THEME.
-// The legacy pipeline cannot resolve v2 themes, so the overlay will fall
-// back to the pink HandyPill default. Phase 5 (ThemeHost) fixes rendering.
+// ALL themes are now manifest v2. DEFAULT_THEME matches the Rust backend
+// DEFAULT_OVERLAY_THEME. ThemeHost handles code-theme loading and fallback.
 const DEFAULT_THEME = "default";
 
 const VALID_MODES: ReadonlySet<OverlayMode> = new Set<OverlayMode>([

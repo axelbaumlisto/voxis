@@ -10,8 +10,9 @@
  * DIP: ThemeHost receives fetchModule + fallbackModule as props;
  * no Tauri imports inside ThemeHost.
  *
- * KISS: one useOverlayState(), one ThemeHost, zero local state.
+ * KISS: one useOverlayState(), one ThemeHost, one params useEffect.
  */
+import { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { useOverlayState } from "./hooks/useOverlayState";
 import ThemeHost from "./theme-engine/ThemeHost";
@@ -31,6 +32,28 @@ export function OverlayApp() {
       : null;
   const themeId = forcedTheme ?? snapshot.themeId;
 
+  // Manifest params for the active theme. Specta skips the `params` field
+  // (serde skip), so the generated ThemeManifest type lacks it. We cast
+  // through unknown to access the field at runtime.
+  const [params, setParams] = useState<unknown>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setParams(null);
+    commands
+      .getThemeManifest(themeId)
+      .then((manifest) => {
+        if (cancelled || !manifest) return;
+        const m = manifest as unknown as Record<string, unknown>;
+        setParams(m.params ?? null);
+      })
+      .catch(() => {
+        // getThemeManifest is best-effort; themes work without params.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [themeId]);
+
   const state: ThemeState = {
     mode: snapshot.mode,
     audioLevel: snapshot.audioLevel,
@@ -44,6 +67,7 @@ export function OverlayApp() {
       fetchModule={fetchThemeModule}
       fallbackModule={fallbackTheme}
       onCancel={() => void commands.cancelOperation()}
+      params={params}
     />
   );
 }

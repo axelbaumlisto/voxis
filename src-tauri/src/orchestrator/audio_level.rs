@@ -143,11 +143,12 @@ pub fn start_audio_level_polling(
 
         // Loop exited (recording stopped OR token cancelled). The
         // overlay's React side only updates bars on incoming events,
-        // and `useSmoothBars` decays toward the target only when a
-        // new event arrives — a SINGLE silence frame would leave bars
-        // frozen at ~70% of their last value forever. Emit a short
-        // burst of zeros so the smoothing curve naturally decays the
-        // bars + peak-ticks back to idle min-height.
+        // and smoothing (theme-engine/renderers/smoothing.ts) decays
+        // toward the target only when a new event arrives — a SINGLE
+        // silence frame would leave bars frozen at ~70% of their last
+        // value forever. Emit a short burst of zeros so the smoothing
+        // curve naturally decays the bars + peak-ticks back to idle
+        // min-height.
         //
         // ~12 frames × 80 ms = 0.96 s of decay — long enough for
         // alpha=0.3 smoothing to reach <1% of the peak value.

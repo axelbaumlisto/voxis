@@ -155,7 +155,8 @@ for (const t of THEMES) {
     // Pre-warm with repeated bursts so the smoothing/peak hooks settle
     // at peak; one shot is not enough for the organic_ring family
     // (the canvas RAF reads the latest bins on each frame, but
-    // useSmoothBars only updates on event arrival).
+    // smoothing (theme-engine/renderers/smoothing.ts) only updates on
+    // event arrival).
     for (let i = 0; i < 6; i++) {
       await emitSpectrum(peakBins(0.9));
       await new Promise((r) => setTimeout(r, 70));

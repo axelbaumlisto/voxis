@@ -1,5 +1,5 @@
 /**
- * Live E2E for the NSPanel HandyPill overlay (macOS only).
+ * Live E2E for the NSPanel overlay (ThemeHost), macOS only.
  *
  * This test triggers AltGr via CGEventPost (Python+Quartz \u2014 needs Accessibility
  * permission on Terminal/runner) and asserts the orchestrator log shows the
@@ -20,10 +20,10 @@ import { readFileSync, existsSync } from "node:fs";
 
 const execFileAsync = promisify(execFile);
 
-test.describe("HandyPill -- webview content (dev URL)", () => {
-  // Phase 5: overlay now uses ThemeHost.  The `?theme=default` pin is
-  // kept so the test doesn't depend on Tauri state.  Grid-only selectors
-  // (.overlay-left/middle/right) died with the old HandyPill shell.
+test.describe("Overlay (ThemeHost) -- webview content (dev URL)", () => {
+  // Overlay uses ThemeHost. The `?theme=default` pin is kept so the
+  // test doesn't depend on Tauri state. Grid-only selectors died with
+  // the old HandyPill shell.
   test("overlay.html mounts ThemeHost (default bars theme)", async ({ page }) => {
     await page.goto("/overlay.html?theme=default");
     await page.waitForSelector("[data-testid='theme-host']");
@@ -45,7 +45,7 @@ test.describe("HandyPill -- webview content (dev URL)", () => {
   });
 });
 
-test.describe("NSPanel HandyPill -- live OS integration", () => {
+test.describe("NSPanel overlay (ThemeHost) -- live OS integration", () => {
   // eslint-disable-next-line playwright/no-skipped-test
   test.skip(
     process.platform !== "darwin",

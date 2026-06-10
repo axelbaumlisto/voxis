@@ -63,11 +63,29 @@ impl ThemeEngineLoader {
         Ok(list)
     }
 
+    /// Load a theme from dir. The folder name is the **authoritative** id —
+    /// if the manifest's "id" field disagrees, we WARN and override it with
+    /// the folder name. This ensures hand-copied or renamed directories
+    /// Just Work instead of being silently invisible or shadowing the
+    /// original id. Same rule applies to copied/exported themes whose
+    /// manifest was rewritten by export_theme_dir.
     fn load_dir(dir: &std::path::Path) -> Result<ThemeManifest, String> {
+        let folder_name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| "theme dir has no valid name".to_string())?;
         let manifest_path = dir.join("theme.json");
         let raw =
             std::fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?;
-        let manifest = ThemeManifest::parse(&raw).map_err(|e| e.to_string())?;
+        let mut manifest = ThemeManifest::parse(&raw).map_err(|e| e.to_string())?;
+        if manifest.id != folder_name {
+            tracing::warn!(
+                "load_dir: manifest id '{}' != folder name '{}' — using folder name as authoritative id",
+                manifest.id,
+                folder_name
+            );
+            manifest.id = folder_name.to_string();
+        }
         let entry = dir.join(&manifest.entry);
         if !entry.is_file() {
             return Err(format!("entry file missing: {}", manifest.entry));
@@ -636,5 +654,60 @@ mod tests {
             !user.path().join("orphan").exists(),
             "missing-entry bundle must not leave a partial theme dir"
         );
+    }
+
+    /// When manifest.id disagrees with the folder name, load_dir must
+    /// WARN and override to use folder name as the authoritative id.
+    /// This ensures hand-copied or renamed dirs Just Work.
+    #[test]
+    fn test_load_dir_uses_folder_name_as_authoritative_id() {
+        let tmp = TempDir::new().unwrap();
+        // Create a dir named "real_id" but with manifest claiming "fake_id".
+        let d = tmp.path().join("real_id");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(
+            d.join("theme.json"),
+            r#"{"manifest_version":2,"id":"fake_id","name":"N","api_version":1,"entry":"theme.js"}"#,
+        )
+        .unwrap();
+        fs::write(d.join("theme.js"), "export function mount(){}").unwrap();
+
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let themes = loader.scan().unwrap();
+        assert_eq!(themes.len(), 1);
+        // The id should be the folder name, not the manifest's "fake_id".
+        assert_eq!(themes[0].id, "real_id");
+        // Cache lookup by folder name works.
+        assert!(loader.manifest("real_id").is_some());
+        // Lookup by the stale manifest id returns None.
+        assert!(loader.manifest("fake_id").is_none());
+    }
+
+    /// After scan(), both the original theme and an exported copy must
+    /// appear as distinct manifests with distinct ids.
+    #[test]
+    fn test_scan_finds_original_and_exported_copy_with_distinct_ids() {
+        let tmp = TempDir::new().unwrap();
+        write_theme(tmp.path(), "alpha", "export function mount(){}");
+
+        // Simulate an exported copy: dir named "alpha_custom" with
+        // theme.json still claiming "alpha" (the bug scenario).
+        let copied = tmp.path().join("alpha_custom");
+        fs::create_dir_all(&copied).unwrap();
+        fs::write(
+            copied.join("theme.json"),
+            r#"{"manifest_version":2,"id":"alpha","name":"Alpha","api_version":1,"entry":"theme.js"}"#,
+        )
+        .unwrap();
+        fs::write(copied.join("theme.js"), "export function mount(){}").unwrap();
+
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let themes = loader.scan().unwrap();
+        // Both must be found with distinct ids.
+        let mut ids: Vec<_> = themes.iter().map(|t| t.id.clone()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["alpha", "alpha_custom"]);
+        assert!(loader.manifest("alpha").is_some());
+        assert!(loader.manifest("alpha_custom").is_some());
     }
 }

@@ -109,7 +109,7 @@ export default function ThemeHost({
       instanceRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [themeId]);
+  }, [themeId, params]);
 
   return <div ref={containerRef} style={{ width, height }} data-testid="theme-host" />;
 }

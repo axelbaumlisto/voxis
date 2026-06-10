@@ -1,9 +1,9 @@
 /**
- * Axiomatic E2E for the NSPanel HandyPill:
+ * Axiomatic E2E for the overlay (ThemeHost) on macOS:
  *
- *   1. Idle pill is visually present (light pixels > threshold).
+ *   1. Idle overlay window is visually present (light pixels > threshold).
  *   2. AltGr keypress is captured by the orchestrator (log probe).
- *   3. Recording pill renders bars + cancel — light pixel count grows
+ *   3. Recording overlay renders bars + cancel — light pixel count grows
  *      significantly versus idle.
  *
  * macOS-only — NSPanel is AppKit specific.
@@ -30,7 +30,7 @@ const SHOTS_DIR = "test-results/nspanel-pill";
 // swallowed by macOS when other tests are also using accessibility APIs.
 test.describe.configure({ mode: "serial", retries: 2 });
 
-test.describe("NSPanel HandyPill -- pixel-level axioms", () => {
+test.describe("NSPanel overlay (ThemeHost) -- pixel-level axioms", () => {
   let pid: string;
 
   test.beforeAll(async () => {
@@ -49,8 +49,8 @@ test.describe("NSPanel HandyPill -- pixel-level axioms", () => {
   });
 
   test("pill window is present and positioned", async () => {
-    // The pill is intentionally transparent in idle (only the small pink
-    // icon is rendered — see HandyPill.module.css). NSPanel + WebKit
+    // The overlay is intentionally transparent in idle (only the small
+    // icon is rendered by the theme module). NSPanel + WebKit
     // compositing on macOS doesn't always push transparent webview
     // pixels into the global screen framebuffer in a way `screencapture`
     // can sample, so we only assert the window exists at the right

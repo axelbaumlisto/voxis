@@ -130,6 +130,46 @@ describe("OverlayApp (ThemeHost integration)", () => {
     }
   });
 
+  it("delivers manifest params to theme via api.params", async () => {
+    // Mock getThemeManifest to include a params object.
+    getThemeManifestMock.mockResolvedValue({
+      manifest_version: 2,
+      id: "test_theme",
+      name: "Test Theme",
+      api_version: 1,
+      entry: "theme.js",
+      // specta skips params, but we access it at runtime via cast
+      params: { speed: 2 },
+    });
+    // The test theme module serializes api.params into the dataset.
+    readThemeScriptMock.mockResolvedValue({
+      status: "ok",
+      data: [
+        "export function mount(c,api){",
+        "  c.dataset.theme='loaded';",
+        "  c.dataset.params=JSON.stringify(api.params);",
+        "  return{unmount(){}}",
+        "}",
+      ].join("\n"),
+    });
+    render(<OverlayApp />);
+    // Wait for the initial mount (null params), then the params
+    // fetch resolves and ThemeHost remounts with {speed:2}.
+    await waitFor(
+      () => {
+        const el = document.querySelector(
+          "[data-theme='loaded']",
+        ) as HTMLElement | null;
+        const raw = el?.dataset.params;
+        expect(raw).toBeDefined();
+        expect(raw).not.toBe("null");
+        const parsed = JSON.parse(raw!);
+        expect(parsed).toEqual({ speed: 2 });
+      },
+      { timeout: 3000 },
+    );
+  });
+
   it("falls back to builtin default module when fetchModule rejects", async () => {
     readThemeScriptMock.mockResolvedValue({
       status: "error",
