@@ -9,7 +9,14 @@ use crate::orchestrator::Orchestrator;
 use crate::output::OutputHandler;
 use crate::overlay_native::ThemeLoaderState;
 use crate::storage;
+use crate::theme_engine::ThemeEngineLoader;
 use crate::{AudioState, HotkeyState, OrchestratorState, OutputState};
+
+/// Theme engine state wrapping the new manifest-v2 loader.
+/// Lives alongside the legacy ThemeLoaderState until Phase 6 deletion.
+pub struct ThemeEngineState {
+    pub loader: Arc<ThemeEngineLoader>,
+}
 
 /// Migrate configuration from INI to SQLite if needed.
 pub(super) fn migrate_config_if_needed(
@@ -52,8 +59,17 @@ pub(super) fn create_app_state(
         .unwrap_or_default()
         .join("soupawhisper")
         .join("themes");
-    let theme_loader_state = ThemeLoaderState::new(themes_dir);
+    let theme_loader_state = ThemeLoaderState::new(themes_dir.clone());
     let theme_loader_handle = Arc::clone(&theme_loader_state.handle);
+
+    // New theme engine (manifest v2) — lives alongside legacy loader until Phase 6.
+    let theme_engine_loader = ThemeEngineLoader::new(themes_dir);
+    if let Err(e) = theme_engine_loader.scan() {
+        tracing::warn!("ThemeEngineLoader scan failed at startup: {}", e);
+    }
+    app.manage(ThemeEngineState {
+        loader: Arc::new(theme_engine_loader),
+    });
 
     let orchestrator = Arc::new(Orchestrator::new(
         app.handle().clone(),

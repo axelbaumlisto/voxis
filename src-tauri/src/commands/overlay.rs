@@ -4,7 +4,9 @@ use crate::overlay::{self, OverlayPosition, OverlayState};
 use crate::overlay_native::{
     ThemeColors, ThemeInfo, ThemeLoaderState, ThemeTestResult, VisualizationTheme,
 };
+use crate::setup::ThemeEngineState;
 use crate::storage::AppPaths;
+use crate::theme_engine::{ThemeEngineLoader, ThemeManifest};
 use crate::OrchestratorState;
 use tauri::AppHandle;
 use tauri::State;
@@ -45,10 +47,30 @@ pub fn get_overlay_state() -> OverlayState {
 }
 
 /// Get all available visualization themes.
+/// NOTE: this command reads from the *user* config themes dir (seeded by
+/// Task 4.3 at startup). If seeding hasn't run yet (e.g. first launch before
+/// Task 4.3 is merged), the list will be empty. No fallback hack — ordering
+/// dependency is intentional.
 #[tauri::command]
 #[specta::specta]
-pub fn get_visualization_themes(theme_loader: State<'_, ThemeLoaderState>) -> Vec<ThemeInfo> {
-    VisualizationTheme::available_themes(&theme_loader.handle)
+pub fn get_visualization_themes(state: State<'_, ThemeEngineState>) -> Vec<ThemeInfo> {
+    theme_infos(&state.loader).unwrap_or_default()
+}
+
+/// Pure helper: scan the loader and produce sorted ThemeInfo DTOs.
+pub fn theme_infos(loader: &ThemeEngineLoader) -> Result<Vec<ThemeInfo>, String> {
+    // Fresh scan to pick up newly-added themes.
+    let manifests = loader.scan().map_err(|e| e.to_string())?;
+    let mut infos: Vec<ThemeInfo> = manifests
+        .into_iter()
+        .map(|m| ThemeInfo {
+            id: m.id,
+            name: m.name,
+            description: m.description,
+        })
+        .collect();
+    infos.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(infos)
 }
 
 /// Validate a visualization theme.
@@ -56,10 +78,14 @@ pub fn get_visualization_themes(theme_loader: State<'_, ThemeLoaderState>) -> Ve
 #[specta::specta]
 pub fn validate_visualization_theme(
     theme_id: String,
-    theme_loader: State<'_, ThemeLoaderState>,
+    state: State<'_, ThemeEngineState>,
 ) -> ThemeTestResult {
-    let theme = VisualizationTheme::by_name(&theme_id, &theme_loader.handle);
-    theme.validate()
+    let v = state.loader.validate(&theme_id);
+    ThemeTestResult {
+        valid: v.valid,
+        warnings: v.warnings,
+        errors: v.errors,
+    }
 }
 
 /// Get path to themes directory.
@@ -74,19 +100,21 @@ pub fn get_themes_dir(app: AppHandle) -> Result<String, String> {
 /// Export a builtin theme to a theme folder for user customization.
 #[tauri::command]
 #[specta::specta]
-pub fn export_builtin_theme(theme_id: String, app: AppHandle) -> Result<String, String> {
-    let paths = AppPaths::new(&app).map_err(|e| e.to_string())?;
-    let themes_dir = paths.ensure_themes_dir().map_err(|e| e.to_string())?;
-    export_builtin_theme_to_dir(&theme_id, &themes_dir)
+pub fn export_builtin_theme(
+    theme_id: String,
+    state: State<'_, ThemeEngineState>,
+) -> Result<String, String> {
+    export_theme_dir(&state.loader, &theme_id)
 }
 
-fn export_builtin_theme_to_dir(
-    theme_id: &str,
-    themes_dir: &std::path::Path,
-) -> Result<String, String> {
-    let theme = VisualizationTheme::builtin_by_id(theme_id)
-        .ok_or_else(|| format!("theme '{theme_id}' is not a builtin theme"))?;
-    let file_format = theme.to_file_format();
+/// Pure helper: copy a theme directory from themes_dir/<id> to
+/// themes_dir/<id>_custom (with counter-suffix loop for collisions).
+pub fn export_theme_dir(loader: &ThemeEngineLoader, theme_id: &str) -> Result<String, String> {
+    let themes_dir = loader.themes_dir();
+    let src_dir = themes_dir.join(theme_id);
+    if !src_dir.is_dir() {
+        return Err(format!("unknown theme: '{theme_id}' not found in themes dir"));
+    }
 
     let base_name = format!("{}_custom", theme_id);
     let mut folder_name = base_name.clone();
@@ -97,25 +125,30 @@ fn export_builtin_theme_to_dir(
         counter += 1;
     }
 
-    let theme_dir = themes_dir.join(&folder_name);
-    std::fs::create_dir_all(&theme_dir).map_err(|e| e.to_string())?;
+    let dest_dir = themes_dir.join(&folder_name);
+    std::fs::create_dir_all(&dest_dir).map_err(|e| format!("create dest dir: {e}"))?;
 
-    let file_path = theme_dir.join("theme.json");
-    let json = serde_json::to_string_pretty(&file_format).map_err(|e| e.to_string())?;
-    std::fs::write(&file_path, json).map_err(|e| e.to_string())?;
+    // Copy all children (theme.json, theme.js, etc.)
+    for entry in std::fs::read_dir(&src_dir).map_err(|e| format!("read src dir: {e}"))? {
+        let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
+        let src_path = entry.path();
+        let fname = entry.file_name();
+        let dest_path = dest_dir.join(&fname);
+        std::fs::copy(&src_path, &dest_path).map_err(|e| format!("copy {fname:?}: {e}"))?;
+    }
 
-    tracing::info!("Exported theme {} to {:?}", theme_id, theme_dir);
-
-    Ok(theme_dir.to_string_lossy().to_string())
+    tracing::info!("Exported theme {} to {:?}", theme_id, dest_dir);
+    Ok(dest_dir.to_string_lossy().to_string())
 }
 
 /// Reload visualization themes from disk.
 #[tauri::command]
 #[specta::specta]
 pub fn reload_visualization_themes(
-    theme_loader: State<'_, ThemeLoaderState>,
+    state: State<'_, ThemeEngineState>,
 ) -> Result<(), String> {
-    VisualizationTheme::reload_themes(&theme_loader.handle)
+    state.loader.scan().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Preview a visualization theme without saving config.
@@ -132,6 +165,26 @@ pub async fn preview_visualization_theme(
     }
 
     state.orchestrator.preview_overlay_theme(&theme_id).await
+}
+
+/// Read the entry script source for a theme id.
+#[tauri::command]
+#[specta::specta]
+pub fn read_theme_script(
+    theme_id: String,
+    state: State<'_, ThemeEngineState>,
+) -> Result<String, String> {
+    state.loader.read_script(&theme_id).map_err(|e| e.to_string())
+}
+
+/// Get the manifest (params included) for a theme id.
+#[tauri::command]
+#[specta::specta]
+pub fn get_theme_manifest(
+    theme_id: String,
+    state: State<'_, ThemeEngineState>,
+) -> Option<ThemeManifest> {
+    state.loader.manifest(&theme_id)
 }
 
 /// Get theme colors for frontend CSS synchronization.
@@ -317,9 +370,16 @@ mod tests {
 
     #[test]
     fn test_export_builtin_theme_writes_theme_json_in_folder() {
+        // Legacy test — uses the pure export_theme_dir helper with a seeded dir.
         let temp = tempfile::tempdir().unwrap();
+        // Seed a theme so the export has something to copy.
+        let src = temp.path().join("winamp_classic");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("theme.json"), "{}").unwrap();
+        std::fs::write(src.join("theme.js"), "export function mount(){}").unwrap();
 
-        let exported_path = export_builtin_theme_to_dir("winamp_classic", temp.path()).unwrap();
+        let loader = crate::theme_engine::ThemeEngineLoader::new(temp.path().to_path_buf());
+        let exported_path = export_theme_dir(&loader, "winamp_classic").unwrap();
         let exported_path = std::path::PathBuf::from(exported_path);
 
         assert!(exported_path.is_dir());
@@ -328,13 +388,98 @@ mod tests {
             Some("winamp_classic_custom")
         );
         assert!(exported_path.join("theme.json").exists());
+        assert!(exported_path.join("theme.js").exists());
     }
 
     #[test]
     fn test_export_builtin_theme_rejects_non_builtin_theme_ids() {
         let temp = tempfile::tempdir().unwrap();
+        let loader = crate::theme_engine::ThemeEngineLoader::new(temp.path().to_path_buf());
 
-        let err = export_builtin_theme_to_dir("nonexistent_theme_xyz", temp.path()).unwrap_err();
-        assert!(err.contains("is not a builtin theme"));
+        let err = export_theme_dir(&loader, "nonexistent_theme_xyz").unwrap_err();
+        assert!(err.contains("unknown theme"));
+    }
+}
+
+#[cfg(test)]
+mod theme_engine_command_tests {
+    use crate::theme_engine::ThemeEngineLoader;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn seed(dir: &std::path::Path, id: &str) {
+        let d = dir.join(id);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(
+            d.join("theme.json"),
+            format!(
+                r#"{{"manifest_version":2,"id":"{id}","name":"N","api_version":1,"entry":"theme.js"}}"#
+            ),
+        )
+        .unwrap();
+        fs::write(d.join("theme.js"), "export function mount(){}").unwrap();
+    }
+
+    #[test]
+    fn test_theme_infos_come_from_manifests() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), "abc");
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let infos = super::theme_infos(&loader).unwrap();
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].id, "abc");
+    }
+
+    #[test]
+    fn test_export_theme_dir_copies_entry_and_manifest() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), "abc");
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        loader.scan().unwrap();
+        let new_dir = super::export_theme_dir(&loader, "abc").unwrap();
+        assert!(std::path::Path::new(&new_dir).join("theme.js").is_file());
+        assert!(std::path::Path::new(&new_dir).join("theme.json").is_file());
+    }
+
+    #[test]
+    fn test_export_theme_dir_unknown_id_errors() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), "abc");
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        loader.scan().unwrap();
+        let err = super::export_theme_dir(&loader, "nope").unwrap_err();
+        assert!(err.contains("unknown theme"));
+    }
+
+    #[test]
+    fn test_read_script_through_loader_helper() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), "abc");
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        loader.scan().unwrap();
+        let src = loader.read_script("abc").unwrap();
+        assert!(src.contains("function mount()"));
+    }
+
+    #[test]
+    fn test_theme_infos_empty_dir() {
+        let tmp = TempDir::new().unwrap();
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let infos = super::theme_infos(&loader).unwrap();
+        assert!(infos.is_empty());
+    }
+
+    #[test]
+    fn test_validate_via_loader() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), "valid");
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        loader.scan().unwrap();
+        let result = loader.validate("valid");
+        assert!(result.valid);
+
+drop(result);
+        let result = loader.validate("missing");
+        assert!(!result.valid);
     }
 }

@@ -472,6 +472,10 @@ async getOverlayState() : Promise<OverlayState> {
 },
 /**
  * Get all available visualization themes.
+ * NOTE: this command reads from the *user* config themes dir (seeded by
+ * Task 4.3 at startup). If seeding hasn't run yet (e.g. first launch before
+ * Task 4.3 is merged), the list will be empty. No fallback hack — ordering
+ * dependency is intentional.
  */
 async getVisualizationThemes() : Promise<ThemeInfo[]> {
     return await TAURI_INVOKE("get_visualization_themes");
@@ -547,6 +551,23 @@ async getOverlayThemeData(themeId: string) : Promise<OverlayThemeData> {
  */
 async getHandyTheme(themeId: string) : Promise<HandyPillTheme> {
     return await TAURI_INVOKE("get_handy_theme", { themeId });
+},
+/**
+ * Read the entry script source for a theme id.
+ */
+async readThemeScript(themeId: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_theme_script", { themeId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get the manifest (params included) for a theme id.
+ */
+async getThemeManifest(themeId: string) : Promise<ThemeManifest | null> {
+    return await TAURI_INVOKE("get_theme_manifest", { themeId });
 },
 /**
  * Diagnostic command — lets the overlay webview log a marker to the Rust
@@ -1085,6 +1106,7 @@ export type ShortcutAction = { kind: "transcribe" } | { kind: "transcribe_post_p
 export type ShortcutBinding = { id: string; name: string; description: string; default_binding: string; current_binding: string; action?: ShortcutAction }
 export type ThemeColors = { use_gradient: boolean; gradient_bottom: string; gradient_middle: string; gradient_top: string; recording: string; transcribing: string; idle: string }
 export type ThemeInfo = { id: string; name: string; description: string }
+export type ThemeManifest = { manifest_version: number; id: string; name: string; description?: string; api_version: number; entry: string }
 export type ThemeTestResult = { valid: boolean; warnings: string[]; errors: string[] }
 /**
  * Transcription debug info.
