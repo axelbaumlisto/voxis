@@ -216,8 +216,7 @@ impl ThemeEngineLoader {
                             // must be preserved — not overwritten.
                             let is_v2 = serde_json::from_str::<serde_json::Value>(existing_raw)
                                 .ok()
-                                .and_then(|v| v.get("manifest_version")?.as_i64())
-                                == Some(2);
+                                .is_some_and(|v| is_manifest_v2(&v));
                             if is_v2 {
                                 // Warn if the v2 manifest fails full parse —
                                 // user may have broken something, but we
@@ -305,6 +304,17 @@ impl ThemeEngineLoader {
 
         Ok(())
     }
+}
+
+/// Helper: detect manifest_version:2 in any JSON Number or String shape.
+fn is_manifest_v2(value: &serde_json::Value) -> bool {
+    value
+        .get("manifest_version")
+        .is_some_and(|ver| {
+            ver.as_i64() == Some(2)
+                || ver.as_f64().is_some_and(|f| (f - 2.0).abs() < f64::EPSILON)
+                || ver.as_str().map(|s| s.trim()) == Some("2")
+        })
 }
 
 #[cfg(test)]
@@ -581,14 +591,23 @@ mod tests {
 
         // The invalid v2 manifest must be UNCHANGED — preserved, not overwritten.
         let content = fs::read_to_string(user_theme_dir.join("theme.json")).unwrap();
-        assert!(
-            content.contains("\"api_version\": 99"),
-            "invalid v2 manifest must be preserved, got: {content}"
-        );
-        assert!(
-            content.contains("\"manifest_version\": 2"),
-            "manifest_version:2 field must still be present, got: {content}"
-        );
+        assert_eq!(content, invalid_v2_json, "invalid v2 manifest must be byte-identical");
+    }
+
+    #[test]
+    fn test_is_manifest_v2_string_2_preserved() {
+        // user-edited json with manifest_version as string "2"
+        let json = r#"{"manifest_version":"2","id":"x","name":"X","api_version":1,"entry":"e.js"}"#;
+        let v: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert!(is_manifest_v2(&v), "string '2' must be detected as v2");
+    }
+
+    #[test]
+    fn test_is_manifest_v2_float_2_0_preserved() {
+        // user-edited json with manifest_version as float 2.0
+        let json = r#"{"manifest_version":2.0,"id":"x","name":"X","api_version":1,"entry":"e.js"}"#;
+        let v: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert!(is_manifest_v2(&v), "float 2.0 must be detected as v2");
     }
 
     /// When a bundled theme has a valid manifest but its entry file is
