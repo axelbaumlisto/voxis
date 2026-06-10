@@ -172,6 +172,41 @@ fn build_overlay_window(
         PILL_HEIGHT as f64,
     ));
     let _ = window.set_position(LogicalPosition::new(x, y));
+
+    // Tauri upstream #6125 / WebKitGTK hardcodes a 200×200 minimum natural
+    // size on the WebKitWebView widget; wry packs it into a GtkBox without
+    // overriding the size request, so the GTK window inherits the child's
+    // minimum and WM_NORMAL_HINTS reports "minimum size: 200 by 200".
+    //
+    // Lift that minimum by setting size-request = (1, 1) directly on the
+    // webkit2gtk widget inside `with_webview` (which dispatches on the GTK
+    // main thread). Then resize the toplevel GTK window in the same callback
+    // so the compositor sees the correct geometry immediately.
+    #[cfg(target_os = "linux")]
+    {
+        let _ = window.with_webview(|webview| {
+            use gtk::prelude::{Cast, GtkWindowExt, WidgetExt};
+            let wv = webview.inner();
+            wv.set_size_request(1, 1);
+            // Also force-resize the toplevel GTK window in case the
+            // compositor has already cached the 200×200 constraints.
+            if let Some(toplevel) = wv.toplevel() {
+                if let Ok(gtk_window) = toplevel.downcast::<gtk::Window>() {
+                    gtk_window.resize(
+                        PILL_WIDTH as i32,
+                        PILL_HEIGHT as i32,
+                    );
+                }
+            }
+        });
+        // Re-assert via Tauri's own set_size after the GTK-level fix so
+        // the inner webview layout is also notified.
+        let _ = window.set_size(LogicalSize::new(
+            PILL_WIDTH as f64,
+            PILL_HEIGHT as f64,
+        ));
+    }
+
     Ok(())
 }
 
@@ -199,8 +234,13 @@ fn compute_initial_position(
         return (100.0, 100.0);
     };
     let scale = monitor.scale_factor().max(1.0);
-    let phys_size = monitor.size();
-    let phys_pos = monitor.position();
+    // Use the work area (desktop without panels / taskbars / docks)
+    // so bottom positions sit above the panel, not behind it.
+    // work_area().position and .size are in physical pixels,
+    // same coordinate space as monitor.position()/size().
+    let wa = monitor.work_area();
+    let phys_size = wa.size;
+    let phys_pos = wa.position;
     let mx = phys_pos.x as f64 / scale;
     let my = phys_pos.y as f64 / scale;
     let mw = (phys_size.width as f64 / scale) as i32;
