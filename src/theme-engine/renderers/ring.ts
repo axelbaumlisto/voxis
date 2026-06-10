@@ -8,7 +8,7 @@
 import { buildRingPoints, ringStrokeWidth } from "./ringGeometry";
 import type { OrganicRingMotion, OrganicRingShape } from "./ringGeometry";
 import type { ThemeState } from "../contract";
-import type { Renderer } from "./bars";
+import type { Renderer } from "./types";
 
 export interface RingOptions {
   shape: OrganicRingShape;

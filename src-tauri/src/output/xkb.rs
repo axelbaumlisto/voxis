@@ -118,7 +118,10 @@ mod tests {
         }
     }
 
+    /// This test inherently requires a live X display and is flaky in parallel runs.
+    /// Run manually with: cargo test --lib -- --ignored
     #[test]
+    #[ignore = "requires live X display; run with --ignored"]
     #[cfg(target_os = "linux")]
     fn test_group_restored_after_closure() {
         if let Some(manager) = XkbGroupManager::new() {

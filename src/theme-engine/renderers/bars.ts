@@ -8,6 +8,7 @@
  */
 import { createSmoother } from "./smoothing";
 import type { ThemeState } from "../contract";
+import type { Renderer } from "./types";
 
 export interface BarsGradient {
   bottom: string;
@@ -24,10 +25,7 @@ export interface BarsOptions {
   smoothingAlpha?: number; // default 0.3
 }
 
-export interface Renderer {
-  update(state: ThemeState): void;
-  destroy(): void;
-}
+export type { Renderer } from "./types";
 
 const DEFAULT_BAR_COUNT = 16;
 const DEFAULT_MAX_HEIGHT = 32;
