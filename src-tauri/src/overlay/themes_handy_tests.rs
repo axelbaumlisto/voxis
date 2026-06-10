@@ -208,15 +208,16 @@ fn all_repository_themes_parse_without_panic() {
     }
     assert!(
         parsed >= 8,
-        "expected to parse >= 8 theme files (incl. winamp_classic), got {parsed}"
+        "expected to parse >= 8 theme files (all 5 v2 + 3 v1), got {parsed}"
     );
 }
 
 #[test]
 fn winamp_classic_uses_legacy_bars_palette() {
-    // Transitional (dies in Phase 6): winamp_classic converted to manifest v2
-    // in Task 3.1 — the theme.json has no handy_pill / family / gradient fields,
-    // so resolve_from_json falls back to HandyPill defaults.
+    // Transitional (dies in Phase 6): winamp_classic (and all 4 other bars
+    // themes) converted to manifest v2 in Tasks 3.1–3.2 — their theme.json
+    // files have no handy_pill / family / gradient fields, so resolve_from_json
+    // falls back to HandyPill defaults.
     use crate::overlay::themes::handy::builtin_handy_theme;
     let t = builtin_handy_theme("winamp_classic")
         .expect("winamp_classic must be in the builtin registry");
@@ -230,9 +231,12 @@ fn winamp_classic_uses_legacy_bars_palette() {
 
 #[test]
 fn all_repository_themes_have_distinct_icon_colors() {
-    // After T4.1 every repository theme declares its own `handy_pill.palette`.
-    // Distinct icon colours guarantee that pixel-diff e2e (Phase 5.5) can
-    // tell the themes apart.
+    // Transitional (dies in Phase 6): all 5 bars-family themes (winamp_classic
+    // + default/dark/neon/monochrome) converted to manifest v2 in Tasks 3.1–3.2;
+    // they all resolve to the default pink palette. Only assert distinctness
+    // across remaining legacy (manifest v1) themes with explicit handy_pill blocks.
+    // Ring themes (quiet_reed, living_reed, drifting_contour) are still legacy
+    // until Task 3.3.
     let themes_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("themes");
     let mut icon_colors = std::collections::HashSet::new();
@@ -243,12 +247,16 @@ fn all_repository_themes_have_distinct_icon_colors() {
         }
         let raw = std::fs::read_to_string(&json_path).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        // Skip manifest v2 — they all fall back to default pink palette.
+        if v.get("manifest_version").and_then(|mv| mv.as_u64()) == Some(2) {
+            continue;
+        }
         let t = resolve_from_json(&v);
         icon_colors.insert(t.palette.icon_color.to_lowercase());
     }
     assert!(
-        icon_colors.len() >= 8,
-        "expected >= 8 distinct icon_color values across themes, got {} ({:?})",
+        icon_colors.len() >= 3,
+        "expected >= 3 distinct icon_color values across legacy themes, got {} ({:?})",
         icon_colors.len(),
         icon_colors
     );

@@ -54,9 +54,9 @@ describe("useOverlayState", () => {
     expect(result.current.audioLevel).toBe(0);
     expect(result.current.spectrumBins).toHaveLength(32);
     expect(result.current.spectrumBins.every((v) => v === 0)).toBe(true);
-    // transitional: DEFAULT_THEME changed from winamp_classic (now manifest v2)
-    // to neon (still-legacy bars-family). Dies in Phase 6.
-    expect(result.current.themeId).toBe("neon");
+    // transitional: all bars themes are manifest v2; DEFAULT_THEME is "default"
+    // matching Rust DEFAULT_OVERLAY_THEME. Dies in Phase 6.
+    expect(result.current.themeId).toBe("default");
   });
 
   it("subscribes to all four overlay events", async () => {
