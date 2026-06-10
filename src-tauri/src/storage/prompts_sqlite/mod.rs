@@ -20,6 +20,8 @@ use crate::llm::prompts::{default_prompts, LlmPrompt};
 use rusqlite::{params, Connection};
 use std::path::PathBuf;
 
+use super::sqlite_base::SqliteSchema;
+
 pub struct LlmPromptsStorage {
     path: PathBuf,
 }
@@ -27,30 +29,6 @@ pub struct LlmPromptsStorage {
 impl LlmPromptsStorage {
     pub fn new(path: PathBuf) -> Self {
         Self { path }
-    }
-
-    fn connect(&self) -> Result<Connection, Box<dyn std::error::Error>> {
-        use super::sqlite_base::open_with_schema;
-        open_with_schema(&self.path, |conn| {
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS llm_prompts (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    prompt TEXT NOT NULL,
-                    created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
-                )",
-                [],
-            )?;
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS llm_prompts_state (
-                    key TEXT PRIMARY KEY,
-                    value TEXT
-                )",
-                [],
-            )?;
-            Ok(())
-        })
     }
 
     /// First-run seed: if the table is empty, insert the canonical defaults.
@@ -193,6 +171,37 @@ impl LlmPromptsStorage {
                 )?;
             }
         }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// SqliteSchema trait — DRY connect() via sqlite_base
+// =============================================================================
+
+impl SqliteSchema for LlmPromptsStorage {
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    fn init_schema(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS llm_prompts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS llm_prompts_state (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )",
+            [],
+        )?;
         Ok(())
     }
 }

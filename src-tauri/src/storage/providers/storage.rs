@@ -6,6 +6,7 @@ use super::{
     types::LlmProvider,
     validation::{ensure_provider_removable, parse_models_json},
 };
+use crate::storage::sqlite_base::SqliteSchema;
 
 /// SQLite storage for LLM providers.
 pub struct ProvidersStorage {
@@ -15,37 +16,6 @@ pub struct ProvidersStorage {
 impl ProvidersStorage {
     pub fn new(path: PathBuf) -> Self {
         Self { path }
-    }
-
-    /// Open connection and ensure schema exists.
-    /// DRY: Uses sqlite_base for connection, keeps seeding logic here.
-    fn connect(&self) -> Result<Connection, Box<dyn std::error::Error>> {
-        use super::super::sqlite_base::open_with_schema;
-
-        let storage = self;
-        open_with_schema(&self.path, |conn| {
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS llm_providers (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    api_url TEXT NOT NULL,
-                    models TEXT NOT NULL,
-                    default_model TEXT NOT NULL,
-                    builtin INTEGER DEFAULT 0
-                )",
-                [],
-            )?;
-
-            // Check if table is empty, insert defaults
-            let count: i64 =
-                conn.query_row("SELECT COUNT(*) FROM llm_providers", [], |row| row.get(0))?;
-
-            if count == 0 {
-                storage.insert_defaults(conn)?;
-            }
-
-            Ok(())
-        })
     }
 
     /// Insert default providers.
@@ -182,5 +152,39 @@ impl ProvidersStorage {
         )?;
 
         Ok(deleted > 0)
+    }
+}
+
+// =============================================================================
+// SqliteSchema trait — DRY connect() via sqlite_base
+// =============================================================================
+
+impl SqliteSchema for ProvidersStorage {
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    fn init_schema(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS llm_providers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                api_url TEXT NOT NULL,
+                models TEXT NOT NULL,
+                default_model TEXT NOT NULL,
+                builtin INTEGER DEFAULT 0
+            )",
+            [],
+        )?;
+
+        // Check if table is empty, insert defaults
+        let count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM llm_providers", [], |row| row.get(0))?;
+
+        if count == 0 {
+            self.insert_defaults(conn)?;
+        }
+
+        Ok(())
     }
 }

@@ -7,7 +7,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use super::sqlite_base::FromSqliteRow;
+use super::sqlite_base::{FromSqliteRow, SqliteSchema};
 
 /// A single history entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,35 +40,6 @@ pub struct HistorySqliteStorage {
 impl HistorySqliteStorage {
     pub fn new(path: PathBuf) -> Self {
         Self { path }
-    }
-
-    /// Open connection and ensure schema exists.
-    /// DRY: Uses sqlite_base helpers for common operations.
-    fn connect(&self) -> Result<Connection, Box<dyn std::error::Error>> {
-        use super::sqlite_base::{column_exists, create_index_if_not_exists, open_with_schema};
-
-        open_with_schema(&self.path, |conn| {
-            // Create table if not exists (compatible with Python schema)
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    text TEXT NOT NULL,
-                    language TEXT DEFAULT '',
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                )",
-                [],
-            )?;
-
-            // Add duration column if not exists (migration for older Python schema)
-            if !column_exists(conn, "history", "duration") {
-                let _ = conn.execute("ALTER TABLE history ADD COLUMN duration REAL", []);
-            }
-
-            // Create index for fast timestamp queries
-            create_index_if_not_exists(conn, "idx_timestamp", "history", "timestamp DESC")?;
-
-            Ok(())
-        })
     }
 
     /// Load history entries, newest first.
@@ -191,6 +162,41 @@ impl HistorySqliteStorage {
         let conn = self.connect()?;
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM history", [], |row| row.get(0))?;
         Ok(count as usize)
+    }
+}
+
+// =============================================================================
+// SqliteSchema trait — DRY connect() via sqlite_base
+// =============================================================================
+
+impl SqliteSchema for HistorySqliteStorage {
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    fn init_schema(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        use super::sqlite_base::{column_exists, create_index_if_not_exists};
+
+        // Create table if not exists (compatible with Python schema)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT NOT NULL,
+                language TEXT DEFAULT '',
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
+        // Add duration column if not exists (migration for older Python schema)
+        if !column_exists(conn, "history", "duration") {
+            let _ = conn.execute("ALTER TABLE history ADD COLUMN duration REAL", []);
+        }
+
+        // Create index for fast timestamp queries
+        create_index_if_not_exists(conn, "idx_timestamp", "history", "timestamp DESC")?;
+
+        Ok(())
     }
 }
 

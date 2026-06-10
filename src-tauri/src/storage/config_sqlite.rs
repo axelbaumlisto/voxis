@@ -7,6 +7,8 @@ use crate::config::{AppConfig, DictionaryConfig, LlmConfig, OverlayConfig, VadCo
 use rusqlite::{params, Connection};
 use std::path::PathBuf;
 
+use super::sqlite_base::SqliteSchema;
+
 /// SQLite storage for config.
 pub struct ConfigSqliteStorage {
     path: PathBuf,
@@ -15,23 +17,6 @@ pub struct ConfigSqliteStorage {
 impl ConfigSqliteStorage {
     pub fn new(path: PathBuf) -> Self {
         Self { path }
-    }
-
-    /// Open connection and ensure schema exists.
-    /// DRY: Uses sqlite_base for common connection pattern.
-    fn connect(&self) -> Result<Connection, Box<dyn std::error::Error>> {
-        use super::sqlite_base::open_with_schema;
-
-        open_with_schema(&self.path, |conn| {
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS config (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                )",
-                [],
-            )?;
-            Ok(())
-        })
     }
 
     /// Check if the config database is empty.
@@ -409,6 +394,27 @@ impl ConfigSqliteStorage {
 }
 
 // =============================================================================
+// SqliteSchema trait — DRY connect() via sqlite_base
+// =============================================================================
+
+impl SqliteSchema for ConfigSqliteStorage {
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    fn init_schema(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )",
+            [],
+        )?;
+        Ok(())
+    }
+}
+
+// =============================================================================
 // Trait implementation for DIP compliance
 // =============================================================================
 
@@ -429,6 +435,7 @@ impl super::traits::ConfigStorage for ConfigSqliteStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::sqlite_base::SqliteSchema;
     use tempfile::NamedTempFile;
 
     #[test]

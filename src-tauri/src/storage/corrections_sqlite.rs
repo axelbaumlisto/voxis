@@ -10,7 +10,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use super::sqlite_base::FromSqliteRow;
+use super::sqlite_base::{FromSqliteRow, SqliteSchema};
 
 /// Status of a correction suggestion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -90,33 +90,6 @@ pub struct CorrectionsSqliteStorage {
 impl CorrectionsSqliteStorage {
     pub fn new(path: PathBuf) -> Self {
         Self { path }
-    }
-
-    /// Open connection and ensure schema exists.
-    /// DRY: Uses sqlite_base helpers for common operations.
-    fn connect(&self) -> Result<Connection, Box<dyn std::error::Error>> {
-        use super::sqlite_base::{create_index_if_not_exists, open_with_schema};
-
-        open_with_schema(&self.path, |conn| {
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS corrections (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    source TEXT NOT NULL,
-                    replacement TEXT NOT NULL,
-                    count INTEGER DEFAULT 1,
-                    status TEXT DEFAULT 'pending',
-                    first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(source, replacement)
-                )",
-                [],
-            )?;
-
-            // Create index for fast pending lookup
-            create_index_if_not_exists(conn, "idx_status", "corrections", "status")?;
-
-            Ok(())
-        })
     }
 
     /// Record a suggestion (insert or increment count).
@@ -296,6 +269,39 @@ impl CorrectionsSqliteStorage {
             |row| row.get(0),
         )?;
         Ok(count as usize)
+    }
+}
+
+// =============================================================================
+// SqliteSchema trait — DRY connect() via sqlite_base
+// =============================================================================
+
+impl SqliteSchema for CorrectionsSqliteStorage {
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    fn init_schema(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+        use super::sqlite_base::create_index_if_not_exists;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS corrections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                replacement TEXT NOT NULL,
+                count INTEGER DEFAULT 1,
+                status TEXT DEFAULT 'pending',
+                first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(source, replacement)
+            )",
+            [],
+        )?;
+
+        // Create index for fast pending lookup
+        create_index_if_not_exists(conn, "idx_status", "corrections", "status")?;
+
+        Ok(())
     }
 }
 
