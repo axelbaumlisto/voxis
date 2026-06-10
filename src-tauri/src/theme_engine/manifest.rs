@@ -15,6 +15,13 @@ pub enum ManifestError {
     ApiVersion(u32),
     #[error("entry must be a plain filename, got: {0}")]
     BadEntry(String),
+    #[error("invalid theme id: {0}")]
+    BadId(String),
+}
+
+/// Reject empty, slashes, or parent-dir segments — shared by id and entry checks.
+pub fn is_safe_path_component(s: &str) -> bool {
+    !s.is_empty() && !s.contains('/') && !s.contains('\\') && !s.contains("..")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -40,7 +47,10 @@ impl ThemeManifest {
         if m.api_version != SUPPORTED_API_VERSION {
             return Err(ManifestError::ApiVersion(m.api_version));
         }
-        if m.entry.contains('/') || m.entry.contains('\\') || m.entry.contains("..") {
+        if !is_safe_path_component(&m.id) {
+            return Err(ManifestError::BadId(m.id));
+        }
+        if !is_safe_path_component(&m.entry) {
             return Err(ManifestError::BadEntry(m.entry));
         }
         Ok(m)
@@ -82,6 +92,18 @@ mod tests {
     #[test]
     fn test_reject_entry_with_path_traversal() {
         let bad = valid_json().replace("theme.js", "../evil.js");
+        assert!(ThemeManifest::parse(&bad).is_err());
+    }
+
+    #[test]
+    fn test_reject_id_with_path_traversal() {
+        let bad = valid_json().replace("my_theme", "../evil");
+        assert!(ThemeManifest::parse(&bad).is_err());
+    }
+
+    #[test]
+    fn test_reject_empty_id() {
+        let bad = valid_json().replace("my_theme", "");
         assert!(ThemeManifest::parse(&bad).is_err());
     }
 
