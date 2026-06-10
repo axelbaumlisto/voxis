@@ -1,9 +1,7 @@
 //! Overlay-related Tauri commands.
 
 use crate::overlay::{self, OverlayPosition, OverlayState};
-use crate::overlay_native::{
-    ThemeColors, ThemeInfo, ThemeLoaderState, ThemeTestResult, VisualizationTheme,
-};
+use crate::overlay_native::{ThemeInfo, ThemeTestResult};
 use crate::setup::ThemeEngineState;
 use crate::storage::{AppPaths, StorageFactory};
 use crate::theme_engine::{ThemeEngineLoader, ThemeManifest};
@@ -186,10 +184,10 @@ pub async fn preview_visualization_theme(
     theme_id: String,
     reload_from_disk: Option<bool>,
     state: State<'_, OrchestratorState>,
-    theme_loader: State<'_, ThemeLoaderState>,
+    theme_engine: State<'_, ThemeEngineState>,
 ) -> Result<(), String> {
     if reload_from_disk.unwrap_or(false) {
-        VisualizationTheme::reload_themes(&theme_loader.handle)?;
+        theme_engine.loader.scan().map_err(|e| e.to_string())?;
     }
 
     state.orchestrator.preview_overlay_theme(&theme_id).await
@@ -213,73 +211,6 @@ pub fn get_theme_manifest(
     state: State<'_, ThemeEngineState>,
 ) -> Option<ThemeManifest> {
     state.loader.manifest(&theme_id)
-}
-
-/// Get theme colors for frontend CSS synchronization.
-#[tauri::command]
-#[specta::specta]
-pub fn get_theme_colors(
-    theme_id: String,
-    theme_loader: State<'_, ThemeLoaderState>,
-) -> ThemeColors {
-    VisualizationTheme::by_name(&theme_id, &theme_loader.handle).to_colors()
-}
-
-/// Get full overlay theme data for the webview overlay (colors + family +
-/// organic_ring). Single DTO so the React layer can drive both bar and ring
-/// rendering without multiple round-trips.
-#[tauri::command]
-#[specta::specta]
-pub fn get_overlay_theme_data(
-    theme_id: String,
-    theme_loader: State<'_, ThemeLoaderState>,
-) -> crate::overlay_native::OverlayThemeData {
-    let theme = VisualizationTheme::by_name(&theme_id, &theme_loader.handle);
-    crate::overlay_native::OverlayThemeData::from_theme(&theme)
-}
-
-/// Get the Handy-pill theme for the named theme id (palette + animation).
-/// Falls back to the default Handy pink palette for unknown ids or themes
-/// without a `handy_pill` block in `theme.json`. Never errors.
-#[tauri::command]
-#[specta::specta]
-pub fn get_handy_theme(
-    theme_id: String,
-    theme_loader: State<'_, ThemeLoaderState>,
-) -> crate::overlay::themes::handy::HandyPillTheme {
-    tracing::info!("get_handy_theme: requested id={theme_id}");
-    // Resolution order:
-    //   1. compile-time built-in registry (covers all 7 repository themes)
-    //   2. user-copied theme.json on disk
-    //   3. DEFAULT_HANDY_THEME (Handy pink)
-    use crate::overlay::themes::handy::{
-        builtin_handy_theme, resolve_from_json, DEFAULT_HANDY_THEME,
-    };
-
-    if let Some(builtin) = builtin_handy_theme(&theme_id) {
-        tracing::info!(
-            "get_handy_theme: BUILTIN id={theme_id} -> icon={}",
-            builtin.palette.icon_color
-        );
-        return builtin;
-    }
-
-    let path = VisualizationTheme::path_for_id(&theme_id, &theme_loader.handle);
-    let Some(path) = path else {
-        tracing::warn!("get_handy_theme: no path for id={theme_id}, using DEFAULT");
-        return DEFAULT_HANDY_THEME.clone();
-    };
-    let Ok(raw) = std::fs::read_to_string(&path) else {
-        tracing::warn!("get_handy_theme: cannot read {path:?}, using DEFAULT");
-        return DEFAULT_HANDY_THEME.clone();
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        tracing::warn!("get_handy_theme: cannot parse {path:?}, using DEFAULT");
-        return DEFAULT_HANDY_THEME.clone();
-    };
-    let resolved = resolve_from_json(&value);
-    tracing::info!("get_handy_theme: resolved id={theme_id} -> icon={}", resolved.palette.icon_color);
-    resolved
 }
 
 /// Diagnostic command — lets the overlay webview log a marker to the Rust
@@ -365,35 +296,6 @@ mod tests {
             OverlayState::Error("Error message".to_string()),
         ];
         assert_eq!(states.len(), 5);
-    }
-
-    #[test]
-    fn test_get_visualization_themes() {
-        use crate::overlay_native::ThemeLoaderHandle;
-        let loader: ThemeLoaderHandle = std::sync::Arc::new(std::sync::RwLock::new(
-            crate::overlay_native::ThemeLoader::new(std::path::PathBuf::from(
-                "/tmp/nonexistent_themes",
-            )),
-        ));
-        let themes = VisualizationTheme::available_themes(&loader);
-        assert!(!themes.is_empty());
-        assert!(themes.iter().any(|t| t.id == "winamp_classic"));
-    }
-
-    #[test]
-    fn test_validate_visualization_theme() {
-        use crate::overlay_native::ThemeLoaderHandle;
-        let loader: ThemeLoaderHandle = std::sync::Arc::new(std::sync::RwLock::new(
-            crate::overlay_native::ThemeLoader::new(std::path::PathBuf::from(
-                "/tmp/nonexistent_themes",
-            )),
-        ));
-        let result = VisualizationTheme::by_name("winamp_classic", &loader).validate();
-        assert!(result.valid);
-
-        // Unknown themes should fall back to winamp and remain valid.
-        let result = VisualizationTheme::by_name("unknown_theme", &loader).validate();
-        assert!(result.valid);
     }
 
     #[test]

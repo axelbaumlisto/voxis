@@ -2,7 +2,7 @@ use super::load_config_from_app;
 use crate::config::AppConfig;
 use crate::overlay_native::{
     create_overlay, CreateOverlayParams, OverlayBackend, OverlayPositionConfig,
-    OverlaySizeConfig, OverlayState, ThemeLoaderHandle,
+    OverlaySizeConfig, OverlayState,
 };
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -11,19 +11,16 @@ use tokio::sync::Mutex;
 pub struct OverlayManager {
     app: AppHandle,
     overlay: Arc<Mutex<Box<dyn OverlayBackend>>>,
-    theme_loader: ThemeLoaderHandle,
 }
 
 impl OverlayManager {
     pub fn new(
         app: AppHandle,
         overlay: Arc<Mutex<Box<dyn OverlayBackend>>>,
-        theme_loader: ThemeLoaderHandle,
     ) -> Self {
         Self {
             app,
             overlay,
-            theme_loader,
         }
     }
 
@@ -37,7 +34,6 @@ impl OverlayManager {
             margin: config.overlay.margin,
             theme: &config.overlay.theme,
             audio_boost: config.overlay.audio_boost,
-            theme_loader: Arc::clone(&self.theme_loader),
             backend: &config.overlay.backend,
             app_handle: Some(self.app.clone()),
         });

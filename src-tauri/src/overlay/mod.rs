@@ -5,15 +5,11 @@
 pub mod themes;
 pub mod types;
 
-#[cfg(test)]
-mod themes_handy_tests;
-
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
-pub use themes::*;
 pub use types::{OverlayState as NativeOverlayState, PositionConfig, SizeConfig};
 
 /// Current overlay state (stored for pull-based access).

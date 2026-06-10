@@ -4,34 +4,12 @@ pub mod nspanel;
 pub mod theme;
 pub mod webview;
 
-use std::sync::{Arc, RwLock};
-
 pub use backend::{NoopOverlay, OverlayBackend};
-pub use theme::{
-    OverlayThemeData, ThemeColors, ThemeInfo, ThemeLoader, ThemeTestResult, VisualizationTheme,
-};
+pub use theme::{ThemeInfo, ThemeTestResult};
 
 pub type OverlayState = crate::overlay::types::OverlayState;
 pub type OverlayPositionConfig = crate::overlay::types::PositionConfig;
 pub type OverlaySizeConfig = crate::overlay::types::SizeConfig;
-
-pub type ThemeLoaderHandle = Arc<RwLock<ThemeLoader>>;
-
-pub struct ThemeLoaderState {
-    pub handle: ThemeLoaderHandle,
-}
-
-impl ThemeLoaderState {
-    pub fn new(themes_dir: std::path::PathBuf) -> Self {
-        let mut loader = ThemeLoader::new(themes_dir);
-        if let Err(e) = loader.scan() {
-            tracing::warn!("Failed to scan themes directory: {}", e);
-        }
-        Self {
-            handle: Arc::new(RwLock::new(loader)),
-        }
-    }
-}
 
 pub const BAR_COUNT: usize = 32;
 
@@ -44,7 +22,6 @@ pub struct CreateOverlayParams<'a> {
     pub margin: i32,
     pub theme: &'a str,
     pub audio_boost: f32,
-    pub theme_loader: ThemeLoaderHandle,
     pub backend: &'a str,
     pub app_handle: Option<tauri::AppHandle>,
 }
@@ -149,14 +126,6 @@ pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-
-    fn test_loader() -> ThemeLoaderHandle {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("themes");
-        let mut loader = ThemeLoader::new(dir);
-        let _ = loader.scan();
-        Arc::new(RwLock::new(loader))
-    }
 
     fn params<'a>(backend: &'a str, enabled: bool) -> CreateOverlayParams<'a> {
         CreateOverlayParams {
@@ -166,7 +135,6 @@ mod tests {
             margin: 30,
             theme: "default",
             audio_boost: 800.0,
-            theme_loader: test_loader(),
             backend,
             app_handle: None,
         }

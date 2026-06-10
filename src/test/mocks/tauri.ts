@@ -210,16 +210,6 @@ export function setupDefaultMocks() {
         return undefined;
       case "preview_visualization_theme":
         return undefined;
-      case "get_theme_colors":
-        return {
-          use_gradient: true,
-          gradient_bottom: "#1e88e5",
-          gradient_middle: "#42a5f5",
-          gradient_top: "#90caf9",
-          recording: "#1e88e5",
-          transcribing: "#4caf50",
-          idle: "#9e9e9e",
-        };
       // LLM Provider commands
       case "get_llm_providers":
         return [...mockLlmProviders];
