@@ -24,6 +24,9 @@ cd src-tauri && cargo test
 # Run E2E tests (requires Playwright browsers)
 bun run test:e2e
 
+# Bundle builtin themes to src-tauri/themes/
+bun run build:themes
+
 # Build for production
 bun run tauri build
 
@@ -49,11 +52,12 @@ cd src-tauri && cargo test test_name
 - **Hooks**: `src/hooks/` - Custom hooks for async data, recording state, settings, etc.
 - **Commands**: `src/lib/commands.ts` - Type-safe wrappers for all Tauri invoke calls
 - **Components**: Domain-organized under `src/components/{dictionary,history,settings}/`
+- **theme-engine**: `src/theme-engine/` — ThemeHost + contract (mount(container, themeApi), apiVersion 1) + renderers + builtin theme sources
 - **Tests**: Co-located as `__tests__/*.test.tsx` alongside source files
 
 ### Backend (src-tauri/)
 - **Rust + Tauri v2** with SQLite storage
-- **Two binaries**: `voice` (main app) and `voice-overlay` (native overlay process)
+- **Two binaries**: `voice` (main app) and `typing_bench` (auto-type latency benchmark)
 
 Key modules:
 - `orchestrator/` - Workflow coordination: hotkey → recording → transcription → output. Uses a queue for buffered concurrent recordings.
@@ -62,7 +66,8 @@ Key modules:
 - `output/` - Clipboard (arboard) and auto-typing
 - `hotkey/` - Low-level keyboard input via rdev
 - `storage/` - SQLite + file-based storage (config, history, dictionary, providers)
-- `overlay_native/` - egui-based passthrough overlay for recording visualization
+- `theme_engine/` - Manifest v2 + theme script loader — Rust knows nothing about theme visuals
+- `overlay_native/` - Overlay window backends (NSPanel on macOS, Tauri webview cross-platform), plus Noop fallback
 - `llm/` - Post-processing transcriptions via LLM
 - `learning/` - Dictionary learning/suggestion system
 - `commands/` - Tauri commands exposed to frontend
@@ -94,3 +99,4 @@ All stored in platform-specific config directory:
 - **Frontend/backend communication**: All via `invoke()` calls defined in `src/lib/commands.ts`
 - **Async hooks**: `useAsyncData` and `useAsyncAction` patterns for loading/mutation states
 - **Recording context**: React context (`RecordingContext`) shares recording state across components
+- **Themes**: Each theme is a directory with `theme.json` (manifest v2) + `theme.js` ES module exporting `mount(container, themeApi)`. Builtin themes are bundled from `src/theme-engine/builtin/` to `src-tauri/themes/` and seeded to `<config>/themes` at startup. User themes follow the same format — edit `theme.js` and reload.

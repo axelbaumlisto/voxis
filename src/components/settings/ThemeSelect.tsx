@@ -65,8 +65,9 @@ function ThemeSelect({ label, description, value, onChange }: ThemeSelectProps) 
           </option>
         ))}
       </select>
-      {/* Swatch grid \u2014 click to select. Per-family rendering proves at
-          a glance which theme is "bars" vs "organic_ring" vs "handy". */}
+      {/* Swatch grid \u2014 click to select. All themes are now code
+          modules (manifest v2); swatches display placeholder until
+          the Rust theme-engine ships swatch data in a future update. */}
       <div
         className="theme-swatch-grid"
         data-testid="theme-swatch-grid"
