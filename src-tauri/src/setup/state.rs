@@ -59,17 +59,53 @@ pub(super) fn create_app_state(
         .unwrap_or_default()
         .join("soupawhisper")
         .join("themes");
-    let theme_loader_state = ThemeLoaderState::new(themes_dir.clone());
-    let theme_loader_handle = Arc::clone(&theme_loader_state.handle);
 
-    // New theme engine (manifest v2) — lives alongside legacy loader until Phase 6.
-    let theme_engine_loader = ThemeEngineLoader::new(themes_dir);
+    // --- Theme engine v2: seed bundled themes BEFORE legacy seeder runs ---
+    //
+    // Ordering is critical: the legacy ThemeLoader::ensure_seeded_external_themes()
+    // writes v1-format theme.json files and skips dirs that already have a
+    // theme.json. By running v2 seeding first, we ensure:
+    //  1. Fresh install: v2 theme.jsons land first, legacy seeder skips them.
+    //  2. Upgrade from older TALRI: v2 seed_from_bundle overwrites legacy v1
+    //     theme.jsons (detected by missing manifest_version:2), then the legacy
+    //     seeder sees the v2 files and skips.
+    let theme_engine_loader = ThemeEngineLoader::new(themes_dir.clone());
+
+    // Resolve the bundled themes path (prod: resource dir, dev: CARGO_MANIFEST_DIR).
+    let bundle_themes_dir = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|r| r.join("themes"))
+        .or_else(|| {
+            let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("themes");
+            if dev_path.exists() {
+                Some(dev_path)
+            } else {
+                None
+            }
+        });
+    if let Some(bundle_dir) = bundle_themes_dir {
+        if let Err(e) = theme_engine_loader.seed_from_bundle(&bundle_dir) {
+            tracing::warn!("ThemeEngineLoader seed_from_bundle failed: {}", e);
+        }
+    } else {
+        tracing::warn!("ThemeEngineLoader: cannot resolve bundled themes directory");
+    }
+
+    // Scan v2 themes after seeding.
     if let Err(e) = theme_engine_loader.scan() {
         tracing::warn!("ThemeEngineLoader scan failed at startup: {}", e);
     }
     app.manage(ThemeEngineState {
         loader: Arc::new(theme_engine_loader),
     });
+
+    // Legacy ThemeLoaderState — its constructor calls scan() which calls
+    // ensure_seeded_external_themes(). Since v2 seeding already wrote
+    // theme.json for each builtin, the legacy seeder will skip them.
+    let theme_loader_state = ThemeLoaderState::new(themes_dir.clone());
+    let theme_loader_handle = Arc::clone(&theme_loader_state.handle);
 
     let orchestrator = Arc::new(Orchestrator::new(
         app.handle().clone(),
