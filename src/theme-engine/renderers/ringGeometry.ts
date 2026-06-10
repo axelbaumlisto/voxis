@@ -12,7 +12,8 @@
  *
  * SOLID / DRY / KISS:
  * - SRP: this module is math only; no DOM/canvas/React side effects.
- * - DRY: shapes/motions types reused from auto-generated bindings.
+ * - DRY: shape/motion types are defined locally (decoupled from generated
+ *   bindings ahead of the Phase-6 legacy deletion).
  * - KISS: each function is a small numeric kernel mirroring its Rust twin.
  */
 export interface OrganicRingShape {

@@ -89,7 +89,12 @@ function barOpacity(v: number): number {
   return Math.max(MIN_OPACITY, Math.min(1, clamped * OPACITY_GAIN));
 }
 
-/** Nearest-neighbour resampling from source bins to barCount. */
+/**
+ * Nearest-neighbour resampling from source bins to barCount.
+ * Intentional deviation from the React port: useSmoothBars truncated to the
+ * FIRST 9 of 32 spectrum bins; here we sample across the full spectrum so
+ * the 9 bars represent the whole frequency range (better visuals).
+ */
 function resampleToBars(bins: number[], count: number = BAR_COUNT): number[] {
   if (bins.length === 0) return new Array(count).fill(0);
   return new Array(count).fill(0).map((_, i) => {
@@ -297,6 +302,10 @@ export function createPillRenderer(container: HTMLElement, opts: PillOptions): R
       if (styleEl.parentNode) {
         styleEl.parentNode.removeChild(styleEl);
       }
+      // Undo every mutation we made on the caller's container so it can
+      // be reused by another renderer (review REV-002).
+      container.classList.remove(scopeClass);
+      container.removeAttribute("style");
       container.innerHTML = "";
     },
   };
