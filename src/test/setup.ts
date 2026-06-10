@@ -62,10 +62,15 @@ beforeEach(() => {
 // Browser API Mocks
 // =============================================================================
 
+// Some tests opt into the node environment (e.g. blob-URL dynamic import in
+// theme-engine/loader). Skip DOM-only mocks when there is no window.
+const hasDom = typeof window !== "undefined";
+
 // Mock window.confirm
 vi.stubGlobal("confirm", vi.fn(() => true));
 
 // Mock clipboard API
+if (hasDom) {
 Object.defineProperty(navigator, "clipboard", {
   value: {
     writeText: vi.fn().mockResolvedValue(undefined),
@@ -98,3 +103,4 @@ Object.defineProperty(window, "__TAURI_OS_PLUGIN_INTERNALS__", {
     version: "15.0.0",
   },
 });
+}
