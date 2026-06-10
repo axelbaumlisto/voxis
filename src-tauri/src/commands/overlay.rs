@@ -62,10 +62,19 @@ pub fn get_current_overlay_theme(paths: State<'_, AppPaths>) -> String {
 /// Task 4.3 at startup). If seeding hasn't run yet (e.g. first launch before
 /// Task 4.3 is merged), the list will be empty. No fallback hack — ordering
 /// dependency is intentional.
+///
+/// Returns an error if theme scanning fails (e.g. themes dir is a file instead
+/// of a directory). The frontend must surface this so the user sees a
+/// concrete problem instead of a silently-empty dropdown.
 #[tauri::command]
 #[specta::specta]
-pub fn get_visualization_themes(state: State<'_, ThemeEngineState>) -> Vec<ThemeInfo> {
-    theme_infos(&state.loader).unwrap_or_default()
+pub fn get_visualization_themes(
+    state: State<'_, ThemeEngineState>,
+) -> Result<Vec<ThemeInfo>, String> {
+    theme_infos(&state.loader).map_err(|e| {
+        tracing::error!("failed to scan visualization themes: {}", e);
+        e
+    })
 }
 
 /// Pure helper: scan the loader and produce sorted ThemeInfo DTOs.
@@ -482,6 +491,20 @@ drop(result);
         // name must have " (custom)" appended.
         let name = manifest["name"].as_str().unwrap();
         assert!(name.contains("(custom)"), "expected '(custom)' in name, got: {name}");
+    }
+
+    #[test]
+    fn test_theme_infos_propagates_scan_error() {
+        let tmp = TempDir::new().unwrap();
+        // Create a FILE where a themes_dir would be — scan will IO-error.
+        let not_a_dir = tmp.path().join("notadir");
+        std::fs::write(&not_a_dir, "i am a file").unwrap();
+        let loader = ThemeEngineLoader::new(not_a_dir);
+        let result = super::theme_infos(&loader);
+        assert!(
+            result.is_err(),
+            "theme_infos on a file (not dir) must propagate the scan error"
+        );
     }
 
     #[test]

@@ -484,9 +484,18 @@ async getCurrentOverlayTheme() : Promise<string> {
  * Task 4.3 at startup). If seeding hasn't run yet (e.g. first launch before
  * Task 4.3 is merged), the list will be empty. No fallback hack — ordering
  * dependency is intentional.
+ * 
+ * Returns an error if theme scanning fails (e.g. themes dir is a file instead
+ * of a directory). The frontend must surface this so the user sees a
+ * concrete problem instead of a silently-empty dropdown.
  */
-async getVisualizationThemes() : Promise<ThemeInfo[]> {
-    return await TAURI_INVOKE("get_visualization_themes");
+async getVisualizationThemes() : Promise<Result<ThemeInfo[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_visualization_themes") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 },
 /**
  * Validate a visualization theme.
