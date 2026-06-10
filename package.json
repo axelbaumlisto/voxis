@@ -13,6 +13,7 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:all": "vitest run && playwright test",
+     "test:rust": "cd src-tauri && cargo build --examples && cargo test",
     "lint": "eslint src --ext ts,tsx"
   },
   "dependencies": {
