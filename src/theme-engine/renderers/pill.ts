@@ -11,7 +11,7 @@
  */
 import { createSmoother } from "./smoothing";
 import type { ThemeState } from "../contract";
-import type { Renderer } from "./bars";
+import type { Renderer } from "./types";
 
 export interface PillPalette {
   icon_color: string;

@@ -477,45 +477,54 @@ mod tests {
         assert!(result.is_none());
     }
 
-    /// E2E test with real corrections database.
-    /// Tests that record() and get_pending() work with actual DB.
+    /// Hermetic workflow test with seeded data covering pending/approved/rejected
+    /// filtering, record+verify, status transitions, and pending_count.
+    /// Replaces the former test_real_corrections_db which read the live user DB.
     #[test]
-    fn test_real_corrections_db() {
-        let real_db = PathBuf::from(env!("HOME")).join(".config/soupawhisper/corrections.db");
+    fn test_corrections_workflow_hermetic() {
+        let storage = create_storage();
 
-        let storage = CorrectionsSqliteStorage::new(real_db.clone());
+        // Seed: insert entries to build a realistic multi-status dataset
+        storage.record("solid", "SOLID").unwrap();
+        storage.record("solid", "SOLID").unwrap(); // count=2
+        storage.record("dry", "DRY").unwrap(); // count=1
+        storage.record("kiss", "KISS").unwrap(); // count=1
 
-        // Check current pending
-        let pending_before = storage.get_pending().unwrap();
-        println!("Pending before: {} items", pending_before.len());
-        for s in &pending_before {
-            println!(
-                "  - {} -> {} (count: {}, status: {})",
-                s.source, s.replacement, s.count, s.status
-            );
-        }
+        // Approve one — must disappear from pending
+        storage.approve_by_source("solid", "SOLID").unwrap();
 
-        // Record a test entry with unique timestamp
-        let test_source = format!("e2e_test_{}", chrono::Local::now().timestamp());
-        let count = storage.record(&test_source, "E2E_Test").unwrap();
-        assert!(count >= 1, "Expected count >= 1, got {}", count);
-        println!(
-            "✓ Recorded test entry: {} -> E2E_Test (count: {})",
-            test_source, count
+        // Reject one — must disappear from pending
+        let pending = storage.get_pending().unwrap();
+        let kiss_id = pending.iter().find(|s| s.source == "kiss").unwrap().id;
+        storage.reject(kiss_id).unwrap();
+
+        // Only "dry" should remain pending
+        let pending = storage.get_pending().unwrap();
+        assert_eq!(pending.len(), 1, "only 'dry' should be pending");
+        assert_eq!(pending[0].source, "dry");
+        assert_eq!(pending[0].replacement, "DRY");
+        assert_eq!(pending[0].count, 1);
+        assert_eq!(pending[0].status, SuggestionStatus::Pending);
+
+        // Record a new entry and verify it appears in pending
+        let count = storage.record("yagni", "YAGNI").unwrap();
+        assert_eq!(count, 1);
+
+        let pending = storage.get_pending().unwrap();
+        assert!(
+            pending.iter().any(|s| s.source == "yagni"),
+            "new entry 'yagni' must be in pending"
         );
 
-        // Verify it appears in pending
-        let pending_after = storage.get_pending().unwrap();
-        let found = pending_after.iter().any(|s| s.source == test_source);
-        assert!(found, "Test entry should be in pending");
-        println!("✓ Test entry found in pending");
+        // Approve the new entry — must disappear from pending
+        storage.approve_by_source("yagni", "YAGNI").unwrap();
+        let pending = storage.get_pending().unwrap();
+        assert!(
+            !pending.iter().any(|s| s.source == "yagni"),
+            "approved entry must not be in pending"
+        );
 
-        // Clean up: reject the test entry
-        if let Some(entry) = pending_after.iter().find(|s| s.source == test_source) {
-            storage.reject(entry.id).unwrap();
-            println!("✓ Cleaned up test entry");
-        }
-
-        println!("✓ Real corrections.db test passed");
+        // pending_count should be 1 (only "dry")
+        assert_eq!(storage.pending_count().unwrap(), 1);
     }
 }
