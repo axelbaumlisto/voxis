@@ -190,4 +190,35 @@ describe("useOverlayState", () => {
     expect(result.current.themeId).toBe("living_reed");
     spy.mockRestore();
   });
+
+  it("live overlay://theme event wins over stale initial pull (race-condition fix)", async () => {
+    // Simulate race: subscribe → live theme event arrives → stale pull resolves later.
+    // The live event must not be clobbered by the delayed stale pull.
+    let resolvePull: (value: string) => void;
+    const pullPromise = new Promise<string>((resolve) => {
+      resolvePull = resolve;
+    });
+    const spy = vi
+      .spyOn(bindings, "getCurrentOverlayTheme")
+      .mockReturnValueOnce(pullPromise);
+    const { result } = renderHook(() => useOverlayState());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(spy).toHaveBeenCalled();
+
+    // Live event fires BEFORE the stale pull resolves.
+    emit("overlay://theme", "living_reed");
+    expect(result.current.themeId).toBe("living_reed");
+
+    // Now the stale pull resolves with "default" — must NOT overwrite live.
+    await act(async () => {
+      resolvePull!("default");
+      // Flush microtasks so the .then() handler runs.
+      await Promise.resolve();
+    });
+    expect(result.current.themeId).toBe("living_reed");
+
+    spy.mockRestore();
+  });
 });

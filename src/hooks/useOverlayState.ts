@@ -123,6 +123,7 @@ export function useOverlayState(): OverlaySnapshot {
 
   useEffect(() => {
     let cancelled = false;
+    let sawLiveTheme = false;
     const unlistens: UnlistenFn[] = [];
 
     const subscribe = async <T,>(
@@ -168,7 +169,10 @@ export function useOverlayState(): OverlaySnapshot {
         )
         .catch(() => {});
       const themeId = coerceTheme(payload);
-      if (themeId) dispatch({ type: "theme", themeId });
+      if (themeId) {
+        sawLiveTheme = true;
+        dispatch({ type: "theme", themeId });
+      }
     });
 
     // Pull current theme after subscribing (race-condition fix).
@@ -176,11 +180,16 @@ export function useOverlayState(): OverlaySnapshot {
     // if that event fired before our JS listener was registered we would
     // silently fall back to DEFAULT_THEME until the next theme change.
     // This pull-after-subscribe pattern ensures we always catch the initial
-    // value. The live listener still wins for later changes (reducer dedups).
+    // value. However, if a live overlay://theme event arrives between our
+    // subscribe and pull-resolve (e.g. preview_visualization_theme emits a
+    // preview theme NOT saved to config), the live event wins — the stale
+    // pull must not clobber the newer live value.
     void bindings
       .getCurrentOverlayTheme()
       .then((themeId: string) => {
-        if (!cancelled && themeId) dispatch({ type: "theme", themeId });
+        if (!cancelled && !sawLiveTheme && themeId) {
+          dispatch({ type: "theme", themeId });
+        }
       })
       .catch(() => {});
 
