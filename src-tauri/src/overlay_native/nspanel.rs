@@ -25,8 +25,8 @@ use super::{OverlayPositionConfig, OverlayState};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-/// Default Handy-style pill dimensions (kept fixed across config sizes — the
-/// HandyPill component is built around this canvas).
+/// Fixed 172×36 pill canvas. The panel hosts the React ThemeHost code-theme
+/// overlay, and the theme-engine contract uses this fixed size.
 pub const PILL_WIDTH: u32 = 172;
 pub const PILL_HEIGHT: u32 = 36;
 
@@ -89,8 +89,8 @@ impl NsPanelOverlay {
     ///
     /// `position` + `margin` honour the user's overlay placement config so
     /// the pill appears where settings say (BottomCenter, TopRight, etc.).
-    /// Window size is fixed at `PILL_WIDTH × PILL_HEIGHT` since HandyPill
-    /// is a single-canvas design.
+    /// Window size is fixed at `PILL_WIDTH × PILL_HEIGHT` per the
+    /// theme-engine contract (fixed-size pill canvas).
     #[cfg(target_os = "macos")]
     pub fn new(
         app: tauri::AppHandle,
