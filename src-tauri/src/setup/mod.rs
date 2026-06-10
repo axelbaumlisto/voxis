@@ -10,6 +10,8 @@ mod process;
 mod state;
 mod window;
 
+pub use state::ThemeEngineState;
+
 #[cfg(test)]
 mod tests;
 
@@ -116,6 +118,8 @@ pub fn command_handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 
         commands::overlay::get_theme_colors,
         commands::overlay::get_overlay_theme_data,
         commands::overlay::get_handy_theme,
+        commands::overlay::read_theme_script,
+        commands::overlay::get_theme_manifest,
         commands::overlay::debug_log_overlay,
         commands::overlay::debug_eval_overlay,
         commands::recording::cancel_operation,
