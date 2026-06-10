@@ -11,6 +11,13 @@
   --success: #00ff00;  /* green1 */
   --error: #ff0000;  /* red1 */
   --warning: #ffa500;
+  /* Default theme spectrum vars (static accent — decoupled from overlay themes) */
+  --spectrum-bottom: #1e88e5;
+  --spectrum-middle: #42a5f5;
+  --spectrum-top: #64b5f6;
+  --spectrum-recording: #1e88e5;
+  --spectrum-transcribing: #4caf50;
+  --spectrum-idle: #1e88e5;
   --border: #3c3c3c;
 
   /* Spacing */

@@ -346,16 +346,6 @@ export interface ThemeTestResult {
   errors: string[];
 }
 
-export interface ThemeColors {
-  use_gradient: boolean;
-  gradient_bottom: string;
-  gradient_middle: string;
-  gradient_top: string;
-  recording: string;
-  transcribing: string;
-  idle: string;
-}
-
 export async function getVisualizationThemes(): Promise<ThemeInfo[]> {
   return invoke<ThemeInfo[]>("get_visualization_themes");
 }
@@ -383,10 +373,6 @@ export async function previewVisualizationTheme(
   reloadFromDisk = false
 ): Promise<void> {
   return invoke("preview_visualization_theme", { themeId, reloadFromDisk });
-}
-
-export async function getThemeColors(themeId: string): Promise<ThemeColors> {
-  return invoke<ThemeColors>("get_theme_colors", { themeId });
 }
 
 // =============================================================================

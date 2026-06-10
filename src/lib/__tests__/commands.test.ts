@@ -46,7 +46,6 @@ import {
   updateOverlayPosition,
   getVisualizationThemes,
   previewVisualizationTheme,
-  getThemeColors,
   // Debug
   getDebugEntries,
   clearDebug,
@@ -685,16 +684,7 @@ describe("commands.ts", () => {
       });
     });
 
-    describe("getThemeColors", () => {
-      it("returns safe frontend colors for an organic theme", async () => {
-        const result = await getThemeColors("living_reed");
-        expect(mockInvoke).toHaveBeenCalledWith("get_theme_colors", { themeId: "living_reed" });
-        expect(result).toHaveProperty("use_gradient");
-        expect(result).toHaveProperty("recording");
-        expect(result).toHaveProperty("transcribing");
-        expect(result).toHaveProperty("idle");
-      });
-    });
+
   });
 
   // ===========================================================================
