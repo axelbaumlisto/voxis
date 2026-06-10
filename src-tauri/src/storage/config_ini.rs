@@ -1,6 +1,5 @@
-//! INI file storage for config.
-//!
-//! Compatible with Python soupawhisper config.ini format.
+//! Read-only legacy INI parser. Exists solely for one-time migration to
+//! SQLite (setup/state.rs). Delete when migration support is dropped.
 
 use crate::config::AppConfig;
 use ini::Ini;
@@ -252,78 +251,7 @@ impl ConfigIniStorage {
         Ok(config)
     }
 
-    /// Save config to INI file.
-    pub fn save(&self, config: &AppConfig) -> Result<(), Box<dyn std::error::Error>> {
-        let mut ini = Ini::new();
 
-        // [api] section
-        ini.with_section(Some("api"))
-            .set("key", &config.api_key)
-            .set("model", &config.model)
-            .set("language", &config.language);
-
-        // [recording] section
-        ini.with_section(Some("recording"))
-            .set("hotkey", &config.hotkey)
-            .set("audio_device", &config.audio_device);
-
-        // [output] section
-        ini.with_section(Some("output"))
-            .set("auto_type", config.auto_type.to_string())
-            .set("auto_enter", config.auto_enter.to_string())
-            .set("typing_delay", config.typing_delay.to_string())
-            .set("notifications", config.notifications.to_string())
-            .set("backend", &config.backend);
-
-        // [overlay] section
-        ini.with_section(Some("overlay"))
-            .set("enabled", config.overlay.enabled.to_string())
-            .set("position", &config.overlay.position)
-            .set("size", &config.overlay.size)
-            .set("margin", config.overlay.margin.to_string());
-
-        // [vad] section
-        ini.with_section(Some("vad"))
-            .set("enabled", config.vad.enabled.to_string())
-            .set("threshold", config.vad.threshold.to_string());
-
-        // [llm] section
-        ini.with_section(Some("llm"))
-            .set("enabled", config.llm.enabled.to_string())
-            .set("provider", &config.llm.provider)
-            .set("api_url", &config.llm.api_url)
-            .set("api_key", &config.llm.api_key)
-            .set("model", &config.llm.model)
-            .set("prompt", &config.llm.prompt);
-
-        // [dictionary] section
-        ini.with_section(Some("dictionary"))
-            .set("path", &config.dictionary.path)
-            .set("learning_mode", &config.dictionary.learning_mode)
-            .set(
-                "learning_threshold",
-                config.dictionary.learning_threshold.to_string(),
-            );
-
-        // [provider] section
-        ini.with_section(Some("provider"))
-            .set("active", &config.active_provider)
-            .set("cloud", &config.cloud_provider)
-            .set("local_backend", &config.local_backend);
-
-        // [history] section
-        ini.with_section(Some("history"))
-            .set("enabled", config.history_enabled.to_string())
-            .set("days", config.history_days.to_string());
-
-        // [advanced] section
-        ini.with_section(Some("advanced"))
-            .set("debug", config.debug.to_string())
-            .set("text_processing", config.text_processing.to_string());
-
-        ini.write_to_file(&self.path)?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -332,25 +260,7 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    #[test]
-    fn test_save_and_load_config() {
-        let file = NamedTempFile::new().unwrap();
-        let storage = ConfigIniStorage::new(file.path().to_path_buf());
 
-        let config = AppConfig {
-            api_key: "test-key".to_string(),
-            hotkey: "f12".to_string(),
-            auto_type: false,
-            ..AppConfig::default()
-        };
-
-        storage.save(&config).unwrap();
-        let loaded = storage.load().unwrap();
-
-        assert_eq!(loaded.api_key, "test-key");
-        assert_eq!(loaded.hotkey, "f12");
-        assert!(!loaded.auto_type);
-    }
 
     #[test]
     fn test_load_nonexistent_returns_default() {
@@ -468,43 +378,7 @@ mod tests {
         assert_eq!(config.typing_delay, 12);
     }
 
-    #[test]
-    fn test_save_creates_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("new_config.ini");
-        let storage = ConfigIniStorage::new(path.clone());
 
-        let config = AppConfig::default();
-        storage.save(&config).unwrap();
-
-        assert!(path.exists());
-    }
-
-    #[test]
-    fn test_save_and_reload_cycle() {
-        let file = NamedTempFile::new().unwrap();
-        let storage = ConfigIniStorage::new(file.path().to_path_buf());
-
-        let mut config = AppConfig {
-            api_key: "key-123".to_string(),
-            history_days: 60,
-            ..AppConfig::default()
-        };
-        config.llm.enabled = true;
-        config.llm.api_key = "llm-key".to_string();
-        config.vad.threshold = 0.75;
-        config.overlay.enabled = true;
-
-        storage.save(&config).unwrap();
-        let loaded = storage.load().unwrap();
-
-        assert_eq!(loaded.api_key, "key-123");
-        assert!(loaded.llm.enabled);
-        assert_eq!(loaded.llm.api_key, "llm-key");
-        assert_eq!(loaded.vad.threshold, 0.75);
-        assert!(loaded.overlay.enabled);
-        assert_eq!(loaded.history_days, 60);
-    }
 
     #[test]
     fn test_load_overlay_section() {
@@ -622,31 +496,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_save_readonly_file_error() {
-        use std::os::unix::fs::PermissionsExt;
 
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("readonly.ini");
-
-        // Create file and make it readonly
-        std::fs::write(&path, "[api]\nkey=test\n").unwrap();
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        perms.set_mode(0o444); // Read-only
-        std::fs::set_permissions(&path, perms).unwrap();
-
-        let storage = ConfigIniStorage::new(path.clone());
-        let config = AppConfig::default();
-        let result = storage.save(&config);
-
-        // Restore permissions before asserting (for cleanup)
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        perms.set_mode(0o644);
-        std::fs::set_permissions(&path, perms).unwrap();
-
-        // Should fail to write to readonly file
-        assert!(result.is_err());
-    }
 
     #[test]
     fn test_partial_section_parsing() {
