@@ -145,13 +145,13 @@ fn test_resolve_bundled_themes_path_skips_non_dir_candidates() {
 }
 
 #[test]
-fn test_resolve_bundled_themes_path_returns_none_when_nothing_exists() {
+fn test_resolve_bundled_themes_path_falls_back_to_dev_dir_when_no_candidates() {
     let tmp = tempfile::TempDir::new().unwrap();
     let nonexistent = tmp.path().join("ghost");
 
     // Give it a nonexistent candidate. The dev fallback (CARGO_MANIFEST_DIR/themes)
-    // exists in our dev environment, so we can't easily test "nothing exists"
-    // without mocking. We'll just assert the candidate is skipped.
+    // exists in our dev environment, so resolve_bundled_themes_path always
+    // returns Some() here — a true None cannot be observed without mocking.
     let candidates: Vec<std::path::PathBuf> = vec![nonexistent];
     let result = state::resolve_bundled_themes_path(&candidates);
     // In dev, the fallback should succeed (we're under src-tauri/).
