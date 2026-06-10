@@ -14,7 +14,6 @@ import { getFooterShortcuts } from "../lib/keyboardShortcuts";
 import { useClock } from "../hooks/useClock";
 import { useHotkeyDisplay } from "../hooks/useHotkeyDisplay";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { useThemeColors } from "../hooks/useThemeColors";
 import {
   checkPermissions,
   openPermissionSettings,
@@ -38,8 +37,8 @@ function Layout() {
   const currentTime = useClock();
   const { hotkey } = useHotkeyDisplay();
 
-  // Sync theme colors from native overlay to CSS variables
-  const useGradient = useThemeColors();
+  // Static accent (decoupled from overlay themes — themes are opaque code now)
+  const useGradient = true;
 
   // SRP: Keyboard handling extracted to hook
   useKeyboardShortcuts(lastTranscription);

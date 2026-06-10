@@ -7,7 +7,9 @@ import { mockInvoke, resetMocks, mockConfig } from "../../test/mocks/tauri";
 // SpectrumVisualizer uses setInterval + getSpectrumBins polling at 50ms,
 // which creates noisy timer interactions. Mock it to keep tests focused on Layout.
 vi.mock("../SpectrumVisualizer", () => ({
-  default: ({ mode }: { mode: string }) => <div className="spectrum">mock-spectrum-{mode}</div>,
+  default: ({ mode, useGradient }: { mode: string; useGradient?: boolean }) => (
+    <div className="spectrum" data-gradient={String(useGradient)}>mock-spectrum-{mode}</div>
+  ),
 }));
 
 // Mock RecordingContext - useRecording relies on Tauri event emission to change
@@ -264,17 +266,6 @@ describe("Layout", () => {
         if (cmd === "check_permissions") {
           return [];
         }
-        if (cmd === "get_theme_colors") {
-          return {
-            use_gradient: true,
-            gradient_bottom: "#1e88e5",
-            gradient_middle: "#42a5f5",
-            gradient_top: "#90caf9",
-            recording: "#1e88e5",
-            transcribing: "#4caf50",
-            idle: "#9e9e9e",
-          };
-        }
         return undefined;
       });
       renderLayout();
@@ -291,6 +282,14 @@ describe("Layout", () => {
       await waitFor(() => {
         const spectrum = document.querySelector(".spectrum");
         expect(spectrum).toBeInTheDocument();
+      });
+    });
+
+    it("passes static useGradient=true (accent decoupled from overlay themes)", async () => {
+      renderLayout();
+      await waitFor(() => {
+        const spectrum = document.querySelector(".spectrum") as HTMLElement;
+        expect(spectrum.dataset.gradient).toBe("true");
       });
     });
   });
@@ -313,17 +312,6 @@ describe("Layout", () => {
           ];
         }
         if (cmd === "get_config") return { ...mockConfig };
-        if (cmd === "get_theme_colors") {
-          return {
-            use_gradient: true,
-            gradient_bottom: "#1e88e5",
-            gradient_middle: "#42a5f5",
-            gradient_top: "#90caf9",
-            recording: "#1e88e5",
-            transcribing: "#4caf50",
-            idle: "#9e9e9e",
-          };
-        }
         return undefined;
       });
 
