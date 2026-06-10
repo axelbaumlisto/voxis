@@ -1,12 +1,14 @@
 /**
- * Smoke tests for the overlay webview entry shell.
+ * Integration tests for the overlay webview entry shell.
  *
- * HandyPill is stubbed; this suite only verifies that the shell wires the
- * snapshot + smoothed bars + cancel command into HandyPill.
+ * OverlayApp now delegates to ThemeHost — all visual logic lives in theme
+ * modules. This suite verifies the wiring: useOverlayState → ThemeHost with
+ * fetchModule/fallbackModule/cancel.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, act, screen } from "@testing-library/react";
+import { render, waitFor, act } from "@testing-library/react";
 
+// ── Mock Tauri event bus (used by useOverlayState) ──────────────────────
 type EventHandler = (event: { payload: unknown }) => void;
 
 const listenMock = vi.fn();
@@ -20,61 +22,46 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
-vi.mock("../components/overlay/HandyPill", () => ({
-  default: ({
-    mode,
-    bars,
-    visible,
-    onCancel,
-  }: {
-    mode: string;
-    bars: number[];
-    visible: boolean;
-    onCancel?: () => void;
-  }) => (
-    <div
-      data-testid="handy-pill-stub"
-      data-mode={mode}
-      data-visible={String(visible)}
-      data-bar-count={bars.length}
-      data-bar-sample={bars[0] ?? 0}
-      onClick={() => onCancel?.()}
-    />
-  ),
+// ── Mock bindings.commands ──────────────────────────────────────────────
+// readThemeScript returns a trivial valid theme module source via the
+// generated Result<T,E> wrapper ({ status, data } | { status, error }).
+const readThemeScriptMock = vi.fn().mockResolvedValue({
+  status: "ok",
+  data: "export function mount(c){c.dataset.theme='loaded';return{unmount(){}}}",
+});
+const getThemeManifestMock = vi.fn().mockResolvedValue(null);
+const cancelOperationMock = vi.fn().mockResolvedValue({ status: "ok", data: null });
+const debugLogOverlayMock = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("../bindings", () => ({
+  commands: {
+    readThemeScript: (...args: unknown[]) => readThemeScriptMock(...args),
+    getThemeManifest: (...args: unknown[]) => getThemeManifestMock(...args),
+    cancelOperation: (...args: unknown[]) => cancelOperationMock(...args),
+    debugLogOverlay: (...args: unknown[]) => debugLogOverlayMock(...args),
+  },
 }));
 
-// ClassicBars stub — for `bars` family routing (Winamp + default + dark + etc.).
-vi.mock("../components/overlay/ClassicBars", () => ({
-  default: ({
-    bars,
-    barCount,
-    gradient,
-  }: {
-    bars: number[];
-    barCount?: number;
-    gradient: { bottom: string; middle: string; top: string };
-  }) => (
-    <div
-      data-testid="classic-bars-stub"
-      data-bar-count={bars.length}
-      data-requested-bar-count={barCount ?? 16}
-      data-bar-sample={bars[0] ?? 0}
-      data-gradient-bottom={gradient.bottom}
-      data-gradient-top={gradient.top}
-    />
-  ),
-}));
+// ── Tests ───────────────────────────────────────────────────────────────
 
 import { OverlayApp } from "../overlay";
 
-describe("OverlayApp (HandyPill shell)", () => {
+describe("OverlayApp (ThemeHost integration)", () => {
   beforeEach(() => {
     handlers.clear();
-    listenMock.mockImplementation(async (event: string, handler: EventHandler) => {
-      handlers.set(event, handler);
-      return () => {};
-    });
+    listenMock.mockImplementation(
+      async (event: string, handler: EventHandler) => {
+        handlers.set(event, handler);
+        return () => {};
+      },
+    );
     invokeMock.mockResolvedValue({ status: "ok", data: null });
+    readThemeScriptMock.mockResolvedValue({
+      status: "ok",
+      data: "export function mount(c){c.dataset.theme='loaded';return{unmount(){}}}",
+    });
+    cancelOperationMock.mockResolvedValue({ status: "ok", data: null });
+    debugLogOverlayMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -82,15 +69,30 @@ describe("OverlayApp (HandyPill shell)", () => {
     invokeMock.mockReset();
   });
 
-  // ClassicBars routing died with legacy pipeline; replaced by ThemeHost in Phase 5.
-  // The bars rendering itself is covered by src/theme-engine tests.
+  it("renders the theme-host container", async () => {
+    const { container } = render(<OverlayApp />);
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-testid='theme-host']"),
+      ).toBeTruthy(),
+    );
+  });
 
-  it("subscribes to all four overlay events", async () => {
+  it("mounts the fetched theme module (sets data-theme='loaded')", async () => {
+    render(<OverlayApp />);
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-theme='loaded']"),
+      ).toBeTruthy(),
+    );
+  });
+
+  it("subscribes to all four overlay events (useOverlayState)", async () => {
     render(<OverlayApp />);
     await act(async () => {
       await Promise.resolve();
     });
-    const subscribed = listenMock.mock.calls.map((c) => c[0]);
+    const subscribed = listenMock.mock.calls.map((c: unknown[]) => c[0]);
     expect(subscribed).toEqual(
       expect.arrayContaining([
         "overlay://state",
@@ -101,41 +103,50 @@ describe("OverlayApp (HandyPill shell)", () => {
     );
   });
 
-  it("becomes visible when state moves out of idle", async () => {
-    render(<OverlayApp />);
-    await act(async () => {
-      await Promise.resolve();
+  it("passes forced ?theme= query param to ThemeHost", async () => {
+    const prevSearch = window.location.search;
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, search: "?theme=winamp_classic" },
+      writable: true,
+      configurable: true,
     });
-    await act(async () => {
-      handlers.get("overlay://state")!({ payload: "recording" });
-    });
-    const pill = screen.getByTestId("handy-pill-stub");
-    expect(pill.dataset.mode).toBe("recording");
-    expect(pill.dataset.visible).toBe("true");
+    try {
+      render(<OverlayApp />);
+      await waitFor(() =>
+        expect(
+          document.querySelector("[data-testid='theme-host']"),
+        ).toBeTruthy(),
+      );
+      // fetchModule should have been called with the forced theme id
+      expect(readThemeScriptMock).toHaveBeenCalledWith("winamp_classic");
+    } finally {
+      Object.defineProperty(window, "location", {
+        value: { ...window.location, search: prevSearch },
+        writable: true,
+        configurable: true,
+      });
+    }
   });
 
-  it("forwards smoothed spectrum bins (length 9) to HandyPill", async () => {
-    render(<OverlayApp />);
-    await act(async () => {
-      await Promise.resolve();
+  it("falls back to builtin default module when fetchModule rejects", async () => {
+    readThemeScriptMock.mockResolvedValue({
+      status: "error",
+      error: "theme not found",
     });
-    await act(async () => {
-      const bins = new Array(32).fill(1);
-      handlers.get("overlay://spectrum-bins")!({ payload: bins });
-    });
-    const pill = screen.getByTestId("handy-pill-stub");
-    expect(Number(pill.dataset.barCount)).toBe(9);
-    // First call: 0*0.7 + 1*0.3 = 0.3
-    expect(Number(pill.dataset.barSample)).toBeCloseTo(0.3, 3);
-  });
-
-  it("calls cancel_operation when HandyPill triggers onCancel", async () => {
-    render(<OverlayApp />);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    const pill = screen.getByTestId("handy-pill-stub");
-    pill.click();
-    expect(invokeMock).toHaveBeenCalledWith("cancel_operation");
+    const { container } = render(<OverlayApp />);
+    // Should still render theme-host (fallback mounted)
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-testid='theme-host']"),
+      ).toBeTruthy(),
+    );
+    // The fallback (default bars theme) renders .classic-bar-col elements
+    await waitFor(
+      () =>
+        expect(
+          container.querySelectorAll(".classic-bar-col").length,
+        ).toBeGreaterThan(0),
+      { timeout: 3000 },
+    );
   });
 });

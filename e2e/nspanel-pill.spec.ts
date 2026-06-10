@@ -21,26 +21,23 @@ import { readFileSync, existsSync } from "node:fs";
 const execFileAsync = promisify(execFile);
 
 test.describe("HandyPill -- webview content (dev URL)", () => {
-  // Pin handy family via ?theme=handy — default theme is now
-  // winamp_classic (bars family) which does NOT render the
-  // overlay-left/middle/right grid these assertions describe.
-  test("overlay.html mounts the pill grid (idle, handy family)", async ({ page }) => {
-    await page.goto("/overlay.html?theme=handy");
-    await page.waitForSelector(".recording-overlay");
-    await expect(page.locator(".recording-overlay")).toHaveAttribute(
-      "data-mode",
-      "idle",
-    );
-    await expect(page.locator(".overlay-left")).toHaveCount(1);
-    await expect(page.locator(".overlay-middle")).toHaveCount(1);
-    await expect(page.locator(".overlay-right")).toHaveCount(1);
+  // Phase 5: overlay now uses ThemeHost.  The `?theme=default` pin is
+  // kept so the test doesn't depend on Tauri state.  Grid-only selectors
+  // (.overlay-left/middle/right) died with the old HandyPill shell.
+  test("overlay.html mounts ThemeHost (default bars theme)", async ({ page }) => {
+    await page.goto("/overlay.html?theme=default");
+    await page.waitForSelector("[data-testid='theme-host']");
+    // The default theme renders .classic-bar-col elements
+    await expect(page.locator(".classic-bar-col").first()).toBeVisible({
+      timeout: 5000,
+    });
   });
 
   // Background transparency must hold for ALL families, not just handy —
   // covered regardless of the active theme.
   test("body background is transparent", async ({ page }) => {
     await page.goto("/overlay.html");
-    await page.waitForSelector(".recording-overlay");
+    await page.waitForSelector("[data-testid='theme-host']");
     const bg = await page.evaluate(
       () => window.getComputedStyle(document.body).backgroundColor,
     );
