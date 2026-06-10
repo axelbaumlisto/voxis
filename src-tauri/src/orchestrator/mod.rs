@@ -20,7 +20,7 @@ pub use state::{ErrorContext, RecordingState};
 use crate::audio::AudioRecorder;
 use crate::config::AppConfig;
 use crate::output::OutputHandler;
-use crate::overlay_native::{NoopOverlay, OverlayBackend, ThemeLoaderHandle};
+use crate::overlay_native::{NoopOverlay, OverlayBackend};
 use crate::storage::{self, ConfigSqliteStorage};
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -55,7 +55,6 @@ impl Orchestrator {
         app: AppHandle,
         recorder: Arc<AudioRecorder>,
         output: Arc<OutputHandler>,
-        theme_loader: ThemeLoaderHandle,
     ) -> Self {
         let queue = Arc::new(TranscriptionQueue::new());
         let state = Arc::new(Mutex::new(RecordingState::Idle));
@@ -82,7 +81,7 @@ impl Orchestrator {
             Arc::clone(&overlay),
             polling_cancel,
         );
-        let overlay_manager = OverlayManager::new(app.clone(), overlay, theme_loader);
+        let overlay_manager = OverlayManager::new(app.clone(), overlay);
 
         Self {
             app,

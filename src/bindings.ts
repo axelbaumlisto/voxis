@@ -539,28 +539,6 @@ async previewVisualizationTheme(themeId: string, reloadFromDisk: boolean | null)
 }
 },
 /**
- * Get theme colors for frontend CSS synchronization.
- */
-async getThemeColors(themeId: string) : Promise<ThemeColors> {
-    return await TAURI_INVOKE("get_theme_colors", { themeId });
-},
-/**
- * Get full overlay theme data for the webview overlay (colors + family +
- * organic_ring). Single DTO so the React layer can drive both bar and ring
- * rendering without multiple round-trips.
- */
-async getOverlayThemeData(themeId: string) : Promise<OverlayThemeData> {
-    return await TAURI_INVOKE("get_overlay_theme_data", { themeId });
-},
-/**
- * Get the Handy-pill theme for the named theme id (palette + animation).
- * Falls back to the default Handy pink palette for unknown ids or themes
- * without a `handy_pill` block in `theme.json`. Never errors.
- */
-async getHandyTheme(themeId: string) : Promise<HandyPillTheme> {
-    return await TAURI_INVOKE("get_handy_theme", { themeId });
-},
-/**
  * Read the entry script source for a theme id.
  */
 async readThemeScript(themeId: string) : Promise<Result<string, string>> {
@@ -963,58 +941,6 @@ timestamp: string;
  */
 provider: string }
 /**
- * Thirteen animation knobs.
- * 
- * Three of them (`smoothing_alpha`, `power_curve`, `peak_decay`) drive
- * JS bar math; the remaining surface as `--hp-*` CSS variables.
- */
-export type HandyPillAnimation = { smoothing_alpha: number; power_curve: number; peak_decay: number; bar_min_height_px: number; bar_min_opacity: number; bar_opacity_gain: number; bar_height_ms: number; bar_opacity_ms: number; pill_fade_ms: number; transcribing_pulse_ms: number; 
-/**
- * 0 disables idle breathing; 0.3 is the upper visual bound.
- */
-idle_breathing_amplitude: number; idle_breathing_period_ms: number; cancel_hover_ms: number }
-/**
- * Per-family `bars` configuration. Only consumed by `Family::Bars`
- * themes; ignored for the others. Pulled from `theme.json` block
- * `handy_pill.bars` with fallbacks to the legacy root `gradient` block.
- */
-export type HandyPillBars = { count: number; gradient_bottom: string; gradient_middle: string; gradient_top: string }
-/**
- * Visualisation family — picks which React component renders the pill.
- * Defaults to `Handy` (icon + bars + cancel) when omitted in JSON.
- * 
- * `Bars` — classic Winamp-style spectrum analyzer (full-width, no icon).
- * `OrganicRing` — breathing animated ring (legacy organic_ring rendering).
- * `Handy` — the compact icon + 9-bar + cancel pill ported from upstream.
- */
-export type HandyPillFamily = "bars" | "organic_ring" | "handy"
-/**
- * Six palette colours drive every coloured pixel in the pill UI.
- */
-export type HandyPillPalette = { icon_color: string; bar_color: string; bar_glow: string; shadow: string; transcribing_text: string; cancel_hover_bg: string }
-/**
- * Per-family `ring` configuration. Only consumed by
- * `Family::OrganicRing` themes. Pulled from `theme.json` block
- * `handy_pill.ring` with fallbacks to the legacy root
- * `organic_ring{shape, motion}` block.
- */
-export type HandyPillRing = { gap_degrees: number; base_thickness: number; taper: number; roundness: number; active_zones: number; 
-/**
- * Multiplier for speech-driven jitter (mirrored from
- * legacy `organic_ring.motion.speech_responsiveness`).
- */
-speech_responsiveness: number; 
-/**
- * Hue-drift speed (legacy `organic_ring.motion.drift`).
- */
-drift: number; 
-/**
- * How quickly the ring snaps back to its idle shape after a peak
- * (legacy `organic_ring.motion.settle_speed`).
- */
-settle_speed: number }
-export type HandyPillTheme = { family: HandyPillFamily; palette: HandyPillPalette; animation: HandyPillAnimation; bars: HandyPillBars; ring: HandyPillRing }
-/**
  * History entry for frontend display.
  */
 export type HistoryEntry = { id: number; timestamp: string; text: string; language: string | null; duration: number | null }
@@ -1040,9 +966,6 @@ export type LlmPrompt = { id: string; name: string; prompt: string }
  * An LLM provider configuration.
  */
 export type LlmProvider = { id: string; name: string; api_url: string; models: LlmModel[]; default_model: string; builtin?: boolean }
-export type OrganicRingMotion = { idle_breathing: number; speech_responsiveness: number; drift: number; settle_speed: number }
-export type OrganicRingShape = { gap_degrees: number; base_thickness: number; taper: number; roundness: number; active_zones: number }
-export type OrganicRingTheme = { shape: OrganicRingShape; motion: OrganicRingMotion }
 /**
  * Recording overlay settings.
  */
@@ -1075,15 +998,6 @@ export type OverlayState = "hidden" | "idle" | "recording" | "transcribing" | { 
  */
 export type OverlayState = "hidden" | "idle" | "recording" | "transcribing" | { error: string }
 /**
- * Full theme payload for the webview overlay. Combines colors + family hint
- * + organic_ring shape/motion so the React side has one DTO to consume.
- */
-export type OverlayThemeData = { id: string; name: string; 
-/**
- * `"bars"` | `"organic_ring"`.
- */
-family: string; colors: ThemeColors; organic_ring: OrganicRingTheme | null }
-/**
  * Pending suggestion entry for frontend display.
  */
 export type PendingSuggestion = { id: number; source: string; replacement: string; count: number; first_seen: string; last_seen: string }
@@ -1112,7 +1026,6 @@ export type ShortcutAction = { kind: "transcribe" } | { kind: "transcribe_post_p
  * the UI.
  */
 export type ShortcutBinding = { id: string; name: string; description: string; default_binding: string; current_binding: string; action?: ShortcutAction }
-export type ThemeColors = { use_gradient: boolean; gradient_bottom: string; gradient_middle: string; gradient_top: string; recording: string; transcribing: string; idle: string }
 export type ThemeInfo = { id: string; name: string; description: string }
 export type ThemeManifest = { manifest_version: number; id: string; name: string; description?: string; api_version: number; entry: string }
 export type ThemeTestResult = { valid: boolean; warnings: string[]; errors: string[] }

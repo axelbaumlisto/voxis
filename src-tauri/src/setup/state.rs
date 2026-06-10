@@ -7,13 +7,11 @@ use crate::audio::AudioRecorder;
 use crate::hotkey::HotkeyListener;
 use crate::orchestrator::Orchestrator;
 use crate::output::OutputHandler;
-use crate::overlay_native::ThemeLoaderState;
 use crate::storage;
 use crate::theme_engine::ThemeEngineLoader;
 use crate::{AudioState, HotkeyState, OrchestratorState, OutputState};
 
-/// Theme engine state wrapping the new manifest-v2 loader.
-/// Lives alongside the legacy ThemeLoaderState until Phase 6 deletion.
+/// Theme engine state wrapping the manifest-v2 loader.
 pub struct ThemeEngineState {
     pub loader: Arc<ThemeEngineLoader>,
 }
@@ -121,17 +119,10 @@ pub(super) fn create_app_state(
         loader: Arc::new(theme_engine_loader),
     });
 
-    // Legacy ThemeLoaderState — its constructor calls scan() which calls
-    // ensure_seeded_external_themes(). Since v2 seeding already wrote
-    // theme.json for each builtin, the legacy seeder will skip them.
-    let theme_loader_state = ThemeLoaderState::new(themes_dir.clone());
-    let theme_loader_handle = Arc::clone(&theme_loader_state.handle);
-
     let orchestrator = Arc::new(Orchestrator::new(
         app.handle().clone(),
         Arc::clone(&recorder),
         Arc::clone(&output),
-        theme_loader_handle,
     ));
 
     let hotkey_str = &config.hotkey;
@@ -163,7 +154,6 @@ pub(super) fn create_app_state(
     });
 
     app.manage(HotkeyState { hotkey_listener });
-    app.manage(theme_loader_state);
 
     tracing::debug!("Setup: domain states registered");
     orchestrator
