@@ -128,12 +128,27 @@ pub fn export_theme_dir(loader: &ThemeEngineLoader, theme_id: &str) -> Result<St
     let dest_dir = themes_dir.join(&folder_name);
     std::fs::create_dir_all(&dest_dir).map_err(|e| format!("create dest dir: {e}"))?;
 
-    // Copy all children (theme.json, theme.js, etc.)
+    // Copy all children (theme.json, theme.js, etc.) — skip symlinks for security.
     for entry in std::fs::read_dir(&src_dir).map_err(|e| format!("read src dir: {e}"))? {
         let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
         let src_path = entry.path();
         let fname = entry.file_name();
         let dest_path = dest_dir.join(&fname);
+
+        // Use symlink_metadata to avoid following symlinks — a symlink in a
+        // theme dir could exfiltrate content from outside the themes_dir.
+        let meta = std::fs::symlink_metadata(&src_path)
+            .map_err(|e| format!("stat {fname:?}: {e}"))?;
+        if meta.file_type().is_symlink() {
+            tracing::warn!(
+                "export_theme_dir: skipping symlink {fname:?} in theme {theme_id}"
+            );
+            continue;
+        }
+        if !meta.file_type().is_file() {
+            // Skip directories, sockets, devices, etc.
+            continue;
+        }
         std::fs::copy(&src_path, &dest_path).map_err(|e| format!("copy {fname:?}: {e}"))?;
     }
 
@@ -481,5 +496,27 @@ mod theme_engine_command_tests {
 drop(result);
         let result = loader.validate("missing");
         assert!(!result.valid);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_export_theme_dir_skips_symlinks() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), "abc");
+        // Create a symlink inside the theme dir pointing outside.
+        let outside = tmp.path().join("outside.txt");
+        std::fs::write(&outside, "sensitive").unwrap();
+        std::os::unix::fs::symlink(&outside, tmp.path().join("abc/evil_link")).unwrap();
+
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        loader.scan().unwrap();
+        let new_dir = super::export_theme_dir(&loader, "abc").unwrap();
+        let exported = std::path::Path::new(&new_dir);
+
+        // Regular files should be copied.
+        assert!(exported.join("theme.json").is_file());
+        assert!(exported.join("theme.js").is_file());
+        // The symlink must NOT be copied.
+        assert!(!exported.join("evil_link").exists());
     }
 }
