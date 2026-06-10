@@ -133,6 +133,8 @@ fn build_overlay_window(
     // explicit min_inner_size + max_inner_size to pin the pill to the
     // Handy 172×36 footprint on Linux/GTK which otherwise can ignore
     // size hints for transparent windows.
+    // `mut` is only needed for the debug-only devtools toggle below.
+    #[cfg_attr(not(debug_assertions), allow(unused_mut))]
     let mut builder = tauri::WebviewWindowBuilder::new(
         app,
         label,
