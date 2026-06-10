@@ -86,6 +86,9 @@ impl ThemeEngineLoader {
 
     /// Read the entry-script source for a theme id.
     pub fn read_script(&self, id: &str) -> Result<String, ThemeEngineError> {
+        if !super::manifest::is_safe_path_component(id) {
+            return Err(ThemeEngineError::UnknownTheme(id.to_string()));
+        }
         let manifest = self
             .manifest(id)
             .ok_or_else(|| ThemeEngineError::UnknownTheme(id.to_string()))?;
@@ -95,6 +98,13 @@ impl ThemeEngineLoader {
 
     /// Validate one theme dir; mirrors legacy ThemeTestResult semantics.
     pub fn validate(&self, id: &str) -> ThemeValidation {
+        if !super::manifest::is_safe_path_component(id) {
+            return ThemeValidation {
+                valid: false,
+                warnings: vec![],
+                errors: vec!["invalid theme id".into()],
+            };
+        }
         let dir = self.themes_dir.join(id);
         match Self::load_dir(&dir) {
             Ok(_) => ThemeValidation {
@@ -183,6 +193,27 @@ mod tests {
         let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
         loader.scan().unwrap();
         assert!(loader.read_script("ghost").is_err());
+    }
+
+    #[test]
+    fn test_read_script_rejects_path_traversal_id() {
+        let tmp = TempDir::new().unwrap();
+        // Pre-populate a valid theme so the cache has entries; we must
+        // still reject a traversal id before consulting the cache/path.
+        write_theme(tmp.path(), "safe_theme", "export function mount(){}");
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        loader.scan().unwrap();
+        let result = loader.read_script("../../../etc");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_rejects_path_traversal_id() {
+        let tmp = TempDir::new().unwrap();
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let result = loader.validate("../../../etc");
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.contains("invalid theme id")));
     }
 
     #[test]
