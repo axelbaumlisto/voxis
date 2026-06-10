@@ -19,9 +19,15 @@ pub enum ManifestError {
     BadId(String),
 }
 
-/// Reject empty, slashes, or parent-dir segments — shared by id and entry checks.
+/// Reject empty, slashes, parent-dir segments, ".", or strings containing ':'
+/// (Windows drive-prefix like "C:" has special PathBuf::join semantics).
 pub fn is_safe_path_component(s: &str) -> bool {
-    !s.is_empty() && !s.contains('/') && !s.contains('\\') && !s.contains("..")
+    !s.is_empty()
+        && !s.contains('/')
+        && !s.contains('\\')
+        && !s.contains("..")
+        && s != "."
+        && !s.contains(':')
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -104,6 +110,18 @@ mod tests {
     #[test]
     fn test_reject_empty_id() {
         let bad = valid_json().replace("my_theme", "");
+        assert!(ThemeManifest::parse(&bad).is_err());
+    }
+
+    #[test]
+    fn test_reject_dot_as_id() {
+        let bad = valid_json().replace("my_theme", ".");
+        assert!(ThemeManifest::parse(&bad).is_err());
+    }
+
+    #[test]
+    fn test_reject_drive_prefix_id() {
+        let bad = valid_json().replace("my_theme", "C:");
         assert!(ThemeManifest::parse(&bad).is_err());
     }
 
