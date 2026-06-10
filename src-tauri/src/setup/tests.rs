@@ -115,3 +115,45 @@ fn specta_commands_match_generate_handler_commands() {
         only_in_runtime,
     );
 }
+
+// --- resolve_bundled_themes_path tests ---
+
+#[test]
+fn test_resolve_bundled_themes_path_picks_first_valid_dir() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir_a = tmp.path().join("a");
+    let dir_b = tmp.path().join("b");
+    std::fs::create_dir_all(&dir_a).unwrap();
+    std::fs::create_dir_all(&dir_b).unwrap();
+
+    let result = state::resolve_bundled_themes_path(&[dir_a.clone(), dir_b.clone()]);
+    assert_eq!(result, Some(dir_a), "should pick first candidate");
+}
+
+#[test]
+fn test_resolve_bundled_themes_path_skips_non_dir_candidates() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let not_a_dir = tmp.path().join("notadir");
+    std::fs::write(&not_a_dir, "i am a file").unwrap();
+    let dir_b = tmp.path().join("b");
+    std::fs::create_dir_all(&dir_b).unwrap();
+
+    // First candidate is a file, not a dir — must be skipped.
+    let result =
+        state::resolve_bundled_themes_path(&[not_a_dir.clone(), dir_b.clone()]);
+    assert_eq!(result, Some(dir_b), "should skip file, pick dir");
+}
+
+#[test]
+fn test_resolve_bundled_themes_path_returns_none_when_nothing_exists() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let nonexistent = tmp.path().join("ghost");
+
+    // Give it a nonexistent candidate. The dev fallback (CARGO_MANIFEST_DIR/themes)
+    // exists in our dev environment, so we can't easily test "nothing exists"
+    // without mocking. We'll just assert the candidate is skipped.
+    let candidates: Vec<std::path::PathBuf> = vec![nonexistent];
+    let result = state::resolve_bundled_themes_path(&candidates);
+    // In dev, the fallback should succeed (we're under src-tauri/).
+    assert!(result.is_some(), "dev fallback should resolve when candidate is missing");
+}

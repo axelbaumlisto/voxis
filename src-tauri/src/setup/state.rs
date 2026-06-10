@@ -46,6 +46,29 @@ pub(super) fn migrate_config_if_needed(
     }
 }
 
+/// Resolve the bundled themes directory path.
+///
+/// Tries each candidate in order; the first one that `.is_dir()` wins.
+/// If no candidate passes, falls back to `CARGO_MANIFEST_DIR/themes` (dev).
+/// Returns `None` only if nothing exists.
+///
+/// Extracted as a pure function so it can be unit-tested without an AppHandle.
+pub(crate) fn resolve_bundled_themes_path(
+    candidates: &[std::path::PathBuf],
+) -> Option<std::path::PathBuf> {
+    for candidate in candidates {
+        if candidate.is_dir() {
+            return Some(candidate.clone());
+        }
+    }
+    let dev_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("themes");
+    if dev_path.is_dir() {
+        return Some(dev_path);
+    }
+    None
+}
+
 /// Create and register all shared application state.
 pub(super) fn create_app_state(
     app: &App,
@@ -72,19 +95,16 @@ pub(super) fn create_app_state(
     let theme_engine_loader = ThemeEngineLoader::new(themes_dir.clone());
 
     // Resolve the bundled themes path (prod: resource dir, dev: CARGO_MANIFEST_DIR).
-    let bundle_themes_dir = app
-        .path()
-        .resource_dir()
-        .ok()
-        .map(|r| r.join("themes"))
-        .or_else(|| {
-            let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("themes");
-            if dev_path.exists() {
-                Some(dev_path)
-            } else {
-                None
-            }
-        });
+    let bundle_themes_dir = {
+        let resource_candidate = app
+            .path()
+            .resource_dir()
+            .ok()
+            .map(|r| r.join("themes"));
+        let candidates: Vec<std::path::PathBuf> =
+            resource_candidate.into_iter().collect();
+        resolve_bundled_themes_path(&candidates)
+    };
     if let Some(bundle_dir) = bundle_themes_dir {
         if let Err(e) = theme_engine_loader.seed_from_bundle(&bundle_dir) {
             tracing::warn!("ThemeEngineLoader seed_from_bundle failed: {}", e);
