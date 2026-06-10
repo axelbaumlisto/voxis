@@ -1,10 +1,11 @@
 /**
- * Smoke tests for the ThemeSelect swatch grid (Phase 6).
+ * Smoke tests for the ThemeSelect swatch grid (Phase 7).
+ *
+ * All themes are now code modules (manifest v2); swatches display
+ * placeholder until the Rust theme-engine ships swatch data.
  *
  * Covers:
  *  - Grid renders one swatch per option.
- *  - Bars-family theme renders a `theme-swatch--bars` swatch.
- *  - Organic_ring-family theme renders a `theme-swatch--ring` swatch.
  *  - Clicking a swatch button fires `onChange` with its theme id.
  *  - Selected swatch carries `aria-checked="true"`.
  */

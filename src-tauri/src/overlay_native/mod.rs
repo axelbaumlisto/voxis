@@ -1,5 +1,4 @@
 mod backend;
-pub mod color;
 pub mod nspanel;
 pub mod theme;
 pub mod webview;
