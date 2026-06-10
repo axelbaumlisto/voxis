@@ -3,8 +3,7 @@ import { useTranslation } from "react-i18next";
 import FieldWrapper from "./FieldWrapper";
 import { useVisualizationThemes } from "../../hooks/useVisualizationThemes";
 import { previewVisualizationTheme } from "../../lib/commands";
-import { getBuiltinHandyTheme } from "../../themes/builtinHandyThemes";
-import type { HandyPillTheme } from "../../themes/handy";
+
 
 interface ThemeSelectProps {
   label: string;
@@ -14,119 +13,13 @@ interface ThemeSelectProps {
 }
 
 /**
- * Mini visual swatch (~96×16) for a theme. Renders the family-specific
- * preview:
- *   - bars        → 8 mini gradient bars (top→bottom of palette)
- *   - organic_ring → a small colored ring stub
- *   - handy       → mic dot + 3 mini bars
- *
- * SRP: the swatch only paints. No event handlers, no state.
+ * Mini visual swatch (~96×16) placeholder for a theme.
+ * Formerly rendered family-specific previews (bars/ring/handy) from the
+ * legacy TS pipeline. All themes are now code modules (manifest v2) —
+ * swatch data comes from the Rust theme-engine in a future update.
  */
 function ThemeSwatch({ themeId }: { themeId: string }) {
-  const theme: HandyPillTheme | null = getBuiltinHandyTheme(themeId);
-  if (!theme) {
-    return <span className="theme-swatch theme-swatch--missing" aria-hidden data-testid={`theme-swatch-${themeId}`} />;
-  }
-  const family = theme.family;
-  if (family === "bars") {
-    const g = theme.bars;
-    const grad = `linear-gradient(to top, ${g.gradient_bottom} 0%, ${g.gradient_middle} 50%, ${g.gradient_top} 100%)`;
-    // 8 mini bars with varying heights to suggest spectrum.
-    const heights = [10, 14, 16, 13, 11, 15, 9, 12];
-    return (
-      <span
-        className="theme-swatch theme-swatch--bars"
-        data-testid={`theme-swatch-${themeId}`}
-        style={{
-          display: "inline-flex",
-          alignItems: "end",
-          gap: "1px",
-          height: "16px",
-          width: "96px",
-          padding: "0 2px",
-        }}
-      >
-        {heights.map((h, i) => (
-          <span
-            key={i}
-            style={{
-              flex: "1 1 0",
-              height: `${h}px`,
-              background: grad,
-              borderRadius: "1px",
-            }}
-          />
-        ))}
-      </span>
-    );
-  }
-  if (family === "organic_ring") {
-    // Small open ring (donut shape via border-radius + clip via gap).
-    return (
-      <span
-        className="theme-swatch theme-swatch--ring"
-        data-testid={`theme-swatch-${themeId}`}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "16px",
-          width: "96px",
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            display: "inline-block",
-            width: "14px",
-            height: "14px",
-            borderRadius: "50%",
-            border: `3px solid ${theme.palette.icon_color}`,
-            borderTopColor: "transparent",
-            transform: "rotate(45deg)",
-          }}
-        />
-      </span>
-    );
-  }
-  // family === 'handy' — mic dot + 3 mini bars in palette colors
-  return (
-    <span
-      className="theme-swatch theme-swatch--handy"
-      data-testid={`theme-swatch-${themeId}`}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "3px",
-        height: "16px",
-        width: "96px",
-        padding: "0 2px",
-      }}
-    >
-      <span
-        aria-hidden
-        style={{
-          width: "8px",
-          height: "8px",
-          borderRadius: "50%",
-          background: theme.palette.icon_color,
-        }}
-      />
-      <span style={{ display: "inline-flex", gap: "1px", alignItems: "end" }}>
-        {[8, 12, 10].map((h, i) => (
-          <span
-            key={i}
-            style={{
-              width: "3px",
-              height: `${h}px`,
-              background: theme.palette.bar_color,
-              borderRadius: "1px",
-            }}
-          />
-        ))}
-      </span>
-    </span>
-  );
+  return <span className="theme-swatch theme-swatch--missing" aria-hidden data-testid={`theme-swatch-${themeId}`} />;
 }
 
 function ThemeSelect({ label, description, value, onChange }: ThemeSelectProps) {
