@@ -57,12 +57,15 @@ describe("ThemeSelect (swatch grid)", () => {
     expect(swatch.className).toContain("theme-swatch--missing");
   });
 
-  it("renders a ring swatch for organic_ring family", () => {
+  // Transitional (dies in Phase 6): all 3 ring themes (quiet_reed,
+  // living_reed, drifting_contour) converted to manifest v2 in Task 3.3 —
+  // no legacy ring theme remains; builtinHandyThemes returns null for them.
+  it("renders mission swatch for v2 ring themes (no legacy pipeline)", () => {
     const { getByTestId } = render(
       <ThemeSelect label="Theme" value="winamp_classic" onChange={() => {}} />,
     );
     const swatch = getByTestId("theme-swatch-drifting_contour");
-    expect(swatch.className).toContain("theme-swatch--ring");
+    expect(swatch.className).toContain("theme-swatch--missing");
   });
 
   it("clicking a swatch row calls onChange with its theme id", () => {

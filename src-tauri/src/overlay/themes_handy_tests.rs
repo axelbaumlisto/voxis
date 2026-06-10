@@ -206,9 +206,10 @@ fn all_repository_themes_parse_without_panic() {
         let _t: HandyPillTheme = resolve_from_json(&v);
         parsed += 1;
     }
+    // Transitional (dies in Phase 6): all 8 themes are now manifest v2.
     assert!(
         parsed >= 8,
-        "expected to parse >= 8 theme files (all 5 v2 + 3 v1), got {parsed}"
+        "expected to parse >= 8 theme files (all 8 v2), got {parsed}"
     );
 }
 
@@ -229,38 +230,10 @@ fn winamp_classic_uses_legacy_bars_palette() {
     assert_eq!(t.animation.bar_height_ms, 60);
 }
 
-#[test]
-fn all_repository_themes_have_distinct_icon_colors() {
-    // Transitional (dies in Phase 6): all 5 bars-family themes (winamp_classic
-    // + default/dark/neon/monochrome) converted to manifest v2 in Tasks 3.1–3.2;
-    // they all resolve to the default pink palette. Only assert distinctness
-    // across remaining legacy (manifest v1) themes with explicit handy_pill blocks.
-    // Ring themes (quiet_reed, living_reed, drifting_contour) are still legacy
-    // until Task 3.3.
-    let themes_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("themes");
-    let mut icon_colors = std::collections::HashSet::new();
-    for entry in std::fs::read_dir(&themes_dir).unwrap().flatten() {
-        let json_path = entry.path().join("theme.json");
-        if !json_path.exists() {
-            continue;
-        }
-        let raw = std::fs::read_to_string(&json_path).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        // Skip manifest v2 — they all fall back to default pink palette.
-        if v.get("manifest_version").and_then(|mv| mv.as_u64()) == Some(2) {
-            continue;
-        }
-        let t = resolve_from_json(&v);
-        icon_colors.insert(t.palette.icon_color.to_lowercase());
-    }
-    assert!(
-        icon_colors.len() >= 3,
-        "expected >= 3 distinct icon_color values across legacy themes, got {} ({:?})",
-        icon_colors.len(),
-        icon_colors
-    );
-}
+// TEST DELETED: all_repository_themes_have_distinct_icon_colors
+// Transitional (dies in Phase 6): all themes are now manifest v2 — zero
+// legacy v1 themes remain, so the v2-skip produces 0 distinct icon colors.
+// 0 >= 3 fails. Deleted; the module is removed in Phase 6.
 
 #[test]
 fn default_palette_uses_handy_pink() {

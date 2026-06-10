@@ -652,6 +652,9 @@ impl ThemeLoader {
 
     fn load_theme_json(&self, path: &Path) -> Result<ThemeFile, ThemeLoadError> {
         let content = std::fs::read_to_string(path)?;
+        // Transitional (dies in Phase 6): manifest v2 theme.json files lack the
+        // "colors" field required by ThemeFile, so deserialization naturally
+        // fails and the scan loop silently skips them.
         serde_json::from_str(&content).map_err(|e| ThemeLoadError::Json {
             file: path.display().to_string(),
             source: e,
@@ -969,9 +972,11 @@ mod organic_theme_tests {
 
     #[test]
     fn test_organic_themes_load_from_bundled_json() {
-        // Walks each bundled JSON, parses it via ThemeLoader, and asserts the
-        // resulting VisualizationTheme matches the builtin (single source of
-        // truth — code wins, JSON must match).
+        // Transitional (dies in Phase 6): all 3 ring theme.json files are now
+        // manifest v2, which the legacy ThemeLoader skips. get_theme() falls
+        // back to the Rust builtin, so loaded == builtin (tautological).
+        // The other organic_theme_tests (shape/motion/color distinctness)
+        // still provide real coverage.
         let themes_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("themes");
         let mut loader = ThemeLoader::new(themes_dir);
         loader.scan().expect("scan bundled themes");
