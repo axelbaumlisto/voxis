@@ -29,6 +29,7 @@ pub mod overlay_native;
 pub mod permissions;
 pub mod setup;
 pub mod storage;
+pub mod theme_engine;
 pub mod transcription;
 pub mod tray;
 
