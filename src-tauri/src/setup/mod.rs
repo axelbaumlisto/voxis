@@ -109,6 +109,7 @@ pub fn command_handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 
         commands::overlay::hide_overlay,
         commands::overlay::update_overlay_position,
         commands::overlay::get_overlay_state,
+        commands::overlay::get_current_overlay_theme,
         commands::overlay::get_visualization_themes,
         commands::overlay::validate_visualization_theme,
         commands::overlay::get_themes_dir,

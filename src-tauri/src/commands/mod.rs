@@ -59,7 +59,7 @@ pub use suggestions::{
 };
 
 // Overlay
-pub use overlay::{get_overlay_state, hide_overlay, show_overlay, update_overlay_position};
+pub use overlay::{get_current_overlay_theme, get_overlay_state, hide_overlay, show_overlay, update_overlay_position};
 
 // Recording
 pub use recording::{

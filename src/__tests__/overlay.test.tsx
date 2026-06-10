@@ -32,6 +32,7 @@ const readThemeScriptMock = vi.fn().mockResolvedValue({
 const getThemeManifestMock = vi.fn().mockResolvedValue(null);
 const cancelOperationMock = vi.fn().mockResolvedValue({ status: "ok", data: null });
 const debugLogOverlayMock = vi.fn().mockResolvedValue(undefined);
+const getCurrentOverlayThemeMock = vi.fn().mockResolvedValue("default");
 
 vi.mock("../bindings", () => ({
   commands: {
@@ -39,6 +40,7 @@ vi.mock("../bindings", () => ({
     getThemeManifest: (...args: unknown[]) => getThemeManifestMock(...args),
     cancelOperation: (...args: unknown[]) => cancelOperationMock(...args),
     debugLogOverlay: (...args: unknown[]) => debugLogOverlayMock(...args),
+    getCurrentOverlayTheme: (...args: unknown[]) => getCurrentOverlayThemeMock(...args),
   },
 }));
 

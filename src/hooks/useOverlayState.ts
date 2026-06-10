@@ -171,6 +171,19 @@ export function useOverlayState(): OverlaySnapshot {
       if (themeId) dispatch({ type: "theme", themeId });
     });
 
+    // Pull current theme after subscribing (race-condition fix).
+    // The backend emits overlay://theme immediately after webview creation;
+    // if that event fired before our JS listener was registered we would
+    // silently fall back to DEFAULT_THEME until the next theme change.
+    // This pull-after-subscribe pattern ensures we always catch the initial
+    // value. The live listener still wins for later changes (reducer dedups).
+    void bindings
+      .getCurrentOverlayTheme()
+      .then((themeId: string) => {
+        if (!cancelled && themeId) dispatch({ type: "theme", themeId });
+      })
+      .catch(() => {});
+
     return () => {
       cancelled = true;
       for (const unlisten of unlistens) {

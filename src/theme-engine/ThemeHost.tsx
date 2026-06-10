@@ -60,6 +60,7 @@ export default function ThemeHost({
   // (Re)mount on themeId change.
   useEffect(() => {
     let cancelled = false;
+    const listeners = listenersRef.current;
 
     const mountModule = (mod: ThemeModule) => {
       const container = containerRef.current;
@@ -70,13 +71,13 @@ export default function ThemeHost({
         params: params ?? null,
         size: { width, height },
         onState(cb) {
-          listenersRef.current.add(cb);
+          listeners.add(cb);
           try {
             cb(stateRef.current);
           } catch (err) {
             console.error("[ThemeHost] initial onState push threw:", err);
           }
-          return () => listenersRef.current.delete(cb);
+          return () => listeners.delete(cb);
         },
         actions: { cancel: onCancel },
       };
@@ -99,7 +100,7 @@ export default function ThemeHost({
 
     return () => {
       cancelled = true;
-      listenersRef.current.clear();
+      listeners.clear();
       try {
         instanceRef.current?.unmount();
       } catch (err) {

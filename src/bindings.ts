@@ -471,6 +471,14 @@ async getOverlayState() : Promise<OverlayState> {
     return await TAURI_INVOKE("get_overlay_state");
 },
 /**
+ * Get the currently configured overlay theme id (pull-after-subscribe).
+ * Frontend calls this after subscribing to overlay://theme so it never
+ * misses the initial event if it fired before the webview JS was ready.
+ */
+async getCurrentOverlayTheme() : Promise<string> {
+    return await TAURI_INVOKE("get_current_overlay_theme");
+},
+/**
  * Get all available visualization themes.
  * NOTE: this command reads from the *user* config themes dir (seeded by
  * Task 4.3 at startup). If seeding hasn't run yet (e.g. first launch before

@@ -5,7 +5,7 @@ use crate::overlay_native::{
     ThemeColors, ThemeInfo, ThemeLoaderState, ThemeTestResult, VisualizationTheme,
 };
 use crate::setup::ThemeEngineState;
-use crate::storage::AppPaths;
+use crate::storage::{AppPaths, StorageFactory};
 use crate::theme_engine::{ThemeEngineLoader, ThemeManifest};
 use crate::OrchestratorState;
 use tauri::AppHandle;
@@ -44,6 +44,19 @@ pub fn get_overlay_state() -> OverlayState {
     let state = overlay::get_current_state();
     tracing::info!("get_overlay_state called, returning: {:?}", state);
     state
+}
+
+/// Get the currently configured overlay theme id (pull-after-subscribe).
+/// Frontend calls this after subscribing to overlay://theme so it never
+/// misses the initial event if it fired before the webview JS was ready.
+#[tauri::command]
+#[specta::specta]
+pub fn get_current_overlay_theme(paths: State<'_, AppPaths>) -> String {
+    let factory = StorageFactory::new(paths.inner().clone());
+    let config = factory.config().load().unwrap_or_default();
+    let theme_id = config.overlay.theme;
+    tracing::info!("get_current_overlay_theme called, returning: {theme_id}");
+    theme_id
 }
 
 /// Get all available visualization themes.

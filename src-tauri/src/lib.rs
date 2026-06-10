@@ -130,6 +130,7 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
         crate::commands::overlay::hide_overlay,
         crate::commands::overlay::update_overlay_position,
         crate::commands::overlay::get_overlay_state,
+        crate::commands::overlay::get_current_overlay_theme,
         crate::commands::overlay::get_visualization_themes,
         crate::commands::overlay::validate_visualization_theme,
         crate::commands::overlay::get_themes_dir,

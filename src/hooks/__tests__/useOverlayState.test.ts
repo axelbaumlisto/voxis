@@ -23,6 +23,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 // Import AFTER mock is registered.
 import { useOverlayState } from "../useOverlayState";
+import { commands as bindings } from "../../bindings";
 
 function emit(event: string, payload: unknown) {
   const handler = handlers.get(event);
@@ -42,10 +43,13 @@ describe("useOverlayState", () => {
       unlistens.set(event, unlisten);
       return unlisten;
     });
+    // suppress real command calls inside the hook
+    vi.spyOn(bindings, "debugLogOverlay").mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     listenMock.mockReset();
+    vi.restoreAllMocks();
   });
 
   it("returns sensible defaults before any events arrive", () => {
@@ -173,5 +177,17 @@ describe("useOverlayState", () => {
     });
     // Defaults preserved, no throw.
     expect(result.current.mode).toBe("idle");
+  });
+
+  it("pulls initial theme from backend after subscribe (race-condition fix)", async () => {
+    const spy = vi.spyOn(bindings, "getCurrentOverlayTheme").mockResolvedValueOnce("living_reed");
+    const { result } = renderHook(() => useOverlayState());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // After subscribe + pull, themeId must be the backend value.
+    expect(spy).toHaveBeenCalled();
+    expect(result.current.themeId).toBe("living_reed");
+    spy.mockRestore();
   });
 });
