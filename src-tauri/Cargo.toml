@@ -115,6 +115,9 @@ tauri = { version = "2", features = ["tray-icon", "devtools", "macos-private-api
 x11 = { version = "2.21", features = ["xlib"] }
 # XKB extension for layout switching (fix punctuation on Russian layout)
 x11rb = { version = "0.13", features = ["xkb"] }
+# WebKitGTK minimum-size lift (Tauri upstream #6125 — 200×200 hardcoded)
+webkit2gtk = "2.0.2"
+gtk = "0.18.2"
 
 [dev-dependencies]
 tempfile = "3"
