@@ -1167,4 +1167,18 @@ describe("createCellRenderer", () => {
     r.destroy();
     expect(container.children.length).toBe(0);
   });
+
+  it("renders with cilia + startle + growth params without throwing", () => {
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: 172, height: 36,
+      params: { ciliaCount: 20, startleSensitivity: 3, growthSwell: 0.3 },
+    });
+    expect(() => {
+      r.update({ mode: "recording", audioLevel: 0.9, spectrumBins: new Array(32).fill(0.7) });
+      r.update({ mode: "recording", audioLevel: 0.1, spectrumBins: new Array(32).fill(0.1) });
+    }).not.toThrow();
+    r.destroy();
+    expect(container.innerHTML).toBe("");
+  });
 });
