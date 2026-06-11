@@ -1,4 +1,4 @@
-// src/theme-engine/renderers/cell.ts
+// src/theme-engine/renderers/shared.ts
 var PERM = [
   151,
   160,
@@ -294,6 +294,49 @@ function fbm(x, y, octaves, lacunarity, gain) {
   }
   return value / maxValue;
 }
+function catmullRom(points, segmentsPerSpan) {
+  const n = points.length;
+  if (n < 2)
+    return [...points];
+  const result = [];
+  const segment = (p0, p1, p2, p3, steps) => {
+    for (let i = 0;i < steps; i++) {
+      const t = i / steps;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const x = 0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3);
+      const y = 0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3);
+      result.push([x, y]);
+    }
+  };
+  for (let i = 0;i < n; i++) {
+    const p0 = points[(i - 1 + n) % n];
+    const p1 = points[i];
+    const p2 = points[(i + 1) % n];
+    const p3 = points[(i + 2) % n];
+    segment(p0, p1, p2, p3, segmentsPerSpan);
+  }
+  return result;
+}
+function integrateDeformation(prevDeform, targetDeform, attack, release) {
+  const a = Math.max(0, Math.min(1, attack));
+  const r = Math.max(0, Math.min(1, release));
+  const n = prevDeform.length;
+  const result = new Array(n);
+  for (let i = 0;i < n; i++) {
+    const prev = prevDeform[i];
+    const tgt = targetDeform[i];
+    const rate = Math.abs(tgt) >= Math.abs(prev) ? a : r;
+    result[i] = prev + (tgt - prev) * rate;
+  }
+  return result;
+}
+function hsla(h, s, l, a) {
+  return `hsla(${h},${Math.round(s * 100)}%,${Math.round(l * 100)}%,${a})`;
+}
+var TAU = Math.PI * 2;
+
+// src/theme-engine/renderers/cell.ts
 var CELL_DEFAULTS = {
   noiseScale: 0.9,
   octaves: 4,
@@ -321,7 +364,6 @@ var CELL_DEFAULTS = {
   nucleusDrift: 0.12,
   nucleusAlpha: 0.55
 };
-var TAU = Math.PI * 2;
 function cellEnergy(mode, audioLevel, t, idle, levelGain) {
   switch (mode) {
     case "idle":
@@ -383,43 +425,6 @@ function buildTargetDeformation(width, height, bins, t, audioLevel, energy, para
   }
   return out;
 }
-function integrateDeformation(prevDeform, targetDeform, attack, release) {
-  const a = Math.max(0, Math.min(1, attack));
-  const r = Math.max(0, Math.min(1, release));
-  const n = prevDeform.length;
-  const result = new Array(n);
-  for (let i = 0;i < n; i++) {
-    const prev = prevDeform[i];
-    const tgt = targetDeform[i];
-    const rate = Math.abs(tgt) >= Math.abs(prev) ? a : r;
-    result[i] = prev + (tgt - prev) * rate;
-  }
-  return result;
-}
-function catmullRom(points, segmentsPerSpan) {
-  const n = points.length;
-  if (n < 2)
-    return [...points];
-  const result = [];
-  const segment = (p0, p1, p2, p3, steps) => {
-    for (let i = 0;i < steps; i++) {
-      const t = i / steps;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      const x = 0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3);
-      const y = 0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3);
-      result.push([x, y]);
-    }
-  };
-  for (let i = 0;i < n; i++) {
-    const p0 = points[(i - 1 + n) % n];
-    const p1 = points[i];
-    const p2 = points[(i + 1) % n];
-    const p3 = points[(i + 2) % n];
-    segment(p0, p1, p2, p3, segmentsPerSpan);
-  }
-  return result;
-}
 function nucleusTransform(t, audioLevel, baseR, params) {
   const rawCx = baseR * params.nucleusWander * noise2D(137, t * params.nucleusDrift);
   const rawCy = baseR * params.nucleusWander * noise2D(241, t * params.nucleusDrift);
@@ -444,9 +449,6 @@ function nucleusTransform(t, audioLevel, baseR, params) {
     cy = rawCy * scale;
   }
   return { cx, cy, r };
-}
-function hsla(h, s, l, a) {
-  return `hsla(${h},${Math.round(s * 100)}%,${Math.round(l * 100)}%,${a})`;
 }
 function createCellRenderer(container, opts) {
   const params = { ...CELL_DEFAULTS, ...opts.params ?? {} };
