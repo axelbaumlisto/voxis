@@ -16,11 +16,12 @@ export default function HarnessApp() {
   const [bg, setBg] = useState("#111");
   const [paramsText, setParamsText] = useState("{}");
   const [running, setRunning] = useState<string | null>(null);
+  const [animate, setAnimate] = useState(true);
   const [frame, setFrame] = useState(0);
 
   // rAF advances frame when animating or a scenario runs.
   useEffect(() => {
-    if (!running) return;
+    if (!animate && !running) return;
     let id: number;
     const tick = () => {
       setFrame((f) => f + 1);
@@ -28,7 +29,7 @@ export default function HarnessApp() {
     };
     id = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(id);
-  }, [running]);
+  }, [animate, running]);
 
   const { parsedParams, paramsError } = useMemo(() => {
     try {
@@ -135,6 +136,8 @@ export default function HarnessApp() {
         style={{ marginBottom: 4 }}
       />
       <span style={{ marginLeft: 8, fontSize: 13 }}>{level.toFixed(2)}</span>
+
+      <label style={{ display: "block", margin: "8px 0 4px", fontSize: 13 }}>Animate <input type="checkbox" aria-label="Animate" checked={animate} onChange={e => setAnimate(e.target.checked)} /></label>
 
       {/* Scale */}
       <label style={{ display: "block", margin: "8px 0 4px", fontSize: 13 }} htmlFor="scale-slider">
