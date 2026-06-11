@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   RADIOLARIAN_DEFAULTS, radiolarianEnergy, shellRadius,
-  spikeEndpoints, poreLattice, growthLevel,
+  spikeEndpoints, poreLattice,
   createRadiolarianRenderer,
 } from "../radiolarian";
+import { growthLevel } from "../shared";
 
 const P = RADIOLARIAN_DEFAULTS;
 
