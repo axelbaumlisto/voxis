@@ -223,6 +223,28 @@ export function pseudopodOffset(
 }
 
 /**
+ * Startle reflex magnitude (the cell "darts" on a sharp audio onset).
+ *
+ * Detects a rising edge as (level - baseline) scaled by `sensitivity`; the new
+ * magnitude is the MAX of the decayed previous magnitude and this fresh edge,
+ * so a jolt rises instantly and then springs back via `decay` (per-frame factor
+ * in [0,1], e.g. 0.85). Clamped to [0,1]. Pure & deterministic.
+ *
+ * The renderer converts magnitude → a small (dx,dy) using a noise-chosen angle.
+ */
+export function startleOffset(
+  prevMag: number,
+  level: number,
+  baseline: number,
+  sensitivity: number,
+  decay: number,
+): number {
+  const edge = Math.max(0, (level - baseline) * sensitivity);
+  const decayed = prevMag * Math.max(0, Math.min(1, decay));
+  return Math.max(0, Math.min(1, Math.max(decayed, edge)));
+}
+
+/**
  * Iridescent hue at a given angle and time.
  *
  * Hue shifts around the contour (angle-dependent), drifts subtly with time

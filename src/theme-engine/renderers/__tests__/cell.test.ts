@@ -12,6 +12,7 @@ import {
   cellEnergy,
   cellRadius,
   pseudopodOffset,
+  startleOffset,
   iridescentHue,
   lowpassRadii,
   catmullRom,
@@ -878,6 +879,36 @@ describe("nucleusTransform", () => {
     // With baseR=0, safeInner=0 so cx,cy must be 0 and r clamped to 0.
     expect(n.cx).toBe(0);
     expect(n.cy).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// startleOffset
+// ---------------------------------------------------------------------------
+
+describe("startleOffset", () => {
+  // startleOffset(prevMag, level, baseline, sensitivity, decay) -> newMag in [0,1]
+  it("fires on a sharp rising edge (level >> baseline)", () => {
+    const m = startleOffset(0, 0.9, 0.1, 2.0, 0.85);
+    expect(m).toBeGreaterThan(0.3); // a jolt was triggered
+  });
+  it("does not fire when level ~ baseline (steady sound)", () => {
+    const m = startleOffset(0, 0.5, 0.5, 2.0, 0.85);
+    expect(m).toBeLessThan(0.05);
+  });
+  it("decays toward 0 when no new edge", () => {
+    const m = startleOffset(1.0, 0.2, 0.2, 2.0, 0.85);
+    expect(m).toBeLessThan(1.0);
+    expect(m).toBeGreaterThan(0.5); // decay 0.85 → keeps 85%
+  });
+  it("clamps to [0,1] and never negative", () => {
+    expect(startleOffset(0, 5, 0, 10, 0.9)).toBeLessThanOrEqual(1);
+    expect(startleOffset(0, 0, 1, 2, 0.9)).toBeGreaterThanOrEqual(0);
+  });
+  it("takes the max of decayed-previous and new-edge (sustained startle holds)", () => {
+    // strong previous, weak edge → stays high via decay, not reset by edge
+    const m = startleOffset(0.9, 0.3, 0.3, 2.0, 0.9);
+    expect(m).toBeCloseTo(0.81, 1); // 0.9 * 0.9 decay
   });
 });
 
