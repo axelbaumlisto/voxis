@@ -311,6 +311,12 @@ function hsla(h, s, l, a) {
   return `hsla(${h},${Math.round(s * 100)}%,${Math.round(l * 100)}%,${a})`;
 }
 var TAU = Math.PI * 2;
+function growthLevel(prevGrowth, audioLevel, mode, attack, release) {
+  const target = mode === "recording" ? Math.max(0, Math.min(1, audioLevel)) : 0;
+  const rate = target >= prevGrowth ? attack : release;
+  const raw = prevGrowth + (target - prevGrowth) * rate;
+  return Math.max(0, Math.min(1, raw));
+}
 
 // src/theme-engine/renderers/radiolarian.ts
 var RADIOLARIAN_DEFAULTS = {
@@ -347,12 +353,6 @@ function radiolarianEnergy(mode, audioLevel, t, params) {
     default:
       return params.idle;
   }
-}
-function growthLevel(prevGrowth, audioLevel, mode, attack, release) {
-  const target = mode === "recording" ? Math.max(0, Math.min(1, audioLevel)) : 0;
-  const rate = target >= prevGrowth ? attack : release;
-  const raw = prevGrowth + (target - prevGrowth) * rate;
-  return Math.max(0, Math.min(1, raw));
 }
 function shellRadius(angle, t, energy, growth, params) {
   const wedge = TAU / params.symmetry;
