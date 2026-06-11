@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   noise2D, fbm, catmullRom, lowpassRadii, integrateDeformation, hsla, TAU,
+  growthLevel,
 } from "../shared";
 
 describe("shared primitives", () => {
@@ -39,4 +40,28 @@ describe("shared primitives", () => {
     expect(hsla(120, 0.5, 0.6, 0.8)).toBe("hsla(120,50%,60%,0.8)");
   });
   it("TAU is two pi", () => { expect(TAU).toBeCloseTo(Math.PI * 2); });
+});
+
+describe("growthLevel", () => {
+  it("rises fast (attack) toward audio during recording", () => {
+    const g = growthLevel(0, 1.0, "recording", 0.5, 0.01);
+    expect(g).toBeCloseTo(0.5); // moved halfway in one step at attack 0.5
+  });
+  it("falls slowly (release) toward 0 in silence", () => {
+    const g = growthLevel(1.0, 0, "idle", 0.5, 0.01);
+    expect(g).toBeGreaterThan(0.98); // barely shrinks at release 0.01
+  });
+  it("attack faster than release", () => {
+    const up = growthLevel(0, 1, "recording", 0.4, 0.02);
+    const down = growthLevel(1, 0, "recording", 0.4, 0.02);
+    expect(up).toBeGreaterThan(1 - down);
+  });
+  it("clamps to [0,1]", () => {
+    expect(growthLevel(0, 5, "recording", 1, 1)).toBeLessThanOrEqual(1);
+    expect(growthLevel(0, -5, "recording", 1, 1)).toBeGreaterThanOrEqual(0);
+  });
+  it("target is 0 outside recording (transcribing/idle/error)", () => {
+    expect(growthLevel(0.5, 1, "transcribing", 0.5, 0.5)).toBeLessThan(0.5);
+    expect(growthLevel(0.5, 1, "idle", 0.5, 0.5)).toBeLessThan(0.5);
+  });
 });

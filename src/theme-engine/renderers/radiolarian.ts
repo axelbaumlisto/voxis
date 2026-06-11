@@ -8,7 +8,7 @@
  * during silence. Built on the shared math primitives (noise/fbm/spline) —
  * SRP: only radiolarian geometry + drawing live here.
  */
-import { fbm, hsla, integrateDeformation, noise2D, TAU } from "./shared";
+import { fbm, growthLevel, hsla, integrateDeformation, noise2D, TAU } from "./shared";
 import type { ThemeMode, ThemeState } from "../contract";
 import type { Renderer } from "./types";
 
@@ -108,27 +108,7 @@ export function radiolarianEnergy(
   }
 }
 
-/**
- * Biological growth accumulator — asymmetric attack/release toward a target.
- *
- * During recording the target is `audioLevel`; during idle/transcribing the
- * target is 0. The organism rises quickly (attack) while the user speaks and
- * slowly shrinks (release) during silence. Clamped to [0, 1].
- *
- * Pure function — callers must persist `prevGrowth` across frames.
- */
-export function growthLevel(
-  prevGrowth: number,
-  audioLevel: number,
-  mode: ThemeMode,
-  attack: number,
-  release: number,
-): number {
-  const target = mode === "recording" ? Math.max(0, Math.min(1, audioLevel)) : 0;
-  const rate = target >= prevGrowth ? attack : release;
-  const raw = prevGrowth + (target - prevGrowth) * rate;
-  return Math.max(0, Math.min(1, raw));
-}
+/** Energy: idle breathing blended with audio activity, clamped to [0,1]. */
 
 /**
  * Shell radius fraction at a given angle. N-fold symmetric: FBM is sampled on

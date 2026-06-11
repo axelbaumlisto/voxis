@@ -6,6 +6,8 @@
  * DRY: consumed by cell.ts (amoeba) and radiolarian.ts (glass shell) alike.
  */
 
+import type { ThemeMode } from "../contract";
+
 // ---------------------------------------------------------------------------
 // Noise tables — deterministic, self-contained
 // ---------------------------------------------------------------------------
@@ -253,3 +255,25 @@ export function hsla(h: number, s: number, l: number, a: number): string {
 // ---------------------------------------------------------------------------
 
 export const TAU = Math.PI * 2;
+
+// ---------------------------------------------------------------------------
+// Biological growth accumulator
+// ---------------------------------------------------------------------------
+
+/**
+ * Asymmetric growth accumulator: rises toward `audioLevel` during recording
+ * at `attack` (fast), relaxes toward 0 otherwise at `release` (slow). Clamped
+ * to [0,1]. Organism-agnostic — used by both cell and radiolarian.
+ */
+export function growthLevel(
+  prevGrowth: number,
+  audioLevel: number,
+  mode: ThemeMode,
+  attack: number,
+  release: number,
+): number {
+  const target = mode === "recording" ? Math.max(0, Math.min(1, audioLevel)) : 0;
+  const rate = target >= prevGrowth ? attack : release;
+  const raw = prevGrowth + (target - prevGrowth) * rate;
+  return Math.max(0, Math.min(1, raw));
+}
