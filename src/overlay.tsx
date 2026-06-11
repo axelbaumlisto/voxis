@@ -61,7 +61,7 @@ export function OverlayApp() {
     spectrumBins: snapshot.spectrumBins,
   };
 
-  const pressRef = useRef(
+  const [press] = useState(() =>
     createPressController({
       onStart: () => void commands.manualStartRecording(),
       onStop: () => void commands.manualStopRecording(),
@@ -71,26 +71,32 @@ export function OverlayApp() {
 
   // Attach native pointer listeners via ref so dispatchEvent(new Event("pointerdown"))
   // works in jsdom tests (React synthetic handlers may not fire for bare Event).
+  // setPointerCapture keeps the pill receiving move/up events even if the finger
+  // slides off — critical for the tiny 172×36 overlay. Guarded for jsdom (no capture API).
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
-    const onDown = () => pressRef.current.press();
-    const onUp = () => pressRef.current.release();
-    const onCancel = () => pressRef.current.release();
-    const onLeave = () => pressRef.current.release();
+    const onDown = (e: Event) => {
+      const pe = e as PointerEvent;
+      if (el && typeof el.setPointerCapture === "function" && pe.pointerId !== undefined) {
+        try { el.setPointerCapture(pe.pointerId); } catch { /* noop: jsdom lacks setPointerCapture */ }
+      }
+      press.press();
+    };
+    const onUp = () => press.release();
+    const onCancel = () => press.release();
     const onCtx = (e: Event) => e.preventDefault();
     el.addEventListener("pointerdown", onDown);
     el.addEventListener("pointerup", onUp);
     el.addEventListener("pointercancel", onCancel);
-    el.addEventListener("pointerleave", onLeave);
     el.addEventListener("contextmenu", onCtx);
     return () => {
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("pointerup", onUp);
       el.removeEventListener("pointercancel", onCancel);
-      el.removeEventListener("pointerleave", onLeave);
       el.removeEventListener("contextmenu", onCtx);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- press is stable (useState lazy init)
   }, []);
 
   return (
