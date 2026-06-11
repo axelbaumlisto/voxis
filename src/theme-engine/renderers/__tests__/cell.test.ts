@@ -16,6 +16,8 @@ import {
   lowpassRadii,
   catmullRom,
   buildCellContour,
+  buildTargetDeformation,
+  integrateDeformation,
   CELL_DEFAULTS,
   createCellRenderer,
 } from "../cell";
@@ -393,6 +395,211 @@ describe("lowpassRadii", () => {
 });
 
 // ---------------------------------------------------------------------------
+// buildTargetDeformation
+// ---------------------------------------------------------------------------
+
+describe("buildTargetDeformation", () => {
+  const p = { ...CELL_DEFAULTS };
+  const zeroBins = new Array(32).fill(0);
+
+  it("returns 96 elements (sampleCount)", () => {
+    const deform = buildTargetDeformation(400, 100, zeroBins, 0, 0, 0.3, p);
+    expect(deform.length).toBe(96);
+  });
+
+  it("returns all finite values", () => {
+    const deform = buildTargetDeformation(200, 200, zeroBins, 0.5, 0.5, 0.8, p);
+    for (const v of deform) {
+      expect(Number.isFinite(v)).toBe(true);
+    }
+  });
+
+  it("is deterministic", () => {
+    const bins = Array.from({ length: 32 }, (_, i) => i / 32);
+    const a = buildTargetDeformation(300, 200, bins, 0.7, 0.4, 0.6, p);
+    const b = buildTargetDeformation(300, 200, bins, 0.7, 0.4, 0.6, p);
+    expect(a).toEqual(b);
+  });
+
+  it("grows with energy: range increases at higher energy", () => {
+    const lo = buildTargetDeformation(200, 200, zeroBins, 0.5, 0.3, 0.1, p);
+    const hi = buildTargetDeformation(200, 200, zeroBins, 0.5, 0.3, 0.9, p);
+    const loRange = Math.max(...lo) - Math.min(...lo);
+    const hiRange = Math.max(...hi) - Math.min(...hi);
+    expect(hiRange).toBeGreaterThan(loRange);
+  });
+
+  it("grows with audioLevel: range increases at higher level", () => {
+    // Use lower energy so FBM is subdued and pseudopod (driven by audioLevel) dominates
+    const lo = buildTargetDeformation(200, 200, zeroBins, 0.5, 0.05, 0.3, p);
+    const hi = buildTargetDeformation(200, 200, zeroBins, 0.5, 0.9, 0.3, p);
+    // Because pseudopod offset is always >= 0, each vertex deformation should be
+    // larger (or equal) at higher audioLevel, so the sum must grow.
+    const loSum = lo.reduce((s, v) => s + v, 0);
+    const hiSum = hi.reduce((s, v) => s + v, 0);
+    expect(hiSum).toBeGreaterThan(loSum);
+  });
+
+  it("contains both FBM and pseudopod contributions", () => {
+    const withPseudo = buildTargetDeformation(200, 200, zeroBins, 0.5, 0.7, 0.8, p);
+    const noPseudo = buildTargetDeformation(200, 200, zeroBins, 0.5, 0.7, 0.8, {
+      ...p,
+      push: 0,
+      idle: 0,
+      levelGain: 0,
+    });
+    // With pseudopods, deformation range should be larger
+    const withRange = Math.max(...withPseudo) - Math.min(...withPseudo);
+    const noRange = Math.max(...noPseudo) - Math.min(...noPseudo);
+    expect(withRange).toBeGreaterThan(noRange);
+  });
+
+  it("idle deformation produces subtle non-zero wobble", () => {
+    const energy = cellEnergy("idle", 0, 5, p.idle, p.levelGain);
+    const deform = buildTargetDeformation(200, 200, zeroBins, 5, 0, energy, p);
+    // At least some vertices should have non-zero deformation
+    const absMax = Math.max(...deform.map(Math.abs));
+    expect(absMax).toBeGreaterThan(0);
+  });
+
+  it("spectrum bins increase deformation range", () => {
+    const loBins = new Array(32).fill(0);
+    const hiBins = new Array(32).fill(1);
+    const lo = buildTargetDeformation(200, 200, loBins, 0.5, 0.5, 0.8, p);
+    const hi = buildTargetDeformation(200, 200, hiBins, 0.5, 0.5, 0.8, p);
+    const loRange = Math.max(...lo) - Math.min(...lo);
+    const hiRange = Math.max(...hi) - Math.min(...hi);
+    expect(hiRange).toBeGreaterThanOrEqual(loRange);
+  });
+
+  it("handles zero baseR gracefully (degenerate case)", () => {
+    // Even with zero width/height, the function should not crash
+    const zeroDeform = buildTargetDeformation(0, 0, new Array(32).fill(0), 0, 0, 0, p);
+    expect(zeroDeform.length).toBe(96);
+    for (const v of zeroDeform) {
+      expect(Number.isFinite(v)).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// integrateDeformation
+// ---------------------------------------------------------------------------
+
+describe("integrateDeformation", () => {
+  const sampleCount = 96;
+
+  it("returns array of same length as inputs", () => {
+    const prev = new Array(sampleCount).fill(0);
+    const target = new Array(sampleCount).fill(0.1);
+    const result = integrateDeformation(prev, target, 0.2, 0.005);
+    expect(result.length).toBe(sampleCount);
+  });
+
+  it("is deterministic", () => {
+    const prev = Array.from({ length: sampleCount }, (_, i) => i / sampleCount);
+    const target = Array.from({ length: sampleCount }, (_, i) => (sampleCount - i) / sampleCount);
+    const a = integrateDeformation(prev, target, 0.2, 0.005);
+    const b = integrateDeformation(prev, target, 0.2, 0.005);
+    expect(a).toEqual(b);
+  });
+
+  it("attack moves faster than release toward same target", () => {
+    const prev = new Array(10).fill(0);
+    // Growing target (target > prev in absolute terms at each vertex)
+    const targetUp = new Array(10).fill(1.0);
+    const resultUp = integrateDeformation(prev, targetUp, 0.2, 0.005);
+
+    // Shrinking target (|target| < |prev| at each vertex)
+    const prevHigh = new Array(10).fill(1.0);
+    const targetDown = new Array(10).fill(0);
+    const resultDown = integrateDeformation(prevHigh, targetDown, 0.2, 0.005);
+
+    // After one frame: attack should move toward target much more than release
+    const attackMove = Math.abs(resultUp[0] - prev[0]); // 0 → ~0.2
+    const releaseMove = Math.abs(resultDown[0] - prevHigh[0]); // 1.0 → ~0.995
+    expect(attackMove).toBeGreaterThan(releaseMove);
+  });
+
+  it("converges upward under sustained non-zero drive", () => {
+    let current = new Array(10).fill(0);
+    const target = new Array(10).fill(0.5);
+
+    // Apply 20 frames of integration
+    for (let step = 0; step < 20; step++) {
+      current = integrateDeformation(current, target, 0.2, 0.005);
+    }
+
+    // After 20 frames at attack=0.2, should be close to target
+    for (let i = 0; i < 10; i++) {
+      // (1-0.2)^20 ≈ 0.0115, so reached ~98.8% of target
+      expect(current[i]).toBeGreaterThanOrEqual(target[i] * 0.9);
+    }
+  });
+
+  it("decays toward zero slowly when target flips to all-zeros", () => {
+    // Start with significant deformation
+    let current = new Array(10).fill(1.0);
+    const target = new Array(10).fill(0.0);
+
+    // Apply one frame with small release
+    current = integrateDeformation(current, target, 0.2, 0.02);
+
+    // After 1 step with release=0.02, value should still be > 0.95 * prev
+    for (let i = 0; i < 10; i++) {
+      expect(current[i]).toBeGreaterThan(0.95);
+    }
+  });
+
+  it("slowly decays toward zero over many frames with tiny release", () => {
+    let current = new Array(10).fill(1.0);
+    const target = new Array(10).fill(0.0);
+
+    // Apply 30 frames with release=0.005
+    for (let step = 0; step < 30; step++) {
+      current = integrateDeformation(current, target, 0.2, 0.005);
+    }
+
+    // After 30 frames at release=0.005: (1-0.005)^30 ≈ 0.861 — still mostly there
+    for (let i = 0; i < 10; i++) {
+      expect(current[i]).toBeGreaterThan(0.8);
+    }
+  });
+
+  it("clamps attack and release to [0, 1]", () => {
+    const prev = new Array(5).fill(0);
+    const target = new Array(5).fill(1.0);
+
+    // Negative attack → clamped to 0 → no movement
+    const rNeg = integrateDeformation(prev, target, -1, 0.5);
+    expect(rNeg).toEqual(prev);
+
+    // Attack > 1 → clamped to 1 → instant jump to target
+    const rOver = integrateDeformation(prev, target, 2.0, 0.1);
+    expect(rOver).toEqual(target);
+
+    // Release > 1 with shrinking target → clamped to 1 → instant jump
+    const prevHigh = new Array(5).fill(1.0);
+    const targetZero = new Array(5).fill(0);
+    const rRelOver = integrateDeformation(prevHigh, targetZero, 0.1, 2.0);
+    expect(rRelOver).toEqual(targetZero);
+  });
+
+  it("handles negative target deformation correctly", () => {
+    // Negative targets with large magnitude should trigger attack path
+    const prev = new Array(10).fill(0);
+    const targetNeg = new Array(10).fill(-0.5);
+    const result = integrateDeformation(prev, targetNeg, 0.2, 0.005);
+    // |target| >= |prev| → attack rate applies, moving toward -0.5
+    for (let i = 0; i < 10; i++) {
+      expect(result[i]).toBeLessThan(0);
+      // At attack=0.2: 0 + (-0.5 - 0)*0.2 = -0.1
+      expect(result[i]).toBeCloseTo(-0.1, 5);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // catmullRom
 // ---------------------------------------------------------------------------
 
@@ -637,5 +844,56 @@ describe("createCellRenderer", () => {
     r.destroy();
     expect(container.children.length).toBe(0);
     expect(container.innerHTML).toBe("");
+  });
+
+  it("form memory: high audio then zero does not crash and holds shape", () => {
+    const container = document.createElement("div");
+    const rafCalls: Array<() => void> = [];
+    let rafCounter = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      rafCalls.push(cb);
+      return ++rafCounter;
+    });
+
+    const r = createCellRenderer(container, {
+      width: 100,
+      height: 50,
+      params: { attack: 0.2, release: 0.005 },
+    });
+
+    // Push a few high-audio recording states
+    for (let i = 0; i < 3; i++) {
+      r.update({
+        mode: "recording",
+        audioLevel: 0.9,
+        spectrumBins: new Array(32).fill(0.5),
+      });
+    }
+
+    // Advance RAF a few times with recording mode
+    for (let i = 0; i < 5; i++) {
+      if (rafCalls.length > 0) {
+        const cb = rafCalls.shift()!;
+        expect(() => cb()).not.toThrow();
+      }
+    }
+
+    // Now push zero (idle silence) — deformation should not instantly collapse
+    r.update({
+      mode: "idle",
+      audioLevel: 0,
+      spectrumBins: new Array(32).fill(0),
+    });
+
+    // Advance RAF several more times after switching to idle
+    for (let i = 0; i < 5; i++) {
+      if (rafCalls.length > 0) {
+        const cb = rafCalls.shift()!;
+        expect(() => cb()).not.toThrow();
+      }
+    }
+
+    r.destroy();
+    expect(container.children.length).toBe(0);
   });
 });

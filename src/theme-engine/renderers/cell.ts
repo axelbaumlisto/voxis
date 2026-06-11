@@ -154,10 +154,18 @@ export interface CellParams {
   hueBoost: number;
   /** Fill alpha (cytoplasm opacity). */
   fillAlpha: number;
-  /** Lowpass tension for temporal smoothing of radii (0=no smoothing, 1=full). */
+  /** Lowpass tension for temporal smoothing of radii (0=no smoothing, 1=full).
+   * @deprecated Replaced by persistent form memory (attack/release).
+   * Kept for backward-compat; not used by the default renderer tick path. */
   tension: number;
   /** Base cell radius as fraction of min(width, height). */
   radiusFraction: number;
+  /** Per-frame blend factor when deformation is being pushed further.
+   * ~0.20 reaches ~90% of a new shape within ~0.2s at 60fps. */
+  attack: number;
+  /** Per-frame blend factor when deformation is relaxing back to idle.
+   * ~0.005 gives a time constant τ ≈ 3.3s (relaxation half-life ~2.3s). */
+  release: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -180,6 +188,8 @@ export const CELL_DEFAULTS: CellParams = {
   fillAlpha: 0.18,
   tension: 0.15,
   radiusFraction: 0.34,
+  attack: 0.20,
+  release: 0.005,
 };
 
 const TAU = Math.PI * 2;
@@ -326,6 +336,104 @@ export function lowpassRadii(
 ): number[] {
   const t = Math.max(0, Math.min(1, tension));
   return prev.map((p, i) => lerp(p, next[i], 1 - t));
+}
+
+/**
+ * Per-vertex target deformation fractions for the cell membrane.
+ *
+ * Returns `sampleCount` values where each `deform[i]` is the fractional
+ * deformation beyond the base circle — i.e. `radius = baseR * (1 + deform[i])`
+ * before clamping. Combines FBM noise, pseudopod protrusions, and spectrum
+ * bin modulation into a single per-vertex scalar.
+ *
+ * This separates "instantaneous target" from persistent state:
+ * the renderer feeds these targets into integrateDeformation() which
+ * accumulates them asymmetrically (fast attack, slow release).
+ *
+ * @param width      Canvas width.
+ * @param height     Canvas height.
+ * @param bins       32 spectrum bins, each in [0, 1].
+ * @param t          Continuous time (seconds).
+ * @param audioLevel Smoothed audio level [0, 1].
+ * @param energy     Pre-computed energy from cellEnergy().
+ * @param params     Cell parameters.
+ * @returns Array of `sampleCount` deformation fractions.
+ */
+export function buildTargetDeformation(
+  width: number,
+  height: number,
+  bins: number[],
+  t: number,
+  audioLevel: number,
+  energy: number,
+  params: CellParams,
+): number[] {
+  const sampleCount = 96;
+  const baseR = Math.min(width, height) * params.radiusFraction;
+  const invBaseR = baseR > 0 ? 1 / baseR : 1;
+
+  const out: number[] = [];
+  for (let i = 0; i < sampleCount; i++) {
+    const angle = (i / sampleCount) * TAU;
+
+    // Spectrum bin under this angle modulates local radius slightly
+    const normalized = ((angle % TAU) + TAU) % TAU / TAU;
+    const binIdx = bins.length === 0 ? 0 : Math.min(Math.floor(normalized * bins.length), bins.length - 1);
+    const binLevel = bins.length === 0 ? 0 : bins[binIdx];
+
+    // FBM deformation (rFbm = 1.0 + noise * amp, so deformation = rFbm - 1)
+    const rFbm = cellRadius(angle, t, energy, params);
+    const fbmDeform = rFbm - 1.0;
+
+    // Pseudopod protrusion (in pixels, convert to fraction of baseR)
+    const rPseudo = pseudopodOffset(angle, t, audioLevel, energy, params);
+    const pseudoDeform = rPseudo * invBaseR;
+
+    // Spectrum bin contribution (fractional)
+    const binDeform = binLevel * 0.15 * energy;
+
+    out.push(fbmDeform + pseudoDeform + binDeform);
+  }
+
+  return out;
+}
+
+/**
+ * Asymmetric temporal integration of per-vertex deformation.
+ *
+ * For each vertex i:
+ * - If |target[i]| >= |prev[i]| (shape being pushed further), blend at `attack` rate (fast).
+ * - Otherwise (shape relaxing toward a smaller or zero target), blend at `release` rate (slow).
+ *
+ * This implements form memory: new sculpted bumps are acquired quickly but
+ * persist and relax slowly, so the membrane "holds" its shape instead of
+ * springing back instantly when audio drops.
+ *
+ * Both rates are clamped to [0, 1].
+ *
+ * @param prevDeform   Previous frame's integrated deformation (length N).
+ * @param targetDeform  Current frame's target deformation (length N).
+ * @param attack        Per-frame blend factor for growing deformation [0, 1].
+ * @param release       Per-frame blend factor for shrinking deformation [0, 1].
+ * @returns New integrated deformation array of length N.
+ */
+export function integrateDeformation(
+  prevDeform: number[],
+  targetDeform: number[],
+  attack: number,
+  release: number,
+): number[] {
+  const a = Math.max(0, Math.min(1, attack));
+  const r = Math.max(0, Math.min(1, release));
+  const n = prevDeform.length;
+  const result = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    const prev = prevDeform[i];
+    const tgt = targetDeform[i];
+    const rate = Math.abs(tgt) >= Math.abs(prev) ? a : r;
+    result[i] = prev + (tgt - prev) * rate;
+  }
+  return result;
 }
 
 /**
@@ -504,8 +612,9 @@ export function createCellRenderer(
     spectrumBins: new Array(32).fill(0),
   };
 
-  // Temporal smoothing state
-  let prevRadii: number[] | null = null;
+  // Persistent form-memory buffer: per-vertex deformation fractions
+  // accumulated across frames with asymmetric attack/release.
+  let deform: number[] | null = null;
 
   const startedAt = performance.now();
   let rafId: number | null = null;
@@ -519,8 +628,8 @@ export function createCellRenderer(
 
       const energy = cellEnergy(s.mode, s.audioLevel, t, params.idle, params.levelGain);
 
-      // Build raw contour points
-      const rawPoints = buildCellContour(
+      // Build per-vertex target deformation fractions
+      const targetDeform = buildTargetDeformation(
         width,
         height,
         s.spectrumBins,
@@ -530,23 +639,28 @@ export function createCellRenderer(
         params,
       );
 
-      // Compute radii for temporal smoothing
+      // Integrate with form memory: fast attack, slow release
+      deform = deform
+        ? integrateDeformation(deform, targetDeform, params.attack, params.release)
+        : targetDeform.slice();
+
+      // Convert deformation fractions back to contour points
       const cx = width / 2;
       const cy = height / 2;
-      const currentRadii = rawPoints.map(
-        ([px, py]) => Math.sqrt((px - cx) ** 2 + (py - cy) ** 2),
-      );
+      const baseR = Math.min(width, height) * params.radiusFraction;
+      const maxRadius = height * 0.46;
+      const floorRadius = baseR * 0.35;
+      const sampleCount = deform.length;
 
-      let smoothedPoints = rawPoints;
-      if (prevRadii && prevRadii.length === currentRadii.length) {
-        const smoothedRadii = lowpassRadii(prevRadii, currentRadii, params.tension);
-        smoothedPoints = rawPoints.map(([px, py], i) => {
-          const angle = Math.atan2(py - cy, px - cx);
-          const r = smoothedRadii[i];
-          return [cx + r * Math.cos(angle), cy + r * Math.sin(angle)] as [number, number];
-        });
+      const smoothedPoints: Array<[number, number]> = [];
+      for (let i = 0; i < sampleCount; i++) {
+        const angle = (i / sampleCount) * TAU;
+        const rawRadius = baseR * (1 + deform[i]);
+        const radius = Math.max(floorRadius, Math.min(maxRadius, rawRadius));
+        const x = cx + radius * Math.cos(angle);
+        const y = cy + radius * Math.sin(angle);
+        smoothedPoints.push([x, y]);
       }
-      prevRadii = currentRadii;
 
       // Smooth via Catmull-Rom (4 segments per span for smoothness)
       const splinePoints = catmullRom(smoothedPoints, 4);

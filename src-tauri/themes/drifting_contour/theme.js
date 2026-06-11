@@ -312,7 +312,9 @@ var CELL_DEFAULTS = {
   hueBoost: 20,
   fillAlpha: 0.18,
   tension: 0.15,
-  radiusFraction: 0.34
+  radiusFraction: 0.34,
+  attack: 0.2,
+  release: 0.005
 };
 var TAU = Math.PI * 2;
 function cellEnergy(mode, audioLevel, t, idle, levelGain) {
@@ -357,9 +359,37 @@ function iridescentHue(angle, t, audioLevel, baseHue, params) {
   hue = (hue % 360 + 360) % 360;
   return hue;
 }
-function lowpassRadii(prev, next, tension) {
-  const t = Math.max(0, Math.min(1, tension));
-  return prev.map((p, i) => lerp(p, next[i], 1 - t));
+function buildTargetDeformation(width, height, bins, t, audioLevel, energy, params) {
+  const sampleCount = 96;
+  const baseR = Math.min(width, height) * params.radiusFraction;
+  const invBaseR = baseR > 0 ? 1 / baseR : 1;
+  const out = [];
+  for (let i = 0;i < sampleCount; i++) {
+    const angle = i / sampleCount * TAU;
+    const normalized = (angle % TAU + TAU) % TAU / TAU;
+    const binIdx = bins.length === 0 ? 0 : Math.min(Math.floor(normalized * bins.length), bins.length - 1);
+    const binLevel = bins.length === 0 ? 0 : bins[binIdx];
+    const rFbm = cellRadius(angle, t, energy, params);
+    const fbmDeform = rFbm - 1;
+    const rPseudo = pseudopodOffset(angle, t, audioLevel, energy, params);
+    const pseudoDeform = rPseudo * invBaseR;
+    const binDeform = binLevel * 0.15 * energy;
+    out.push(fbmDeform + pseudoDeform + binDeform);
+  }
+  return out;
+}
+function integrateDeformation(prevDeform, targetDeform, attack, release) {
+  const a = Math.max(0, Math.min(1, attack));
+  const r = Math.max(0, Math.min(1, release));
+  const n = prevDeform.length;
+  const result = new Array(n);
+  for (let i = 0;i < n; i++) {
+    const prev = prevDeform[i];
+    const tgt = targetDeform[i];
+    const rate = Math.abs(tgt) >= Math.abs(prev) ? a : r;
+    result[i] = prev + (tgt - prev) * rate;
+  }
+  return result;
 }
 function catmullRom(points, segmentsPerSpan) {
   const n = points.length;
@@ -385,28 +415,6 @@ function catmullRom(points, segmentsPerSpan) {
   }
   return result;
 }
-function buildCellContour(width, height, bins, t, audioLevel, energy, params) {
-  const sampleCount = 96;
-  const cx = width / 2;
-  const cy = height / 2;
-  const baseR = Math.min(width, height) * params.radiusFraction;
-  const out = [];
-  for (let i = 0;i < sampleCount; i++) {
-    const angle = i / sampleCount * TAU;
-    const normalized = (angle % TAU + TAU) % TAU / TAU;
-    const binIdx = bins.length === 0 ? 0 : Math.min(Math.floor(normalized * bins.length), bins.length - 1);
-    const binLevel = bins.length === 0 ? 0 : bins[binIdx];
-    const rFbm = cellRadius(angle, t, energy, params);
-    const rPseudo = pseudopodOffset(angle, t, audioLevel, energy, params);
-    const rawRadius = baseR * rFbm + rPseudo + binLevel * baseR * 0.15 * energy;
-    const maxRadius = height * 0.46;
-    const radius = Math.max(baseR * 0.35, Math.min(maxRadius, rawRadius));
-    const x = cx + radius * Math.cos(angle);
-    const y = cy + radius * Math.sin(angle);
-    out.push([x, y]);
-  }
-  return out;
-}
 function hsla(h, s, l, a) {
   return `hsla(${h},${Math.round(s * 100)}%,${Math.round(l * 100)}%,${a})`;
 }
@@ -425,7 +433,7 @@ function createCellRenderer(container, opts) {
     audioLevel: 0,
     spectrumBins: new Array(32).fill(0)
   };
-  let prevRadii = null;
+  let deform = null;
   const startedAt = performance.now();
   let rafId = null;
   const tick = () => {
@@ -434,20 +442,23 @@ function createCellRenderer(container, opts) {
     if (ctx) {
       ctx.clearRect(0, 0, width, height);
       const energy = cellEnergy(s.mode, s.audioLevel, t, params.idle, params.levelGain);
-      const rawPoints = buildCellContour(width, height, s.spectrumBins, t, s.audioLevel, energy, params);
+      const targetDeform = buildTargetDeformation(width, height, s.spectrumBins, t, s.audioLevel, energy, params);
+      deform = deform ? integrateDeformation(deform, targetDeform, params.attack, params.release) : targetDeform.slice();
       const cx = width / 2;
       const cy = height / 2;
-      const currentRadii = rawPoints.map(([px, py]) => Math.sqrt((px - cx) ** 2 + (py - cy) ** 2));
-      let smoothedPoints = rawPoints;
-      if (prevRadii && prevRadii.length === currentRadii.length) {
-        const smoothedRadii = lowpassRadii(prevRadii, currentRadii, params.tension);
-        smoothedPoints = rawPoints.map(([px, py], i) => {
-          const angle = Math.atan2(py - cy, px - cx);
-          const r = smoothedRadii[i];
-          return [cx + r * Math.cos(angle), cy + r * Math.sin(angle)];
-        });
+      const baseR = Math.min(width, height) * params.radiusFraction;
+      const maxRadius = height * 0.46;
+      const floorRadius = baseR * 0.35;
+      const sampleCount = deform.length;
+      const smoothedPoints = [];
+      for (let i = 0;i < sampleCount; i++) {
+        const angle = i / sampleCount * TAU;
+        const rawRadius = baseR * (1 + deform[i]);
+        const radius = Math.max(floorRadius, Math.min(maxRadius, rawRadius));
+        const x = cx + radius * Math.cos(angle);
+        const y = cy + radius * Math.sin(angle);
+        smoothedPoints.push([x, y]);
       }
-      prevRadii = currentRadii;
       const splinePoints = catmullRom(smoothedPoints, 4);
       if (splinePoints.length >= 3) {
         ctx.fillStyle = hsla(baseHue, 0.7, 0.55, params.fillAlpha);
