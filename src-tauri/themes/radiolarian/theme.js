@@ -315,7 +315,7 @@ var TAU = Math.PI * 2;
 // src/theme-engine/renderers/radiolarian.ts
 var RADIOLARIAN_DEFAULTS = {
   symmetry: 6,
-  radiusFraction: 0.34,
+  radiusFraction: 0.28,
   octaves: 2,
   lacunarity: 2,
   gain: 0.5,
@@ -327,7 +327,14 @@ var RADIOLARIAN_DEFAULTS = {
   spikePulse: 0.45,
   poreRings: 2,
   poreRadius: 1.2,
-  spinSpeed: 0.15
+  spinSpeed: 0.15,
+  angleJitter: 0.1,
+  lengthJitter: 0.22,
+  jitterSpeed: 0.4,
+  growthAttack: 0.06,
+  growthRelease: 0.012,
+  growthSpikeBoost: 0.5,
+  growthShellSwell: 0.18
 };
 function radiolarianEnergy(mode, audioLevel, t, params) {
   switch (mode) {
@@ -341,25 +348,49 @@ function radiolarianEnergy(mode, audioLevel, t, params) {
       return params.idle;
   }
 }
-function shellRadius(angle, t, energy, params) {
+function growthLevel(prevGrowth, audioLevel, mode, attack, release) {
+  const target = mode === "recording" ? Math.max(0, Math.min(1, audioLevel)) : 0;
+  const rate = target >= prevGrowth ? attack : release;
+  const raw = prevGrowth + (target - prevGrowth) * rate;
+  return Math.max(0, Math.min(1, raw));
+}
+function shellRadius(angle, t, energy, growth, params) {
   const wedge = TAU / params.symmetry;
   const folded = (angle % wedge + wedge) % wedge;
   const sym = Math.abs(folded / wedge - 0.5) * 2;
   const n = fbm(sym * 3, t * params.timeScale, params.octaves, params.lacunarity, params.gain);
   const breathe = 1 + energy * 0.18;
-  return (1 + n * params.shellAmplitude) * breathe;
+  const swell = 1 + growth * params.growthShellSwell;
+  return (1 + n * params.shellAmplitude) * breathe * swell;
 }
-function spikeEndpoints(cx, cy, baseR, t, audioLevel, params) {
+function spikeEndpoints(cx, cy, baseR, width, height, t, audioLevel, growth, params) {
   const out = [];
   const spin = t * params.spinSpeed;
-  const ext = baseR * (params.spikeLength + audioLevel * params.spikePulse);
+  const ext = baseR * (params.spikeLength + audioLevel * params.spikePulse + growth * params.growthSpikeBoost);
+  const xB = width * 0.46;
+  const yB = height * 0.46;
+  const maxTipRadius = (a) => {
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    if (Math.abs(cos) < 0.0000000001 && Math.abs(sin) < 0.0000000001)
+      return 0;
+    const denom = Math.sqrt(cos * cos / (xB * xB) + sin * sin / (yB * yB));
+    return 1 / denom;
+  };
   for (let k = 0;k < params.symmetry; k++) {
-    const a = spin + k / params.symmetry * TAU;
-    const sr = baseR * shellRadius(a, t, params.idle, params);
+    const baseAngle = spin + k / params.symmetry * TAU;
+    const angleJit = noise2D(k * 13.1, t * params.jitterSpeed) * params.angleJitter;
+    const lenJit = noise2D(k * 7.7, t * params.jitterSpeed + 50) * params.lengthJitter * params.spikeLength;
+    const a = baseAngle + angleJit;
+    const sr = baseR * shellRadius(a, t, params.idle, growth, params);
+    let rawOuterR = sr + ext + baseR * lenJit;
+    const maxR = maxTipRadius(a);
+    if (rawOuterR > maxR)
+      rawOuterR = maxR;
     const x1 = cx + sr * Math.cos(a);
     const y1 = cy + sr * Math.sin(a);
-    const x2 = cx + (sr + ext) * Math.cos(a);
-    const y2 = cy + (sr + ext) * Math.sin(a);
+    const x2 = cx + rawOuterR * Math.cos(a);
+    const y2 = cy + rawOuterR * Math.sin(a);
     out.push({ x1, y1, x2, y2 });
   }
   return out;
@@ -392,6 +423,7 @@ function createRadiolarianRenderer(container, opts) {
   const ctx = canvas.getContext("2d");
   let latestState = { mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) };
   let shellMemory = null;
+  let growth = 0;
   const startedAt = performance.now();
   let rafId = null;
   const cx = width / 2;
@@ -400,6 +432,7 @@ function createRadiolarianRenderer(container, opts) {
   const tick = () => {
     const t = (performance.now() - startedAt) / 1000;
     const s = latestState;
+    growth = growthLevel(growth, s.audioLevel, s.mode, params.growthAttack, params.growthRelease);
     if (ctx) {
       ctx.clearRect(0, 0, width, height);
       const energy = radiolarianEnergy(s.mode, s.audioLevel, t, params);
@@ -407,11 +440,11 @@ function createRadiolarianRenderer(container, opts) {
       for (let i = 0;i < SAMPLE_COUNT; i++) {
         const a = i / SAMPLE_COUNT * TAU + t * params.spinSpeed;
         const bin = s.spectrumBins[Math.min(s.spectrumBins.length - 1, Math.floor(i / SAMPLE_COUNT * s.spectrumBins.length))] ?? 0;
-        target.push(shellRadius(a, t, energy, params) + bin * 0.12 * energy);
+        target.push(shellRadius(a, t, energy, growth, params) + bin * 0.12 * energy);
       }
       shellMemory = shellMemory ? integrateDeformation(shellMemory, target, 0.25, 0.02) : target.slice();
       ctx.lineCap = "round";
-      for (const sp of spikeEndpoints(cx, cy, baseR, t, s.audioLevel, params)) {
+      for (const sp of spikeEndpoints(cx, cy, baseR, width, height, t, s.audioLevel, growth, params)) {
         ctx.strokeStyle = hsla(baseHue + 10, 0.85, 0.65, 0.55 + 0.35 * energy);
         ctx.lineWidth = 1.2;
         ctx.beginPath();
@@ -477,7 +510,7 @@ function mount(container, api) {
     baseHue: 190,
     params: {
       symmetry: 6,
-      radiusFraction: 0.34,
+      radiusFraction: 0.28,
       octaves: 2,
       lacunarity: 2,
       gain: 0.5,
@@ -490,6 +523,13 @@ function mount(container, api) {
       poreRings: 2,
       poreRadius: 1.2,
       spinSpeed: 0.15,
+      angleJitter: 0.1,
+      lengthJitter: 0.22,
+      jitterSpeed: 0.4,
+      growthAttack: 0.06,
+      growthRelease: 0.012,
+      growthSpikeBoost: 0.5,
+      growthShellSwell: 0.18,
       ...userParams
     }
   });

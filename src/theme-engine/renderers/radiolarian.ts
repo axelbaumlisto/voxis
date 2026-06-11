@@ -2,11 +2,13 @@
  * radiolarian.ts — luminous glass-skeleton marine microorganism renderer.
  *
  * A radial, N-fold symmetric silica "test": a stiff bumpy shell, a lattice
- * of hexagonal-ish pores, and radial spikes that extend with voice. Built on
- * the shared math primitives (noise/fbm/spline) — SRP: only radiolarian
- * geometry + drawing live here.
+ * of hexagonal-ish pores, and radial spikes that extend with voice. Per-spike
+ * organic jitter breaks mechanical symmetry; an asymmetric growth accumulator
+ * makes the organism visibly swell during sustained speech and slowly relax
+ * during silence. Built on the shared math primitives (noise/fbm/spline) —
+ * SRP: only radiolarian geometry + drawing live here.
  */
-import { fbm, hsla, integrateDeformation, TAU } from "./shared";
+import { fbm, hsla, integrateDeformation, noise2D, TAU } from "./shared";
 import type { ThemeMode, ThemeState } from "../contract";
 import type { Renderer } from "./types";
 
@@ -39,11 +41,29 @@ export interface RadiolarianParams {
   poreRadius: number;
   /** Global rotation speed (radians/sec) — slow drift of the whole test. */
   spinSpeed: number;
+
+  // ---- per-spike organic jitter ----
+  /** Max angular jitter per spike (radians). 0 = perfectly even. */
+  angleJitter: number;
+  /** Max length jitter fraction of spikeLength (±). 0 = all equal. */
+  lengthJitter: number;
+  /** Speed of jitter wobble over time. */
+  jitterSpeed: number;
+
+  // ---- biological growth during speech ----
+  /** Per-frame attack rate (fast rise toward audioLevel during recording). */
+  growthAttack: number;
+  /** Per-frame release rate (slow decay toward 0 during silence). */
+  growthRelease: number;
+  /** Extra spike extension from growth, as fraction of baseR (0..1). */
+  growthSpikeBoost: number;
+  /** Shell radius swell from growth, as fraction (0..1). */
+  growthShellSwell: number;
 }
 
 export const RADIOLARIAN_DEFAULTS: RadiolarianParams = {
   symmetry: 6,
-  radiusFraction: 0.34,
+  radiusFraction: 0.28,
   octaves: 2,
   lacunarity: 2.0,
   gain: 0.5,
@@ -56,6 +76,17 @@ export const RADIOLARIAN_DEFAULTS: RadiolarianParams = {
   poreRings: 2,
   poreRadius: 1.2,
   spinSpeed: 0.15,
+
+  // jitter defaults: subtle organic wobble
+  angleJitter: 0.10,
+  lengthJitter: 0.22,
+  jitterSpeed: 0.4,
+
+  // growth defaults: grows fast, shrinks slow
+  growthAttack: 0.06,
+  growthRelease: 0.012,
+  growthSpikeBoost: 0.5,
+  growthShellSwell: 0.18,
 };
 
 /** Energy: idle breathing blended with audio activity, clamped to [0,1]. */
@@ -78,14 +109,39 @@ export function radiolarianEnergy(
 }
 
 /**
+ * Biological growth accumulator — asymmetric attack/release toward a target.
+ *
+ * During recording the target is `audioLevel`; during idle/transcribing the
+ * target is 0. The organism rises quickly (attack) while the user speaks and
+ * slowly shrinks (release) during silence. Clamped to [0, 1].
+ *
+ * Pure function — callers must persist `prevGrowth` across frames.
+ */
+export function growthLevel(
+  prevGrowth: number,
+  audioLevel: number,
+  mode: ThemeMode,
+  attack: number,
+  release: number,
+): number {
+  const target = mode === "recording" ? Math.max(0, Math.min(1, audioLevel)) : 0;
+  const rate = target >= prevGrowth ? attack : release;
+  const raw = prevGrowth + (target - prevGrowth) * rate;
+  return Math.max(0, Math.min(1, raw));
+}
+
+/**
  * Shell radius fraction at a given angle. N-fold symmetric: FBM is sampled on
  * an angle wrapped into a single symmetry wedge, so r repeats every 2π/symmetry.
  * Returns a multiplier around 1.0 (baseR * shellRadius = pixels).
+ *
+ * `growth` (0..1) adds a modest swell to the shell.
  */
 export function shellRadius(
   angle: number,
   t: number,
   energy: number,
+  growth: number,
   params: RadiolarianParams,
 ): number {
   const wedge = TAU / params.symmetry;
@@ -94,30 +150,71 @@ export function shellRadius(
   const sym = Math.abs(folded / wedge - 0.5) * 2; // 0..1..0 triangle, period = wedge
   const n = fbm(sym * 3.0, t * params.timeScale, params.octaves, params.lacunarity, params.gain);
   const breathe = 1 + energy * 0.18;
-  return (1 + n * params.shellAmplitude) * breathe;
+  const swell = 1 + growth * params.growthShellSwell;
+  return (1 + n * params.shellAmplitude) * breathe * swell;
 }
 
 export interface Spike { x1: number; y1: number; x2: number; y2: number; }
 
 /**
- * Radial spikes from the shell outward, one per symmetry vertex. Inner point
- * sits on the shell; outer point extends by spikeLength + audio*spikePulse.
- * `spin` (t*spinSpeed) rotates the whole crown slowly.
+ * Radial spikes from the shell outward, one per symmetry vertex.
+ *
+ * Each spike gets a small deterministic per-spike jitter (angle + length)
+ * via noise2D seeded by spike index — organic, not mechanical. Growth extends
+ * spikes further.
+ *
+ * Outer tips are clamped to an elliptical bound matching the canvas so spikes
+ * never clip at the edge even at max audio + growth.
  */
 export function spikeEndpoints(
   cx: number, cy: number, baseR: number,
-  t: number, audioLevel: number, params: RadiolarianParams,
+  width: number, height: number,
+  t: number, audioLevel: number, growth: number,
+  params: RadiolarianParams,
 ): Spike[] {
   const out: Spike[] = [];
   const spin = t * params.spinSpeed;
-  const ext = baseR * (params.spikeLength + audioLevel * params.spikePulse);
+  const ext = baseR * (
+    params.spikeLength
+    + audioLevel * params.spikePulse
+    + growth * params.growthSpikeBoost
+  );
+
+  // Elliptical bound: radius at which tip hits canvas edge for a given angle
+  const xB = width * 0.46;
+  const yB = height * 0.46;
+
+  const maxTipRadius = (a: number): number => {
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    if (Math.abs(cos) < 1e-10 && Math.abs(sin) < 1e-10) return 0;
+    const denom = Math.sqrt(
+      (cos * cos) / (xB * xB) + (sin * sin) / (yB * yB),
+    );
+    return 1 / denom;
+  };
+
   for (let k = 0; k < params.symmetry; k++) {
-    const a = spin + (k / params.symmetry) * TAU;
-    const sr = baseR * shellRadius(a, t, params.idle, params);
+    const baseAngle = spin + (k / params.symmetry) * TAU;
+
+    // per-spike organic jitter (deterministic via noise2D)
+    const angleJit = noise2D(k * 13.1, t * params.jitterSpeed) * params.angleJitter;
+    const lenJit = noise2D(k * 7.7, t * params.jitterSpeed + 50) * params.lengthJitter * params.spikeLength;
+
+    const a = baseAngle + angleJit;
+
+    const sr = baseR * shellRadius(a, t, params.idle, growth, params);
+
+    let rawOuterR = sr + ext + baseR * lenJit;
+
+    // Clamp to canvas elliptical bound
+    const maxR = maxTipRadius(a);
+    if (rawOuterR > maxR) rawOuterR = maxR;
+
     const x1 = cx + sr * Math.cos(a);
     const y1 = cy + sr * Math.sin(a);
-    const x2 = cx + (sr + ext) * Math.cos(a);
-    const y2 = cy + (sr + ext) * Math.sin(a);
+    const x2 = cx + rawOuterR * Math.cos(a);
+    const y2 = cy + rawOuterR * Math.sin(a);
     out.push({ x1, y1, x2, y2 });
   }
   return out;
@@ -179,6 +276,7 @@ export function createRadiolarianRenderer(
 
   let latestState: ThemeState = { mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) };
   let shellMemory: number[] | null = null; // form-memory of shell radii fractions
+  let growth = 0; // biological growth accumulator
   const startedAt = performance.now();
   let rafId: number | null = null;
 
@@ -190,6 +288,9 @@ export function createRadiolarianRenderer(
     const t = (performance.now() - startedAt) / 1000;
     const s = latestState;
 
+    // update biological growth
+    growth = growthLevel(growth, s.audioLevel, s.mode, params.growthAttack, params.growthRelease);
+
     if (ctx) {
       ctx.clearRect(0, 0, width, height);
       const energy = radiolarianEnergy(s.mode, s.audioLevel, t, params);
@@ -200,7 +301,7 @@ export function createRadiolarianRenderer(
         const a = (i / SAMPLE_COUNT) * TAU + t * params.spinSpeed;
         const bin = s.spectrumBins[Math.min(s.spectrumBins.length - 1,
           Math.floor((i / SAMPLE_COUNT) * s.spectrumBins.length))] ?? 0;
-        target.push(shellRadius(a, t, energy, params) + bin * 0.12 * energy);
+        target.push(shellRadius(a, t, energy, growth, params) + bin * 0.12 * energy);
       }
       shellMemory = shellMemory
         ? integrateDeformation(shellMemory, target, 0.25, 0.02)
@@ -208,7 +309,7 @@ export function createRadiolarianRenderer(
 
       // --- spikes (under shell stroke) ---
       ctx.lineCap = "round";
-      for (const sp of spikeEndpoints(cx, cy, baseR, t, s.audioLevel, params)) {
+      for (const sp of spikeEndpoints(cx, cy, baseR, width, height, t, s.audioLevel, growth, params)) {
         ctx.strokeStyle = hsla(baseHue + 10, 0.85, 0.65, 0.55 + 0.35 * energy);
         ctx.lineWidth = 1.2;
         ctx.beginPath(); ctx.moveTo(sp.x1, sp.y1); ctx.lineTo(sp.x2, sp.y2); ctx.stroke();
