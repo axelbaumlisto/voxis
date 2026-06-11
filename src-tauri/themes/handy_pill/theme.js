@@ -119,6 +119,7 @@ function createPillRenderer(container, opts) {
   const scopeClass = `pill-scope-${++pillIdCounter}`;
   const smoother = createSmoother({ size: BAR_COUNT, alpha, peakDecay });
   const SETTLE_EPSILON = 0.005;
+  const SETTLE_SMTH_MULT = 0.75;
   let settleRaf = null;
   let lastSettleTime = null;
   function anyResidual(smoothed) {
@@ -139,11 +140,11 @@ function createPillRenderer(container, opts) {
     lastSettleTime = timestamp;
     const smoothed = smoother.push(new Array(BAR_COUNT).fill(0));
     for (let i = 0;i < barEls.length; i++) {
-      const v = smoothed[i] ?? 0;
+      const v = (smoothed[i] ?? 0) * SETTLE_SMTH_MULT;
       barEls[i].style.height = `${barHeightPx(v, powerCurve)}px`;
       barEls[i].style.opacity = `${barOpacity(v)}`;
     }
-    if (anyResidual(smoothed)) {
+    if (smoothed.some((v) => v * SETTLE_SMTH_MULT > SETTLE_EPSILON)) {
       settleRaf = requestAnimationFrame(settleStep);
     } else {
       settleRaf = null;

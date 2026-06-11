@@ -83,10 +83,9 @@ describe("createBarsRenderer", () => {
         });
       }
 
-      // Advance fake timers enough for settle loop to complete.
-      // Peak-hold decays at 0.96/step; needs ~113 steps from 0.515 → 0.005.
-      // At 80ms gating per step = ~9040ms. Use 15000ms for safety.
-      vi.advanceTimersByTime(15000);
+      // Advance fake timers — accelerated settle reaches floor within 1.5 s
+      // (worst case ~15 steps × 80 ms = 1200 ms).
+      vi.advanceTimersByTime(1500);
 
       // After settle: all bars at MIN_HEIGHT (2px), all peaks display:none
       bars.forEach((b) => {

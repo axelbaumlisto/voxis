@@ -81,8 +81,9 @@ describe("createPillRenderer", () => {
         r.update({ mode: "recording", audioLevel: 0, spectrumBins: [] });
       }
 
-      // Advance fake timers for settle to complete
-      vi.advanceTimersByTime(15000);
+      // Advance fake timers — accelerated settle reaches floor within 1.5 s
+      // (worst case ~15 steps × 80 ms = 1200 ms).
+      vi.advanceTimersByTime(1500);
 
       // After settle: all bars at MIN_PX (4px) and MIN_OPACITY (0.2)
       bars.forEach((b) => {

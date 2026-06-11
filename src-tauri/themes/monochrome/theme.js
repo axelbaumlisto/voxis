@@ -29,6 +29,8 @@ var DEFAULT_SMOOTHING_ALPHA = 0.3;
 var MIN_HEIGHT_PX = 2;
 var PEAK_HEIGHT_PX = 2;
 var SETTLE_EPSILON = 0.005;
+var SETTLE_SMTH_MULT = 0.75;
+var SETTLE_PEAK_MULT = 0.7;
 function barHeight(v, maxHeight) {
   const clamped = Math.max(0, Math.min(1, v));
   const range = Math.max(0, maxHeight - MIN_HEIGHT_PX);
@@ -143,8 +145,21 @@ function createBarsRenderer(container, opts) {
     }
     lastSettleTime = timestamp;
     const heights = smoother.push(new Array(barCount).fill(0));
-    renderFrame(heights);
-    if (anyResidual(heights)) {
+    for (let i = 0;i < barCount; i++) {
+      const v = heights[i] * SETTLE_SMTH_MULT;
+      const barPx = barHeight(v, maxHeight);
+      barEls[i].style.height = `${barPx}px`;
+      peaks[i] *= SETTLE_PEAK_MULT;
+      const peakPx = barHeight(peaks[i], maxHeight);
+      const showPeak = peakDecay > 0 && peakPx > barPx + 1;
+      peakEls[i].style.display = showPeak ? "block" : "none";
+      if (showPeak) {
+        peakEls[i].style.bottom = `${peakPx}px`;
+      }
+    }
+    const anySmth = heights.some((h) => h * SETTLE_SMTH_MULT > SETTLE_EPSILON);
+    const anyPeak = peaks.some((p) => p > SETTLE_EPSILON);
+    if (anySmth || anyPeak) {
       settleRaf = requestAnimationFrame(settleStep);
     } else {
       settleRaf = null;

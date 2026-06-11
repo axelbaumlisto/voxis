@@ -168,6 +168,11 @@ export function createPillRenderer(container: HTMLElement, opts: PillOptions): R
 
   // ── settle loop state ──
   const SETTLE_EPSILON = 0.005;
+
+  // Settle-specific accelerated decay — see bars.ts for full math comment.
+  // smoothed: s · 0.7 · 0.75 = s · 0.525 / step  →  < 0.005 within ~10 steps
+  const SETTLE_SMTH_MULT = 0.75;
+
   let settleRaf: number | null = null;
   let lastSettleTime: number | null = null;
 
@@ -192,13 +197,15 @@ export function createPillRenderer(container: HTMLElement, opts: PillOptions): R
     lastSettleTime = timestamp;
 
     const smoothed = smoother.push(new Array(BAR_COUNT).fill(0));
+
+    // Settle-specific accelerated decay (see SETTLE_SMTH_MULT doc above).
     for (let i = 0; i < barEls.length; i++) {
-      const v = smoothed[i] ?? 0;
+      const v = (smoothed[i] ?? 0) * SETTLE_SMTH_MULT;
       barEls[i].style.height = `${barHeightPx(v, powerCurve)}px`;
       barEls[i].style.opacity = `${barOpacity(v)}`;
     }
 
-    if (anyResidual(smoothed)) {
+    if (smoothed.some((v) => v * SETTLE_SMTH_MULT > SETTLE_EPSILON)) {
       settleRaf = requestAnimationFrame(settleStep);
     } else {
       // Fully settled — force absolute floor

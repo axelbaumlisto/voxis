@@ -40,6 +40,14 @@ const MIN_HEIGHT_PX = 2;
 const PEAK_HEIGHT_PX = 2;
 const SETTLE_EPSILON = 0.005;
 
+// Settle-specific accelerated decay (applied only in the self-driven settle loop).
+// Normal path: smoothing alpha 0.3 → s := s·(1-α) = s·0.7/step; peaks·0.96/step.
+// Target: residual < 0.5 % within ~15 steps at 80 ms → ~1.2 s to floor.
+//   smoothed: s · 0.7 · 0.75 = s · 0.525 / step  →  crosses 0.005 at step 10
+//   peaks:    p · 0.70 / step                      →  crosses 0.005 at step 15
+const SETTLE_SMTH_MULT = 0.75;
+const SETTLE_PEAK_MULT = 0.70;
+
 /** Height formula ported from ClassicBars: soft power-curve compression. */
 function barHeight(v: number, maxHeight: number): number {
   const clamped = Math.max(0, Math.min(1, v));
@@ -187,11 +195,28 @@ export function createBarsRenderer(container: HTMLElement, opts: BarsOptions): R
     }
     lastSettleTime = timestamp;
 
-    // Synthesize a zero-frame: push zeros through smoother + decay peaks
+    // Synthesize a zero-frame through the smoother.
     const heights = smoother.push(new Array(barCount).fill(0));
-    renderFrame(heights);
 
-    if (anyResidual(heights)) {
+    // Settle-specific accelerated decay (see SETTLE_SMTH_MULT / SETTLE_PEAK_MULT docs above).
+    // We apply the extra multipliers only here; the live-update path is unchanged.
+    for (let i = 0; i < barCount; i++) {
+      const v = heights[i] * SETTLE_SMTH_MULT;
+      const barPx = barHeight(v, maxHeight);
+      barEls[i].style.height = `${barPx}px`;
+
+      peaks[i] *= SETTLE_PEAK_MULT;
+      const peakPx = barHeight(peaks[i], maxHeight);
+      const showPeak = peakDecay > 0 && peakPx > barPx + 1;
+      peakEls[i].style.display = showPeak ? "block" : "none";
+      if (showPeak) {
+        peakEls[i].style.bottom = `${peakPx}px`;
+      }
+    }
+
+    const anySmth = heights.some((h) => h * SETTLE_SMTH_MULT > SETTLE_EPSILON);
+    const anyPeak = peaks.some((p) => p > SETTLE_EPSILON);
+    if (anySmth || anyPeak) {
       settleRaf = requestAnimationFrame(settleStep);
     } else {
       // Fully settled — force absolute floor

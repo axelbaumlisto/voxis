@@ -67,4 +67,4 @@ echo "Using DISPLAY=$DISPLAY, XAUTHORITY=$XAUTHORITY"
 
 # Run the app
 cd "$(dirname "$0")"
-exec ./src-tauri/target/debug/voice "$@"
+exec ./src-tauri/target/release/voice "$@"
