@@ -86,6 +86,16 @@ export interface CellParams {
   /** Nucleus fill opacity — deliberately higher than `fillAlpha` so the
    * organelle reads as a *denser* body inside the translucent cytoplasm. */
   nucleusAlpha: number;
+  /** Number of cilia (hair-like tentacles) around the membrane. */
+  ciliaCount: number;
+  /** Resting cilium length as fraction of baseR. */
+  ciliaLength: number;
+  /** Extra cilium length from growth (fraction of baseR). */
+  ciliaGrowthBoost: number;
+  /** Lateral wave amplitude of cilia tips (radians of angular sway). */
+  ciliaWave: number;
+  /** Cilia wave speed. */
+  ciliaWaveSpeed: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -115,6 +125,11 @@ export const CELL_DEFAULTS: CellParams = {
   nucleusWander: 0.14,
   nucleusDrift: 0.12,
   nucleusAlpha: 0.55,
+  ciliaCount: 18,
+  ciliaLength: 0.45,
+  ciliaGrowthBoost: 0.6,
+  ciliaWave: 0.5,
+  ciliaWaveSpeed: 1.6,
 };
 
 
@@ -220,6 +235,46 @@ export function pseudopodOffset(
   }
 
   return total;
+}
+
+export interface Cilium { x1: number; y1: number; x2: number; y2: number; }
+
+/**
+ * Hair-like cilia around the membrane. Each cilium base sits on the cell
+ * radius at its angle; the tip extends outward by (ciliaLength + growth*
+ * ciliaGrowthBoost)*baseR and sways laterally via a per-cilium noise wave.
+ * Energy makes them a touch longer/livelier. Pure & deterministic given t.
+ *
+ * @param cx,cy   Cell center (already including any startle offset).
+ * @param baseR   Base cell radius in pixels.
+ * @param t       Continuous time (seconds).
+ * @param energy  Cell energy [0,1].
+ * @param growth  Growth level [0,1].
+ */
+export function ciliaEndpoints(
+  cx: number,
+  cy: number,
+  baseR: number,
+  t: number,
+  energy: number,
+  growth: number,
+  params: CellParams,
+): Cilium[] {
+  const out: Cilium[] = [];
+  const n = Math.max(1, params.ciliaCount);
+  const lenPx = baseR * (params.ciliaLength + growth * params.ciliaGrowthBoost) * (0.7 + energy * 0.6);
+  for (let k = 0; k < n; k++) {
+    const baseAngle = (k / n) * TAU;
+    // per-cilium lateral sway via noise (each hair waves slightly differently)
+    const sway = noise2D(k * 5.3, t * params.ciliaWaveSpeed) * params.ciliaWave;
+    const tipAngle = baseAngle + sway;
+    const x1 = cx + baseR * Math.cos(baseAngle);
+    const y1 = cy + baseR * Math.sin(baseAngle);
+    const x2 = cx + (baseR + lenPx) * Math.cos(tipAngle);
+    const y2 = cy + (baseR + lenPx) * Math.sin(tipAngle);
+    out.push({ x1, y1, x2, y2 });
+  }
+  return out;
 }
 
 /**

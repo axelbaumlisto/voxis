@@ -20,6 +20,7 @@ import {
   buildTargetDeformation,
   integrateDeformation,
   nucleusTransform,
+  ciliaEndpoints,
   CELL_DEFAULTS,
   createCellRenderer,
 } from "../cell";
@@ -909,6 +910,38 @@ describe("startleOffset", () => {
     // strong previous, weak edge → stays high via decay, not reset by edge
     const m = startleOffset(0.9, 0.3, 0.3, 2.0, 0.9);
     expect(m).toBeCloseTo(0.81, 1); // 0.9 * 0.9 decay
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ciliaEndpoints
+// ---------------------------------------------------------------------------
+
+describe("ciliaEndpoints", () => {
+  const P = CELL_DEFAULTS;
+  it("emits `ciliaCount` cilia", () => {
+    const c = ciliaEndpoints(86, 18, 12, 1.0, 0.3, 0.2, P);
+    expect(c.length).toBe(P.ciliaCount);
+  });
+  it("tips extend beyond their bases (outward)", () => {
+    const c = ciliaEndpoints(86, 18, 12, 1.0, 0.5, 0.3, P);
+    for (const cil of c) {
+      const baseR = Math.hypot(cil.x1 - 86, cil.y1 - 18);
+      const tipR = Math.hypot(cil.x2 - 86, cil.y2 - 18);
+      expect(tipR).toBeGreaterThan(baseR);
+    }
+  });
+  it("is deterministic", () => {
+    const a = ciliaEndpoints(86, 18, 12, 2.0, 0.4, 0.2, P);
+    const b = ciliaEndpoints(86, 18, 12, 2.0, 0.4, 0.2, P);
+    expect(a).toEqual(b);
+  });
+  it("cilia get longer with growth", () => {
+    const lo = ciliaEndpoints(86, 18, 12, 1.0, 0.3, 0.0, P)[0];
+    const hi = ciliaEndpoints(86, 18, 12, 1.0, 0.3, 1.0, P)[0];
+    const len = (c: { x1: number; y1: number; x2: number; y2: number }) =>
+      Math.hypot(c.x2 - c.x1, c.y2 - c.y1);
+    expect(len(hi)).toBeGreaterThan(len(lo));
   });
 });
 
