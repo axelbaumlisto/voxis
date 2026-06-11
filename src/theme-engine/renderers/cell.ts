@@ -13,7 +13,7 @@
 import type { ThemeState } from "../contract";
 import type { Renderer } from "./types";
 import {
-  noise2D, fbm, catmullRom, integrateDeformation, hsla, TAU,
+  noise2D, fbm, catmullRom, integrateDeformation, hsla, TAU, growthLevel,
 } from "./shared";
 
 // Backward-compat re-exports: existing imports of these from "./cell" keep working.
@@ -96,6 +96,20 @@ export interface CellParams {
   ciliaWave: number;
   /** Cilia wave speed. */
   ciliaWaveSpeed: number;
+  /** Growth attack per-frame (fast rise during speech). */
+  growthAttack: number;
+  /** Growth release per-frame (slow shrink in silence). */
+  growthRelease: number;
+  /** How much growth swells the cell radius (fraction). */
+  growthSwell: number;
+  /** Startle sensitivity (edge gain). */
+  startleSensitivity: number;
+  /** Startle decay per-frame [0,1]. */
+  startleDecay: number;
+  /** Startle max displacement in px. */
+  startleMaxPx: number;
+  /** Baseline tracking rate for startle edge detection. */
+  startleBaselineRate: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -130,6 +144,13 @@ export const CELL_DEFAULTS: CellParams = {
   ciliaGrowthBoost: 0.6,
   ciliaWave: 0.5,
   ciliaWaveSpeed: 1.6,
+  growthAttack: 0.05,
+  growthRelease: 0.012,
+  growthSwell: 0.22,
+  startleSensitivity: 2.2,
+  startleDecay: 0.86,
+  startleMaxPx: 5,
+  startleBaselineRate: 0.08,
 };
 
 
@@ -569,6 +590,9 @@ export function createCellRenderer(
   // Persistent form-memory buffer: per-vertex deformation fractions
   // accumulated across frames with asymmetric attack/release.
   let deform: number[] | null = null;
+  let growth = 0;
+  let startle = 0;
+  let baseline = 0; // slow-tracking audio baseline for startle edge detection
 
   const startedAt = performance.now();
   let rafId: number | null = null;
@@ -581,6 +605,15 @@ export function createCellRenderer(
       ctx.clearRect(0, 0, width, height);
 
       const energy = cellEnergy(s.mode, s.audioLevel, t, params.idle, params.levelGain);
+
+      // Biological growth (shared accumulator) + startle reflex.
+      growth = growthLevel(growth, s.audioLevel, s.mode, params.growthAttack, params.growthRelease);
+      baseline = baseline + (s.audioLevel - baseline) * params.startleBaselineRate;
+      startle = startleOffset(startle, s.audioLevel, baseline, params.startleSensitivity, params.startleDecay);
+      // Startle direction: a noise-chosen angle that drifts slowly.
+      const startleAngle = TAU * noise2D(900.5, t * 0.7);
+      const sdx = Math.cos(startleAngle) * startle * params.startleMaxPx;
+      const sdy = Math.sin(startleAngle) * startle * params.startleMaxPx;
 
       // Build per-vertex target deformation fractions
       const targetDeform = buildTargetDeformation(
@@ -598,10 +631,10 @@ export function createCellRenderer(
         ? integrateDeformation(deform, targetDeform, params.attack, params.release)
         : targetDeform.slice();
 
-      // Convert deformation fractions back to contour points
-      const cx = width / 2;
-      const cy = height / 2;
-      const baseR = Math.min(width, height) * params.radiusFraction;
+      // Hoisted cell centre + radius: includes startle jolt (sdx,sdy) and growth swell.
+      const cx = width / 2 + sdx;
+      const cy = height / 2 + sdy;
+      const baseR = Math.min(width, height) * params.radiusFraction * (1 + growth * params.growthSwell);
       const maxRadius = height * 0.46;
       const floorRadius = baseR * 0.35;
       const sampleCount = deform.length;
@@ -620,6 +653,20 @@ export function createCellRenderer(
       const splinePoints = catmullRom(smoothedPoints, 4);
 
       if (splinePoints.length >= 3) {
+        // --- Cilia (under the membrane) ---
+        {
+          const cilia = ciliaEndpoints(cx, cy, baseR, t, energy, growth, params);
+          ctx.lineCap = "round";
+          ctx.lineWidth = 1;
+          for (const c of cilia) {
+            ctx.strokeStyle = hsla(baseHue, 0.6, 0.6, 0.35 + 0.35 * energy);
+            ctx.beginPath();
+            ctx.moveTo(c.x1, c.y1);
+            ctx.lineTo(c.x2, c.y2);
+            ctx.stroke();
+          }
+        }
+
         // --- Fill: translucent cytoplasm ---
         ctx.fillStyle = hsla(baseHue, 0.7, 0.55, params.fillAlpha);
         ctx.beginPath();
