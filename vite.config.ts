@@ -24,6 +24,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         overlay: resolve(__dirname, "overlay.html"),
+        harness: resolve(__dirname, "harness.html"),
       },
     },
   },

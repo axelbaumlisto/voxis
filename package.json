@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "harness": "vite",
     "build": "bun run build:themes && tsc && vite build",
     "build:themes": "bun scripts/build-themes.ts",
     "preview": "vite preview",

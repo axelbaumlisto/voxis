@@ -232,6 +232,32 @@ building your own theme, you can't import those helpers; the builtins show
 the final bundled output in `src-tauri/themes/<id>/theme.js` after running
 `bun run build:themes`.
 
+## Developing Themes with the Visual Harness
+
+You can test and iterate on theme visuals WITHOUT building or running the Tauri
+app. The visual harness loads the **same** builtin theme modules and the exact
+production `<ThemeHost/>` component — just in a plain browser tab via Vite.
+
+1. Run `bun run dev` (or `bun run harness`).
+2. Open the printed URL and add `/harness.html`
+   (e.g. `http://localhost:5173/harness.html`).
+3. Pick a theme from the dropdown, then drive its state:
+   - **Mode** — switch between idle / recording / transcribing / error.
+   - **Audio level** — slider 0–1 that feeds `audioLevel`.
+   - **Scenario buttons** — play pre-defined behaviours:
+     `Speech → grow → silence`, `Startle burst`, `Idle morph`, `Steady speech`.
+   - **Animate** — enable/disable the rAF frame loop (turn on in manual mode to
+     see idle morph and time-based motion).
+   - **Params JSON** — live-edit theme `params` (shown as `api.params` inside
+     the module); the preview remounts instantly on every change.
+   - **Scale** — zoom the 172×36 preview for easier inspection.
+   - **Background** — toggle between dark/medium grey so light and dark themes
+     are both visible.
+
+The harness uses the **same** builtin modules + ThemeHost contract as the
+overlay. No Tauri build, no cargo, no hotkey — just save your `theme.js` and
+reload the browser.
+
 ## Debugging
 
 - Open the overlay then press Ctrl+Shift+I (or right-click → Inspect) to get a
