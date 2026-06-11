@@ -176,6 +176,36 @@ describe("cellRadius", () => {
     const rHigh = cellRadius(1.0, 0.3, 0.5, pHigh);
     expect(rLow).not.toBe(rHigh);
   });
+
+  it("higher membraneAmplitude produces larger variation range", () => {
+    const pLow = { ...p, membraneAmplitude: 0.05 };
+    const pHigh = { ...p, membraneAmplitude: 0.5 };
+    const loVals: number[] = [];
+    const hiVals: number[] = [];
+    for (let i = 0; i < 48; i++) {
+      const angle = (i / 48) * TAU;
+      loVals.push(cellRadius(angle, 0.5, 0.5, pLow));
+      hiVals.push(cellRadius(angle, 0.5, 0.5, pHigh));
+    }
+    const loRange = Math.max(...loVals) - Math.min(...loVals);
+    const hiRange = Math.max(...hiVals) - Math.min(...hiVals);
+    expect(hiRange).toBeGreaterThan(loRange);
+  });
+
+  it("higher energyDrive increases recording deformation range", () => {
+    const pLow = { ...p, energyDrive: 0.1 };
+    const pHigh = { ...p, energyDrive: 1.0 };
+    const loVals: number[] = [];
+    const hiVals: number[] = [];
+    for (let i = 0; i < 48; i++) {
+      const angle = (i / 48) * TAU;
+      loVals.push(cellRadius(angle, 0.5, 0.8, pLow));
+      hiVals.push(cellRadius(angle, 0.5, 0.8, pHigh));
+    }
+    const loRange = Math.max(...loVals) - Math.min(...loVals);
+    const hiRange = Math.max(...hiVals) - Math.min(...hiVals);
+    expect(hiRange).toBeGreaterThan(loRange);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -226,8 +256,8 @@ describe("pseudopodOffset", () => {
   });
 
   it("different sharpness produces different lobe shapes", () => {
-    const pSharp = { ...p, sharpness: 8, push: 20 };
-    const pSoft = { ...p, sharpness: 1, push: 20 };
+    const pSharp = { ...p, sharpness: 8, push: 4 };
+    const pSoft = { ...p, sharpness: 1, push: 4 };
     const angles = Array.from({ length: 96 }, (_, i) => (i / 96) * TAU);
     const sharpVals = angles.map((a) => pseudopodOffset(a, 0.3, 0.7, 0.7, pSharp));
     const softVals = angles.map((a) => pseudopodOffset(a, 0.3, 0.7, 0.7, pSoft));
@@ -235,6 +265,36 @@ describe("pseudopodOffset", () => {
     const sharpSum = sharpVals.reduce((s, v) => s + v, 0);
     const softSum = softVals.reduce((s, v) => s + v, 0);
     expect(sharpSum).not.toBe(softSum);
+  });
+
+  it("is monotonic in audioLevel (peak response never decreases)", () => {
+    const angles = Array.from({ length: 96 }, (_, i) => (i / 96) * TAU);
+    const prevPeaks: number[] = [];
+    // Sample 10 audio levels from 0 to 1, check peak is non-decreasing
+    for (let levelIdx = 0; levelIdx <= 10; levelIdx++) {
+      const level = levelIdx / 10;
+      let maxVal = 0;
+      for (const a of angles) {
+        const v = pseudopodOffset(a, 0.5, level, 0.8, p);
+        if (v > maxVal) maxVal = v;
+      }
+      if (prevPeaks.length > 0) {
+        expect(maxVal).toBeGreaterThanOrEqual(prevPeaks[prevPeaks.length - 1] - 0.0001);
+      }
+      prevPeaks.push(maxVal);
+    }
+  });
+
+  it("idle pseudopods are near-zero but non-negative", () => {
+    const samples: number[] = [];
+    for (let i = 0; i < 96; i++) {
+      const angle = (i / 96) * TAU;
+      samples.push(pseudopodOffset(angle, 0.5, 0, p.idle, p));
+    }
+    const maxVal = Math.max(...samples);
+    expect(maxVal).toBeGreaterThanOrEqual(0);
+    // With idle energy floor, pseudopods are tiny but allowed to be non-zero
+    expect(maxVal).toBeLessThanOrEqual(1.5);
   });
 });
 
@@ -458,13 +518,54 @@ describe("buildCellContour", () => {
     expect(a).toEqual(b);
   });
 
-  it("idle mode produces subtle but non-zero variation", () => {
+  it("idle mode produces visible variation (≥5% of baseR)", () => {
     const energy = cellEnergy("idle", 0, 0, p.idle, p.levelGain);
     const pts = buildCellContour(200, 200, zeroBins, 0, 0, energy, p);
     const cx = 100, cy = 100;
     const radii = pts.map(([x, y]) => Math.sqrt((x - cx) ** 2 + (y - cy) ** 2));
     // All radii should be positive
     expect(radii.every((r) => r > 0)).toBe(true);
+    // Idle variation should be visible — range ≥ 5% of expected base radius
+    const baseR = Math.min(200, 200) * p.radiusFraction;
+    const range = Math.max(...radii) - Math.min(...radii);
+    expect(range).toBeGreaterThanOrEqual(baseR * 0.05);
+  });
+
+  it("clamps radius to [baseR*0.35, height*0.46] even at extreme energy", () => {
+    const w = 172, h = 36;
+    const baseR = Math.min(w, h) * p.radiusFraction;
+    // Recording at max energy and audio
+    const energy = cellEnergy("recording", 1.0, 10, p.idle, p.levelGain);
+    for (let trial = 0; trial < 20; trial++) {
+      const pts = buildCellContour(w, h, new Array(32).fill(1), trial, 1.0, energy, {
+        ...p,
+        // Crank amplitudes to stress-test the clamp
+        membraneAmplitude: 2.0,
+        energyDrive: 2.0,
+        push: 20,
+      });
+      const cx = w / 2, cy = h / 2;
+      for (const [x, y] of pts) {
+        const r = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+        expect(r).toBeGreaterThanOrEqual(baseR * 0.35 - 0.001);
+        expect(r).toBeLessThanOrEqual(h * 0.46 + 0.001);
+      }
+    }
+  });
+
+  it("produces visibly egg-shaped / non-circular contour during recording", () => {
+    const w = 200, h = 200;
+    const energy = cellEnergy("recording", 0.9, 3, p.idle, p.levelGain);
+    const pts = buildCellContour(w, h, zeroBins, 3, 0.9, energy, p);
+    const cx = w / 2, cy = h / 2;
+    const radii = pts.map(([x, y]) => Math.sqrt((x - cx) ** 2 + (y - cy) ** 2));
+    const baseR = Math.min(w, h) * p.radiusFraction;
+    const range = Math.max(...radii) - Math.min(...radii);
+    // Recording deformation should be at least 15% of baseR
+    expect(range).toBeGreaterThanOrEqual(baseR * 0.15);
+    // Aspect ratio (max/min) should measurably deviate from 1
+    const aspect = Math.max(...radii) / Math.min(...radii);
+    expect(aspect).toBeGreaterThan(1.20);
   });
 });
 
