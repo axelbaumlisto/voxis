@@ -110,6 +110,14 @@ export interface CellParams {
   startleMaxPx: number;
   /** Baseline tracking rate for startle edge detection. */
   startleBaselineRate: number;
+  /** Idle resting morph amplitude (deformation fraction of baseR). */
+  idleMorphAmplitude: number;
+  /** Idle morph traveling speed (how fast bumps move around the membrane). */
+  idleMorphSpeed: number;
+  /** Idle morph envelope period in seconds (wax/wane cycle). */
+  idleMorphPeriod: number;
+  /** Idle morph minimum envelope (0..1): residual morph at the trough. */
+  idleMorphFloor: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -151,6 +159,10 @@ export const CELL_DEFAULTS: CellParams = {
   startleDecay: 0.86,
   startleMaxPx: 5,
   startleBaselineRate: 0.08,
+  idleMorphAmplitude: 0.18,
+  idleMorphSpeed: 0.25,
+  idleMorphPeriod: 7,
+  idleMorphFloor: 0.25,
 };
 
 
@@ -318,6 +330,44 @@ export function startleOffset(
   const edge = Math.max(0, (level - baseline) * sensitivity);
   const decayed = prevMag * Math.max(0, Math.min(1, decay));
   return Math.max(0, Math.min(1, Math.max(decayed, edge)));
+}
+
+/**
+ * Resting-state membrane morphing. Returns per-vertex deformation fractions
+ * (added to baseR) that slowly travel around the cell and wax/wane on a
+ * periodic envelope, so an idle cell keeps gently reshaping instead of
+ * freezing. Pure & deterministic given t.
+ *
+ * - Two traveling lobes via noise on (angle ± moving phase) give an organic,
+ *   non-repeating bump pattern.
+ * - A cosine envelope over `idleMorphPeriod` seconds, lifted to a floor in
+ *   [idleMorphFloor, 1], modulates overall magnitude (gentle breathing of the
+ *   reshape itself).
+ * - Output is clamped to ±idleMorphAmplitude.
+ */
+export function idleMorph(
+  sampleCount: number,
+  t: number,
+  params: CellParams,
+): number[] {
+  const out: number[] = [];
+  // envelope in [floor, 1]
+  const phase = (Math.cos((TAU * t) / Math.max(0.01, params.idleMorphPeriod)) + 1) / 2; // 0..1
+  const env = params.idleMorphFloor + (1 - params.idleMorphFloor) * phase;
+  const travel = t * params.idleMorphSpeed;
+  for (let i = 0; i < sampleCount; i++) {
+    const a = (i / sampleCount) * TAU;
+    // two slowly traveling lobes for an organic, evolving outline
+    const n1 = noise2D(Math.cos(a) * 1.6 + travel, Math.sin(a) * 1.6 - travel * 0.7);
+    const n2 = noise2D(Math.cos(a) * 3.1 - travel * 0.5, Math.sin(a) * 3.1 + travel * 0.9);
+    const raw = (n1 * 0.65 + n2 * 0.35); // in ~[-1,1]
+    let d = raw * params.idleMorphAmplitude * env;
+    // clamp to amplitude
+    const cap = params.idleMorphAmplitude;
+    if (d > cap) d = cap; else if (d < -cap) d = -cap;
+    out.push(d);
+  }
+  return out;
 }
 
 /**

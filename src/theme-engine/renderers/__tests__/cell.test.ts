@@ -21,6 +21,7 @@ import {
   integrateDeformation,
   nucleusTransform,
   ciliaEndpoints,
+  idleMorph,
   CELL_DEFAULTS,
   createCellRenderer,
 } from "../cell";
@@ -1180,5 +1181,48 @@ describe("createCellRenderer", () => {
     }).not.toThrow();
     r.destroy();
     expect(container.innerHTML).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// idleMorph
+// ---------------------------------------------------------------------------
+
+describe("idleMorph", () => {
+  const P = CELL_DEFAULTS;
+  it("returns one value per sample", () => {
+    expect(idleMorph(96, 1.0, P).length).toBe(96);
+  });
+  it("is deterministic", () => {
+    expect(idleMorph(96, 2.3, P)).toEqual(idleMorph(96, 2.3, P));
+  });
+  it("stays within a gentle bound (|d| <= idleMorphAmplitude)", () => {
+    for (const tt of [0, 1.7, 5.0, 12.4]) {
+      for (const d of idleMorph(64, tt, P)) {
+        expect(Math.abs(d)).toBeLessThanOrEqual(P.idleMorphAmplitude + 1e-9);
+      }
+    }
+  });
+  it("changes over time (not frozen)", () => {
+    const a = idleMorph(64, 0.0, P);
+    const b = idleMorph(64, 4.0, P);
+    let diff = 0;
+    for (let i = 0; i < a.length; i++) diff += Math.abs(a[i] - b[i]);
+    expect(diff).toBeGreaterThan(0.01);
+  });
+  it("envelope waxes and wanes (overall magnitude varies across a period)", () => {
+    const mag = (arr: number[]) => arr.reduce((s, v) => s + Math.abs(v), 0);
+    // sample several times across one envelope period; max should exceed min noticeably
+    const mags: number[] = [];
+    const period = P.idleMorphPeriod;
+    for (let k = 0; k < 8; k++) mags.push(mag(idleMorph(64, (k / 8) * period, P)));
+    expect(Math.max(...mags)).toBeGreaterThan(Math.min(...mags) * 1.3);
+  });
+  it("respects the floor (envelope never fully zero when floor > 0)", () => {
+    const mag = (arr: number[]) => arr.reduce((s, v) => s + Math.abs(v), 0);
+    // with default floor > 0 there is always some morph somewhere
+    let any = 0;
+    for (let k = 0; k < 8; k++) any += mag(idleMorph(48, k * 0.9, P));
+    expect(any).toBeGreaterThan(0);
   });
 });
