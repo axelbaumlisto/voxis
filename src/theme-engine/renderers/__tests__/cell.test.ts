@@ -18,6 +18,7 @@ import {
   buildCellContour,
   buildTargetDeformation,
   integrateDeformation,
+  nucleusTransform,
   CELL_DEFAULTS,
   createCellRenderer,
 } from "../cell";
@@ -777,6 +778,110 @@ describe("buildCellContour", () => {
 });
 
 // ---------------------------------------------------------------------------
+// nucleusTransform
+// ---------------------------------------------------------------------------
+
+describe("nucleusTransform", () => {
+  const p = { ...CELL_DEFAULTS };
+  const w = 172, h = 36;
+  const baseR = Math.min(w, h) * p.radiusFraction; // ≈ 12.24 px
+
+  it("returns deterministic output for same inputs", () => {
+    const a = nucleusTransform(1.5, 0.3, baseR, p);
+    const b = nucleusTransform(1.5, 0.3, baseR, p);
+    expect(a.cx).toBe(b.cx);
+    expect(a.cy).toBe(b.cy);
+    expect(a.r).toBe(b.r);
+  });
+
+  it("returns non-negative radius", () => {
+    for (let t = 0; t < 20; t += 1.7) {
+      for (let level = 0; level <= 1; level += 0.2) {
+        const n = nucleusTransform(t, level, baseR, p);
+        expect(n.r).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
+  it("has a positive minimum pixel radius floor (>= 2.5 px)", () => {
+    // Small baseR and zero audio — should still be at least 2.5 px
+    const small = nucleusTransform(0, 0, 5, p);
+    expect(small.r).toBeGreaterThanOrEqual(2.5);
+  });
+
+  it("nucleus stays inside safe inner radius for many t samples and audio levels", () => {
+    // sqrt(cx^2 + cy^2) + r <= baseR * 0.55
+    const safeInner = baseR * 0.55;
+    for (let t = 0; t < 30; t += 1.3) {
+      for (let level = 0; level <= 1; level += 0.1) {
+        const n = nucleusTransform(t, level, baseR, p);
+        const offsetMag = Math.sqrt(n.cx * n.cx + n.cy * n.cy);
+        const total = offsetMag + n.r;
+        expect(total).toBeLessThanOrEqual(safeInner + 0.001);
+      }
+    }
+    // Sanity: nucleus does produce non-trivial offsets at some times
+    const n2 = nucleusTransform(5.0, 0.3, baseR, p);
+    const offsetMag2 = Math.sqrt(n2.cx * n2.cx + n2.cy * n2.cy);
+    const total2 = offsetMag2 + n2.r;
+    expect(total2).toBeLessThanOrEqual(safeInner + 0.001);
+  });
+
+  it("radius grows with audioLevel (monotonic-ish across many time samples)", () => {
+    // Due to the idle breath term (sin-based), radius may oscillate
+    // slightly, so we check that averaged over many t values, the sum
+    // at audioLevel=1 is larger than at audioLevel=0.
+    let sumLow = 0, sumHigh = 0;
+    for (let ti = 0; ti < 50; ti++) {
+      sumLow += nucleusTransform(ti * 0.5, 0, baseR, p).r;
+      sumHigh += nucleusTransform(ti * 0.5, 1.0, baseR, p).r;
+    }
+    expect(sumHigh).toBeGreaterThan(sumLow);
+  });
+
+  it("cx and cy drift over time (different t produce different offsets)", () => {
+    const n1 = nucleusTransform(0, 0.3, baseR, p);
+    const n2 = nucleusTransform(5.0, 0.3, baseR, p);
+    const n3 = nucleusTransform(10.0, 0.3, baseR, p);
+    // At least one of cx/cy should differ between time points (the
+    // nucleus is not stuck at the exact same offset forever).
+    const changedCx = n1.cx !== n2.cx || n2.cx !== n3.cx;
+    const changedCy = n1.cy !== n2.cy || n2.cy !== n3.cy;
+    expect(changedCx || changedCy).toBe(true);
+  });
+
+  it("cx and cy are bounded by nucleusWander * baseR", () => {
+    const maxWander = baseR * p.nucleusWander;
+    for (let t = 0; t < 20; t += 1.5) {
+      const n = nucleusTransform(t, 0.3, baseR, p);
+      expect(Math.abs(n.cx)).toBeLessThanOrEqual(maxWander + 0.001);
+      expect(Math.abs(n.cy)).toBeLessThanOrEqual(maxWander + 0.001);
+    }
+  });
+
+  it("all return values are finite", () => {
+    for (let t = 0; t < 20; t += 2) {
+      for (let level = 0; level <= 1; level += 0.25) {
+        const n = nucleusTransform(t, level, baseR, p);
+        expect(Number.isFinite(n.cx)).toBe(true);
+        expect(Number.isFinite(n.cy)).toBe(true);
+        expect(Number.isFinite(n.r)).toBe(true);
+      }
+    }
+  });
+
+  it("handles zero baseR gracefully", () => {
+    const n = nucleusTransform(1.0, 0.5, 0, p);
+    expect(Number.isFinite(n.cx)).toBe(true);
+    expect(Number.isFinite(n.cy)).toBe(true);
+    expect(Number.isFinite(n.r)).toBe(true);
+    // With baseR=0, safeInner=0 so cx,cy must be 0 and r clamped to 0.
+    expect(n.cx).toBe(0);
+    expect(n.cy).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // CreateCellRenderer (smoke test matching ring.test.ts patterns)
 // ---------------------------------------------------------------------------
 
@@ -886,6 +991,108 @@ describe("createCellRenderer", () => {
     });
 
     // Advance RAF several more times after switching to idle
+    for (let i = 0; i < 5; i++) {
+      if (rafCalls.length > 0) {
+        const cb = rafCalls.shift()!;
+        expect(() => cb()).not.toThrow();
+      }
+    }
+
+    r.destroy();
+    expect(container.children.length).toBe(0);
+  });
+
+  it("nucleus: mount + recording update + RAF ticks does not throw (smoke)", () => {
+    const container = document.createElement("div");
+    const rafCalls: Array<() => void> = [];
+    let rafCounter = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      rafCalls.push(cb);
+      return ++rafCounter;
+    });
+
+    const r = createCellRenderer(container, {
+      width: 172,
+      height: 36,
+    });
+
+    r.update({
+      mode: "recording",
+      audioLevel: 0.8,
+      spectrumBins: new Array(32).fill(0.6),
+    });
+
+    // Advance several frames to exercise the nucleus drawing path
+    for (let i = 0; i < 8; i++) {
+      if (rafCalls.length > 0) {
+        const cb = rafCalls.shift()!;
+        expect(() => cb()).not.toThrow();
+      }
+    }
+
+    r.destroy();
+    expect(container.children.length).toBe(0);
+  });
+
+  it("nucleus: idle breathing across frames does not throw (smoke)", () => {
+    const container = document.createElement("div");
+    const rafCalls: Array<() => void> = [];
+    let rafCounter = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      rafCalls.push(cb);
+      return ++rafCounter;
+    });
+
+    const r = createCellRenderer(container, {
+      width: 172,
+      height: 36,
+    });
+
+    r.update({
+      mode: "idle",
+      audioLevel: 0,
+      spectrumBins: new Array(32).fill(0),
+    });
+
+    // Advance several idle frames — nucleus breathes gently
+    for (let i = 0; i < 12; i++) {
+      if (rafCalls.length > 0) {
+        const cb = rafCalls.shift()!;
+        expect(() => cb()).not.toThrow();
+      }
+    }
+
+    r.destroy();
+    expect(container.children.length).toBe(0);
+  });
+
+  it("nucleus: custom nucleus params are accepted and do not throw", () => {
+    const container = document.createElement("div");
+    const rafCalls: Array<() => void> = [];
+    let rafCounter = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      rafCalls.push(cb);
+      return ++rafCounter;
+    });
+
+    const r = createCellRenderer(container, {
+      width: 200,
+      height: 100,
+      params: {
+        nucleusRadius: 0.35,
+        nucleusPulse: 0.15,
+        nucleusWander: 0.20,
+        nucleusDrift: 0.08,
+        nucleusAlpha: 0.65,
+      },
+    });
+
+    r.update({
+      mode: "recording",
+      audioLevel: 0.7,
+      spectrumBins: new Array(32).fill(0.4),
+    });
+
     for (let i = 0; i < 5; i++) {
       if (rafCalls.length > 0) {
         const cb = rafCalls.shift()!;

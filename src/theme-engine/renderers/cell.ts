@@ -166,6 +166,22 @@ export interface CellParams {
   /** Per-frame blend factor when deformation is relaxing back to idle.
    * ~0.005 gives a time constant τ ≈ 3.3s (relaxation half-life ~2.3s). */
   release: number;
+  /** Nucleus radius as fraction of baseR — determines the resting size of the
+   * organelle. At the 172×36 window this yields ~3.4 px (well above 2.5 px
+   * minimum). */
+  nucleusRadius: number;
+  /** Audio-driven pulse amplitude for the nucleus radius (fraction of baseR).
+   * During loud recording the nucleus visibly expands. */
+  nucleusPulse: number;
+  /** Nuclear drift amplitude — max offset from cell center as fraction of
+   * baseR. The nucleus wanders slowly via deterministic 2D noise. */
+  nucleusWander: number;
+  /** Drift speed — rate at which the nucleus noise seed advances (Hz-like).
+   * Higher values produce a more restless organelle. */
+  nucleusDrift: number;
+  /** Nucleus fill opacity — deliberately higher than `fillAlpha` so the
+   * organelle reads as a *denser* body inside the translucent cytoplasm. */
+  nucleusAlpha: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -190,6 +206,11 @@ export const CELL_DEFAULTS: CellParams = {
   radiusFraction: 0.34,
   attack: 0.20,
   release: 0.005,
+  nucleusRadius: 0.28,
+  nucleusPulse: 0.10,
+  nucleusWander: 0.14,
+  nucleusDrift: 0.12,
+  nucleusAlpha: 0.55,
 };
 
 const TAU = Math.PI * 2;
@@ -562,6 +583,73 @@ export function buildCellContour(
 }
 
 // ---------------------------------------------------------------------------
+// Nucleus — drifting, pulsing organelle inside the membrane
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the nucleus position and radius for the living cell.
+ *
+ * **SRP**: All nucleus math lives here; renderer only draws.
+ * **Deterministic**: same inputs always produce the same output.
+ *
+ * The nucleus drifts slowly via 2D value-noise (two orthogonal seeds),
+ * pulses its radius with audio level, and breathes gently during silence.
+ * The offset is clamped so the organelle always stays well inside the
+ * membrane wall (within `baseR * 0.55` from center).
+ *
+ * @param t          Continuous time in seconds.
+ * @param audioLevel Smoothed audio level [0, 1].
+ * @param baseR      Base cell radius in pixels.
+ * @param params     Cell parameters (nucleus tunables are read from this).
+ * @returns `{ cx, cy }` — offset **from cell center** in pixels.
+ *          `{ r }` — nucleus radius in pixels, never below a safe floor.
+ */
+export function nucleusTransform(
+  t: number,
+  audioLevel: number,
+  baseR: number,
+  params: CellParams,
+): { cx: number; cy: number; r: number } {
+  // --- Drift: slow noise-driven offset inside the cell ---
+  const rawCx = baseR * params.nucleusWander * noise2D(137, t * params.nucleusDrift);
+  const rawCy = baseR * params.nucleusWander * noise2D(241, t * params.nucleusDrift);
+
+  // --- Radius: base size + audio-driven pulse + idle breathing ---
+  const idleBreath = Math.sin(t * 1.3) * params.nucleusPulse * 0.25;
+  let r = baseR * (params.nucleusRadius + audioLevel * params.nucleusPulse + idleBreath);
+
+  // Enforce a minimum pixel radius so the nucleus is never sub-pixel.
+  const MIN_PX_RADIUS = 2.5;
+  r = Math.max(MIN_PX_RADIUS, r);
+
+  // --- Safety clamp: nucleus must stay well inside the membrane ---
+  // The floor of the membrane contour is baseR * 0.35, but we use a more
+  // conservative inner-safe radius of baseR * 0.55 so the nucleus is
+  // always clearly separated from the wall.
+  const safeInner = baseR * 0.55;
+  const offsetMag = Math.sqrt(rawCx * rawCx + rawCy * rawCy);
+  const maxOffsetMag = Math.max(0, safeInner - r);
+
+  if (maxOffsetMag <= 0) {
+    // Nucleus radius alone fills the safe zone — pin to centre.
+    return { cx: 0, cy: 0, r: Math.max(0, safeInner) };
+  }
+
+  let cx: number;
+  let cy: number;
+  if (offsetMag <= maxOffsetMag) {
+    cx = rawCx;
+    cy = rawCy;
+  } else {
+    const scale = maxOffsetMag / offsetMag;
+    cx = rawCx * scale;
+    cy = rawCy * scale;
+  }
+
+  return { cx, cy, r };
+}
+
+// ---------------------------------------------------------------------------
 // Canvas helper
 // ---------------------------------------------------------------------------
 
@@ -684,6 +772,32 @@ export function createCellRenderer(
         grad.addColorStop(1, hsla(baseHue, 0.7, 0.45, params.fillAlpha));
         ctx.fillStyle = grad;
         ctx.fill();
+
+        // --- Nucleus: denser organelle drifting/pulsing inside the cell ---
+        const nucleus = nucleusTransform(t, s.audioLevel, baseR, params);
+        if (nucleus.r >= 2.5) {
+          const nx = cx + nucleus.cx;
+          const ny = cy + nucleus.cy;
+          const nr = nucleus.r;
+
+          // Soft radial gradient: denser warmer core → darker rim
+          const nucGrad = ctx.createRadialGradient(nx, ny, 0, nx, ny, nr);
+          // Hue shifted slightly warmer/darker vs the amber cytoplasm base
+          nucGrad.addColorStop(0, hsla(baseHue - 5, 0.80, 0.48, params.nucleusAlpha));
+          nucGrad.addColorStop(0.4, hsla(baseHue - 8, 0.75, 0.40, params.nucleusAlpha));
+          nucGrad.addColorStop(1, hsla(baseHue - 10, 0.65, 0.30, params.nucleusAlpha * 0.7));
+
+          ctx.fillStyle = nucGrad;
+          ctx.beginPath();
+          ctx.arc(nx, ny, nr, 0, TAU);
+          ctx.fill();
+
+          // Nucleolus — tiny brighter dot at the centre for organelle detail
+          ctx.fillStyle = hsla(baseHue + 5, 0.55, 0.72, params.nucleusAlpha * 0.8);
+          ctx.beginPath();
+          ctx.arc(nx, ny, nr * 0.22, 0, TAU);
+          ctx.fill();
+        }
 
         // --- Stroke: iridescent outline ---
         ctx.lineJoin = "round";

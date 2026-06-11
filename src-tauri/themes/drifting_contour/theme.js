@@ -314,7 +314,12 @@ var CELL_DEFAULTS = {
   tension: 0.15,
   radiusFraction: 0.34,
   attack: 0.2,
-  release: 0.005
+  release: 0.005,
+  nucleusRadius: 0.28,
+  nucleusPulse: 0.1,
+  nucleusWander: 0.14,
+  nucleusDrift: 0.12,
+  nucleusAlpha: 0.55
 };
 var TAU = Math.PI * 2;
 function cellEnergy(mode, audioLevel, t, idle, levelGain) {
@@ -415,6 +420,31 @@ function catmullRom(points, segmentsPerSpan) {
   }
   return result;
 }
+function nucleusTransform(t, audioLevel, baseR, params) {
+  const rawCx = baseR * params.nucleusWander * noise2D(137, t * params.nucleusDrift);
+  const rawCy = baseR * params.nucleusWander * noise2D(241, t * params.nucleusDrift);
+  const idleBreath = Math.sin(t * 1.3) * params.nucleusPulse * 0.25;
+  let r = baseR * (params.nucleusRadius + audioLevel * params.nucleusPulse + idleBreath);
+  const MIN_PX_RADIUS = 2.5;
+  r = Math.max(MIN_PX_RADIUS, r);
+  const safeInner = baseR * 0.55;
+  const offsetMag = Math.sqrt(rawCx * rawCx + rawCy * rawCy);
+  const maxOffsetMag = Math.max(0, safeInner - r);
+  if (maxOffsetMag <= 0) {
+    return { cx: 0, cy: 0, r: Math.max(0, safeInner) };
+  }
+  let cx;
+  let cy;
+  if (offsetMag <= maxOffsetMag) {
+    cx = rawCx;
+    cy = rawCy;
+  } else {
+    const scale = maxOffsetMag / offsetMag;
+    cx = rawCx * scale;
+    cy = rawCy * scale;
+  }
+  return { cx, cy, r };
+}
 function hsla(h, s, l, a) {
   return `hsla(${h},${Math.round(s * 100)}%,${Math.round(l * 100)}%,${a})`;
 }
@@ -473,6 +503,24 @@ function createCellRenderer(container, opts) {
         grad.addColorStop(1, hsla(baseHue, 0.7, 0.45, params.fillAlpha));
         ctx.fillStyle = grad;
         ctx.fill();
+        const nucleus = nucleusTransform(t, s.audioLevel, baseR, params);
+        if (nucleus.r >= 2.5) {
+          const nx = cx + nucleus.cx;
+          const ny = cy + nucleus.cy;
+          const nr = nucleus.r;
+          const nucGrad = ctx.createRadialGradient(nx, ny, 0, nx, ny, nr);
+          nucGrad.addColorStop(0, hsla(baseHue - 5, 0.8, 0.48, params.nucleusAlpha));
+          nucGrad.addColorStop(0.4, hsla(baseHue - 8, 0.75, 0.4, params.nucleusAlpha));
+          nucGrad.addColorStop(1, hsla(baseHue - 10, 0.65, 0.3, params.nucleusAlpha * 0.7));
+          ctx.fillStyle = nucGrad;
+          ctx.beginPath();
+          ctx.arc(nx, ny, nr, 0, TAU);
+          ctx.fill();
+          ctx.fillStyle = hsla(baseHue + 5, 0.55, 0.72, params.nucleusAlpha * 0.8);
+          ctx.beginPath();
+          ctx.arc(nx, ny, nr * 0.22, 0, TAU);
+          ctx.fill();
+        }
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
         ctx.strokeStyle = hsla(baseHue, 0.8, 0.6, 0.9);
