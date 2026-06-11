@@ -8,6 +8,7 @@
 //!   {"cmd":"set_handy_theme","theme":"living_reed"}
 //!   {"cmd":"set_overlay_state","state":"recording"}
 //!   {"cmd":"emit_spectrum","bins":[0.9, 0.9, …]}
+//!   {"cmd":"emit_audio_level","level":0.8}
 //!   {"cmd":"emit_silence"}
 //!
 //! Each accepted message is forwarded to `app.emit()` for the matching
@@ -41,6 +42,7 @@ enum Request {
     SetHandyTheme { theme: String },
     SetOverlayState { state: String },
     EmitSpectrum { bins: Vec<f32> },
+    EmitAudioLevel { level: f32 },
     EmitSilence,
     Ping,
 }
@@ -102,6 +104,10 @@ fn handle_request(app: &AppHandle, req: Request) -> Response {
             }
             let normalised: Vec<f32> = bins.iter().map(|v| v.clamp(0.0, 1.0)).collect();
             emit_everywhere(app, "overlay://spectrum-bins", &normalised)
+        }
+        Request::EmitAudioLevel { level } => {
+            let clamped = level.clamp(0.0, 1.0);
+            emit_everywhere(app, "overlay://audio-level", &clamped)
         }
         Request::EmitSilence => {
             let zeros = vec![0.0f32; crate::audio::SPECTRUM_BARS];
@@ -176,4 +182,19 @@ pub fn spawn(app: AppHandle) {
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_emit_audio_level() {
+        let req: Request =
+            serde_json::from_str(r#"{"cmd":"emit_audio_level","level":0.5}"#).unwrap();
+        match req {
+            Request::EmitAudioLevel { level } => assert!((level - 0.5).abs() < f32::EPSILON),
+            _ => panic!("wrong variant"),
+        }
+    }
 }
