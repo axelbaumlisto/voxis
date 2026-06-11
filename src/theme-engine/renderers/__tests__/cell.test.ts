@@ -484,6 +484,18 @@ describe("buildTargetDeformation", () => {
       expect(Number.isFinite(v)).toBe(true);
     }
   });
+  it("idleFactor defaults to 0 → no idle morph added (back-compat)", () => {
+    const a = buildTargetDeformation(200, 200, zeroBins, 3.0, 0, 0.1, p);
+    const b = buildTargetDeformation(200, 200, zeroBins, 3.0, 0, 0.1, p, 0);
+    expect(a).toEqual(b);
+  });
+  it("idleFactor=1 adds idle morph (differs from idleFactor=0)", () => {
+    const off = buildTargetDeformation(200, 200, zeroBins, 3.0, 0, 0.1, p, 0);
+    const on = buildTargetDeformation(200, 200, zeroBins, 3.0, 0, 0.1, p, 1);
+    let diff = 0;
+    for (let i = 0; i < off.length; i++) diff += Math.abs(off[i] - on[i]);
+    expect(diff).toBeGreaterThan(0.01);
+  });
 });
 
 // ---------------------------------------------------------------------------

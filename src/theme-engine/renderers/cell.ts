@@ -424,10 +424,13 @@ export function buildTargetDeformation(
   audioLevel: number,
   energy: number,
   params: CellParams,
+  idleFactor: number = 0,
 ): number[] {
   const sampleCount = 96;
   const baseR = Math.min(width, height) * params.radiusFraction;
   const invBaseR = baseR > 0 ? 1 / baseR : 1;
+
+  const morph = idleFactor > 0 ? idleMorph(sampleCount, t, params) : null;
 
   const out: number[] = [];
   for (let i = 0; i < sampleCount; i++) {
@@ -449,7 +452,8 @@ export function buildTargetDeformation(
     // Spectrum bin contribution (fractional)
     const binDeform = binLevel * 0.15 * energy;
 
-    out.push(fbmDeform + pseudoDeform + binDeform);
+    const idle = morph ? morph[i] * idleFactor : 0;
+    out.push(fbmDeform + pseudoDeform + binDeform + idle);
   }
 
   return out;
@@ -665,6 +669,11 @@ export function createCellRenderer(
       const sdx = Math.cos(startleAngle) * startle * params.startleMaxPx;
       const sdy = Math.sin(startleAngle) * startle * params.startleMaxPx;
 
+      // Idle morphing only when at rest: full at idle/silence, fades as audio rises
+      // or while actively recording, so it never fights speech-driven deformation.
+      const recordingFade = s.mode === "recording" ? 0.3 : 1;
+      const idleFactor = Math.max(0, 1 - s.audioLevel * 3) * recordingFade;
+
       // Build per-vertex target deformation fractions
       const targetDeform = buildTargetDeformation(
         width,
@@ -674,6 +683,7 @@ export function createCellRenderer(
         s.audioLevel,
         energy,
         params,
+        idleFactor,
       );
 
       // Integrate with form memory: fast attack, slow release
