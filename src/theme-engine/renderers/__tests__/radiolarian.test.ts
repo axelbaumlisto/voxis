@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   RADIOLARIAN_DEFAULTS, radiolarianEnergy, shellRadius,
+  spikeEndpoints, poreLattice,
 } from "../radiolarian";
 
 const P = RADIOLARIAN_DEFAULTS;
@@ -39,5 +40,42 @@ describe("shellRadius", () => {
       expect(r).toBeGreaterThan(0.7);
       expect(r).toBeLessThan(1.4);
     }
+  });
+});
+
+describe("spikeEndpoints", () => {
+  it("emits exactly `symmetry` spikes", () => {
+    const s = spikeEndpoints(100, 100, 20, 1.0, 0.5, RADIOLARIAN_DEFAULTS);
+    expect(s.length).toBe(RADIOLARIAN_DEFAULTS.symmetry);
+  });
+  it("spike outer point is farther than shell at higher audio", () => {
+    const lo = spikeEndpoints(100, 100, 20, 1.0, 0.0, RADIOLARIAN_DEFAULTS)[0];
+    const hi = spikeEndpoints(100, 100, 20, 1.0, 1.0, RADIOLARIAN_DEFAULTS)[0];
+    const dist = (p: { x1: number; y1: number; x2: number; y2: number }) =>
+      Math.hypot(p.x2 - 100, p.y2 - 100);
+    expect(dist(hi)).toBeGreaterThan(dist(lo));
+  });
+  it("inner endpoints sit on/near the shell, outer beyond it", () => {
+    const sp = spikeEndpoints(100, 100, 20, 1.0, 0.5, RADIOLARIAN_DEFAULTS)[0];
+    const inner = Math.hypot(sp.x1 - 100, sp.y1 - 100);
+    const outer = Math.hypot(sp.x2 - 100, sp.y2 - 100);
+    expect(outer).toBeGreaterThan(inner);
+  });
+});
+
+describe("poreLattice", () => {
+  it("returns dots on `poreRings` concentric rings, all inside the shell", () => {
+    const baseR = 20;
+    const dots = poreLattice(100, 100, baseR, 2.0, RADIOLARIAN_DEFAULTS);
+    expect(dots.length).toBeGreaterThan(0);
+    for (const d of dots) {
+      const rr = Math.hypot(d.x - 100, d.y - 100);
+      expect(rr).toBeLessThanOrEqual(baseR * 1.01); // inside shell
+    }
+  });
+  it("is deterministic", () => {
+    const a = poreLattice(100, 100, 20, 2.0, RADIOLARIAN_DEFAULTS);
+    const b = poreLattice(100, 100, 20, 2.0, RADIOLARIAN_DEFAULTS);
+    expect(a).toEqual(b);
   });
 });
