@@ -64,4 +64,19 @@ describe("growthLevel", () => {
     expect(growthLevel(0.5, 1, "transcribing", 0.5, 0.5)).toBeLessThan(0.5);
     expect(growthLevel(0.5, 1, "idle", 0.5, 0.5)).toBeLessThan(0.5);
   });
+  it("with release 0, holds its peak forever in silence (stays at last position)", () => {
+    let g = 0;
+    // grow during speech
+    for (let i = 0; i < 40; i++) g = growthLevel(g, 0.8, "recording", 0.05, 0);
+    const peak = g;
+    expect(peak).toBeGreaterThan(0.3);
+    // long silence — must NOT shrink
+    for (let i = 0; i < 200; i++) g = growthLevel(g, 0, "idle", 0.05, 0);
+    expect(g).toBeCloseTo(peak, 10);
+  });
+  it("with release 0, can still grow further on a louder later breath", () => {
+    let g = growthLevel(0.4, 0.4, "recording", 0.5, 0); // ~0.4
+    g = growthLevel(g, 0.9, "recording", 0.5, 0);        // rises toward 0.9
+    expect(g).toBeGreaterThan(0.4);
+  });
 });
