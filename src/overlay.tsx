@@ -12,7 +12,7 @@
  *
  * KISS: one useOverlayState(), one ThemeHost, one params useEffect.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { useOverlayState } from "./hooks/useOverlayState";
 import ThemeHost from "./theme-engine/ThemeHost";
@@ -20,6 +20,7 @@ import { fetchThemeModule } from "./theme-engine/fetchModule";
 import * as fallbackTheme from "./theme-engine/builtin/default";
 import { commands } from "./bindings";
 import type { ThemeState } from "./theme-engine/contract";
+import { createPressController } from "./overlay/pressController";
 
 export function OverlayApp() {
   const snapshot = useOverlayState();
@@ -60,15 +61,53 @@ export function OverlayApp() {
     spectrumBins: snapshot.spectrumBins,
   };
 
+  const pressRef = useRef(
+    createPressController({
+      onStart: () => void commands.manualStartRecording(),
+      onStop: () => void commands.manualStopRecording(),
+    }),
+  );
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Attach native pointer listeners via ref so dispatchEvent(new Event("pointerdown"))
+  // works in jsdom tests (React synthetic handlers may not fire for bare Event).
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const onDown = () => pressRef.current.press();
+    const onUp = () => pressRef.current.release();
+    const onCancel = () => pressRef.current.release();
+    const onLeave = () => pressRef.current.release();
+    const onCtx = (e: Event) => e.preventDefault();
+    el.addEventListener("pointerdown", onDown);
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onCancel);
+    el.addEventListener("pointerleave", onLeave);
+    el.addEventListener("contextmenu", onCtx);
+    return () => {
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onCancel);
+      el.removeEventListener("pointerleave", onLeave);
+      el.removeEventListener("contextmenu", onCtx);
+    };
+  }, []);
+
   return (
-    <ThemeHost
-      themeId={themeId}
-      state={state}
-      fetchModule={fetchThemeModule}
-      fallbackModule={fallbackTheme}
-      onCancel={() => void commands.cancelOperation()}
-      params={params}
-    />
+    <div
+      ref={wrapperRef}
+      data-press-target
+      style={{ width: "100%", height: "100%", touchAction: "none" }}
+    >
+      <ThemeHost
+        themeId={themeId}
+        state={state}
+        fetchModule={fetchThemeModule}
+        fallbackModule={fallbackTheme}
+        onCancel={() => void commands.cancelOperation()}
+        params={params}
+      />
+    </div>
   );
 }
 

@@ -33,6 +33,8 @@ const getThemeManifestMock = vi.fn().mockResolvedValue(null);
 const cancelOperationMock = vi.fn().mockResolvedValue({ status: "ok", data: null });
 const debugLogOverlayMock = vi.fn().mockResolvedValue(undefined);
 const getCurrentOverlayThemeMock = vi.fn().mockResolvedValue("default");
+const manualStartMock = vi.fn().mockResolvedValue({ status: "ok", data: null });
+const manualStopMock = vi.fn().mockResolvedValue({ status: "ok", data: null });
 
 vi.mock("../bindings", () => ({
   commands: {
@@ -41,6 +43,8 @@ vi.mock("../bindings", () => ({
     cancelOperation: (...args: unknown[]) => cancelOperationMock(...args),
     debugLogOverlay: (...args: unknown[]) => debugLogOverlayMock(...args),
     getCurrentOverlayTheme: (...args: unknown[]) => getCurrentOverlayThemeMock(...args),
+    manualStartRecording: (...args: unknown[]) => manualStartMock(...args),
+    manualStopRecording: (...args: unknown[]) => manualStopMock(...args),
   },
 }));
 
@@ -64,6 +68,10 @@ describe("OverlayApp (ThemeHost integration)", () => {
     });
     cancelOperationMock.mockResolvedValue({ status: "ok", data: null });
     debugLogOverlayMock.mockResolvedValue(undefined);
+    manualStartMock.mockClear();
+    manualStartMock.mockResolvedValue({ status: "ok", data: null });
+    manualStopMock.mockClear();
+    manualStopMock.mockResolvedValue({ status: "ok", data: null });
   });
 
   afterEach(() => {
@@ -168,6 +176,35 @@ describe("OverlayApp (ThemeHost integration)", () => {
       },
       { timeout: 3000 },
     );
+  });
+
+  describe("OverlayApp hold-to-dictate", () => {
+    it("pointerdown on the overlay starts recording", async () => {
+      const { container } = render(<OverlayApp />);
+      const host = container.querySelector("[data-press-target]") as HTMLElement;
+      expect(host).toBeTruthy();
+      await act(async () => {
+        host.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      });
+      expect(manualStartMock).toHaveBeenCalledTimes(1);
+    });
+    it("pointerup stops recording", async () => {
+      const { container } = render(<OverlayApp />);
+      const host = container.querySelector("[data-press-target]") as HTMLElement;
+      await act(async () => {
+        host.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        host.dispatchEvent(new Event("pointerup", { bubbles: true }));
+      });
+      expect(manualStartMock).toHaveBeenCalledTimes(1);
+      expect(manualStopMock).toHaveBeenCalledTimes(1);
+    });
+    it("contextmenu is prevented (no long-press menu on touch / right-click)", async () => {
+      const { container } = render(<OverlayApp />);
+      const host = container.querySelector("[data-press-target]") as HTMLElement;
+      const ev = new Event("contextmenu", { bubbles: true, cancelable: true });
+      host.dispatchEvent(ev);
+      expect(ev.defaultPrevented).toBe(true);
+    });
   });
 
   it("falls back to builtin default module when fetchModule rejects", async () => {
