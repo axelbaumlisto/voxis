@@ -335,6 +335,12 @@ function hsla(h, s, l, a) {
   return `hsla(${h},${Math.round(s * 100)}%,${Math.round(l * 100)}%,${a})`;
 }
 var TAU = Math.PI * 2;
+function growthLevel(prevGrowth, audioLevel, mode, attack, release) {
+  const target = mode === "recording" ? Math.max(0, Math.min(1, audioLevel)) : 0;
+  const rate = target >= prevGrowth ? attack : release;
+  const raw = prevGrowth + (target - prevGrowth) * rate;
+  return Math.max(0, Math.min(1, raw));
+}
 
 // src/theme-engine/renderers/cell.ts
 var CELL_DEFAULTS = {
@@ -362,7 +368,19 @@ var CELL_DEFAULTS = {
   nucleusPulse: 0.1,
   nucleusWander: 0.14,
   nucleusDrift: 0.12,
-  nucleusAlpha: 0.55
+  nucleusAlpha: 0.55,
+  ciliaCount: 18,
+  ciliaLength: 0.45,
+  ciliaGrowthBoost: 0.6,
+  ciliaWave: 0.5,
+  ciliaWaveSpeed: 1.6,
+  growthAttack: 0.05,
+  growthRelease: 0.012,
+  growthSwell: 0.22,
+  startleSensitivity: 2.2,
+  startleDecay: 0.86,
+  startleMaxPx: 5,
+  startleBaselineRate: 0.08
 };
 function cellEnergy(mode, audioLevel, t, idle, levelGain) {
   switch (mode) {
@@ -399,6 +417,27 @@ function pseudopodOffset(angle, t, audioLevel, energy, params) {
     total += lobe * amp;
   }
   return total;
+}
+function ciliaEndpoints(cx, cy, baseR, t, energy, growth, params) {
+  const out = [];
+  const n = Math.max(1, params.ciliaCount);
+  const lenPx = baseR * (params.ciliaLength + growth * params.ciliaGrowthBoost) * (0.7 + energy * 0.6);
+  for (let k = 0;k < n; k++) {
+    const baseAngle = k / n * TAU;
+    const sway = noise2D(k * 5.3, t * params.ciliaWaveSpeed) * params.ciliaWave;
+    const tipAngle = baseAngle + sway;
+    const x1 = cx + baseR * Math.cos(baseAngle);
+    const y1 = cy + baseR * Math.sin(baseAngle);
+    const x2 = cx + (baseR + lenPx) * Math.cos(tipAngle);
+    const y2 = cy + (baseR + lenPx) * Math.sin(tipAngle);
+    out.push({ x1, y1, x2, y2 });
+  }
+  return out;
+}
+function startleOffset(prevMag, level, baseline, sensitivity, decay) {
+  const edge = Math.max(0, (level - baseline) * sensitivity);
+  const decayed = prevMag * Math.max(0, Math.min(1, decay));
+  return Math.max(0, Math.min(1, Math.max(decayed, edge)));
 }
 function iridescentHue(angle, t, audioLevel, baseHue, params) {
   const norm = (angle % TAU + TAU) % TAU / TAU;
@@ -466,6 +505,9 @@ function createCellRenderer(container, opts) {
     spectrumBins: new Array(32).fill(0)
   };
   let deform = null;
+  let growth = 0;
+  let startle = 0;
+  let baseline = 0;
   const startedAt = performance.now();
   let rafId = null;
   const tick = () => {
@@ -474,11 +516,17 @@ function createCellRenderer(container, opts) {
     if (ctx) {
       ctx.clearRect(0, 0, width, height);
       const energy = cellEnergy(s.mode, s.audioLevel, t, params.idle, params.levelGain);
+      growth = growthLevel(growth, s.audioLevel, s.mode, params.growthAttack, params.growthRelease);
+      baseline = baseline + (s.audioLevel - baseline) * params.startleBaselineRate;
+      startle = startleOffset(startle, s.audioLevel, baseline, params.startleSensitivity, params.startleDecay);
+      const startleAngle = TAU * noise2D(900.5, t * 0.7);
+      const sdx = Math.cos(startleAngle) * startle * params.startleMaxPx;
+      const sdy = Math.sin(startleAngle) * startle * params.startleMaxPx;
       const targetDeform = buildTargetDeformation(width, height, s.spectrumBins, t, s.audioLevel, energy, params);
       deform = deform ? integrateDeformation(deform, targetDeform, params.attack, params.release) : targetDeform.slice();
-      const cx = width / 2;
-      const cy = height / 2;
-      const baseR = Math.min(width, height) * params.radiusFraction;
+      const cx = width / 2 + sdx;
+      const cy = height / 2 + sdy;
+      const baseR = Math.min(width, height) * params.radiusFraction * (1 + growth * params.growthSwell);
       const maxRadius = height * 0.46;
       const floorRadius = baseR * 0.35;
       const sampleCount = deform.length;
@@ -493,6 +541,18 @@ function createCellRenderer(container, opts) {
       }
       const splinePoints = catmullRom(smoothedPoints, 4);
       if (splinePoints.length >= 3) {
+        {
+          const cilia = ciliaEndpoints(cx, cy, baseR, t, energy, growth, params);
+          ctx.lineCap = "round";
+          ctx.lineWidth = 1;
+          for (const c of cilia) {
+            ctx.strokeStyle = hsla(baseHue, 0.6, 0.6, 0.35 + 0.35 * energy);
+            ctx.beginPath();
+            ctx.moveTo(c.x1, c.y1);
+            ctx.lineTo(c.x2, c.y2);
+            ctx.stroke();
+          }
+        }
         ctx.fillStyle = hsla(baseHue, 0.7, 0.55, params.fillAlpha);
         ctx.beginPath();
         ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
@@ -591,6 +651,18 @@ function mount(container, api) {
       hueBoost: 20,
       fillAlpha: 0.18,
       tension: 0.15,
+      ciliaCount: 18,
+      ciliaLength: 0.4,
+      ciliaGrowthBoost: 0.55,
+      ciliaWave: 0.5,
+      ciliaWaveSpeed: 1.6,
+      growthAttack: 0.05,
+      growthRelease: 0.012,
+      growthSwell: 0.2,
+      startleSensitivity: 2.2,
+      startleDecay: 0.86,
+      startleMaxPx: 4,
+      startleBaselineRate: 0.08,
       ...userParams
     }
   });
