@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   RADIOLARIAN_DEFAULTS, radiolarianEnergy, shellRadius,
   spikeEndpoints, poreLattice,
+  createRadiolarianRenderer,
 } from "../radiolarian";
 
 const P = RADIOLARIAN_DEFAULTS;
@@ -77,5 +78,58 @@ describe("poreLattice", () => {
     const a = poreLattice(100, 100, 20, 2.0, RADIOLARIAN_DEFAULTS);
     const b = poreLattice(100, 100, 20, 2.0, RADIOLARIAN_DEFAULTS);
     expect(a).toEqual(b);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createRadiolarianRenderer (smoke test matching cell.test.ts patterns)
+// ---------------------------------------------------------------------------
+
+describe("createRadiolarianRenderer", () => {
+  beforeEach(() => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn().mockReturnValue(42));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("creates a canvas sized to options", () => {
+    const container = document.createElement("div");
+    const r = createRadiolarianRenderer(container, { width: 172, height: 36 });
+    const canvas = container.querySelector("canvas")!;
+    expect(canvas).not.toBeNull();
+    expect(canvas.width).toBe(172);
+    expect(canvas.height).toBe(36);
+    r.destroy();
+  });
+
+  it("starts RAF loop on create and cancels on destroy", () => {
+    const container = document.createElement("div");
+    const r = createRadiolarianRenderer(container, { width: 100, height: 50 });
+    expect(requestAnimationFrame).toHaveBeenCalled();
+    r.destroy();
+    expect(cancelAnimationFrame).toHaveBeenCalled();
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("update() does not throw (smoke)", () => {
+    const container = document.createElement("div");
+    const r = createRadiolarianRenderer(container, { width: 100, height: 50 });
+    expect(() =>
+      r.update({
+        mode: "recording",
+        audioLevel: 0.8,
+        spectrumBins: new Array(32).fill(0.5),
+      }),
+    ).not.toThrow();
+    r.destroy();
+  });
+
+  it("destroy clears container", () => {
+    const container = document.createElement("div");
+    const r = createRadiolarianRenderer(container, { width: 100, height: 50 });
+    expect(container.children.length).toBeGreaterThan(0);
+    r.destroy();
+    expect(container.children.length).toBe(0);
+    expect(container.innerHTML).toBe("");
   });
 });

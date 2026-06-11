@@ -6,8 +6,9 @@
  * the shared math primitives (noise/fbm/spline) — SRP: only radiolarian
  * geometry + drawing live here.
  */
-import { fbm, TAU } from "./shared";
-import type { ThemeMode } from "../contract";
+import { fbm, hsla, integrateDeformation, TAU } from "./shared";
+import type { ThemeMode, ThemeState } from "../contract";
+import type { Renderer } from "./types";
 
 export interface RadiolarianParams {
   /** Rotational symmetry order (number of spikes / lattice repeats). */
@@ -145,4 +146,110 @@ export function poreLattice(
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer factory
+// ---------------------------------------------------------------------------
+
+export interface RadiolarianOptions {
+  width: number;
+  height: number;
+  params?: Partial<RadiolarianParams>;
+  /** Glass-cyan base hue in degrees (default 190). */
+  baseHue?: number;
+}
+
+const SAMPLE_COUNT = 96;
+
+export function createRadiolarianRenderer(
+  container: HTMLElement,
+  opts: RadiolarianOptions,
+): Renderer {
+  const params: RadiolarianParams = { ...RADIOLARIAN_DEFAULTS, ...(opts.params ?? {}) };
+  const baseHue = opts.baseHue ?? 190; // luminous glass cyan
+  const { width, height } = opts;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.style.display = "block";
+  container.appendChild(canvas);
+  const ctx = canvas.getContext("2d");
+
+  let latestState: ThemeState = { mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) };
+  let shellMemory: number[] | null = null; // form-memory of shell radii fractions
+  const startedAt = performance.now();
+  let rafId: number | null = null;
+
+  const cx = width / 2;
+  const cy = height / 2;
+  const baseR = Math.min(width, height) * params.radiusFraction;
+
+  const tick = () => {
+    const t = (performance.now() - startedAt) / 1000;
+    const s = latestState;
+
+    if (ctx) {
+      ctx.clearRect(0, 0, width, height);
+      const energy = radiolarianEnergy(s.mode, s.audioLevel, t, params);
+
+      // --- shell contour with form memory ---
+      const target: number[] = [];
+      for (let i = 0; i < SAMPLE_COUNT; i++) {
+        const a = (i / SAMPLE_COUNT) * TAU + t * params.spinSpeed;
+        const bin = s.spectrumBins[Math.min(s.spectrumBins.length - 1,
+          Math.floor((i / SAMPLE_COUNT) * s.spectrumBins.length))] ?? 0;
+        target.push(shellRadius(a, t, energy, params) + bin * 0.12 * energy);
+      }
+      shellMemory = shellMemory
+        ? integrateDeformation(shellMemory, target, 0.25, 0.02)
+        : target.slice();
+
+      // --- spikes (under shell stroke) ---
+      ctx.lineCap = "round";
+      for (const sp of spikeEndpoints(cx, cy, baseR, t, s.audioLevel, params)) {
+        ctx.strokeStyle = hsla(baseHue + 10, 0.85, 0.65, 0.55 + 0.35 * energy);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(sp.x1, sp.y1); ctx.lineTo(sp.x2, sp.y2); ctx.stroke();
+      }
+
+      // --- shell: glow pass then crisp glass rim ---
+      const pts: Array<[number, number]> = shellMemory.map((rf, i) => {
+        const a = (i / SAMPLE_COUNT) * TAU + t * params.spinSpeed;
+        const rr = baseR * rf;
+        return [cx + rr * Math.cos(a), cy + rr * Math.sin(a)];
+      });
+      const drawClosed = (lw: number, style: string) => {
+        ctx.lineWidth = lw; ctx.strokeStyle = style; ctx.lineJoin = "round";
+        ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+        ctx.closePath(); ctx.stroke();
+      };
+      // translucent interior
+      ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.closePath();
+      ctx.fillStyle = hsla(baseHue, 0.6, 0.5, 0.12 + 0.10 * energy);
+      ctx.fill();
+      drawClosed(3.0, hsla(baseHue + 5, 0.9, 0.7, 0.18 + 0.18 * energy)); // glow
+      drawClosed(1.2, hsla(baseHue, 0.85, 0.75, 0.9));                    // crisp rim
+
+      // --- pore lattice ---
+      for (const p of poreLattice(cx, cy, baseR, t, params)) {
+        ctx.fillStyle = hsla(baseHue + 6, 0.7, 0.8, 0.5 + 0.4 * energy);
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill();
+      }
+    }
+    rafId = requestAnimationFrame(tick);
+  };
+  rafId = requestAnimationFrame(tick);
+
+  return {
+    update(state: ThemeState) { latestState = state; },
+    destroy() {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      container.innerHTML = "";
+    },
+  };
 }
