@@ -95,3 +95,54 @@ export function shellRadius(
   const breathe = 1 + energy * 0.18;
   return (1 + n * params.shellAmplitude) * breathe;
 }
+
+export interface Spike { x1: number; y1: number; x2: number; y2: number; }
+
+/**
+ * Radial spikes from the shell outward, one per symmetry vertex. Inner point
+ * sits on the shell; outer point extends by spikeLength + audio*spikePulse.
+ * `spin` (t*spinSpeed) rotates the whole crown slowly.
+ */
+export function spikeEndpoints(
+  cx: number, cy: number, baseR: number,
+  t: number, audioLevel: number, params: RadiolarianParams,
+): Spike[] {
+  const out: Spike[] = [];
+  const spin = t * params.spinSpeed;
+  const ext = baseR * (params.spikeLength + audioLevel * params.spikePulse);
+  for (let k = 0; k < params.symmetry; k++) {
+    const a = spin + (k / params.symmetry) * TAU;
+    const sr = baseR * shellRadius(a, t, params.idle, params);
+    const x1 = cx + sr * Math.cos(a);
+    const y1 = cy + sr * Math.sin(a);
+    const x2 = cx + (sr + ext) * Math.cos(a);
+    const y2 = cy + (sr + ext) * Math.sin(a);
+    out.push({ x1, y1, x2, y2 });
+  }
+  return out;
+}
+
+export interface Pore { x: number; y: number; r: number; }
+
+/**
+ * Concentric rings of pore dots on a symmetric angular grid. Each ring i sits
+ * at radius baseR*(0.35 + 0.5*i/poreRings); dots per ring scale with symmetry.
+ */
+export function poreLattice(
+  cx: number, cy: number, baseR: number,
+  t: number, params: RadiolarianParams,
+): Pore[] {
+  const out: Pore[] = [];
+  const spin = t * params.spinSpeed * 0.5;
+  const r = Math.max(0.6, params.poreRadius);
+  for (let ring = 0; ring < params.poreRings; ring++) {
+    const rr = baseR * (0.35 + 0.5 * (ring / Math.max(1, params.poreRings)));
+    const count = params.symmetry * (ring + 1);
+    const offset = ring % 2 === 0 ? 0 : (TAU / count) * 0.5; // brick-stagger
+    for (let j = 0; j < count; j++) {
+      const a = spin + offset + (j / count) * TAU;
+      out.push({ x: cx + rr * Math.cos(a), y: cy + rr * Math.sin(a), r });
+    }
+  }
+  return out;
+}
