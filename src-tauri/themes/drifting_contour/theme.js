@@ -300,14 +300,16 @@ var CELL_DEFAULTS = {
   lacunarity: 2.3,
   gain: 0.55,
   timeScale: 0.3,
-  push: 18,
+  membraneAmplitude: 0.35,
+  energyDrive: 0.8,
+  push: 3,
   sharpness: 4,
   intentDrift: 0.08,
-  idle: 0.06,
+  idle: 0.1,
   levelGain: 0.7,
   hueSpread: 40,
   shimmerSpeed: 0.5,
-  hueBoost: 15,
+  hueBoost: 20,
   fillAlpha: 0.18,
   tension: 0.15,
   radiusFraction: 0.34
@@ -331,8 +333,8 @@ function cellRadius(angle, t, energy, params) {
   const dx = Math.cos(angle);
   const dy = Math.sin(angle);
   const noiseVal = fbm(dx * params.noiseScale + t * params.timeScale * 0.3, dy * params.noiseScale + t * params.timeScale * 0.2, params.octaves, params.lacunarity, params.gain);
-  const amplitude = Math.max(params.idle, energy);
-  return 1 + noiseVal * 0.28 * amplitude;
+  const amp = params.idle + energy * params.energyDrive;
+  return 1 + noiseVal * params.membraneAmplitude * amp;
 }
 function pseudopodOffset(angle, t, audioLevel, energy, params) {
   let total = 0;
@@ -343,7 +345,8 @@ function pseudopodOffset(angle, t, audioLevel, energy, params) {
     let delta = angle - theta;
     delta = ((delta + Math.PI) % TAU + TAU) % TAU - Math.PI;
     const lobe = Math.pow(Math.max(0, Math.cos(delta)), params.sharpness);
-    const amp = params.push * (params.idle + audioLevel * params.levelGain) * (energy / Math.max(0.01, params.idle + 0.01));
+    const audioDrive = params.idle + audioLevel * params.levelGain;
+    const amp = params.push * audioDrive * energy;
     total += lobe * amp;
   }
   return total;
@@ -395,7 +398,9 @@ function buildCellContour(width, height, bins, t, audioLevel, energy, params) {
     const binLevel = bins.length === 0 ? 0 : bins[binIdx];
     const rFbm = cellRadius(angle, t, energy, params);
     const rPseudo = pseudopodOffset(angle, t, audioLevel, energy, params);
-    const radius = baseR * rFbm + rPseudo + binLevel * baseR * 0.15 * energy;
+    const rawRadius = baseR * rFbm + rPseudo + binLevel * baseR * 0.15 * energy;
+    const maxRadius = height * 0.46;
+    const radius = Math.max(baseR * 0.35, Math.min(maxRadius, rawRadius));
     const x = cx + radius * Math.cos(angle);
     const y = cy + radius * Math.sin(angle);
     out.push([x, y]);
@@ -513,14 +518,16 @@ function mount(container, api) {
       lacunarity: 2.3,
       gain: 0.55,
       timeScale: 0.3,
-      push: 18,
+      membraneAmplitude: 0.35,
+      energyDrive: 0.8,
+      push: 3,
       sharpness: 4,
       intentDrift: 0.08,
-      idle: 0.06,
+      idle: 0.1,
       levelGain: 0.7,
       hueSpread: 40,
       shimmerSpeed: 0.5,
-      hueBoost: 15,
+      hueBoost: 20,
       fillAlpha: 0.18,
       tension: 0.15,
       ...userParams

@@ -132,6 +132,10 @@ export interface CellParams {
   gain: number;
   /** Time scaling factor for drifting the noise domain. */
   timeScale: number;
+  /** Amplitude multiplier for FBM membrane deformation (was hardcoded 0.28). */
+  membraneAmplitude: number;
+  /** How much energy (beyond idle) drives FBM deformation amplitude. */
+  energyDrive: number;
   /** Base pseudopod push amplitude. */
   push: number;
   /** Sharpness exponent for pseudopod directionality. */
@@ -163,14 +167,16 @@ export const CELL_DEFAULTS: CellParams = {
   lacunarity: 2.3,
   gain: 0.55,
   timeScale: 0.3,
-  push: 18,
+  membraneAmplitude: 0.35,
+  energyDrive: 0.8,
+  push: 3.0,
   sharpness: 4,
   intentDrift: 0.08,
-  idle: 0.06,
+  idle: 0.10,
   levelGain: 0.7,
   hueSpread: 40,
   shimmerSpeed: 0.5,
-  hueBoost: 15,
+  hueBoost: 20,
   fillAlpha: 0.18,
   tension: 0.15,
   radiusFraction: 0.34,
@@ -237,9 +243,10 @@ export function cellRadius(
     params.gain,
   );
 
-  // Energy scaling: idle gives subtle breathing, recording gives full deformation
-  const amplitude = Math.max(params.idle, energy);
-  return 1.0 + noiseVal * 0.28 * amplitude;
+  // Amplitude blends idle floor with energy-driven deformation.
+  // idle ~5% wobble alone; recording ~25-40% (with membraneAmplitude ≈ 0.28).
+  const amp = params.idle + energy * params.energyDrive;
+  return 1.0 + noiseVal * params.membraneAmplitude * amp;
 }
 
 /**
@@ -272,8 +279,9 @@ export function pseudopodOffset(
     delta = ((delta + Math.PI) % TAU + TAU) % TAU - Math.PI;
     // Bell-shaped lobe: cos(delta)^sharpness, clamped to positive
     const lobe = Math.pow(Math.max(0, Math.cos(delta)), params.sharpness);
-    // Amplitude grows with energy and audio level
-    const amp = params.push * (params.idle + audioLevel * params.levelGain) * (energy / Math.max(0.01, params.idle + 0.01));
+    // Amplitude grows with audio level and energy; idle gives tiny twitches
+    const audioDrive = params.idle + audioLevel * params.levelGain;
+    const amp = params.push * audioDrive * energy;
     total += lobe * amp;
   }
 
@@ -426,11 +434,16 @@ export function buildCellContour(
     const rFbm = cellRadius(angle, t, energy, params);
     const rPseudo = pseudopodOffset(angle, t, audioLevel, energy, params);
 
-    // Combine: base radius * deformation * energy + pseudopod + bin modulation
-    const radius =
+    // Combine: base radius * deformation + pseudopod + bin modulation
+    const rawRadius =
       baseR * rFbm +
       rPseudo +
       binLevel * baseR * 0.15 * energy;
+
+    // Clamp: keep membrane fully visible within the window.
+    // Floor prevents pinching to a dot; ceiling respects window height.
+    const maxRadius = height * 0.46;
+    const radius = Math.max(baseR * 0.35, Math.min(maxRadius, rawRadius));
 
     const x = cx + radius * Math.cos(angle);
     const y = cy + radius * Math.sin(angle);
