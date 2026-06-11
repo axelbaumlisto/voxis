@@ -1,20 +1,16 @@
 /**
- * Smoke tests for the ThemeSelect swatch grid (Phase 7).
- *
- * All themes are now code modules (manifest v2); swatches display
- * placeholder until the Rust theme-engine ships swatch data.
+ * Smoke tests for the ThemeSelect dropdown (post swatch-grid removal).
  *
  * Covers:
- *  - Grid renders one swatch per option.
- *  - Clicking a swatch button fires `onChange` with its theme id.
- *  - Selected swatch carries `aria-checked="true"`.
+ *  - Select dropdown renders with all options.
+ *  - Changing the dropdown fires onChange with the new value.
+ *  - The selected value is reflected in the dropdown.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import ThemeSelect from "../ThemeSelect";
 
-// Stub the theme-list hook to avoid Tauri command round-trip; we control
-// the dropdown options directly.
+// Stub the theme-list hook to avoid Tauri command round-trip.
 vi.mock("../../../hooks/useVisualizationThemes", () => ({
   useVisualizationThemes: () => ({
     options: [
@@ -37,58 +33,40 @@ vi.mock("../../../lib/commands", () => ({
   previewVisualizationTheme: vi.fn().mockResolvedValue(undefined),
 }));
 
-describe("ThemeSelect (swatch grid)", () => {
-  it("renders one swatch row per theme option", () => {
-    const { getByTestId } = render(
+describe("ThemeSelect (dropdown)", () => {
+  it("renders a select dropdown with one option per theme", () => {
+    const { getByLabelText } = render(
       <ThemeSelect label="Theme" value="winamp_classic" onChange={() => {}} />,
     );
-    expect(getByTestId("theme-swatch-winamp_classic")).toBeInTheDocument();
-    expect(getByTestId("theme-swatch-drifting_contour")).toBeInTheDocument();
-    expect(getByTestId("theme-swatch-neon")).toBeInTheDocument();
+    const select = getByLabelText("Theme") as HTMLSelectElement;
+    expect(select.tagName).toBe("SELECT");
+    const optionValues = Array.from(select.options).map((o) => o.value);
+    expect(optionValues).toEqual(["winamp_classic", "drifting_contour", "neon"]);
   });
 
-  // Transitional (dies in Phase 6): ALL bars-family themes are now manifest v2.
-  // No legacy bars theme remains, so v2 bars ids render the --missing swatch.
-  // Ring themes are still legacy until Task 3.3 — ring-swatch branch has coverage.
-  it("renders a missing swatch for v2 bars themes (no legacy pipeline)", () => {
-    const { getByTestId } = render(
-      <ThemeSelect label="Theme" value="winamp_classic" onChange={() => {}} />,
-    );
-    const swatch = getByTestId("theme-swatch-neon");
-    expect(swatch.className).toContain("theme-swatch--missing");
-  });
-
-  // Transitional (dies in Phase 6): all 3 ring themes (quiet_reed,
-  // living_reed, drifting_contour) converted to manifest v2 in Task 3.3 —
-  // no legacy ring theme remains; builtinHandyThemes returns null for them.
-  it("renders mission swatch for v2 ring themes (no legacy pipeline)", () => {
-    const { getByTestId } = render(
-      <ThemeSelect label="Theme" value="winamp_classic" onChange={() => {}} />,
-    );
-    const swatch = getByTestId("theme-swatch-drifting_contour");
-    expect(swatch.className).toContain("theme-swatch--missing");
-  });
-
-  it("clicking a swatch row calls onChange with its theme id", () => {
+  it("changing the dropdown fires onChange with the new value", () => {
     const onChange = vi.fn();
-    const { getByTestId } = render(
+    const { getByLabelText } = render(
       <ThemeSelect label="Theme" value="winamp_classic" onChange={onChange} />,
     );
-    const swatch = getByTestId("theme-swatch-neon");
-    fireEvent.click(swatch.closest("button")!);
+    const select = getByLabelText("Theme");
+    fireEvent.change(select, { target: { value: "neon" } });
     expect(onChange).toHaveBeenCalledWith("neon");
   });
 
-  it("selected swatch row carries aria-checked=true", () => {
-    const { getByTestId } = render(
+  it("reflects the selected value in the dropdown", () => {
+    const { getByLabelText } = render(
       <ThemeSelect label="Theme" value="neon" onChange={() => {}} />,
     );
-    const swatch = getByTestId("theme-swatch-neon");
-    const row = swatch.closest("button")!;
-    expect(row.getAttribute("aria-checked")).toBe("true");
+    const select = getByLabelText("Theme") as HTMLSelectElement;
+    expect(select.value).toBe("neon");
+  });
 
-    const otherSwatch = getByTestId("theme-swatch-winamp_classic");
-    const otherRow = otherSwatch.closest("button")!;
-    expect(otherRow.getAttribute("aria-checked")).toBe("false");
+  it("renders Preview and Reload + Preview buttons", () => {
+    const { getByText } = render(
+      <ThemeSelect label="Theme" value="winamp_classic" onChange={() => {}} />,
+    );
+    expect(getByText("settings.preview")).toBeInTheDocument();
+    expect(getByText("Reload + Preview")).toBeInTheDocument();
   });
 });
