@@ -1,8 +1,12 @@
 // src/theme-engine/renderers/bars.ts
 /**
  * createBarsRenderer — vanilla-DOM port of ClassicBars.tsx (Winamp-style
- * gradient spectrum bars with peak-hold ticks). No React, no RAF: update()
- * is called on every spectrum event, which is the frame clock.
+ * gradient spectrum bars with peak-hold ticks).
+ *
+ * Drive: update() is called on every spectrum event (~12.5 fps).
+ * After events stop, a self-driven "settle" loop (rAF ~60 fps, gated at
+ * 80 ms per decay step) continues pushing zeros through the smoother +
+ * decaying peaks until everything reaches floor, so bars never freeze mid-air.
  *
  * SRP: only DOM rendering of bars; smoothing math lives in smoothing.ts.
  */
@@ -34,6 +38,7 @@ const DEFAULT_PEAK_DECAY = 0.96;
 const DEFAULT_SMOOTHING_ALPHA = 0.3;
 const MIN_HEIGHT_PX = 2;
 const PEAK_HEIGHT_PX = 2;
+const SETTLE_EPSILON = 0.005;
 
 /** Height formula ported from ClassicBars: soft power-curve compression. */
 function barHeight(v: number, maxHeight: number): number {
@@ -131,28 +136,101 @@ export function createBarsRenderer(container: HTMLElement, opts: BarsOptions): R
 
   container.appendChild(root);
 
+  // ── settle loop state ──
+  let settleRaf: number | null = null;
+  let lastSettleTime: number | null = null;
+
+  /** Apply heights + peak-hold to the DOM. Shared by update() and settleStep(). */
+  function renderFrame(heights: number[]): void {
+    for (let i = 0; i < barCount; i++) {
+      const v = heights[i] ?? 0;
+      const barPx = barHeight(v, maxHeight);
+      barEls[i].style.height = `${barPx}px`;
+
+      // Peak hold: instant rise, multiplicative decay per update.
+      const prev = peaks[i];
+      peaks[i] = v >= prev ? v : prev * peakDecay;
+      const peakPx = barHeight(peaks[i], maxHeight);
+      const showPeak = peakDecay > 0 && peakPx > barPx + 1;
+      peakEls[i].style.display = showPeak ? "block" : "none";
+      if (showPeak) {
+        peakEls[i].style.bottom = `${peakPx}px`;
+      }
+    }
+  }
+
+  function anyResidual(heights: number[]): boolean {
+    return heights.some((h) => h > SETTLE_EPSILON) || peaks.some((p) => p > SETTLE_EPSILON);
+  }
+
+  function cancelSettle(): void {
+    if (settleRaf !== null) {
+      cancelAnimationFrame(settleRaf);
+      settleRaf = null;
+      lastSettleTime = null;
+    }
+  }
+
+  /**
+   * Self-driven decay tick.
+   *
+   * rAF fires at ~60 fps; events arrive at ~12.5 fps (80 ms).
+   * To keep decay speed perceptually identical we gate at 80 ms per step
+   * using the rAF timestamp delta. This is simpler and more honest than
+   * rescaling per-frame decay factors.
+   */
+  function settleStep(timestamp: number): void {
+    // Gate: only run a decay step every ~80 ms
+    if (lastSettleTime !== null && timestamp - lastSettleTime < 80) {
+      settleRaf = requestAnimationFrame(settleStep);
+      return;
+    }
+    lastSettleTime = timestamp;
+
+    // Synthesize a zero-frame: push zeros through smoother + decay peaks
+    const heights = smoother.push(new Array(barCount).fill(0));
+    renderFrame(heights);
+
+    if (anyResidual(heights)) {
+      settleRaf = requestAnimationFrame(settleStep);
+    } else {
+      // Fully settled — force absolute floor
+      settleRaf = null;
+      lastSettleTime = null;
+      for (let i = 0; i < barCount; i++) {
+        peaks[i] = 0;
+        barEls[i].style.height = `${MIN_HEIGHT_PX}px`;
+        peakEls[i].style.display = "none";
+      }
+    }
+  }
+
+  function startSettle(): void {
+    if (settleRaf === null) {
+      // Gate the first step from NOW so we don't double-decay within
+      // the same 80 ms window as the just-processed event.
+      lastSettleTime = performance.now();
+      settleRaf = requestAnimationFrame(settleStep);
+    }
+  }
+
   return {
     update(state: ThemeState): void {
+      // Live events always win — cancel any in-progress settle
+      cancelSettle();
+
       const resampled = resample(state.spectrumBins ?? [], barCount);
       const heights = smoother.push(resampled);
+      renderFrame(heights);
 
-      for (let i = 0; i < barCount; i++) {
-        const v = heights[i] ?? 0;
-        const barPx = barHeight(v, maxHeight);
-        barEls[i].style.height = `${barPx}px`;
-
-        // Peak hold: instant rise, multiplicative decay per update.
-        const prev = peaks[i];
-        peaks[i] = v >= prev ? v : prev * peakDecay;
-        const peakPx = barHeight(peaks[i], maxHeight);
-        const showPeak = peakDecay > 0 && peakPx > barPx + 1;
-        peakEls[i].style.display = showPeak ? "block" : "none";
-        if (showPeak) {
-          peakEls[i].style.bottom = `${peakPx}px`;
-        }
+      // If residual energy remains, start self-driven decay so bars
+      // don't freeze mid-air when events stop.
+      if (anyResidual(heights)) {
+        startSettle();
       }
     },
     destroy(): void {
+      cancelSettle();
       container.innerHTML = "";
     },
   };

@@ -5,7 +5,11 @@
  * Layout: 172×36 grid (auto 1fr auto) → icon | middle | cancel.
  * 9 compact bars with power-curve height + opacity smoothing.
  * Self-contained SVG icons (Microphone, Transcription, Cancel) inlined.
- * No React, no RAF: update() is pushed on every spectrum event.
+ *
+ * Drive: update() is pushed on every spectrum event (~12.5 fps).
+ * After events stop, a self-driven "settle" loop (rAF ~60 fps, gated at
+ * 80 ms per decay step) continues pushing zeros through the smoother
+ * until all bars reach floor, so they never freeze mid-air in recording mode.
  *
  * SRP: only DOM rendering of the Handy pill; smoothing math delegated to smoothing.ts.
  */
@@ -162,6 +166,58 @@ export function createPillRenderer(container: HTMLElement, opts: PillOptions): R
 
   const smoother = createSmoother({ size: BAR_COUNT, alpha, peakDecay });
 
+  // ── settle loop state ──
+  const SETTLE_EPSILON = 0.005;
+  let settleRaf: number | null = null;
+  let lastSettleTime: number | null = null;
+
+  function anyResidual(smoothed: number[]): boolean {
+    return smoothed.some((v) => v > SETTLE_EPSILON);
+  }
+
+  function cancelSettle(): void {
+    if (settleRaf !== null) {
+      cancelAnimationFrame(settleRaf);
+      settleRaf = null;
+      lastSettleTime = null;
+    }
+  }
+
+  /** Self-driven decay tick, gated at 80 ms to match event rate. */
+  function settleStep(timestamp: number): void {
+    if (lastSettleTime !== null && timestamp - lastSettleTime < 80) {
+      settleRaf = requestAnimationFrame(settleStep);
+      return;
+    }
+    lastSettleTime = timestamp;
+
+    const smoothed = smoother.push(new Array(BAR_COUNT).fill(0));
+    for (let i = 0; i < barEls.length; i++) {
+      const v = smoothed[i] ?? 0;
+      barEls[i].style.height = `${barHeightPx(v, powerCurve)}px`;
+      barEls[i].style.opacity = `${barOpacity(v)}`;
+    }
+
+    if (anyResidual(smoothed)) {
+      settleRaf = requestAnimationFrame(settleStep);
+    } else {
+      // Fully settled — force absolute floor
+      settleRaf = null;
+      lastSettleTime = null;
+      for (let i = 0; i < barEls.length; i++) {
+        barEls[i].style.height = `${MIN_PX}px`;
+        barEls[i].style.opacity = `${MIN_OPACITY}`;
+      }
+    }
+  }
+
+  function startSettle(): void {
+    if (settleRaf === null) {
+      lastSettleTime = performance.now();
+      settleRaf = requestAnimationFrame(settleStep);
+    }
+  }
+
   // Inject scoped <style> for hover/keyframes
   const styleEl = document.createElement("style");
   styleEl.setAttribute("data-pill-scope", scopeClass);
@@ -285,10 +341,14 @@ export function createPillRenderer(container: HTMLElement, opts: PillOptions): R
     update(state: ThemeState): void {
       const mode = state.mode;
       if (mode !== currentMode) {
+        cancelSettle();
         currentMode = mode;
         rebuildDOM(mode);
       }
       if (mode === "recording" && barEls.length > 0) {
+        // Live events always win — cancel any in-progress settle
+        cancelSettle();
+
         const resampled = resampleToBars(state.spectrumBins);
         const smoothed = smoother.push(resampled);
         for (let i = 0; i < barEls.length; i++) {
@@ -296,9 +356,15 @@ export function createPillRenderer(container: HTMLElement, opts: PillOptions): R
           barEls[i].style.height = `${barHeightPx(v, powerCurve)}px`;
           barEls[i].style.opacity = `${barOpacity(v)}`;
         }
+
+        // If residual remains, start self-driven decay
+        if (anyResidual(smoothed)) {
+          startSettle();
+        }
       }
     },
     destroy(): void {
+      cancelSettle();
       if (styleEl.parentNode) {
         styleEl.parentNode.removeChild(styleEl);
       }

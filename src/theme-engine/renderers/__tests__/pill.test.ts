@@ -1,5 +1,5 @@
 // src/theme-engine/renderers/__tests__/pill.test.ts
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createPillRenderer } from "../pill";
 
 const PALETTE = {
@@ -49,5 +49,86 @@ describe("createPillRenderer", () => {
     const r = createPillRenderer(container, { palette: PALETTE, onCancel: () => {} });
     r.destroy();
     expect(container.innerHTML).toBe("");
+  });
+
+  describe("settle loop", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date", "performance", "requestAnimationFrame", "cancelAnimationFrame"],
+      });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("decays bars to min height and min opacity after events stop", () => {
+      const container = document.createElement("div");
+      const r = createPillRenderer(container, { palette: PALETTE, onCancel: () => {} });
+      r.update({ mode: "recording", audioLevel: 1, spectrumBins: new Array(32).fill(1) });
+
+      // Push several high-energy updates
+      for (let i = 0; i < 10; i++) {
+        r.update({ mode: "recording", audioLevel: 1, spectrumBins: new Array(32).fill(1) });
+      }
+
+      const bars = container.querySelectorAll<HTMLElement>(".pill-bar");
+      // Bars should be above min after high energy
+      expect(parseFloat(bars[0].style.height)).toBeGreaterThan(4);
+
+      // Push a few zero-frames (not enough to fully decay — residual > epsilon
+      // so the settle loop is what brings bars to floor)
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0, spectrumBins: [] });
+      }
+
+      // Advance fake timers for settle to complete
+      vi.advanceTimersByTime(15000);
+
+      // After settle: all bars at MIN_PX (4px) and MIN_OPACITY (0.2)
+      bars.forEach((b) => {
+        expect(parseFloat(b.style.height)).toBe(4);
+        expect(parseFloat(b.style.opacity)).toBe(0.2);
+      });
+
+      r.destroy();
+    });
+
+    it("settle is cancelled on mode change away from recording", () => {
+      const container = document.createElement("div");
+      const r = createPillRenderer(container, { palette: PALETTE, onCancel: () => {} });
+
+      // Push high energy to trigger settle
+      for (let i = 0; i < 10; i++) {
+        r.update({ mode: "recording", audioLevel: 1, spectrumBins: new Array(32).fill(1) });
+      }
+      r.update({ mode: "recording", audioLevel: 0, spectrumBins: [] });
+
+      const cancelSpy = vi.spyOn(window, "cancelAnimationFrame");
+
+      // Mode change should cancel any pending settle
+      r.update({ mode: "transcribing", audioLevel: 0, spectrumBins: [] });
+      expect(cancelSpy).toHaveBeenCalled();
+
+      cancelSpy.mockRestore();
+      r.destroy();
+    });
+
+    it("destroy() cancels pending settle rAF", () => {
+      const container = document.createElement("div");
+      const r = createPillRenderer(container, { palette: PALETTE, onCancel: () => {} });
+
+      for (let i = 0; i < 10; i++) {
+        r.update({ mode: "recording", audioLevel: 1, spectrumBins: new Array(32).fill(1) });
+      }
+      r.update({ mode: "recording", audioLevel: 0, spectrumBins: [] });
+
+      const cancelSpy = vi.spyOn(window, "cancelAnimationFrame");
+
+      r.destroy();
+      expect(cancelSpy).toHaveBeenCalled();
+      expect(container.innerHTML).toBe("");
+
+      cancelSpy.mockRestore();
+    });
   });
 });

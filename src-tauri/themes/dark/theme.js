@@ -28,6 +28,7 @@ var DEFAULT_PEAK_DECAY = 0.96;
 var DEFAULT_SMOOTHING_ALPHA = 0.3;
 var MIN_HEIGHT_PX = 2;
 var PEAK_HEIGHT_PX = 2;
+var SETTLE_EPSILON = 0.005;
 function barHeight(v, maxHeight) {
   const clamped = Math.max(0, Math.min(1, v));
   const range = Math.max(0, maxHeight - MIN_HEIGHT_PX);
@@ -108,25 +109,71 @@ function createBarsRenderer(container, opts) {
     peakEls.push(peak);
   }
   container.appendChild(root);
+  let settleRaf = null;
+  let lastSettleTime = null;
+  function renderFrame(heights) {
+    for (let i = 0;i < barCount; i++) {
+      const v = heights[i] ?? 0;
+      const barPx = barHeight(v, maxHeight);
+      barEls[i].style.height = `${barPx}px`;
+      const prev = peaks[i];
+      peaks[i] = v >= prev ? v : prev * peakDecay;
+      const peakPx = barHeight(peaks[i], maxHeight);
+      const showPeak = peakDecay > 0 && peakPx > barPx + 1;
+      peakEls[i].style.display = showPeak ? "block" : "none";
+      if (showPeak) {
+        peakEls[i].style.bottom = `${peakPx}px`;
+      }
+    }
+  }
+  function anyResidual(heights) {
+    return heights.some((h) => h > SETTLE_EPSILON) || peaks.some((p) => p > SETTLE_EPSILON);
+  }
+  function cancelSettle() {
+    if (settleRaf !== null) {
+      cancelAnimationFrame(settleRaf);
+      settleRaf = null;
+      lastSettleTime = null;
+    }
+  }
+  function settleStep(timestamp) {
+    if (lastSettleTime !== null && timestamp - lastSettleTime < 80) {
+      settleRaf = requestAnimationFrame(settleStep);
+      return;
+    }
+    lastSettleTime = timestamp;
+    const heights = smoother.push(new Array(barCount).fill(0));
+    renderFrame(heights);
+    if (anyResidual(heights)) {
+      settleRaf = requestAnimationFrame(settleStep);
+    } else {
+      settleRaf = null;
+      lastSettleTime = null;
+      for (let i = 0;i < barCount; i++) {
+        peaks[i] = 0;
+        barEls[i].style.height = `${MIN_HEIGHT_PX}px`;
+        peakEls[i].style.display = "none";
+      }
+    }
+  }
+  function startSettle() {
+    if (settleRaf === null) {
+      lastSettleTime = performance.now();
+      settleRaf = requestAnimationFrame(settleStep);
+    }
+  }
   return {
     update(state) {
+      cancelSettle();
       const resampled = resample(state.spectrumBins ?? [], barCount);
       const heights = smoother.push(resampled);
-      for (let i = 0;i < barCount; i++) {
-        const v = heights[i] ?? 0;
-        const barPx = barHeight(v, maxHeight);
-        barEls[i].style.height = `${barPx}px`;
-        const prev = peaks[i];
-        peaks[i] = v >= prev ? v : prev * peakDecay;
-        const peakPx = barHeight(peaks[i], maxHeight);
-        const showPeak = peakDecay > 0 && peakPx > barPx + 1;
-        peakEls[i].style.display = showPeak ? "block" : "none";
-        if (showPeak) {
-          peakEls[i].style.bottom = `${peakPx}px`;
-        }
+      renderFrame(heights);
+      if (anyResidual(heights)) {
+        startSettle();
       }
     },
     destroy() {
+      cancelSettle();
       container.innerHTML = "";
     }
   };

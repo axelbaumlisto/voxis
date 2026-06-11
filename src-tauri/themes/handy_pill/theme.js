@@ -118,6 +118,48 @@ function createPillRenderer(container, opts) {
   const peakDecay = opts.animation?.peak_decay ?? 1;
   const scopeClass = `pill-scope-${++pillIdCounter}`;
   const smoother = createSmoother({ size: BAR_COUNT, alpha, peakDecay });
+  const SETTLE_EPSILON = 0.005;
+  let settleRaf = null;
+  let lastSettleTime = null;
+  function anyResidual(smoothed) {
+    return smoothed.some((v) => v > SETTLE_EPSILON);
+  }
+  function cancelSettle() {
+    if (settleRaf !== null) {
+      cancelAnimationFrame(settleRaf);
+      settleRaf = null;
+      lastSettleTime = null;
+    }
+  }
+  function settleStep(timestamp) {
+    if (lastSettleTime !== null && timestamp - lastSettleTime < 80) {
+      settleRaf = requestAnimationFrame(settleStep);
+      return;
+    }
+    lastSettleTime = timestamp;
+    const smoothed = smoother.push(new Array(BAR_COUNT).fill(0));
+    for (let i = 0;i < barEls.length; i++) {
+      const v = smoothed[i] ?? 0;
+      barEls[i].style.height = `${barHeightPx(v, powerCurve)}px`;
+      barEls[i].style.opacity = `${barOpacity(v)}`;
+    }
+    if (anyResidual(smoothed)) {
+      settleRaf = requestAnimationFrame(settleStep);
+    } else {
+      settleRaf = null;
+      lastSettleTime = null;
+      for (let i = 0;i < barEls.length; i++) {
+        barEls[i].style.height = `${MIN_PX}px`;
+        barEls[i].style.opacity = `${MIN_OPACITY}`;
+      }
+    }
+  }
+  function startSettle() {
+    if (settleRaf === null) {
+      lastSettleTime = performance.now();
+      settleRaf = requestAnimationFrame(settleStep);
+    }
+  }
   const styleEl = document.createElement("style");
   styleEl.setAttribute("data-pill-scope", scopeClass);
   styleEl.textContent = generateScopedCSS(scopeClass, p);
@@ -223,10 +265,12 @@ function createPillRenderer(container, opts) {
     update(state) {
       const mode = state.mode;
       if (mode !== currentMode) {
+        cancelSettle();
         currentMode = mode;
         rebuildDOM(mode);
       }
       if (mode === "recording" && barEls.length > 0) {
+        cancelSettle();
         const resampled = resampleToBars(state.spectrumBins);
         const smoothed = smoother.push(resampled);
         for (let i = 0;i < barEls.length; i++) {
@@ -234,9 +278,13 @@ function createPillRenderer(container, opts) {
           barEls[i].style.height = `${barHeightPx(v, powerCurve)}px`;
           barEls[i].style.opacity = `${barOpacity(v)}`;
         }
+        if (anyResidual(smoothed)) {
+          startSettle();
+        }
       }
     },
     destroy() {
+      cancelSettle();
       if (styleEl.parentNode) {
         styleEl.parentNode.removeChild(styleEl);
       }
