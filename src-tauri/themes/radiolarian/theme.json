@@ -1,0 +1,8 @@
+{
+  "manifest_version": 2,
+  "id": "radiolarian",
+  "name": "Radiolarian",
+  "description": "Luminous glass-skeleton plankton — radial spikes, hexagonal pore lattice, cyan rim that pulses with voice",
+  "api_version": 1,
+  "entry": "theme.js"
+}
