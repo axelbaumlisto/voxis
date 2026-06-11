@@ -380,7 +380,11 @@ var CELL_DEFAULTS = {
   startleSensitivity: 2.2,
   startleDecay: 0.86,
   startleMaxPx: 5,
-  startleBaselineRate: 0.08
+  startleBaselineRate: 0.08,
+  idleMorphAmplitude: 0.18,
+  idleMorphSpeed: 0.25,
+  idleMorphPeriod: 7,
+  idleMorphFloor: 0.25
 };
 function cellEnergy(mode, audioLevel, t, idle, levelGain) {
   switch (mode) {
@@ -439,16 +443,37 @@ function startleOffset(prevMag, level, baseline, sensitivity, decay) {
   const decayed = prevMag * Math.max(0, Math.min(1, decay));
   return Math.max(0, Math.min(1, Math.max(decayed, edge)));
 }
+function idleMorph(sampleCount, t, params) {
+  const out = [];
+  const phase = (Math.cos(TAU * t / Math.max(0.01, params.idleMorphPeriod)) + 1) / 2;
+  const env = params.idleMorphFloor + (1 - params.idleMorphFloor) * phase;
+  const travel = t * params.idleMorphSpeed;
+  for (let i = 0;i < sampleCount; i++) {
+    const a = i / sampleCount * TAU;
+    const n1 = noise2D(Math.cos(a) * 1.6 + travel, Math.sin(a) * 1.6 - travel * 0.7);
+    const n2 = noise2D(Math.cos(a) * 3.1 - travel * 0.5, Math.sin(a) * 3.1 + travel * 0.9);
+    const raw = n1 * 0.65 + n2 * 0.35;
+    let d = raw * params.idleMorphAmplitude * env;
+    const cap = params.idleMorphAmplitude;
+    if (d > cap)
+      d = cap;
+    else if (d < -cap)
+      d = -cap;
+    out.push(d);
+  }
+  return out;
+}
 function iridescentHue(angle, t, audioLevel, baseHue, params) {
   const norm = (angle % TAU + TAU) % TAU / TAU;
   let hue = baseHue + norm * params.hueSpread + t * params.shimmerSpeed + audioLevel * params.hueBoost;
   hue = (hue % 360 + 360) % 360;
   return hue;
 }
-function buildTargetDeformation(width, height, bins, t, audioLevel, energy, params) {
+function buildTargetDeformation(width, height, bins, t, audioLevel, energy, params, idleFactor = 0) {
   const sampleCount = 96;
   const baseR = Math.min(width, height) * params.radiusFraction;
   const invBaseR = baseR > 0 ? 1 / baseR : 1;
+  const morph = idleFactor > 0 ? idleMorph(sampleCount, t, params) : null;
   const out = [];
   for (let i = 0;i < sampleCount; i++) {
     const angle = i / sampleCount * TAU;
@@ -460,7 +485,8 @@ function buildTargetDeformation(width, height, bins, t, audioLevel, energy, para
     const rPseudo = pseudopodOffset(angle, t, audioLevel, energy, params);
     const pseudoDeform = rPseudo * invBaseR;
     const binDeform = binLevel * 0.15 * energy;
-    out.push(fbmDeform + pseudoDeform + binDeform);
+    const idle = morph ? morph[i] * idleFactor : 0;
+    out.push(fbmDeform + pseudoDeform + binDeform + idle);
   }
   return out;
 }
@@ -522,7 +548,9 @@ function createCellRenderer(container, opts) {
       const startleAngle = TAU * noise2D(900.5, t * 0.7);
       const sdx = Math.cos(startleAngle) * startle * params.startleMaxPx;
       const sdy = Math.sin(startleAngle) * startle * params.startleMaxPx;
-      const targetDeform = buildTargetDeformation(width, height, s.spectrumBins, t, s.audioLevel, energy, params);
+      const recordingFade = s.mode === "recording" ? 0.3 : 1;
+      const idleFactor = Math.max(0, 1 - s.audioLevel * 3) * recordingFade;
+      const targetDeform = buildTargetDeformation(width, height, s.spectrumBins, t, s.audioLevel, energy, params, idleFactor);
       deform = deform ? integrateDeformation(deform, targetDeform, params.attack, params.release) : targetDeform.slice();
       const cx = width / 2 + sdx;
       const cy = height / 2 + sdy;
@@ -657,7 +685,11 @@ function mount(container, api) {
       ciliaWave: 0.5,
       ciliaWaveSpeed: 1.6,
       growthAttack: 0.05,
-      growthRelease: 0.012,
+      growthRelease: 0,
+      idleMorphAmplitude: 0.16,
+      idleMorphSpeed: 0.22,
+      idleMorphPeriod: 7,
+      idleMorphFloor: 0.3,
       growthSwell: 0.2,
       startleSensitivity: 2.2,
       startleDecay: 0.86,
