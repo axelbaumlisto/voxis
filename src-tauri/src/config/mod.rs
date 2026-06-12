@@ -264,6 +264,11 @@ pub struct AppConfig {
     /// as a key modifier for combinations.
     #[serde(default = "default_hotkey_hold_ms")]
     pub hotkey_hold_ms: u32,
+    /// Minimum captured-audio duration (ms, after VAD) below which a
+    /// recording is dropped without hitting the API. See
+    /// `DEFAULT_MIN_RECORDING_MS`.
+    #[serde(default = "default_min_recording_ms")]
+    pub min_recording_ms: u32,
 
     // Behavior
     #[serde(default = "default_true")]
@@ -405,6 +410,7 @@ impl Default for AppConfig {
             language: DEFAULT_AUTO.into(),
             hotkey: DEFAULT_HOTKEY.into(),
             hotkey_hold_ms: DEFAULT_HOTKEY_HOLD_MS,
+            min_recording_ms: DEFAULT_MIN_RECORDING_MS,
             auto_type: true,
             auto_enter: false,
             typing_delay: DEFAULT_TYPING_DELAY,
@@ -456,6 +462,10 @@ fn default_hotkey() -> String {
 
 fn default_hotkey_hold_ms() -> u32 {
     DEFAULT_HOTKEY_HOLD_MS
+}
+
+fn default_min_recording_ms() -> u32 {
+    DEFAULT_MIN_RECORDING_MS
 }
 
 fn default_hotkey_mode() -> String {

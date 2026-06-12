@@ -126,6 +126,12 @@ pub const DEFAULT_HOTKEY: &str = "ctrl_r";
 /// being used in shortcuts like AltGr+R, Ctrl+C, etc.
 pub const DEFAULT_HOTKEY_HOLD_MS: u32 = 300;
 
+/// Recordings shorter than this (after VAD) are silently dropped instead
+/// of sent to the transcription API (which rejects sub-second clips as
+/// "Audio file is too short"). Guards accidental short clicks/taps on the
+/// press-and-hold overlay.
+pub const DEFAULT_MIN_RECORDING_MS: u32 = 400;
+
 /// Default typing delay in milliseconds.
 pub const DEFAULT_TYPING_DELAY: u32 = 12;
 
