@@ -13,7 +13,7 @@ mod sync;
 pub mod vad;
 
 pub use devices::{get_device, list_devices, AudioDevice};
-pub use encoder::{downsample, samples_to_wav, TRANSCRIPTION_SAMPLE_RATE};
+pub use encoder::{downsample, samples_to_wav, wav_duration_ms, TRANSCRIPTION_SAMPLE_RATE};
 pub use error::AudioError;
 pub use level::{SpectrumAnalyzer, SPECTRUM_BARS};
 pub use recorder::AudioRecorder;

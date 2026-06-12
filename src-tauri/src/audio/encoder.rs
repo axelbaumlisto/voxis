@@ -28,6 +28,34 @@ pub fn downsample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     output
 }
 
+/// Duration in milliseconds of a canonical PCM WAV (as produced by
+/// `samples_to_wav`: 44-byte header, "RIFF"/"WAVE", PCM, mono/stereo).
+///
+/// Pure & dependency-free: reads sample_rate (@24), channels (@22),
+/// bits_per_sample (@34) and the data chunk size (@40) from the header.
+/// Returns `None` if the bytes aren't a WAV we recognize.
+pub fn wav_duration_ms(wav: &[u8]) -> Option<u32> {
+    if wav.len() < 44 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
+        return None;
+    }
+    let le16 = |o: usize| u16::from_le_bytes([wav[o], wav[o + 1]]) as u32;
+    let le32 = |o: usize| u32::from_le_bytes([wav[o], wav[o + 1], wav[o + 2], wav[o + 3]]);
+    let channels = le16(22).max(1);
+    let sample_rate = le32(24);
+    let bits = le16(34).max(1);
+    let data_size = le32(40);
+    if sample_rate == 0 {
+        return None;
+    }
+    let bytes_per_sample_frame = channels * (bits / 8).max(1);
+    if bytes_per_sample_frame == 0 {
+        return None;
+    }
+    let frames = data_size / bytes_per_sample_frame;
+    // ms = frames * 1000 / sample_rate (u64 to avoid overflow)
+    Some(((frames as u64 * 1000) / sample_rate as u64) as u32)
+}
+
 /// Convert f32 samples to WAV bytes.
 pub fn samples_to_wav(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>, AudioError> {
     let spec = WavSpec {
@@ -234,5 +262,43 @@ mod tests {
         let sample = i16::from_le_bytes([wav[44], wav[45]]);
         // 0.5 * 32767 = 16383.5 -> 16383
         assert!((sample - 16383).abs() <= 1);
+    }
+
+    #[test]
+    fn test_wav_duration_ms_one_second_16k_mono() {
+        // 16000 samples @ 16kHz mono = 1000 ms
+        let samples = vec![0.0f32; 16_000];
+        let wav = samples_to_wav(&samples, 16_000).unwrap();
+        let ms = wav_duration_ms(&wav).expect("should parse");
+        assert!((ms as i64 - 1000).abs() <= 2, "got {ms} ms");
+    }
+
+    #[test]
+    fn test_wav_duration_ms_short_clip() {
+        // 1600 samples @ 16kHz = 100 ms
+        let samples = vec![0.0f32; 1_600];
+        let wav = samples_to_wav(&samples, 16_000).unwrap();
+        let ms = wav_duration_ms(&wav).expect("should parse");
+        assert!((ms as i64 - 100).abs() <= 2, "got {ms} ms");
+    }
+
+    #[test]
+    fn test_wav_duration_ms_empty_samples_is_zero() {
+        let wav = samples_to_wav(&[], 16_000).unwrap();
+        assert_eq!(wav_duration_ms(&wav), Some(0));
+    }
+
+    #[test]
+    fn test_wav_duration_ms_rejects_garbage() {
+        assert_eq!(wav_duration_ms(&[0u8; 10]), None);
+        assert_eq!(wav_duration_ms(b"not a wav file at all........"), None);
+    }
+
+    #[test]
+    fn test_wav_duration_ms_44100_mono() {
+        let samples = vec![0.0f32; 44_100]; // 1s @ 44.1k
+        let wav = samples_to_wav(&samples, 44_100).unwrap();
+        let ms = wav_duration_ms(&wav).expect("parse");
+        assert!((ms as i64 - 1000).abs() <= 2, "got {ms} ms");
     }
 }
