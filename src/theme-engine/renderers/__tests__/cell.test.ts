@@ -25,6 +25,7 @@ import {
   resolveBaseRadius,
   cellReach,
   cellDrift,
+  driftActivation,
   serializeCellState,
   parseCellState,
   restoreSeed,
@@ -1468,6 +1469,150 @@ describe("cellDrift", () => {
     const d = cellDrift(0, 0, 0, 0, P);
     expect(Number.isFinite(d.cx)).toBe(true);
     expect(Number.isFinite(d.cy)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// driftActivation
+// ---------------------------------------------------------------------------
+
+describe("driftActivation", () => {
+  it("ramps prev toward 1 when recording=true", () => {
+    let v = 0;
+    const rate = 0.1;
+    for (let i = 0; i < 30; i++) {
+      v = driftActivation(v, true, rate);
+    }
+    // After 30 frames at rate 0.1, should be very close to 1
+    expect(v).toBeGreaterThan(0.95);
+    expect(v).toBeLessThanOrEqual(1);
+  });
+
+  it("ramps prev toward 0 when recording=false", () => {
+    let v = 1;
+    const rate = 0.1;
+    for (let i = 0; i < 30; i++) {
+      v = driftActivation(v, false, rate);
+    }
+    expect(v).toBeLessThan(0.05);
+    expect(v).toBeGreaterThanOrEqual(0);
+  });
+
+  it("clamps to [0, 1]", () => {
+    // rate=0.5, starting near 0, recording=true — should never exceed 1
+    let v = 0;
+    for (let i = 0; i < 20; i++) {
+      v = driftActivation(v, true, 0.5);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+    // Starting near 1, recording=false — should never go below 0
+    v = 0.99;
+    for (let i = 0; i < 20; i++) {
+      v = driftActivation(v, false, 0.5);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("rate=1 jumps immediately to target", () => {
+    expect(driftActivation(0, true, 1)).toBe(1);
+    expect(driftActivation(0.5, true, 1)).toBe(1);
+    expect(driftActivation(1, false, 1)).toBe(0);
+    expect(driftActivation(0.3, false, 1)).toBe(0);
+  });
+
+  it("rate=0 never moves", () => {
+    expect(driftActivation(0, true, 0)).toBe(0);
+    expect(driftActivation(0.5, false, 0)).toBe(0.5);
+    expect(driftActivation(1, false, 0)).toBe(1);
+  });
+
+  it("is deterministic", () => {
+    let v1 = 0.3;
+    let v2 = 0.3;
+    for (let i = 0; i < 10; i++) {
+      v1 = driftActivation(v1, i % 2 === 0, 0.05);
+      v2 = driftActivation(v2, i % 2 === 0, 0.05);
+      expect(v1).toBeCloseTo(v2, 10);
+    }
+  });
+
+  it("default rate 0.02 reaches ~90% after ~3 seconds at 60 fps", () => {
+    // 60 fps * 3 seconds = 180 frames; (1-0.02)^180 ≈ 0.026, so 1 - 0.026 = 0.974
+    let v = 0;
+    for (let i = 0; i < 180; i++) {
+      v = driftActivation(v, true, 0.02);
+    }
+    expect(v).toBeGreaterThan(0.9);
+  });
+});
+
+/**
+ * Blend helper: given a cell-drift position, a canvas center, and an activation
+ * value in [0, 1], returns the blended (x, y).
+ *
+ * This is the exact formula used in createCellRenderer tick.
+ */
+function blendCenter(
+  drift: { cx: number; cy: number },
+  width: number,
+  height: number,
+  activation: number,
+): { x: number; y: number } {
+  return {
+    x: width / 2 + (drift.cx - width / 2) * activation,
+    y: height / 2 + (drift.cy - height / 2) * activation,
+  };
+}
+
+describe("blendCenter", () => {
+  it("activation=0 → (width/2, height/2) regardless of drift position", () => {
+    const drift = { cx: 80, cy: 120 };
+    const b = blendCenter(drift, 160, 160, 0);
+    expect(b.x).toBeCloseTo(80); // width/2
+    expect(b.y).toBeCloseTo(80); // height/2
+
+    const drift2 = { cx: 30, cy: 140 };
+    const b2 = blendCenter(drift2, 160, 160, 0);
+    expect(b2.x).toBeCloseTo(80);
+    expect(b2.y).toBeCloseTo(80);
+  });
+
+  it("activation=1 → equals drift position", () => {
+    const drift = { cx: 80, cy: 120 };
+    const b = blendCenter(drift, 160, 160, 1);
+    expect(b.x).toBeCloseTo(80);
+    expect(b.y).toBeCloseTo(120);
+
+    const drift2 = { cx: 30, cy: 140 };
+    const b2 = blendCenter(drift2, 160, 160, 1);
+    expect(b2.x).toBeCloseTo(30);
+    expect(b2.y).toBeCloseTo(140);
+  });
+
+  it("activation=0.5 is halfway between center and drift", () => {
+    const drift = { cx: 100, cy: 40 };
+    const b = blendCenter(drift, 160, 160, 0.5);
+    // width/2 = 80, half to 100 = 90
+    expect(b.x).toBeCloseTo(90);
+    // height/2 = 80, half to 40 = 60
+    expect(b.y).toBeCloseTo(60);
+  });
+
+  it("blend is continuous (adjacent activation values are close)", () => {
+    const drift = cellDrift(5, 160, 160, 16, CELL_DEFAULTS);
+    const b1 = blendCenter(drift, 160, 160, 0.0);
+    const b2 = blendCenter(drift, 160, 160, 0.2);
+    const b3 = blendCenter(drift, 160, 160, 0.4);
+    const b4 = blendCenter(drift, 160, 160, 0.6);
+    const b5 = blendCenter(drift, 160, 160, 0.8);
+    const b6 = blendCenter(drift, 160, 160, 1.0);
+    // Check monotonic progression in both x and y (or at least no huge jumps)
+    const xs = [b1.x, b2.x, b3.x, b4.x, b5.x, b6.x];
+    for (let i = 1; i < xs.length; i++) {
+      expect(Math.abs(xs[i] - xs[i - 1])).toBeLessThan(Math.abs(drift.cx - 80) + 1);
+    }
   });
 });
 
