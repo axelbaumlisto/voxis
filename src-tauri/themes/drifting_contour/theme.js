@@ -547,18 +547,27 @@ function resolveBaseRadius(width, height, params, growth) {
   const rawBaseR = params.baseRadiusPx ?? fallbackR;
   return rawBaseR * (1 + growth * params.growthSwell);
 }
+function cellReach(baseR, params) {
+  const ciliaLength = params.ciliaLength ?? 0;
+  const ciliaGrowthBoost = params.ciliaGrowthBoost ?? 0;
+  const startleMaxPx = params.startleMaxPx ?? 0;
+  const membraneOuter = baseR * 1.4;
+  const ciliaOuter = baseR + baseR * (ciliaLength + ciliaGrowthBoost) * 1.3;
+  return Math.max(membraneOuter, ciliaOuter) + startleMaxPx;
+}
 function cellDrift(t, width, height, baseR, params) {
-  const margin = params.driftMargin ?? 4;
+  const reach = cellReach(baseR, params);
+  const inset = Math.max(params.driftMargin ?? 4, reach);
   const speed = params.driftSpeed ?? 0.03;
-  const travelRangeX = width - 2 * baseR - 2 * margin;
-  const travelRangeY = height - 2 * baseR - 2 * margin;
+  const travelRangeX = width - 2 * inset;
+  const travelRangeY = height - 2 * inset;
   const phaseX = t * speed + 1000;
   const phaseY = t * speed + 2000;
   const noiseX = noise2D(phaseX, 0);
   const noiseY = noise2D(phaseY, 0);
   const mapTo = (noise, lo, hi) => lo + (noise * 0.5 + 0.5) * (hi - lo);
-  const cx = travelRangeX > 0 ? mapTo(noiseX, baseR + margin, width - baseR - margin) : width / 2;
-  const cy = travelRangeY > 0 ? mapTo(noiseY, baseR + margin, height - baseR - margin) : height / 2;
+  const cx = travelRangeX > 0 ? mapTo(noiseX, inset, width - inset) : width / 2;
+  const cy = travelRangeY > 0 ? mapTo(noiseY, inset, height - inset) : height / 2;
   return { cx, cy };
 }
 function createCellRenderer(container, opts) {
