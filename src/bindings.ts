@@ -1042,7 +1042,7 @@ export type ShortcutAction = { kind: "transcribe" } | { kind: "transcribe_post_p
  */
 export type ShortcutBinding = { id: string; name: string; description: string; default_binding: string; current_binding: string; action?: ShortcutAction }
 export type ThemeInfo = { id: string; name: string; description: string }
-export type ThemeManifest = { manifest_version: number; id: string; name: string; description?: string; api_version: number; entry: string }
+export type ThemeManifest = { manifest_version: number; id: string; name: string; description?: string; api_version: number; entry: string; overlay_width?: number | null; overlay_height?: number | null }
 export type ThemeTestResult = { valid: boolean; warnings: string[]; errors: string[] }
 /**
  * Transcription debug info.
