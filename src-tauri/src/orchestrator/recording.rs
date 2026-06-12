@@ -206,7 +206,8 @@ impl RecordingCoordinator {
                 config.audio_feedback,
                 &crate::audio_feedback::RodioPlayer,
             );
-            self.handle_error(&e.to_string(), ErrorContext::Hotkey).await;
+            self.handle_error(&e.to_string(), ErrorContext::Hotkey)
+                .await;
             return;
         }
         tracing::info!("on_hotkey_pressed: recorder started OK");
@@ -297,11 +298,29 @@ impl RecordingCoordinator {
                     release_config.audio_feedback,
                     &crate::audio_feedback::RodioPlayer,
                 );
-                self.handle_error(&e.to_string(), ErrorContext::Hotkey).await;
+                self.handle_error(&e.to_string(), ErrorContext::Hotkey)
+                    .await;
                 self.overlay.lock().await.hide();
                 return;
             }
         };
+
+        // Drop too-short captures (accidental click/tap on the overlay, or a
+        // hold over silence that VAD trimmed to near-zero). Sending these to
+        // the API yields a user-facing "Audio file is too short" error, so we
+        // silently cancel back to Idle instead.
+        let min_ms = release_config.min_recording_ms;
+        if let Some(dur_ms) = crate::audio::wav_duration_ms(&audio_data) {
+            if dur_ms < min_ms {
+                tracing::info!(
+                    "on_hotkey_released: dropping too-short recording ({dur_ms}ms < {min_ms}ms)"
+                );
+                self.coordinator.cancel();
+                self.overlay.lock().await.hide();
+                self.mirror_state().await;
+                return;
+            }
+        }
 
         // Stop beep — short, mid-pitch, signals 'recording captured'.
         let _ = crate::audio_feedback::play(
@@ -389,8 +408,6 @@ impl RecordingCoordinator {
     }
 }
 
-
-
 #[cfg(test)]
 mod stage_mapping_tests {
     use super::*;
@@ -407,7 +424,10 @@ mod stage_mapping_tests {
 
     #[test]
     fn test_stage_processing_maps_to_state_transcribing() {
-        assert_eq!(stage_to_state(Stage::Processing), RecordingState::Transcribing);
+        assert_eq!(
+            stage_to_state(Stage::Processing),
+            RecordingState::Transcribing
+        );
     }
 
     #[test]
