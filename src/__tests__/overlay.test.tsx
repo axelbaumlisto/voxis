@@ -207,6 +207,74 @@ describe("OverlayApp (ThemeHost integration)", () => {
     });
   });
 
+  describe("window-size tracking", () => {
+    let origInnerWidth: number;
+    let origInnerHeight: number;
+
+    beforeEach(() => {
+      origInnerWidth = window.innerWidth;
+      origInnerHeight = window.innerHeight;
+    });
+
+    afterEach(() => {
+      Object.defineProperty(window, "innerWidth", {
+        value: origInnerWidth,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        value: origInnerHeight,
+        writable: true,
+        configurable: true,
+      });
+    });
+
+    it("passes window.innerWidth/innerHeight as ThemeHost width/height", async () => {
+      Object.defineProperty(window, "innerWidth", {
+        value: 160,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        value: 160,
+        writable: true,
+        configurable: true,
+      });
+      const { container } = render(<OverlayApp />);
+      await waitFor(() => {
+        const host = container.querySelector(
+          "[data-testid='theme-host']",
+        ) as HTMLElement | null;
+        expect(host).toBeTruthy();
+        expect(host!.style.width).toBe("160px");
+        expect(host!.style.height).toBe("160px");
+      });
+    });
+
+    it("falls back to ThemeHost defaults when innerWidth is 0", async () => {
+      Object.defineProperty(window, "innerWidth", {
+        value: 0,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        value: 0,
+        writable: true,
+        configurable: true,
+      });
+      const { container } = render(<OverlayApp />);
+      await waitFor(() => {
+        const host = container.querySelector(
+          "[data-testid='theme-host']",
+        ) as HTMLElement | null;
+        expect(host).toBeTruthy();
+        // ThemeHost defaults: width=172, height=36
+        expect(host!.style.width).toBe("172px");
+        expect(host!.style.height).toBe("36px");
+      });
+    });
+  });
+
   it("falls back to builtin default module when fetchModule rejects", async () => {
     readThemeScriptMock.mockResolvedValue({
       status: "error",

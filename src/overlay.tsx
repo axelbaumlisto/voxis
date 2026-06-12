@@ -25,6 +25,20 @@ import { createPressController } from "./overlay/pressController";
 export function OverlayApp() {
   const snapshot = useOverlayState();
 
+  // Track actual OS window size so the theme canvas fills the window.
+  // When innerWidth/innerHeight is 0 (jsdom/headless), fall back to
+  // undefined so ThemeHost uses its 172/36 defaults.
+  const [size, setSize] = useState(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
+  useEffect(() => {
+    const handler = () =>
+      setSize({ width: window.innerWidth, height: window.innerHeight });
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
   // E2E hook: /overlay.html?theme=<id> forces a theme without round-tripping
   // through the Tauri command (kept from old shell for Playwright tests).
   const forcedTheme =
@@ -112,6 +126,8 @@ export function OverlayApp() {
         fallbackModule={fallbackTheme}
         onCancel={() => void commands.cancelOperation()}
         params={params}
+        width={size.width || undefined}
+        height={size.height || undefined}
       />
     </div>
   );
