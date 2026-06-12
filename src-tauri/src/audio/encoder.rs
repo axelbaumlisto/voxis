@@ -35,7 +35,8 @@ pub fn downsample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
 /// bits_per_sample (@34) and the data chunk size (@40) from the header.
 /// Returns `None` if the bytes aren't a WAV we recognize.
 pub fn wav_duration_ms(wav: &[u8]) -> Option<u32> {
-    if wav.len() < 44 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
+    if wav.len() < 44 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" || &wav[36..40] != b"data"
+    {
         return None;
     }
     let le16 = |o: usize| u16::from_le_bytes([wav[o], wav[o + 1]]) as u32;

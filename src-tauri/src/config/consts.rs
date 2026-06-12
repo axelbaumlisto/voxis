@@ -130,7 +130,7 @@ pub const DEFAULT_HOTKEY_HOLD_MS: u32 = 300;
 /// of sent to the transcription API (which rejects sub-second clips as
 /// "Audio file is too short"). Guards accidental short clicks/taps on the
 /// press-and-hold overlay.
-pub const DEFAULT_MIN_RECORDING_MS: u32 = 400;
+pub const DEFAULT_MIN_RECORDING_MS: u32 = 300;
 
 /// Default typing delay in milliseconds.
 pub const DEFAULT_TYPING_DELAY: u32 = 12;

@@ -316,6 +316,7 @@ impl RecordingCoordinator {
                     "on_hotkey_released: dropping too-short recording ({dur_ms}ms < {min_ms}ms)"
                 );
                 self.coordinator.cancel();
+                self.await_stage(Stage::Idle).await;
                 self.overlay.lock().await.hide();
                 self.mirror_state().await;
                 return;

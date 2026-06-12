@@ -815,7 +815,13 @@ export type AppConfig = { api_key?: string; model?: string; language?: string; h
  * shorter than this are ignored — allows AltGr/Ctrl to keep working
  * as a key modifier for combinations.
  */
-hotkey_hold_ms?: number; auto_type?: boolean; auto_enter?: boolean; typing_delay?: number; notifications?: boolean; backend?: string; debug?: boolean; audio_device?: string; history_enabled?: boolean; history_days?: number; active_provider?: string; cloud_provider?: string; local_backend?: string; text_processing?: boolean; 
+hotkey_hold_ms?: number; 
+/**
+ * Minimum captured-audio duration (ms, after VAD) below which a
+ * recording is dropped without hitting the API. See
+ * `DEFAULT_MIN_RECORDING_MS`.
+ */
+min_recording_ms?: number; auto_type?: boolean; auto_enter?: boolean; typing_delay?: number; notifications?: boolean; backend?: string; debug?: boolean; audio_device?: string; history_enabled?: boolean; history_days?: number; active_provider?: string; cloud_provider?: string; local_backend?: string; text_processing?: boolean; 
 /**
  * Append a single trailing space to the output (after dictionary +
  * hallucination filter + optional LLM post-process). Prevents
