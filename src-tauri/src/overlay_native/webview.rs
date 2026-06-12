@@ -151,7 +151,7 @@ fn build_overlay_window(
     .skip_taskbar(true)
     .focused(false)
     .transparent(true)
-    .visible(true);
+    .visible(false);
 
     // On Linux click-through is provided by GTK; on Windows by WS_EX_LAYERED.
     // Tauri exposes the cross-platform shim through `WebviewWindowBuilder`
@@ -216,6 +216,10 @@ fn build_overlay_window(
             PILL_HEIGHT as f64,
         ));
     }
+
+    // Now that the GTK focus policy has been applied (before show),
+    // make the pill visible on all platforms.
+    let _ = window.show();
 
     Ok(())
 }
