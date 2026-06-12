@@ -23,6 +23,7 @@ import {
   ciliaEndpoints,
   idleMorph,
   resolveBaseRadius,
+  cellReach,
   cellDrift,
   serializeCellState,
   parseCellState,
@@ -1293,6 +1294,69 @@ describe("resolveBaseRadius", () => {
 });
 
 // ---------------------------------------------------------------------------
+// cellReach
+// ---------------------------------------------------------------------------
+
+describe("cellReach", () => {
+  it("returns a value >= baseR for defaults (membrane alone)", () => {
+    const r = cellReach(16, CELL_DEFAULTS);
+    expect(r).toBeGreaterThanOrEqual(16 * 1.4);
+  });
+
+  it("includes cilia reach: at least baseR + ciliaLen*baseR", () => {
+    const p = { ...CELL_DEFAULTS, ciliaLength: 0.4, ciliaGrowthBoost: 0.55, startleMaxPx: 0 };
+    const r = cellReach(16, p);
+    // cilia outer = 16 + 16 * (0.4 + 0.55) * 1.3 = 16 + 16*1.235 = 35.76
+    expect(r).toBeGreaterThanOrEqual(35.7);
+    // membrane outer = 16 * 1.4 = 22.4 — cilia dominates
+    expect(r).toBeCloseTo(35.76, 1);
+  });
+
+  it("includes startle on top", () => {
+    const pNoStartle = { ...CELL_DEFAULTS, ciliaLength: 0.4, ciliaGrowthBoost: 0.55, startleMaxPx: 0 };
+    const pWithStartle = { ...pNoStartle, startleMaxPx: 4 };
+    const rNo = cellReach(16, pNoStartle);
+    const rWith = cellReach(16, pWithStartle);
+    expect(rWith - rNo).toBeCloseTo(4, 1);
+  });
+
+  it("returns >= baseR + cilia + startle for typical drifting_contour params", () => {
+    const p = { ...CELL_DEFAULTS, ciliaLength: 0.4, ciliaGrowthBoost: 0.55, startleMaxPx: 4 };
+    const r = cellReach(16, p);
+    // membrane = 22.4, cilia = 35.76, +4 = 39.76
+    expect(r).toBeGreaterThanOrEqual(39.7);
+    expect(r).toBeCloseTo(39.76, 1);
+  });
+
+  it("defaults missing cilia/growth/startle to 0", () => {
+    const p = { ...CELL_DEFAULTS };
+    // remove cilia + startle fields so only the membrane headroom remains
+    const pPartial = { ...CELL_DEFAULTS, ciliaLength: 0 as unknown as number };
+    delete (pPartial as any).ciliaLength;
+    delete (pPartial as any).ciliaGrowthBoost;
+    delete (pPartial as any).startleMaxPx;
+    const r = cellReach(10, pPartial as CellParams);
+    // membrane = 10 * 1.4 = 14, cilia = 10 + 10*0*1.3 = 10, max=14, +0 startle
+    expect(r).toBe(14);
+  });
+
+  it("grows with baseR (dominant term is proportional)", () => {
+    const p = { ...CELL_DEFAULTS, ciliaLength: 0.4, ciliaGrowthBoost: 0.5, startleMaxPx: 3 };
+    const r10 = cellReach(10, p);
+    const r20 = cellReach(20, p);
+    // cilia outer dominates: baseR + baseR * 0.9 * 1.3 = 2.17 * baseR;
+    // startle is constant (3) so ratio is slightly below 2×.
+    expect(r20).toBeGreaterThan(r10 * 1.7);
+  });
+
+  it("is deterministic", () => {
+    const a = cellReach(16, CELL_DEFAULTS);
+    const b = cellReach(16, CELL_DEFAULTS);
+    expect(a).toBe(b);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // cellDrift
 // ---------------------------------------------------------------------------
 
@@ -1301,50 +1365,86 @@ describe("cellDrift", () => {
   const W = 160, H = 160;
   const baseR = 16;
 
-  it("returns cx within [baseR+margin, width-baseR-margin] for 160x160 window", () => {
+  it("contains the whole cell (cilia + membrane + startle) within [0,160] box (defaults)", () => {
+    const reach = cellReach(baseR, P);
     for (let t = 0; t < 1000; t += 13.7) {
       const d = cellDrift(t, W, H, baseR, P);
-      const margin = P.driftMargin ?? 4;
-      expect(d.cx).toBeGreaterThanOrEqual(baseR + margin - 0.001);
-      expect(d.cx).toBeLessThanOrEqual(W - baseR - margin + 0.001);
-      expect(d.cy).toBeGreaterThanOrEqual(baseR + margin - 0.001);
-      expect(d.cy).toBeLessThanOrEqual(H - baseR - margin + 0.001);
+      // Centre must stay >= reach from left/top so cilia tips never go negative
+      expect(d.cx - reach).toBeGreaterThanOrEqual(-0.001);
+      expect(d.cy - reach).toBeGreaterThanOrEqual(-0.001);
+      // Centre must stay <= width-reach from right/bottom so cilia tips never exceed window
+      expect(d.cx + reach).toBeLessThanOrEqual(W + 0.001);
+      expect(d.cy + reach).toBeLessThanOrEqual(H + 0.001);
     }
   });
 
-  it("degenerate pill (172x36) keeps cell within vertical bounds, never leaves pill", () => {
+  it("contains the whole cell within [0,160] with precise drifting_contour params", () => {
+    // Exact params from drifting_contour theme (baseRadiusPx≈16, ciliaLength 0.4,
+    // ciliaGrowthBoost 0.55, startleMaxPx 4, driftMargin 30).
+    const dcParams = {
+      ...P,
+      ciliaLength: 0.4,
+      ciliaGrowthBoost: 0.55,
+      startleMaxPx: 4,
+      driftMargin: 30,
+    };
+    const reach = cellReach(baseR, dcParams);
+    // reach ≈ 39.76, inset = max(30, 39.76) = 39.76
+    expect(reach).toBeCloseTo(39.76, 1);
+    for (let t = 0; t < 1000; t += 13.7) {
+      const d = cellDrift(t, W, H, baseR, dcParams);
+      // cx ± reach must stay within [0, 160]
+      expect(d.cx - reach).toBeGreaterThanOrEqual(-0.001);
+      expect(d.cx + reach).toBeLessThanOrEqual(W + 0.001);
+      expect(d.cy - reach).toBeGreaterThanOrEqual(-0.001);
+      expect(d.cy + reach).toBeLessThanOrEqual(H + 0.001);
+    }
+  });
+
+  it("degenerate pill (172x36) now clamps Y to centre when reach > height", () => {
     const w = 172, h = 36;
     const br = Math.min(w, h) * P.radiusFraction; // ≈ 12.24
-    const margin = P.driftMargin ?? 4;
+    const reach = cellReach(br, P);
+    const inset = Math.max(P.driftMargin ?? 4, reach);
     for (let t = 0; t < 500; t += 11.3) {
       const d = cellDrift(t, w, h, br, P);
-      // Y-axis has tiny travel range (~3.5px) but is not degenerate;
-      // cell stays clamped to valid bounds so it never leaves the pill.
-      expect(d.cy).toBeGreaterThanOrEqual(br + margin - 0.001);
-      expect(d.cy).toBeLessThanOrEqual(h - br - margin + 0.001);
-      // X-axis has plenty of room on a wide pill
-      expect(d.cx).toBeGreaterThanOrEqual(br + margin - 0.001);
-      expect(d.cx).toBeLessThanOrEqual(w - br - margin + 0.001);
+      // Y-axis: with old margin the pill used to have ~3.5px travel;
+      // with full reach containment the Y axis is degenerate → clamps to centre.
+      if (h - 2 * inset <= 0) {
+        expect(d.cy).toBeCloseTo(h / 2, 0);
+      } else {
+        expect(d.cy).toBeGreaterThanOrEqual(inset - 0.001);
+        expect(d.cy).toBeLessThanOrEqual(h - inset + 0.001);
+      }
+      // X-axis should still have room (172 is wide)
+      if (w - 2 * inset > 0) {
+        expect(d.cx).toBeGreaterThanOrEqual(inset - 0.001);
+        expect(d.cx).toBeLessThanOrEqual(w - inset + 0.001);
+      }
     }
   });
 
   it("truly degenerate axis (no travel room) clamps to center", () => {
     // With large baseR and small window, travelRange <= 0 → pin to center
     const d = cellDrift(0, 20, 20, 10, P);
-    // baseR=10, margin=4, travelRange=20-20-8=-8 → clamped to center
+    // reach = cellReach(10, P); inset = max(4, reach) >= 10*1.4 = 14 > 10 → degenerate
     expect(d.cx).toBe(10);
     expect(d.cy).toBe(10);
   });
 
-  it("respects custom driftMargin", () => {
+  it("respects custom driftMargin but full-reach still dominates when larger", () => {
     const margin = 10;
     const p = { ...P, driftMargin: margin };
+    const reach = cellReach(baseR, p);
+    // inset = max(margin, reach) — reach is typically much larger than 10
+    const inset = Math.max(margin, reach);
     for (let t = 0; t < 200; t += 17) {
       const d = cellDrift(t, W, H, baseR, p);
-      expect(d.cx).toBeGreaterThanOrEqual(baseR + margin - 0.001);
-      expect(d.cx).toBeLessThanOrEqual(W - baseR - margin + 0.001);
-      expect(d.cy).toBeGreaterThanOrEqual(baseR + margin - 0.001);
-      expect(d.cy).toBeLessThanOrEqual(H - baseR - margin + 0.001);
+      // Full containment: centre ± reach must stay in window
+      expect(d.cx - reach).toBeGreaterThanOrEqual(-0.001);
+      expect(d.cx + reach).toBeLessThanOrEqual(W + 0.001);
+      expect(d.cy - reach).toBeGreaterThanOrEqual(-0.001);
+      expect(d.cy + reach).toBeLessThanOrEqual(H + 0.001);
     }
   });
 

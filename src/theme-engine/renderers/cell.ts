@@ -675,6 +675,39 @@ export function resolveBaseRadius(
 }
 
 // ---------------------------------------------------------------------------
+// Cell containment — full organism reach (membrane + cilia + startle)
+// ---------------------------------------------------------------------------
+
+/**
+ * Worst-case distance from cell centre to any drawn pixel.
+ *
+ * Accounts for three stacked effects:
+ *  1. Membrane deformation (FBM + pseudopods) can push the contour outward
+ *     ~40% beyond baseR.
+ *  2. Cilia tips extend beyond the base circle: at max growth and energy they
+ *     reach baseR + baseR * (ciliaLength + ciliaGrowthBoost) * 1.3.
+ *  3. Startle jolts the entire cell by up to `startleMaxPx` pixels.
+ *
+ * The return value is the radius of the bounding circle around the centre
+ * within which the whole organism fits.
+ *
+ * @param baseR  Current base cell radius (with growth swell already applied).
+ * @param params Cell parameters (ciliaLength, ciliaGrowthBoost, startleMaxPx).
+ */
+export function cellReach(baseR: number, params: CellParams): number {
+  const ciliaLength = params.ciliaLength ?? 0;
+  const ciliaGrowthBoost = params.ciliaGrowthBoost ?? 0;
+  const startleMaxPx = params.startleMaxPx ?? 0;
+
+  const membraneOuter = baseR * 1.4; // baseR + 40% membrane headroom
+  // Cilia at max growth and energy: lenPx = baseR*(ciliaLen + growth*boost)*(0.7+energy*0.6)
+  // worst case growth=1, energy=1 → factor = (ciliaLen + boost) * 1.3
+  const ciliaOuter = baseR + baseR * (ciliaLength + ciliaGrowthBoost) * 1.3;
+
+  return Math.max(membraneOuter, ciliaOuter) + startleMaxPx;
+}
+
+// ---------------------------------------------------------------------------
 // Cell drift (slow travel within aquarium bounds)
 // ---------------------------------------------------------------------------
 
@@ -685,13 +718,15 @@ export function cellDrift(
   baseR: number,
   params: CellParams,
 ): { cx: number; cy: number } {
-  const margin = params.driftMargin ?? 4;
-  // NOTE: The margin should ideally account for cilia and startle reach
-  // (headroom tuning is deferred to theme-param overrides).
+  // Contain the WHOLE organism (membrane + cilia + startle), not just the
+  // base circle.  `inset` is the min distance from wall that the centre must
+  // respect so that no part of the living cell clips the aquarium edge.
+  const reach = cellReach(baseR, params);
+  const inset = Math.max(params.driftMargin ?? 4, reach);
   const speed = params.driftSpeed ?? 0.03;
 
-  const travelRangeX = width - 2 * baseR - 2 * margin;
-  const travelRangeY = height - 2 * baseR - 2 * margin;
+  const travelRangeX = width - 2 * inset;
+  const travelRangeY = height - 2 * inset;
 
   const phaseX = t * speed + 1000;
   const phaseY = t * speed + 2000;
@@ -704,10 +739,10 @@ export function cellDrift(
     lo + (noise * 0.5 + 0.5) * (hi - lo);
 
   const cx = travelRangeX > 0
-    ? mapTo(noiseX, baseR + margin, width - baseR - margin)
+    ? mapTo(noiseX, inset, width - inset)
     : width / 2;
   const cy = travelRangeY > 0
-    ? mapTo(noiseY, baseR + margin, height - baseR - margin)
+    ? mapTo(noiseY, inset, height - inset)
     : height / 2;
 
   return { cx, cy };
