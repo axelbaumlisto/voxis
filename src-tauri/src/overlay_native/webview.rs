@@ -205,7 +205,8 @@ fn build_overlay_window(
                     // user's focused window.
                     gtk_window.set_accept_focus(false);
                     gtk_window.set_can_focus(false);
-                    gtk_window.set_type_hint(gtk::gdk::WindowTypeHint::Utility);
+                    gtk_window.set_focus_on_map(false);
+                    gtk_window.set_type_hint(gtk::gdk::WindowTypeHint::Dock);
                 }
             }
         });
