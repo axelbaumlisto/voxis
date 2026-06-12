@@ -124,6 +124,11 @@ export interface CellParams {
   idleMorphPeriod: number;
   /** Idle morph minimum envelope (0..1): residual morph at the trough. */
   idleMorphFloor: number;
+  /** Per-frame rate at which the cell blends between centered (rest) and
+   * cellDrift-positioned (recording). 0=never move, 1=instant jump.
+   * Default ~0.02 → the cell ramps from centered to fully drifting in
+   * about 3 seconds at 60 fps. */
+  driftActivationRate?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -169,6 +174,7 @@ export const CELL_DEFAULTS: CellParams = {
   idleMorphSpeed: 0.25,
   idleMorphPeriod: 7,
   idleMorphFloor: 0.25,
+  driftActivationRate: 0.02,
 };
 
 
@@ -707,6 +713,29 @@ export function cellReach(baseR: number, params: CellParams): number {
   return Math.max(membraneOuter, ciliaOuter) + startleMaxPx;
 }
 
+/**
+ * Smoothed drift-activation ramp.
+ *
+ * Moves `prev` toward a target of 1 (when `recording` is true) or 0
+ * (when idle/transcribing/error) by a per-frame `rate`, then clamps to
+ * [0, 1]. This gives a visually smooth transition between centered rest
+ * and full-drift recording, without instant jumps.
+ *
+ * At the default rate of 0.02 and 60 fps, it takes about 3 seconds to
+ * reach 90% of the target.  rate=1 jumps instantly; rate=0 never moves.
+ */
+export function driftActivation(
+  prev: number,
+  recording: boolean,
+  rate: number,
+): number {
+  const target = recording ? 1 : 0;
+  const raw = prev + (target - prev) * rate;
+  if (raw > 1) return 1;
+  if (raw < 0) return 0;
+  return raw;
+}
+
 // ---------------------------------------------------------------------------
 // Cell drift (slow travel within aquarium bounds)
 // ---------------------------------------------------------------------------
@@ -802,6 +831,7 @@ export function createCellRenderer(
   let growth = 0;
   let startle = 0;
   let baseline = 0; // slow-tracking audio baseline for startle edge detection
+  let drift01 = 0; // smoothed drift activation (0=centered, 1=full drift)
 
   // Persistence: restore state from localStorage for continuity across restarts
   const PERSIST_KEY = "talri.cell.state.v1";
@@ -865,11 +895,19 @@ export function createCellRenderer(
         ? integrateDeformation(deform, targetDeform, params.attack, params.release)
         : targetDeform.slice();
 
-      // Hoisted cell centre + radius: includes drift, startle jolt (sdx,sdy) and growth swell.
+      // Drift activation ramp: cell stays centered at rest, drifts while recording.
+      // setPointerCapture keeps the recording session even if the cell wanders
+      // off the finger, so visual drift during recording is fine.
+      drift01 = driftActivation(drift01, s.mode === "recording", params.driftActivationRate ?? 0.02);
+
+      // Hoisted cell centre + radius: includes drift blend, startle jolt (sdx,sdy) and growth swell.
       const baseR = resolveBaseRadius(width, height, params, growth);
       const drift = cellDrift(t + driftPhaseOffset, width, height, baseR, params);
-      const cx = drift.cx + sdx;
-      const cy = drift.cy + sdy;
+      // Blend between rest center (width/2, height/2) and full-drift position
+      const driftedX = width / 2 + (drift.cx - width / 2) * drift01;
+      const driftedY = height / 2 + (drift.cy - height / 2) * drift01;
+      const cx = driftedX + sdx;
+      const cy = driftedY + sdy;
       const maxRadius = height * 0.46;
       const floorRadius = baseR * 0.35;
       const sampleCount = deform.length;
