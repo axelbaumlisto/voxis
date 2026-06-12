@@ -384,7 +384,8 @@ var CELL_DEFAULTS = {
   idleMorphAmplitude: 0.18,
   idleMorphSpeed: 0.25,
   idleMorphPeriod: 7,
-  idleMorphFloor: 0.25
+  idleMorphFloor: 0.25,
+  driftActivationRate: 0.02
 };
 function cellEnergy(mode, audioLevel, t, idle, levelGain) {
   switch (mode) {
@@ -555,6 +556,15 @@ function cellReach(baseR, params) {
   const ciliaOuter = baseR + baseR * (ciliaLength + ciliaGrowthBoost) * 1.3;
   return Math.max(membraneOuter, ciliaOuter) + startleMaxPx;
 }
+function driftActivation(prev, recording, rate) {
+  const target = recording ? 1 : 0;
+  const raw = prev + (target - prev) * rate;
+  if (raw > 1)
+    return 1;
+  if (raw < 0)
+    return 0;
+  return raw;
+}
 function cellDrift(t, width, height, baseR, params) {
   const reach = cellReach(baseR, params);
   const inset = Math.max(params.driftMargin ?? 4, reach);
@@ -589,6 +599,7 @@ function createCellRenderer(container, opts) {
   let growth = 0;
   let startle = 0;
   let baseline = 0;
+  let drift01 = 0;
   const PERSIST_KEY = "talri.cell.state.v1";
   let driftPhaseOffset = 0;
   let lastPersist = 0;
@@ -621,10 +632,13 @@ function createCellRenderer(container, opts) {
       const idleFactor = Math.max(0, 1 - s.audioLevel * 3) * recordingFade;
       const targetDeform = buildTargetDeformation(width, height, s.spectrumBins, t, s.audioLevel, energy, params, idleFactor);
       deform = deform ? integrateDeformation(deform, targetDeform, params.attack, params.release) : targetDeform.slice();
+      drift01 = driftActivation(drift01, s.mode === "recording", params.driftActivationRate ?? 0.02);
       const baseR = resolveBaseRadius(width, height, params, growth);
       const drift = cellDrift(t + driftPhaseOffset, width, height, baseR, params);
-      const cx = drift.cx + sdx;
-      const cy = drift.cy + sdy;
+      const driftedX = width / 2 + (drift.cx - width / 2) * drift01;
+      const driftedY = height / 2 + (drift.cy - height / 2) * drift01;
+      const cx = driftedX + sdx;
+      const cy = driftedY + sdy;
       const maxRadius = height * 0.46;
       const floorRadius = baseR * 0.35;
       const sampleCount = deform.length;
