@@ -1,8 +1,8 @@
 use super::load_config_from_app;
 use crate::config::AppConfig;
 use crate::overlay_native::{
-    create_overlay, CreateOverlayParams, OverlayBackend, OverlayPositionConfig,
-    OverlaySizeConfig, OverlayState,
+    create_overlay, CreateOverlayParams, OverlayBackend, OverlayPositionConfig, OverlaySizeConfig,
+    OverlayState,
 };
 use crate::setup::ThemeEngineState;
 use std::sync::Arc;
@@ -15,28 +15,29 @@ pub struct OverlayManager {
     overlay: Arc<Mutex<Box<dyn OverlayBackend>>>,
 }
 
+/// Validate theme overlay dimensions against sane inclusive range.
+/// Returns `Some((w, h))` when both are Some and inside 16..=4096.
+fn validate_overlay_dimensions(w: Option<u32>, h: Option<u32>) -> Option<(u32, u32)> {
+    match (w, h) {
+        (Some(w), Some(h)) if (16..=4096).contains(&w) && (16..=4096).contains(&h) => Some((w, h)),
+        _ => None,
+    }
+}
+
 impl OverlayManager {
-    pub fn new(
-        app: AppHandle,
-        overlay: Arc<Mutex<Box<dyn OverlayBackend>>>,
-    ) -> Self {
-        Self {
-            app,
-            overlay,
-        }
+    pub fn new(app: AppHandle, overlay: Arc<Mutex<Box<dyn OverlayBackend>>>) -> Self {
+        Self { app, overlay }
     }
 
     /// Resolve the overlay size declared by a theme's manifest.
     /// Returns `Some((w, h))` only when BOTH `overlay_width` and
-    /// `overlay_height` are present; returns `None` otherwise so the
-    /// caller can fall back to `PILL_WIDTH × PILL_HEIGHT` defaults.
+    /// `overlay_height` are present AND within sane inclusive range
+    /// 16..=4096; returns `None` otherwise so the caller can fall
+    /// back to `PILL_WIDTH × PILL_HEIGHT` defaults.
     fn theme_overlay_size(&self, theme_id: &str) -> Option<(u32, u32)> {
         let loader = self.app.state::<ThemeEngineState>().loader.clone();
         let manifest = loader.manifest(theme_id)?;
-        match (manifest.overlay_width, manifest.overlay_height) {
-            (Some(w), Some(h)) => Some((w, h)),
-            _ => None,
-        }
+        validate_overlay_dimensions(manifest.overlay_width, manifest.overlay_height)
     }
 
     pub async fn init(&self, config: &AppConfig) {
@@ -104,5 +105,49 @@ impl OverlayManager {
     #[cfg(debug_assertions)]
     pub async fn run_demo(&self) {
         self.overlay.lock().await.run_demo();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_overlay_dimensions;
+
+    #[test]
+    fn valid_range_accepted() {
+        assert_eq!(
+            validate_overlay_dimensions(Some(16), Some(16)),
+            Some((16, 16))
+        );
+        assert_eq!(
+            validate_overlay_dimensions(Some(172), Some(36)),
+            Some((172, 36))
+        );
+        assert_eq!(
+            validate_overlay_dimensions(Some(4096), Some(4096)),
+            Some((4096, 4096))
+        );
+    }
+
+    #[test]
+    fn missing_dimension_returns_none() {
+        assert_eq!(validate_overlay_dimensions(None, Some(100)), None);
+        assert_eq!(validate_overlay_dimensions(Some(100), None), None);
+        assert_eq!(validate_overlay_dimensions(None, None), None);
+    }
+
+    #[test]
+    fn out_of_range_rejected() {
+        // Zero
+        assert_eq!(validate_overlay_dimensions(Some(0), Some(100)), None);
+        assert_eq!(validate_overlay_dimensions(Some(100), Some(0)), None);
+        // Below minimum
+        assert_eq!(validate_overlay_dimensions(Some(15), Some(100)), None);
+        assert_eq!(validate_overlay_dimensions(Some(1), Some(1)), None);
+        // Above maximum
+        assert_eq!(validate_overlay_dimensions(Some(4097), Some(100)), None);
+        assert_eq!(validate_overlay_dimensions(Some(100), Some(4097)), None);
+        // Absurdly large
+        assert_eq!(validate_overlay_dimensions(Some(u32::MAX), Some(100)), None);
+        assert_eq!(validate_overlay_dimensions(Some(100), Some(u32::MAX)), None);
     }
 }
