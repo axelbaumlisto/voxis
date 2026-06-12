@@ -64,6 +64,12 @@ export interface CellParams {
   tension: number;
   /** Base cell radius as fraction of min(width, height). */
   radiusFraction: number;
+  /** Absolute base radius in pixels. When set, overrides radiusFraction. */
+  baseRadiusPx?: number;
+  /** Drift travel speed factor (multiplier on time for noise phase). */
+  driftSpeed?: number;
+  /** Margin in pixels from window edges the cell centre must respect. */
+  driftMargin?: number;
   /** Per-frame blend factor when deformation is being pushed further.
    * ~0.20 reaches ~90% of a new shape within ~0.2s at 60fps. */
   attack: number;
@@ -594,6 +600,94 @@ export function nucleusTransform(
 }
 
 // ---------------------------------------------------------------------------
+// Cell persistence state + serialization
+// ---------------------------------------------------------------------------
+
+export interface CellPersistState {
+  driftPhase: number;
+  growth: number;
+  elapsed: number;
+}
+
+export function serializeCellState(s: CellPersistState): string {
+  return JSON.stringify(s);
+}
+
+export function parseCellState(raw: string | null): CellPersistState | null {
+  if (raw === null) return null;
+  try {
+    const obj = JSON.parse(raw);
+    if (
+      typeof obj !== "object" ||
+      obj === null ||
+      typeof obj.driftPhase !== "number" ||
+      !Number.isFinite(obj.driftPhase) ||
+      typeof obj.growth !== "number" ||
+      !Number.isFinite(obj.growth) ||
+      typeof obj.elapsed !== "number" ||
+      !Number.isFinite(obj.elapsed)
+    ) {
+      return null;
+    }
+    return { driftPhase: obj.driftPhase, growth: obj.growth, elapsed: obj.elapsed };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Base radius resolution (absolute + growth swell)
+// ---------------------------------------------------------------------------
+
+export function resolveBaseRadius(
+  width: number,
+  height: number,
+  params: CellParams,
+  growth: number,
+): number {
+  const fallbackR = Math.min(width, height) * params.radiusFraction;
+  const rawBaseR = params.baseRadiusPx ?? fallbackR;
+  return rawBaseR * (1 + growth * params.growthSwell);
+}
+
+// ---------------------------------------------------------------------------
+// Cell drift (slow travel within aquarium bounds)
+// ---------------------------------------------------------------------------
+
+export function cellDrift(
+  t: number,
+  width: number,
+  height: number,
+  baseR: number,
+  params: CellParams,
+): { cx: number; cy: number } {
+  const margin = params.driftMargin ?? 4;
+  const speed = params.driftSpeed ?? 0.03;
+
+  const travelRangeX = width - 2 * baseR - 2 * margin;
+  const travelRangeY = height - 2 * baseR - 2 * margin;
+
+  const phaseX = t * speed + 1000;
+  const phaseY = t * speed + 2000;
+
+  const noiseX = noise2D(phaseX, 0);
+  const noiseY = noise2D(phaseY, 0);
+
+  // Map [-1, 1] → [lo, hi]; clamp degenerate axis to center
+  const mapTo = (noise: number, lo: number, hi: number) =>
+    lo + (noise * 0.5 + 0.5) * (hi - lo);
+
+  const cx = travelRangeX > 0
+    ? mapTo(noiseX, baseR + margin, width - baseR - margin)
+    : width / 2;
+  const cy = travelRangeY > 0
+    ? mapTo(noiseY, baseR + margin, height - baseR - margin)
+    : height / 2;
+
+  return { cx, cy };
+}
+
+// ---------------------------------------------------------------------------
 // Canvas helper
 // ---------------------------------------------------------------------------
 
@@ -648,7 +742,27 @@ export function createCellRenderer(
   let startle = 0;
   let baseline = 0; // slow-tracking audio baseline for startle edge detection
 
-  const startedAt = performance.now();
+  // Persistence: restore state from localStorage for continuity across restarts
+  const PERSIST_KEY = "talri.cell.state.v1";
+  let driftPhaseOffset = 0;
+  let lastPersist = 0;
+  let startedAt = performance.now();
+
+  if (typeof localStorage !== "undefined") {
+    try {
+      const saved = parseCellState(localStorage.getItem(PERSIST_KEY));
+      if (saved) {
+        growth = saved.growth;
+        driftPhaseOffset = saved.driftPhase;
+        if (saved.elapsed > 0) {
+          startedAt = performance.now() - saved.elapsed * 1000;
+        }
+      }
+    } catch {
+      // Silently ignore localStorage errors
+    }
+  }
+
   let rafId: number | null = null;
 
   const tick = () => {
@@ -691,10 +805,11 @@ export function createCellRenderer(
         ? integrateDeformation(deform, targetDeform, params.attack, params.release)
         : targetDeform.slice();
 
-      // Hoisted cell centre + radius: includes startle jolt (sdx,sdy) and growth swell.
-      const cx = width / 2 + sdx;
-      const cy = height / 2 + sdy;
-      const baseR = Math.min(width, height) * params.radiusFraction * (1 + growth * params.growthSwell);
+      // Hoisted cell centre + radius: includes drift, startle jolt (sdx,sdy) and growth swell.
+      const baseR = resolveBaseRadius(width, height, params, growth);
+      const drift = cellDrift(t + driftPhaseOffset, width, height, baseR, params);
+      const cx = drift.cx + sdx;
+      const cy = drift.cy + sdy;
       const maxRadius = height * 0.46;
       const floorRadius = baseR * 0.35;
       const sampleCount = deform.length;
@@ -806,6 +921,21 @@ export function createCellRenderer(
           }
           ctx.stroke();
         }
+      }
+    }
+
+    // Persist state every 500ms for continuity across restarts
+    const now = performance.now();
+    if (now - lastPersist > 500 && typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem(PERSIST_KEY, serializeCellState({
+          driftPhase: t + driftPhaseOffset,
+          growth,
+          elapsed: t,
+        }));
+        lastPersist = now;
+      } catch {
+        // Silently ignore storage errors
       }
     }
 

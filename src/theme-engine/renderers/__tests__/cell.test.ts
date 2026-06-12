@@ -22,10 +22,14 @@ import {
   nucleusTransform,
   ciliaEndpoints,
   idleMorph,
+  resolveBaseRadius,
+  cellDrift,
+  serializeCellState,
+  parseCellState,
   CELL_DEFAULTS,
   createCellRenderer,
 } from "../cell";
-import type { CellParams } from "../cell";
+import type { CellParams, CellPersistState } from "../cell";
 
 const TAU = Math.PI * 2;
 
@@ -1236,5 +1240,171 @@ describe("idleMorph", () => {
     let any = 0;
     for (let k = 0; k < 8; k++) any += mag(idleMorph(48, k * 0.9, P));
     expect(any).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveBaseRadius
+// ---------------------------------------------------------------------------
+
+describe("resolveBaseRadius", () => {
+  const P = CELL_DEFAULTS;
+
+  it("with baseRadiusPx=16 and large window (160x160), returns 16 (absolute px)", () => {
+    const r = resolveBaseRadius(160, 160, { ...P, baseRadiusPx: 16 }, 0);
+    expect(r).toBeCloseTo(16, 1);
+  });
+
+  it("without baseRadiusPx, falls back to Math.min(width,height)*radiusFraction", () => {
+    const r = resolveBaseRadius(160, 160, P, 0);
+    expect(r).toBeCloseTo(160 * P.radiusFraction, 1);
+  });
+
+  it("applies growth swell when growth > 0", () => {
+    const rNoGrowth = resolveBaseRadius(160, 160, { ...P, baseRadiusPx: 16 }, 0);
+    const rWithGrowth = resolveBaseRadius(160, 160, { ...P, baseRadiusPx: 16 }, 0.5);
+    expect(rWithGrowth).toBeGreaterThan(rNoGrowth);
+    // baseR = 16 * (1 + 0.5 * growthSwell)
+    expect(rWithGrowth).toBeCloseTo(16 * (1 + 0.5 * P.growthSwell), 1);
+  });
+
+  it("is deterministic", () => {
+    const a = resolveBaseRadius(100, 80, P, 0.3);
+    const b = resolveBaseRadius(100, 80, P, 0.3);
+    expect(a).toBe(b);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cellDrift
+// ---------------------------------------------------------------------------
+
+describe("cellDrift", () => {
+  const P = CELL_DEFAULTS;
+  const W = 160, H = 160;
+  const baseR = 16;
+
+  it("returns cx within [baseR+margin, width-baseR-margin] for 160x160 window", () => {
+    for (let t = 0; t < 1000; t += 13.7) {
+      const d = cellDrift(t, W, H, baseR, P);
+      const margin = P.driftMargin ?? 4;
+      expect(d.cx).toBeGreaterThanOrEqual(baseR + margin - 0.001);
+      expect(d.cx).toBeLessThanOrEqual(W - baseR - margin + 0.001);
+      expect(d.cy).toBeGreaterThanOrEqual(baseR + margin - 0.001);
+      expect(d.cy).toBeLessThanOrEqual(H - baseR - margin + 0.001);
+    }
+  });
+
+  it("degenerate pill (172x36) keeps cell within vertical bounds, never leaves pill", () => {
+    const w = 172, h = 36;
+    const br = Math.min(w, h) * P.radiusFraction; // ≈ 12.24
+    const margin = P.driftMargin ?? 4;
+    for (let t = 0; t < 500; t += 11.3) {
+      const d = cellDrift(t, w, h, br, P);
+      // Y-axis has tiny travel range (~3.5px) but is not degenerate;
+      // cell stays clamped to valid bounds so it never leaves the pill.
+      expect(d.cy).toBeGreaterThanOrEqual(br + margin - 0.001);
+      expect(d.cy).toBeLessThanOrEqual(h - br - margin + 0.001);
+      // X-axis has plenty of room on a wide pill
+      expect(d.cx).toBeGreaterThanOrEqual(br + margin - 0.001);
+      expect(d.cx).toBeLessThanOrEqual(w - br - margin + 0.001);
+    }
+  });
+
+  it("truly degenerate axis (no travel room) clamps to center", () => {
+    // With large baseR and small window, travelRange <= 0 → pin to center
+    const d = cellDrift(0, 20, 20, 10, P);
+    // baseR=10, margin=4, travelRange=20-20-8=-8 → clamped to center
+    expect(d.cx).toBe(10);
+    expect(d.cy).toBe(10);
+  });
+
+  it("respects custom driftMargin", () => {
+    const margin = 10;
+    const p = { ...P, driftMargin: margin };
+    for (let t = 0; t < 200; t += 17) {
+      const d = cellDrift(t, W, H, baseR, p);
+      expect(d.cx).toBeGreaterThanOrEqual(baseR + margin - 0.001);
+      expect(d.cx).toBeLessThanOrEqual(W - baseR - margin + 0.001);
+      expect(d.cy).toBeGreaterThanOrEqual(baseR + margin - 0.001);
+      expect(d.cy).toBeLessThanOrEqual(H - baseR - margin + 0.001);
+    }
+  });
+
+  it("produces different positions at different times (cell actually travels)", () => {
+    const positions = new Set<string>();
+    for (let t = 0; t < 100; t += 5) {
+      const d = cellDrift(t, W, H, baseR, P);
+      positions.add(`${d.cx.toFixed(2)},${d.cy.toFixed(2)}`);
+    }
+    // Should have multiple distinct positions (cell actually travels)
+    expect(positions.size).toBeGreaterThan(3);
+  });
+
+  it("is deterministic", () => {
+    const a = cellDrift(5, W, H, baseR, P);
+    const b = cellDrift(5, W, H, baseR, P);
+    expect(a).toEqual(b);
+  });
+
+  it("handles zero-sized window gracefully (no crash, returns finite)", () => {
+    const d = cellDrift(0, 0, 0, 0, P);
+    expect(Number.isFinite(d.cx)).toBe(true);
+    expect(Number.isFinite(d.cy)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// serializeCellState / parseCellState
+// ---------------------------------------------------------------------------
+
+describe("CellPersistState serialization", () => {
+  it("roundtrips a valid state", () => {
+    const state = { driftPhase: 42.5, growth: 0.3, elapsed: 17.2 };
+    const raw = serializeCellState(state);
+    const parsed = parseCellState(raw);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.driftPhase).toBeCloseTo(42.5);
+    expect(parsed!.growth).toBeCloseTo(0.3);
+    expect(parsed!.elapsed).toBeCloseTo(17.2);
+  });
+
+  it("parseCellState(null) returns null", () => {
+    expect(parseCellState(null)).toBeNull();
+  });
+
+  it('parseCellState("garbage") returns null', () => {
+    expect(parseCellState("garbage")).toBeNull();
+  });
+
+  it("parseCellState of empty string returns null", () => {
+    expect(parseCellState("")).toBeNull();
+  });
+
+  it("parseCellState of object missing fields returns null", () => {
+    expect(parseCellState('{"driftPhase":1}')).toBeNull();
+    expect(parseCellState('{"growth":0.5}')).toBeNull();
+    expect(parseCellState('{"elapsed":10}')).toBeNull();
+    expect(parseCellState('{"driftPhase":1,"growth":0.5}')).toBeNull();
+  });
+
+  it("parseCellState of object with non-numeric fields returns null", () => {
+    expect(parseCellState('{"driftPhase":"abc","growth":0.3,"elapsed":1}')).toBeNull();
+    expect(parseCellState('{"driftPhase":1,"growth":true,"elapsed":1}')).toBeNull();
+    expect(parseCellState('{"driftPhase":1,"growth":0.3,"elapsed":null}')).toBeNull();
+  });
+
+  it("parseCellState of object with extra fields still returns valid state", () => {
+    const parsed = parseCellState('{"driftPhase":1,"growth":0.3,"elapsed":5,"extra":true}');
+    expect(parsed).not.toBeNull();
+    expect(parsed!.driftPhase).toBe(1);
+    expect(parsed!.growth).toBe(0.3);
+    expect(parsed!.elapsed).toBe(5);
+  });
+
+  it("serializeCellState produces valid JSON parseable string", () => {
+    const state = { driftPhase: 0, growth: 0, elapsed: 0 };
+    const raw = serializeCellState(state);
+    expect(() => JSON.parse(raw)).not.toThrow();
   });
 });
