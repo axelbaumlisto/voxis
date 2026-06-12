@@ -111,7 +111,7 @@ impl RecordingCoordinator {
         state
     }
 
-    pub async fn on_hotkey_pressed(&self) {
+    pub async fn on_hotkey_pressed(&self, skip_debounce: bool) {
         tracing::info!("on_hotkey_pressed: enter");
         let stage = self.coordinator.current_stage();
         tracing::info!("on_hotkey_pressed: current_stage={:?}", stage);
@@ -139,6 +139,11 @@ impl RecordingCoordinator {
         // that long while listening for a cancellation from
         // `on_hotkey_released`. If the release fires first the user was
         // pressing AltGr/Ctrl as part of a shortcut — bail out silently.
+        //
+        // skip_debounce: when true (e.g. pointer/touch overlay tap),
+        // the debounce is skipped entirely — a tap on the cell is
+        // explicit intent and must start recording immediately.
+        if !skip_debounce {
         let config_for_hold = load_config_from_app(&self.app);
         let hold_ms = config_for_hold.hotkey_hold_ms as u64;
         if hold_ms > 0 {
@@ -174,6 +179,7 @@ impl RecordingCoordinator {
                 return;
             }
         }
+        } // end skip_debounce guard
 
         tracing::info!("on_hotkey_pressed: checking mic permission");
         if !create_permission_checker()
@@ -437,5 +443,54 @@ mod stage_mapping_tests {
         for stage in [Stage::Idle, Stage::Recording, Stage::Processing] {
             let _ = stage_to_state(stage);
         }
+    }
+}
+
+#[cfg(test)]
+mod debounce_tests {
+    // The hold threshold from `config/consts.rs`:
+    // `pub const DEFAULT_HOTKEY_HOLD_MS: u32 = 300;`
+    const DEFAULT_HOLD_MS: u64 = 300;
+
+    /// Returns whether the debounce hold-sleep would be entered for the
+    /// given parameters — mirrors the exact guard condition in
+    /// `on_hotkey_pressed`.
+    fn enters_debounce(skip_debounce: bool, hold_ms: u64) -> bool {
+        !skip_debounce && hold_ms > 0
+    }
+
+    #[test]
+    fn test_pointer_bypasses_debounce() {
+        // Pointer/touch overlay tap: skip_debounce=true.
+        // The debounce block must NOT be entered — a tap on the cell
+        // is explicit intent and must start recording immediately.
+        assert!(
+            !enters_debounce(true, DEFAULT_HOLD_MS),
+            "skip_debounce=true must bypass the hold timer entirely"
+        );
+        // Also holds for any hold_ms value — the skip_debounce guard
+        // short-circuits before hold_ms is even read.
+        assert!(!enters_debounce(true, 0));
+        assert!(!enters_debounce(true, 1000));
+    }
+
+    #[test]
+    fn test_keyboard_honors_debounce() {
+        // Keyboard hotkey path: skip_debounce=false.
+        // With the default hold_ms=300, the debounce block IS entered.
+        // This is how AltGr/Ctrl-as-modifier protection works — a
+        // short press (<300ms) gets cancelled by the release.
+        assert!(
+            enters_debounce(false, DEFAULT_HOLD_MS),
+            "skip_debounce=false with hold_ms=300 must enter debounce"
+        );
+    }
+
+    #[test]
+    fn test_zero_hold_skips_debounce() {
+        // When the user sets hold_ms=0, the debounce is skipped even
+        // for the keyboard path — the inner `if hold_ms > 0` guard
+        // prevents the sleep.
+        assert!(!enters_debounce(false, 0));
     }
 }

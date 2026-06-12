@@ -104,7 +104,7 @@ impl Orchestrator {
         self.overlay_manager.preview_theme(theme_id).await
     }
     pub async fn on_hotkey_pressed(&self) {
-        self.recording.on_hotkey_pressed().await;
+        self.recording.on_hotkey_pressed(false).await;
     }
     pub async fn on_hotkey_released(&self) {
         self.recording.on_hotkey_released().await;
@@ -116,7 +116,7 @@ impl Orchestrator {
         self.overlay_manager.is_running().await
     }
     pub async fn manual_start(&self) {
-        self.on_hotkey_pressed().await;
+        self.recording.on_hotkey_pressed(true).await;
     }
     pub async fn manual_stop(&self) {
         self.on_hotkey_released().await;
