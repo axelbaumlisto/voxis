@@ -471,7 +471,7 @@ function iridescentHue(angle, t, audioLevel, baseHue, params) {
 }
 function buildTargetDeformation(width, height, bins, t, audioLevel, energy, params, idleFactor = 0) {
   const sampleCount = 96;
-  const baseR = Math.min(width, height) * params.radiusFraction;
+  const baseR = resolveBaseRadius(width, height, params, 0);
   const invBaseR = baseR > 0 ? 1 / baseR : 1;
   const morph = idleFactor > 0 ? idleMorph(sampleCount, t, params) : null;
   const out = [];
@@ -515,6 +515,52 @@ function nucleusTransform(t, audioLevel, baseR, params) {
   }
   return { cx, cy, r };
 }
+function serializeCellState(s) {
+  return JSON.stringify(s);
+}
+function parseCellState(raw) {
+  if (raw === null)
+    return null;
+  try {
+    const obj = JSON.parse(raw);
+    if (typeof obj !== "object" || obj === null || typeof obj.driftPhase !== "number" || !Number.isFinite(obj.driftPhase) || typeof obj.growth !== "number" || !Number.isFinite(obj.growth) || typeof obj.elapsed !== "number" || !Number.isFinite(obj.elapsed)) {
+      return null;
+    }
+    if (obj.elapsed < 0 || obj.elapsed >= 1e7)
+      return null;
+    if (obj.driftPhase < -1e7 || obj.driftPhase > 1e7)
+      return null;
+    return { driftPhase: obj.driftPhase, growth: obj.growth, elapsed: obj.elapsed };
+  } catch {
+    return null;
+  }
+}
+function restoreSeed(saved, now) {
+  const elapsed = saved.elapsed > 0 ? saved.elapsed : 0;
+  return {
+    startedAt: now - elapsed * 1000,
+    driftPhaseOffset: saved.driftPhase - elapsed
+  };
+}
+function resolveBaseRadius(width, height, params, growth) {
+  const fallbackR = Math.min(width, height) * params.radiusFraction;
+  const rawBaseR = params.baseRadiusPx ?? fallbackR;
+  return rawBaseR * (1 + growth * params.growthSwell);
+}
+function cellDrift(t, width, height, baseR, params) {
+  const margin = params.driftMargin ?? 4;
+  const speed = params.driftSpeed ?? 0.03;
+  const travelRangeX = width - 2 * baseR - 2 * margin;
+  const travelRangeY = height - 2 * baseR - 2 * margin;
+  const phaseX = t * speed + 1000;
+  const phaseY = t * speed + 2000;
+  const noiseX = noise2D(phaseX, 0);
+  const noiseY = noise2D(phaseY, 0);
+  const mapTo = (noise, lo, hi) => lo + (noise * 0.5 + 0.5) * (hi - lo);
+  const cx = travelRangeX > 0 ? mapTo(noiseX, baseR + margin, width - baseR - margin) : width / 2;
+  const cy = travelRangeY > 0 ? mapTo(noiseY, baseR + margin, height - baseR - margin) : height / 2;
+  return { cx, cy };
+}
 function createCellRenderer(container, opts) {
   const params = { ...CELL_DEFAULTS, ...opts.params ?? {} };
   const baseHue = opts.baseHue ?? 34;
@@ -534,7 +580,21 @@ function createCellRenderer(container, opts) {
   let growth = 0;
   let startle = 0;
   let baseline = 0;
-  const startedAt = performance.now();
+  const PERSIST_KEY = "talri.cell.state.v1";
+  let driftPhaseOffset = 0;
+  let lastPersist = 0;
+  let startedAt = performance.now();
+  if (typeof localStorage !== "undefined") {
+    try {
+      const saved = parseCellState(localStorage.getItem(PERSIST_KEY));
+      if (saved) {
+        growth = saved.growth;
+        const seed = restoreSeed(saved, performance.now());
+        startedAt = seed.startedAt;
+        driftPhaseOffset = seed.driftPhaseOffset;
+      }
+    } catch {}
+  }
   let rafId = null;
   const tick = () => {
     const t = (performance.now() - startedAt) / 1000;
@@ -552,9 +612,10 @@ function createCellRenderer(container, opts) {
       const idleFactor = Math.max(0, 1 - s.audioLevel * 3) * recordingFade;
       const targetDeform = buildTargetDeformation(width, height, s.spectrumBins, t, s.audioLevel, energy, params, idleFactor);
       deform = deform ? integrateDeformation(deform, targetDeform, params.attack, params.release) : targetDeform.slice();
-      const cx = width / 2 + sdx;
-      const cy = height / 2 + sdy;
-      const baseR = Math.min(width, height) * params.radiusFraction * (1 + growth * params.growthSwell);
+      const baseR = resolveBaseRadius(width, height, params, growth);
+      const drift = cellDrift(t + driftPhaseOffset, width, height, baseR, params);
+      const cx = drift.cx + sdx;
+      const cy = drift.cy + sdy;
       const maxRadius = height * 0.46;
       const floorRadius = baseR * 0.35;
       const sampleCount = deform.length;
@@ -588,7 +649,7 @@ function createCellRenderer(container, opts) {
           ctx.lineTo(splinePoints[i][0], splinePoints[i][1]);
         }
         ctx.closePath();
-        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, Math.min(width, height) * params.radiusFraction * 0.9));
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, baseR * 0.9));
         grad.addColorStop(0, hsla(baseHue + 10, 0.5, 0.7, params.fillAlpha * 0.5));
         grad.addColorStop(1, hsla(baseHue, 0.7, 0.45, params.fillAlpha));
         ctx.fillStyle = grad;
@@ -636,6 +697,17 @@ function createCellRenderer(container, opts) {
           ctx.stroke();
         }
       }
+    }
+    const now = performance.now();
+    if (now - lastPersist > 500 && typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem(PERSIST_KEY, serializeCellState({
+          driftPhase: t + driftPhaseOffset,
+          growth,
+          elapsed: t
+        }));
+        lastPersist = now;
+      } catch {}
     }
     rafId = requestAnimationFrame(tick);
   };
@@ -685,7 +757,10 @@ function mount(container, api) {
       ciliaWave: 0.5,
       ciliaWaveSpeed: 1.6,
       growthAttack: 0.05,
-      growthRelease: 0,
+      growthRelease: 0.012,
+      baseRadiusPx: 16,
+      driftSpeed: 0.03,
+      driftMargin: 30,
       idleMorphAmplitude: 0.16,
       idleMorphSpeed: 0.22,
       idleMorphPeriod: 7,
