@@ -21,6 +21,7 @@ import * as fallbackTheme from "./theme-engine/builtin/default";
 import { commands } from "./bindings";
 import type { ThemeState } from "./theme-engine/contract";
 import { createPressController } from "./overlay/pressController";
+import { isCanvasOpaqueAt } from "./overlay/hitTest";
 
 export function OverlayApp() {
   const snapshot = useOverlayState();
@@ -92,6 +93,14 @@ export function OverlayApp() {
     if (!el) return;
     const onDown = (e: Event) => {
       const pe = e as PointerEvent;
+
+      // Only start dictation if click lands on opaque canvas pixels.
+      // Clicks on the empty transparent aquarium background are ignored.
+      const canvas = el?.querySelector("canvas");
+      if (canvas && !isCanvasOpaqueAt(canvas, pe.clientX, pe.clientY)) {
+        return; // clicked empty aquarium -> ignore
+      }
+
       if (el && typeof el.setPointerCapture === "function" && pe.pointerId !== undefined) {
         try { el.setPointerCapture(pe.pointerId); } catch { /* noop: jsdom lacks setPointerCapture */ }
       }
