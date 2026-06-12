@@ -26,6 +26,7 @@ import {
   cellDrift,
   serializeCellState,
   parseCellState,
+  restoreSeed,
   CELL_DEFAULTS,
   createCellRenderer,
 } from "../cell";
@@ -499,6 +500,22 @@ describe("buildTargetDeformation", () => {
     let diff = 0;
     for (let i = 0; i < off.length; i++) diff += Math.abs(off[i] - on[i]);
     expect(diff).toBeGreaterThan(0.01);
+  });
+
+  it("uses resolveBaseRadius for pseudopod px→fraction (baseRadiusPx=16 in 160×160)", () => {
+    // Without baseRadiusPx (legacy): baseR = 160 * 0.34 = 54.4
+    // With baseRadiusPx=16: baseR = 16 (real small-cell radius)
+    // Pseudopod offset is in px; division by smaller baseR yields larger fraction,
+    // so the two outputs must differ (and both be finite).
+    const legacy = buildTargetDeformation(160, 160, new Array(32).fill(0), 0.5, 0.7, 0.8, CELL_DEFAULTS);
+    const absolute = buildTargetDeformation(160, 160, new Array(32).fill(0), 0.5, 0.7, 0.8, { ...CELL_DEFAULTS, baseRadiusPx: 16 });
+    for (let i = 0; i < legacy.length; i++) {
+      expect(Number.isFinite(legacy[i])).toBe(true);
+      expect(Number.isFinite(absolute[i])).toBe(true);
+    }
+    // The two deformation arrays must differ because invBaseR differs.
+    const sumSqDiff = legacy.reduce((s, v, i) => s + (v - absolute[i]) ** 2, 0);
+    expect(sumSqDiff).toBeGreaterThan(1e-6);
   });
 });
 
@@ -1355,6 +1372,77 @@ describe("cellDrift", () => {
 });
 
 // ---------------------------------------------------------------------------
+// restoreSeed
+// ---------------------------------------------------------------------------
+
+describe("restoreSeed", () => {
+  it("resumes drift-phase at the persisted value (NOT double-counted)", () => {
+    const saved: CellPersistState = { driftPhase: 1200, growth: 0.5, elapsed: 600 };
+    const now = 1_000_000;
+    const seed = restoreSeed(saved, now);
+    // t ≈ (now - startedAt)/1000 ≈ 600
+    const t = (now - seed.startedAt) / 1000;
+    expect(t).toBeCloseTo(600, 0);
+    // Phase arg passed to cellDrift: t + driftPhaseOffset
+    const phaseArg = t + seed.driftPhaseOffset;
+    // Should resume at the persisted driftPhase, NOT 2*elapsed + ...
+    expect(Math.abs(phaseArg - saved.driftPhase)).toBeLessThan(1e-6);
+    // Sanity: it must NOT be ~1800 (which would be the double-count bug)
+    expect(Math.abs(phaseArg - 1800)).toBeGreaterThan(1);
+    // Verify offset is calibrated: driftPhase - elapsed = 1200 - 600 = 600
+    expect(seed.driftPhaseOffset).toBeCloseTo(600, 6);
+  });
+
+  it("handles elapsed=0 gracefully", () => {
+    const saved: CellPersistState = { driftPhase: 42, growth: 0.2, elapsed: 0 };
+    const now = 500_000;
+    const seed = restoreSeed(saved, now);
+    expect(seed.startedAt).toBeCloseTo(now, 0);
+    expect(seed.driftPhaseOffset).toBeCloseTo(42, 6);
+    const t = (now - seed.startedAt) / 1000;
+    expect(t).toBeCloseTo(0, 0);
+    const phaseArg = t + seed.driftPhaseOffset;
+    expect(Math.abs(phaseArg - saved.driftPhase)).toBeLessThan(1e-6);
+  });
+
+  it("handles elapsed<0 (should occur only on tampered/edge data) — uses 0", () => {
+    const saved: CellPersistState = { driftPhase: 10, growth: 0, elapsed: -5 };
+    const now = 1_000_000;
+    const seed = restoreSeed(saved, now);
+    expect(seed.startedAt).toBeCloseTo(now, 0);
+    expect(seed.driftPhaseOffset).toBeCloseTo(10, 6);
+  });
+
+  it("round-trips: persist → restoreSeed yields continuous phase", () => {
+    // Simulate a running cell: driftPhaseOffset=7.3, t=5.2
+    const driftPhaseOffset = 7.3;
+    const tRun = 5.2;
+    const phaseDuringRun = tRun + driftPhaseOffset; // 12.5
+
+    // Persist
+    const persisted: CellPersistState = {
+      driftPhase: phaseDuringRun, // 12.5
+      growth: 0.4,
+      elapsed: tRun, // 5.2
+    };
+
+    // Restore a bit later
+    const now = 2_000_000;
+    const seed = restoreSeed(persisted, now);
+
+    // First frame after restore: t' ≈ persisted.elapsed = 5.2
+    const tRestored = (now - seed.startedAt) / 1000;
+    expect(tRestored).toBeCloseTo(5.2, 0);
+
+    // Phase arg should equal the phase at persist time (12.5), not 5.2+12.5=17.7
+    const phaseAfterRestore = tRestored + seed.driftPhaseOffset;
+    expect(Math.abs(phaseAfterRestore - phaseDuringRun)).toBeLessThan(1e-6);
+    // Also verify that offset was properly computed: 12.5 - 5.2 = 7.3
+    expect(seed.driftPhaseOffset).toBeCloseTo(driftPhaseOffset, 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // serializeCellState / parseCellState
 // ---------------------------------------------------------------------------
 
@@ -1406,5 +1494,19 @@ describe("CellPersistState serialization", () => {
     const state = { driftPhase: 0, growth: 0, elapsed: 0 };
     const raw = serializeCellState(state);
     expect(() => JSON.parse(raw)).not.toThrow();
+  });
+
+  it("rejects absurd elapsed (>= 1e7)", () => {
+    expect(parseCellState(JSON.stringify({ driftPhase: 0, growth: 0, elapsed: 1e7 }))).toBeNull();
+    expect(parseCellState(JSON.stringify({ driftPhase: 0, growth: 0, elapsed: 1e308 }))).toBeNull();
+  });
+
+  it("rejects absurd driftPhase (outside [-1e7, 1e7])", () => {
+    expect(parseCellState(JSON.stringify({ driftPhase: 1e7 + 1, growth: 0, elapsed: 0 }))).toBeNull();
+    expect(parseCellState(JSON.stringify({ driftPhase: -1e7 - 1, growth: 0, elapsed: 0 }))).toBeNull();
+  });
+
+  it("rejects negative elapsed", () => {
+    expect(parseCellState(JSON.stringify({ driftPhase: 0, growth: 0, elapsed: -1 }))).toBeNull();
   });
 });

@@ -433,7 +433,7 @@ export function buildTargetDeformation(
   idleFactor: number = 0,
 ): number[] {
   const sampleCount = 96;
-  const baseR = Math.min(width, height) * params.radiusFraction;
+  const baseR = resolveBaseRadius(width, height, params, 0);
   const invBaseR = baseR > 0 ? 1 / baseR : 1;
 
   const morph = idleFactor > 0 ? idleMorph(sampleCount, t, params) : null;
@@ -499,7 +499,7 @@ export function buildCellContour(
   const sampleCount = 96;
   const cx = width / 2;
   const cy = height / 2;
-  const baseR = Math.min(width, height) * params.radiusFraction;
+  const baseR = resolveBaseRadius(width, height, params, 0);
 
   const out: Array<[number, number]> = [];
   for (let i = 0; i < sampleCount; i++) {
@@ -629,10 +629,34 @@ export function parseCellState(raw: string | null): CellPersistState | null {
     ) {
       return null;
     }
+    // Reject absurd-but-finite values that could freeze/break animation
+    if (obj.elapsed < 0 || obj.elapsed >= 1e7) return null;
+    if (obj.driftPhase < -1e7 || obj.driftPhase > 1e7) return null;
     return { driftPhase: obj.driftPhase, growth: obj.growth, elapsed: obj.elapsed };
   } catch {
     return null;
   }
+}
+
+/**
+ * Compute initial `startedAt` and `driftPhaseOffset` from a persisted
+ * cell state so that the first rendered frame's drift-phase argument
+ * (`t + driftPhaseOffset`) continues seamlessly from the saved phase.
+ *
+ * Pure & exported for testability.
+ *
+ * @param saved  Parsed persistence state from localStorage.
+ * @param now    Current `performance.now()` value at restore time (ms).
+ */
+export function restoreSeed(
+  saved: CellPersistState,
+  now: number,
+): { startedAt: number; driftPhaseOffset: number } {
+  const elapsed = saved.elapsed > 0 ? saved.elapsed : 0;
+  return {
+    startedAt: now - elapsed * 1000,
+    driftPhaseOffset: saved.driftPhase - elapsed,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -662,6 +686,8 @@ export function cellDrift(
   params: CellParams,
 ): { cx: number; cy: number } {
   const margin = params.driftMargin ?? 4;
+  // NOTE: The margin should ideally account for cilia and startle reach
+  // (headroom tuning is deferred to theme-param overrides).
   const speed = params.driftSpeed ?? 0.03;
 
   const travelRangeX = width - 2 * baseR - 2 * margin;
@@ -753,10 +779,9 @@ export function createCellRenderer(
       const saved = parseCellState(localStorage.getItem(PERSIST_KEY));
       if (saved) {
         growth = saved.growth;
-        driftPhaseOffset = saved.driftPhase;
-        if (saved.elapsed > 0) {
-          startedAt = performance.now() - saved.elapsed * 1000;
-        }
+        const seed = restoreSeed(saved, performance.now());
+        startedAt = seed.startedAt;
+        driftPhaseOffset = seed.driftPhaseOffset;
       }
     } catch {
       // Silently ignore localStorage errors
@@ -854,7 +879,7 @@ export function createCellRenderer(
         // Soft radial gradient fill — overlay lighter center
         const grad = ctx.createRadialGradient(
           cx, cy, 0,
-          cx, cy, Math.max(1, Math.min(width, height) * params.radiusFraction * 0.9),
+          cx, cy, Math.max(1, baseR * 0.9),
         );
         grad.addColorStop(0, hsla(baseHue + 10, 0.5, 0.7, params.fillAlpha * 0.5));
         grad.addColorStop(1, hsla(baseHue, 0.7, 0.45, params.fillAlpha));
