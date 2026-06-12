@@ -42,6 +42,10 @@ pub struct ThemeManifest {
     #[serde(default)]
     #[specta(skip)]
     pub params: Option<serde_json::Value>,
+    #[serde(default)]
+    pub overlay_width: Option<u32>,
+    #[serde(default)]
+    pub overlay_height: Option<u32>,
 }
 
 impl ThemeManifest {
@@ -133,5 +137,23 @@ mod tests {
         );
         let m = ThemeManifest::parse(&with_params).unwrap();
         assert!(m.params.is_some());
+    }
+
+    #[test]
+    fn test_parse_overlay_size() {
+        let with_size = valid_json().replace(
+            "\"entry\": \"theme.js\"",
+            "\"entry\": \"theme.js\", \"overlay_width\": 160, \"overlay_height\": 160",
+        );
+        let m = ThemeManifest::parse(&with_size).unwrap();
+        assert_eq!(m.overlay_width, Some(160));
+        assert_eq!(m.overlay_height, Some(160));
+    }
+
+    #[test]
+    fn test_overlay_size_defaults_none() {
+        let m = ThemeManifest::parse(valid_json()).unwrap();
+        assert!(m.overlay_width.is_none());
+        assert!(m.overlay_height.is_none());
     }
 }
