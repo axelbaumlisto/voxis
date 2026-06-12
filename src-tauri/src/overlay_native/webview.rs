@@ -198,6 +198,14 @@ fn build_overlay_window(
                         PILL_WIDTH as i32,
                         PILL_HEIGHT as i32,
                     );
+                    // Never steal keyboard focus from the active app: a click on
+                    // the pill still delivers the pointer event to WebKit (so
+                    // click-to-dictate works), but the WM must not transfer input
+                    // focus here, or auto-typed text would no longer reach the
+                    // user's focused window.
+                    gtk_window.set_accept_focus(false);
+                    gtk_window.set_can_focus(false);
+                    gtk_window.set_type_hint(gtk::gdk::WindowTypeHint::Utility);
                 }
             }
         });
