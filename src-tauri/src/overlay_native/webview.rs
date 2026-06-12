@@ -37,6 +37,11 @@ pub struct WebviewOverlay {
     running: Arc<AtomicBool>,
     app: AppHandle,
     label: String,
+    /// User-configured position (e.g. BottomCenter). Used when resizing
+    /// the window so the bottom edge stays anchored.
+    position: OverlayPositionConfig,
+    /// Margin from the screen edge, in logical pixels.
+    margin: i32,
 }
 
 impl WebviewOverlay {
@@ -70,6 +75,8 @@ impl WebviewOverlay {
                 running: Arc::new(AtomicBool::new(true)),
                 app,
                 label,
+                position,
+                margin,
             });
         }
 
@@ -100,6 +107,8 @@ impl WebviewOverlay {
             running: Arc::new(AtomicBool::new(true)),
             app,
             label,
+            position,
+            margin,
         })
     }
 
@@ -229,13 +238,27 @@ fn build_overlay_window(
 /// the user's `PositionConfig` + `margin`. Returns LOGICAL GLOBAL pixels
 /// (includes the monitor's position offset so external displays work).
 ///
-/// Kept local (not shared with nspanel.rs) to avoid pulling tauri-nspanel
-/// types into this file. The math is identical and unit-tested via the
-/// nspanel module.
+/// Delegates to `compute_position_for` with `PILL_WIDTH × PILL_HEIGHT`.
 fn compute_initial_position(
     app: &AppHandle,
     position: OverlayPositionConfig,
     margin: i32,
+) -> (f64, f64) {
+    compute_position_for(app, position, margin, PILL_WIDTH, PILL_HEIGHT)
+}
+
+/// Resolve (x, y) for the overlay window at size `w × h`.
+/// Larger `h` moves the top upward, keeping the bottom edge fixed — the
+/// window grows toward the top of the screen, not downward off-screen.
+///
+/// Uses the work area (desktop without panels/taskbars/docks) so bottom
+/// positions sit above the panel.
+pub(crate) fn compute_position_for(
+    app: &AppHandle,
+    position: OverlayPositionConfig,
+    margin: i32,
+    w: u32,
+    h: u32,
 ) -> (f64, f64) {
     let monitor = app
         .get_webview_window("main")
@@ -261,8 +284,63 @@ fn compute_initial_position(
     let mw = (phys_size.width as f64 / scale) as i32;
     let mh = (phys_size.height as f64 / scale) as i32;
     let (local_x, local_y) =
-        position.calculate(mw, mh, PILL_WIDTH as i32, PILL_HEIGHT as i32, margin);
+        position.calculate(mw, mh, w as i32, h as i32, margin);
     (mx + local_x as f64, my + local_y as f64)
+}
+
+/// Apply a theme-declared overlay size to the OS window, bottom-anchored.
+///
+/// Re-applies min/max size + set_size + recomputed bottom-anchored
+/// position. On Linux, re-runs the WebKitGTK `size_request(1,1)` +
+/// `toplevel.resize` lift so sizes below the 200×200 GTK default are
+/// not clamped.
+///
+/// The focus policy (`set_accept_focus(false)`, `set_can_focus(false)`,
+/// `set_focus_on_map(false)`, `Dock` type hint) is already applied at
+/// `build_overlay_window` time. This function re-asserts it on Linux as
+/// a belt-and-suspenders measure — calling `set_accept_focus(false)` on
+/// an already-unfocusable window is a harmless no-op.
+pub(crate) fn apply_overlay_size(
+    window: &tauri::WebviewWindow,
+    app: &AppHandle,
+    position: OverlayPositionConfig,
+    margin: i32,
+    w: u32,
+    h: u32,
+) {
+    let _ = window.set_min_size(Some(LogicalSize::new(w as f64, h as f64)));
+    let _ = window.set_max_size(Some(LogicalSize::new(w as f64, h as f64)));
+    let _ = window.set_size(LogicalSize::new(w as f64, h as f64));
+
+    // Recompute bottom-anchored position so the window grows upward,
+    // keeping the bottom edge fixed.
+    let (x, y) = compute_position_for(app, position, margin, w, h);
+    let _ = window.set_position(LogicalPosition::new(x, y));
+
+    // On Linux, lift the WebKitGTK 200×200 default natural minimum so
+    // the compositor respects per-theme sizes smaller than that.
+    #[cfg(target_os = "linux")]
+    {
+        let _ = window.with_webview(move |webview| {
+            use gtk::prelude::{Cast, GtkWindowExt, WidgetExt};
+            let wv = webview.inner();
+            wv.set_size_request(1, 1);
+            if let Some(toplevel) = wv.toplevel() {
+                if let Ok(gtk_window) = toplevel.downcast::<gtk::Window>() {
+                    gtk_window.resize(w as i32, h as i32);
+                    // Re-assert focus policy (already applied at build;
+                    // these are harmless no-ops on an already-
+                    // unfocusable window).
+                    gtk_window.set_accept_focus(false);
+                    gtk_window.set_can_focus(false);
+                    gtk_window.set_focus_on_map(false);
+                    gtk_window.set_type_hint(gtk::gdk::WindowTypeHint::Dock);
+                }
+            }
+        });
+        // Re-assert via Tauri's own set_size after the GTK-level fix.
+        let _ = window.set_size(LogicalSize::new(w as f64, h as f64));
+    }
 }
 
 impl OverlayBackend for WebviewOverlay {
@@ -323,6 +401,24 @@ impl OverlayBackend for WebviewOverlay {
             return;
         }
         self.emit(events::THEME, &theme_name.to_string());
+    }
+
+    fn resize_for_theme(&self, size: Option<(u32, u32)>) {
+        if !self.running.load(Ordering::SeqCst) {
+            return;
+        }
+        let (w, h) = size.unwrap_or((PILL_WIDTH, PILL_HEIGHT));
+        tracing::info!("webview: resize_for_theme -> {w}x{h}");
+        if let Some(window) = self.app.get_webview_window(&self.label) {
+            apply_overlay_size(
+                &window,
+                &self.app,
+                self.position,
+                self.margin,
+                w,
+                h,
+            );
+        }
     }
 
     fn shutdown(&mut self) {

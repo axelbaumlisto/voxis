@@ -187,6 +187,17 @@ impl OverlayBackend for NsPanelOverlay {
         let _ = theme_name;
     }
 
+    /// NSPanel resize is a no-op.
+    ///
+    /// The NSPanel backend uses a fixed `PILL_WIDTH × PILL_HEIGHT` panel;
+    /// aquarium-style per-theme resizing is handled by the webview backend.
+    /// This method exists only to satisfy the `OverlayBackend` trait and
+    /// compile on macOS.
+    fn resize_for_theme(&self, _size: Option<(u32, u32)>) {
+        #[cfg(target_os = "macos")]
+        let _ = _size;
+    }
+
     fn shutdown(&mut self) {
         self.running.store(false, Ordering::SeqCst);
         #[cfg(target_os = "macos")]
@@ -578,5 +589,49 @@ mod tests {
         assert!(result.is_err(), "expected stub error on non-macOS");
         let overlay = NsPanelOverlay::unavailable();
         assert!(!overlay.is_running());
+    }
+
+    /// Verify that bottom-anchored positions keep the bottom edge fixed
+    /// when the window height grows — the window expands upward, not
+    /// downward off-screen.
+    #[test]
+    fn test_bottom_anchor_resize_grows_upward() {
+        use crate::overlay_native::OverlayPositionConfig;
+        let mw: i32 = 1920;
+        let mh: i32 = 1080;
+        let margin: i32 = 8;
+        let w: i32 = 172;
+
+        // 36px pill (default)
+        let (_, y36) =
+            OverlayPositionConfig::BottomCenter.calculate(mw, mh, w, 36, margin);
+        // 160px aquarium
+        let (_, y160) =
+            OverlayPositionConfig::BottomCenter.calculate(mw, mh, w, 160, margin);
+
+        // y160 must be smaller (higher on screen) — window grows upward
+        assert!(
+            y160 < y36,
+            "bottom-anchored: y160 ({y160}) should be less than y36 ({y36})"
+        );
+        // Bottom edges must be equal (fixed anchor)
+        assert_eq!(
+            y36 + 36,
+            y160 + 160,
+            "bottom-anchored: bottom edge must stay fixed"
+        );
+
+        // Also verify for BottomLeft and BottomRight
+        let (_, y_bl_36) =
+            OverlayPositionConfig::BottomLeft.calculate(mw, mh, w, 36, margin);
+        let (_, y_bl_160) =
+            OverlayPositionConfig::BottomLeft.calculate(mw, mh, w, 160, margin);
+        assert_eq!(y_bl_36 + 36, y_bl_160 + 160);
+
+        let (_, y_br_36) =
+            OverlayPositionConfig::BottomRight.calculate(mw, mh, w, 36, margin);
+        let (_, y_br_160) =
+            OverlayPositionConfig::BottomRight.calculate(mw, mh, w, 160, margin);
+        assert_eq!(y_br_36 + 36, y_br_160 + 160);
     }
 }

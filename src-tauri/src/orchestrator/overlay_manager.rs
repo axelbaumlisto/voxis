@@ -4,8 +4,10 @@ use crate::overlay_native::{
     create_overlay, CreateOverlayParams, OverlayBackend, OverlayPositionConfig,
     OverlaySizeConfig, OverlayState,
 };
+use crate::setup::ThemeEngineState;
 use std::sync::Arc;
 use tauri::AppHandle;
+use tauri::Manager;
 use tokio::sync::Mutex;
 
 pub struct OverlayManager {
@@ -21,6 +23,19 @@ impl OverlayManager {
         Self {
             app,
             overlay,
+        }
+    }
+
+    /// Resolve the overlay size declared by a theme's manifest.
+    /// Returns `Some((w, h))` only when BOTH `overlay_width` and
+    /// `overlay_height` are present; returns `None` otherwise so the
+    /// caller can fall back to `PILL_WIDTH × PILL_HEIGHT` defaults.
+    fn theme_overlay_size(&self, theme_id: &str) -> Option<(u32, u32)> {
+        let loader = self.app.state::<ThemeEngineState>().loader.clone();
+        let manifest = loader.manifest(theme_id)?;
+        match (manifest.overlay_width, manifest.overlay_height) {
+            (Some(w), Some(h)) => Some((w, h)),
+            _ => None,
         }
     }
 
@@ -40,7 +55,11 @@ impl OverlayManager {
         *self.overlay.lock().await = new_overlay;
 
         if config.overlay.enabled {
-            self.overlay.lock().await.set_theme(&config.overlay.theme);
+            {
+                self.overlay.lock().await.set_theme(&config.overlay.theme);
+            }
+            let size = self.theme_overlay_size(&config.overlay.theme);
+            self.overlay.lock().await.resize_for_theme(size);
         }
     }
 
@@ -72,6 +91,8 @@ impl OverlayManager {
 
         let overlay = self.overlay.lock().await;
         overlay.set_theme(theme_id);
+        let size = self.theme_overlay_size(theme_id);
+        overlay.resize_for_theme(size);
         overlay.show(OverlayState::Idle);
         Ok(())
     }

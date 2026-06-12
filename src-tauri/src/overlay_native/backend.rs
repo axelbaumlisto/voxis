@@ -12,6 +12,10 @@ pub trait OverlayBackend: Send + Sync {
     fn send_spectrum_bins(&self, bins: [f32; SPECTRUM_BARS]);
     fn update_position(&self, x: i32, y: i32, width: u32, height: u32);
     fn set_theme(&self, theme_name: &str);
+    /// Resize the OS window to `(width, height)` if `Some`, or reset to the
+    /// default pill size (PILL_WIDTH × PILL_HEIGHT) if `None`.
+    /// No-op on backends that don't support dynamic resizing (NSPanel, Noop).
+    fn resize_for_theme(&self, _size: Option<(u32, u32)>) {}
     fn shutdown(&mut self);
     fn is_running(&self) -> bool;
 
@@ -36,6 +40,7 @@ impl OverlayBackend for NoopOverlay {
     fn send_spectrum_bins(&self, _bins: [f32; crate::audio::SPECTRUM_BARS]) {}
     fn update_position(&self, _x: i32, _y: i32, _width: u32, _height: u32) {}
     fn set_theme(&self, _theme_name: &str) {}
+    fn resize_for_theme(&self, _size: Option<(u32, u32)>) {}
     fn shutdown(&mut self) {}
     fn is_running(&self) -> bool {
         false
