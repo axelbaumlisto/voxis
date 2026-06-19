@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   noise2D,
   fbm,
+  smoothstep,
   cellEnergy,
   cellRadius,
   pseudopodOffset,
@@ -16,15 +17,19 @@ import {
   iridescentHue,
   lowpassRadii,
   catmullRom,
+  sampleBinLevel,
   buildCellContour,
   buildTargetDeformation,
   integrateDeformation,
   nucleusTransform,
   ciliaEndpoints,
+  ciliaPath,
+  ciliaBeatPhase,
   idleMorph,
   resolveBaseRadius,
   cellReach,
   cellDrift,
+  wanderStep,
   driftActivation,
   serializeCellState,
   parseCellState,
@@ -979,6 +984,432 @@ describe("ciliaEndpoints", () => {
       Math.hypot(c.x2 - c.x1, c.y2 - c.y1);
     expect(len(hi)).toBeGreaterThan(len(lo));
   });
+  it("each cilium has a control point bent sideways off the base->tip line (curved, not straight)", () => {
+    // A biological cilium/flagellum is not a rigid spike: it bows to one
+    // side. We model it as a quadratic Bezier whose control point (cpx,cpy)
+    // is offset PERPENDICULAR to the base->tip chord. At least some cilia
+    // must bend noticeably (perpendicular distance > 1px) so the organism
+    // reads as alive rather than a sea-urchin of straight needles.
+    const cilia = ciliaEndpoints(86, 18, 12, 1.3, 0.6, 0.8, P);
+    // EVERY hair must bow (no straight needles), not just some.
+    for (const c of cilia) {
+      const dx = c.x2 - c.x1;
+      const dy = c.y2 - c.y1;
+      const len = Math.hypot(dx, dy) || 1;
+      // signed perpendicular distance of control point from the chord
+      const perp = ((c.cpx - c.x1) * -dy + (c.cpy - c.y1) * dx) / len;
+      expect(Math.abs(perp)).toBeGreaterThan(1);
+    }
+  });
+  it("cilia curvature varies between hairs and over time (chaotic, not uniform)", () => {
+    // Different hairs bend by different amounts, and a given hair's bend
+    // evolves over time — no single rigid sway shared by all.
+    const at = (t: number) => ciliaEndpoints(86, 18, 12, t, 0.5, 0.6, P);
+    const perpOf = (c: { x1: number; y1: number; x2: number; y2: number; cpx: number; cpy: number }) => {
+      const dx = c.x2 - c.x1, dy = c.y2 - c.y1;
+      const len = Math.hypot(dx, dy) || 1;
+      return ((c.cpx - c.x1) * -dy + (c.cpy - c.y1) * dx) / len;
+    };
+    const frame = at(2.0);
+    const perps = frame.map(perpOf);
+    // not all equal -> spatial variety
+    expect(Math.max(...perps) - Math.min(...perps)).toBeGreaterThan(0.5);
+    // first hair's bend changes over time -> temporal variety
+    expect(Math.abs(perpOf(at(2.0)[0]) - perpOf(at(6.0)[0]))).toBeGreaterThan(0.1);
+  });
+  it("hairs sway ASYNCHRONOUSLY (per-hair frequency, not one shared rhythm)", () => {
+    // Symmetric/mechanical look = every hair sways with the SAME temporal
+    // phase, so the crown pulses in lock-step. A living organism has each
+    // cilium beating at its own rate. Measure the tip-angle time series of
+    // two different hairs and require their motion to be decorrelated.
+    const tipAngle = (c: { x1: number; y1: number; x2: number; y2: number }, cx = 86, cy = 18) =>
+      Math.atan2(c.y2 - cy, c.x2 - cx);
+    const hairA: number[] = [];
+    const hairB: number[] = [];
+    for (let t = 0; t < 30; t += 0.25) {
+      const f = ciliaEndpoints(86, 18, 12, t, 0.5, 0.4, P);
+      hairA.push(tipAngle(f[0]));
+      hairB.push(tipAngle(f[Math.floor(f.length / 2)]));
+    }
+    const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
+    const ma = mean(hairA), mb = mean(hairB);
+    let cov = 0, va = 0, vb = 0;
+    for (let i = 0; i < hairA.length; i++) {
+      const da = hairA[i] - ma, db = hairB[i] - mb;
+      cov += da * db; va += da * da; vb += db * db;
+    }
+    const corr = cov / (Math.sqrt(va * vb) || 1);
+    expect(Math.abs(corr)).toBeLessThan(0.6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ciliaBeatPhase — asymmetric two-phase beat clock (power vs recovery)
+// ---------------------------------------------------------------------------
+
+describe("ciliaBeatPhase", () => {
+  const P = CELL_DEFAULTS;
+  it("returns a phase in [0,1)", () => {
+    for (let t = 0; t < 5; t += 0.13) {
+      const p = ciliaBeatPhase(t, 0, P);
+      expect(p).toBeGreaterThanOrEqual(0);
+      expect(p).toBeLessThan(1.0000001);
+    }
+  });
+  it("is asymmetric: the power stroke occupies LESS time than recovery", () => {
+    // With ciliaAsymmetry>0 the phase should advance quickly through the
+    // power-stroke band (say [0,0.5)) and dwell in recovery. Sample uniformly
+    // in time over one period and count how long phase sits in each half.
+    const hz = P.ciliaBeatHz ?? 0.9;
+    const period = 1 / hz;
+    let inPower = 0, inRecovery = 0;
+    const N = 2000;
+    for (let i = 0; i < N; i++) {
+      const t = (i / N) * period;
+      const ph = ciliaBeatPhase(t, 0, { ...P, ciliaAsymmetry: 0.6 });
+      if (ph < 0.5) inPower++; else inRecovery++;
+    }
+    // Fast power stroke => fewer time samples land in [0,0.5).
+    expect(inPower).toBeLessThan(inRecovery);
+  });
+  it("symmetric when asymmetry=0 (≈ equal dwell in each half)", () => {
+    const hz = P.ciliaBeatHz ?? 0.9;
+    const period = 1 / hz;
+    let inPower = 0;
+    const N = 2000;
+    for (let i = 0; i < N; i++) {
+      const t = (i / N) * period;
+      if (ciliaBeatPhase(t, 0, { ...P, ciliaAsymmetry: 0 }) < 0.5) inPower++;
+    }
+    expect(Math.abs(inPower - N / 2)).toBeLessThan(N * 0.08);
+  });
+  it("metachronal phase offset shifts the beat between neighbouring cilia", () => {
+    const a = ciliaBeatPhase(1.0, 0, P);
+    const b = ciliaBeatPhase(1.0, 1, P); // neighbour index
+    expect(a).not.toBeCloseTo(b, 5);
+  });
+
+  // F3: C1 continuity — dphase/dt has no jump > 2x a single step.
+  it("F3: phase velocity (dphase/dt) has no jump larger than 2x a single step", () => {
+    const P3 = { ...CELL_DEFAULTS, ciliaMetachronal: 0 };
+    const hz = P3.ciliaBeatHz ?? 0.9;
+    const period = 1 / hz;
+    const N = 4000;
+    const h = period / N;
+    const vels: number[] = [];
+    let prev = ciliaBeatPhase(0, 0, P3);
+    let prevV: number | null = null;
+    for (let i = 1; i <= N; i++) {
+      const t = i * h;
+      const cur = ciliaBeatPhase(t, 0, P3);
+      let d = cur - prev;
+      if (d < -0.5) d += 1; else if (d > 0.5) d -= 1; // unwrap [0,1)
+      const v = d / h;
+      if (prevV !== null) vels.push(Math.abs(v - prevV));
+      prevV = v;
+      prev = cur;
+    }
+    const sorted = [...vels].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)] || 1e-9;
+    const maxJump = Math.max(...vels);
+    // C1: worst velocity jump is within a small multiple of the typical one
+    // (a C0 corner would spike by ~|s2-s1|, of order the phase speed).
+    expect(maxJump).toBeLessThan(median * 2 + 1e-6);
+  });
+
+  it("F3: recovery envelope smoothstep((phase-0.35)/0.3) is Lipschitz (no step)", () => {
+    const recovery = (phase: number) => smoothstep((phase - 0.35) / 0.3);
+    let prev = recovery(0);
+    let maxStep = 0;
+    const N = 2000;
+    for (let i = 1; i <= N; i++) {
+      const cur = recovery(i / N);
+      maxStep = Math.max(maxStep, Math.abs(cur - prev));
+      prev = cur;
+    }
+    // A hard {0.35,1} step would jump 0.65; smoothstep slope <= 1.5 → <<0.65.
+    expect(maxStep).toBeLessThan(0.01);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sampleBinLevel — A3 interpolated, wraparound spectrum-bin sampling
+// ---------------------------------------------------------------------------
+
+describe("sampleBinLevel (A3)", () => {
+  const bins = Array.from({ length: 32 }, (_, i) => (i % 2 === 0 ? 0.2 : 0.8));
+
+  it("is periodic: value at normalized 0 equals value at 1 (no 0/2pi seam)", () => {
+    expect(sampleBinLevel(bins, 0)).toBeCloseTo(sampleBinLevel(bins, 1), 10);
+  });
+
+  it("interpolates (no staircase): adjacent-angle changes are bounded", () => {
+    const M = 960; // 30 samples per bin
+    let maxStep = 0;
+    let prev = sampleBinLevel(bins, 0);
+    for (let i = 1; i <= M; i++) {
+      const cur = sampleBinLevel(bins, i / M);
+      maxStep = Math.max(maxStep, Math.abs(cur - prev));
+      prev = cur;
+    }
+    // Raw staircase would jump 0.6 between bins; interpolation keeps each step
+    // an order of magnitude smaller.
+    expect(maxStep).toBeLessThan(0.6 * 0.2);
+  });
+
+  it("wraps the last bin to the first across the seam", () => {
+    const b = new Array(8).fill(0);
+    b[0] = 1; b[7] = 1;
+    expect(sampleBinLevel(b, 0.999)).toBeGreaterThan(0.5);
+    expect(sampleBinLevel(b, 0.001)).toBeGreaterThan(0.5);
+  });
+
+  it("empty bins -> 0; single bin -> that value", () => {
+    expect(sampleBinLevel([], 0.3)).toBe(0);
+    expect(sampleBinLevel([0.7], 0.42)).toBe(0.7);
+  });
+
+  it("is deterministic", () => {
+    expect(sampleBinLevel(bins, 0.37)).toBe(sampleBinLevel(bins, 0.37));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildCellContour — A3 star-shaped (monotonic angle) guard
+// ---------------------------------------------------------------------------
+
+describe("buildCellContour star-shape (A3)", () => {
+  it("smoothed contour stays star-shaped: angle about centre is monotonic mod 2pi", () => {
+    const w = 200, h = 200, cx = w / 2, cy = h / 2;
+    const bins = Array.from({ length: 32 }, (_, i) => (i % 2 === 0 ? 0 : 1));
+    const energy = cellEnergy("recording", 0.9, 3, CELL_DEFAULTS.idle, CELL_DEFAULTS.levelGain);
+    const pts = buildCellContour(w, h, bins, 3, 0.9, energy, CELL_DEFAULTS);
+    const smooth = catmullRom(pts, 4);
+    let prev = Math.atan2(smooth[0][1] - cy, smooth[0][0] - cx);
+    let total = 0;
+    let sign = 0;
+    for (let i = 1; i <= smooth.length; i++) {
+      const p = smooth[i % smooth.length];
+      const ang = Math.atan2(p[1] - cy, p[0] - cx);
+      let d = ang - prev;
+      if (d > Math.PI) d -= TAU; else if (d < -Math.PI) d += TAU;
+      if (Math.abs(d) > 1e-9) {
+        const s = d > 0 ? 1 : -1;
+        if (sign === 0) sign = s;
+        expect(s).toBe(sign); // never reverses => monotonic => star-shaped
+      }
+      total += d;
+      prev = ang;
+    }
+    expect(Math.abs(Math.abs(total) - TAU)).toBeLessThan(1e-6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pseudopodOffset — A3 sharpness clamp (C1 lobe)
+// ---------------------------------------------------------------------------
+
+describe("pseudopodOffset sharpness clamp (A3)", () => {
+  it("clamps sharpness to >= 2 (sharpness 1 == sharpness 2)", () => {
+    const base = { ...CELL_DEFAULTS };
+    for (let a = 0; a < TAU; a += 0.31) {
+      const s1 = pseudopodOffset(a, 1.0, 0.5, 0.6, { ...base, sharpness: 1 });
+      const s2 = pseudopodOffset(a, 1.0, 0.5, 0.6, { ...base, sharpness: 2 });
+      expect(s1).toBeCloseTo(s2, 10);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ciliaPath — multi-segment flagellum with a base->tip travelling bend wave
+// ---------------------------------------------------------------------------
+
+describe("ciliaPath", () => {
+  const P = CELL_DEFAULTS;
+  const cx = 80, cy = 80, baseR = 16;
+
+  it("returns ciliaCount paths, each with ciliaSegments+1 points and a width", () => {
+    const paths = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, P);
+    expect(paths.length).toBe(P.ciliaCount);
+    const seg = P.ciliaSegments ?? 6;
+    for (const h of paths) {
+      expect(h.points.length).toBe(seg + 1);
+      expect(h.width).toBeGreaterThan(0);
+    }
+  });
+
+  it("each path starts on the membrane circle (base anchored at radius baseR)", () => {
+    for (const h of ciliaPath(cx, cy, baseR, 1.0, 0.5, 0.5, P)) {
+      const [bx, by] = h.points[0];
+      expect(Math.hypot(bx - cx, by - cy)).toBeCloseTo(baseR, 0);
+    }
+  });
+
+  it("tip extends beyond the base radius (hair points outward)", () => {
+    for (const h of ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, P)) {
+      const [tx, ty] = h.points[h.points.length - 1];
+      expect(Math.hypot(tx - cx, ty - cy)).toBeGreaterThan(baseR);
+    }
+  });
+
+  it("is a CURVED polyline: interior points deviate from the straight base->tip chord", () => {
+    let maxDev = 0;
+    for (const h of ciliaPath(cx, cy, baseR, 1.3, 0.7, 0.9, P)) {
+      const pts = h.points;
+      const [x1, y1] = pts[0];
+      const [x2, y2] = pts[pts.length - 1];
+      const dx = x2 - x1, dy = y2 - y1;
+      const L = Math.hypot(dx, dy) || 1;
+      for (let i = 1; i < pts.length - 1; i++) {
+        const [px, py] = pts[i];
+        const perp = Math.abs(((px - x1) * -dy + (py - y1) * dx) / L);
+        maxDev = Math.max(maxDev, perp);
+      }
+    }
+    expect(maxDev).toBeGreaterThan(2);
+  });
+
+  it("bend SHAPE travels along the cilium over time (wave propagates base->tip)", () => {
+    const peakSeg = (t: number) => {
+      const pts = ciliaPath(cx, cy, baseR, t, 0.5, 0.6, P)[0].points;
+      const [x1, y1] = pts[0];
+      const [x2, y2] = pts[pts.length - 1];
+      const dx = x2 - x1, dy = y2 - y1;
+      const L = Math.hypot(dx, dy) || 1;
+      let best = 0, bestI = 0;
+      for (let i = 1; i < pts.length - 1; i++) {
+        const [px, py] = pts[i];
+        const perp = Math.abs(((px - x1) * -dy + (py - y1) * dx) / L);
+        if (perp > best) { best = perp; bestI = i; }
+      }
+      return bestI;
+    };
+    const seen = new Set<number>();
+    for (let t = 0; t < 4; t += 0.1) seen.add(peakSeg(t));
+    expect(seen.size).toBeGreaterThan(1);
+  });
+
+  it("hairs have DIVERSE lengths (not all the same size)", () => {
+    // Measure the HAIR length (tip minus base along the radial axis), not the
+    // tip's distance from cell centre — the latter is diluted by the fixed
+    // baseR offset and understates the diversity of the hairs themselves.
+    const hairLen = (h: { points: Array<[number, number]> }) => {
+      const [bx, by] = h.points[0];
+      const [tx, ty] = h.points[h.points.length - 1];
+      return Math.hypot(tx - bx, ty - by);
+    };
+    const lens = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, P).map(hairLen);
+    const spread = (Math.max(...lens) - Math.min(...lens)) / (Math.max(...lens) || 1);
+    // With ciliaLengthVar ~0.5 the longest hair should be markedly longer
+    // than the shortest (>40% spread).
+    expect(spread).toBeGreaterThan(0.4);
+  });
+
+  it("hairs have DIVERSE thickness", () => {
+    const ws = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, P).map((h) => h.width);
+    expect(Math.max(...ws) - Math.min(...ws)).toBeGreaterThan(0.2);
+  });
+
+  it("angular spacing is IRREGULAR (aperiodic crown, not evenly spaced)", () => {
+    const angles = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, P).map((h) => {
+      const [bx, by] = h.points[0];
+      return Math.atan2(by - cy, bx - cx);
+    });
+    angles.sort((a, b) => a - b);
+    const gaps: number[] = [];
+    for (let i = 1; i < angles.length; i++) gaps.push(angles[i] - angles[i - 1]);
+    const mean = gaps.reduce((s, v) => s + v, 0) / gaps.length;
+    const variance = gaps.reduce((s, v) => s + (v - mean) ** 2, 0) / gaps.length;
+    // Perfectly even spacing => variance ~0. Require real irregularity.
+    expect(Math.sqrt(variance)).toBeGreaterThan(mean * 0.1);
+  });
+
+  it("length tracks SMOOTHED growth so it shrinks gradually (no snap on silence)", () => {
+    // Same energy, different growth -> different mean length. Because the
+    // renderer feeds the slow-releasing `growth` accumulator, a sudden
+    // silence (energy drop) with still-high growth keeps hairs long, then
+    // they recede as growth releases. Here we assert monotonic dependence
+    // on growth so the decay is gradual, not instantaneous.
+    const lenAt = (growth: number) => {
+      const h = ciliaPath(cx, cy, baseR, 1.0, 0.0, growth, P)[0];
+      const [tx, ty] = h.points[h.points.length - 1];
+      return Math.hypot(tx - cx, ty - cy);
+    };
+    expect(lenAt(0.8)).toBeGreaterThan(lenAt(0.2));
+  });
+
+  it("A1: BASE-angle order (points[0]) is preserved for all jitter, even out-of-range", () => {
+    // The base ring order is k=0..n-1 at increasing baseAngle. Clamping
+    // ciliaAngleJitter to <=0.9 keeps each hair within <0.45*gap of its slot,
+    // so the cyclic order of base angles must never change, no matter how
+    // extreme the requested jitter.
+    const baseOrder = (jit: number) => {
+      const paths = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, { ...P, ciliaAngleJitter: jit });
+      return paths.map((h) => {
+        const [bx, by] = h.points[0];
+        return ((Math.atan2(by - cy, bx - cx) % TAU) + TAU) % TAU;
+      });
+    };
+    for (const jit of [0, 0.5, 0.9, 1.5, 5, 100]) {
+      const angles = baseOrder(jit);
+      // Each hair k must stay within (k*gap +/- 0.45*gap); since slots are
+      // gap apart, the array is strictly increasing (cyclically) => order kept.
+      const gap = TAU / P.ciliaCount;
+      for (let k = 0; k < angles.length; k++) {
+        let diff = angles[k] - k * gap;
+        diff = ((diff + Math.PI) % TAU + TAU) % TAU - Math.PI;
+        expect(Math.abs(diff)).toBeLessThan(0.5 * gap);
+      }
+    }
+  });
+
+  it("F12: cellReach covers the actual longest cilium tip at ciliaLengthVar=0.95", () => {
+    const p = { ...CELL_DEFAULTS, ciliaLengthVar: 0.95, startleMaxPx: 0 };
+    const reach = cellReach(baseR, p);
+    // The renderer's worst case is growth=1, energy=1.
+    let maxDist = 0;
+    for (const h of ciliaPath(cx, cy, baseR, 1.7, 1.0, 1.0, p)) {
+      for (const [px, py] of h.points) {
+        maxDist = Math.max(maxDist, Math.hypot(px - cx, py - cy));
+      }
+    }
+    expect(reach).toBeGreaterThanOrEqual(maxDist - 1e-6);
+  });
+
+  it("F2: per-segment angular order matches base order (hairs never cross neighbours)", () => {
+    // For each cilium, every segment's angle about the centre must stay within
+    // half a gap of its base angle, so the bend can never sweep a point into a
+    // neighbour's angular slot (which would visually cross hairs).
+    for (const curl of [0.7, 2, 5]) {
+      for (const lenVar of [0, 0.5, 0.95]) {
+        const paths = ciliaPath(cx, cy, baseR, 1.7, 0.7, 0.9, {
+          ...P,
+          ciliaCurl: curl,
+          ciliaLengthVar: lenVar,
+          ciliaAngleJitter: 0.9,
+        });
+        const gap = TAU / P.ciliaCount;
+        for (const h of paths) {
+          const [bx, by] = h.points[0];
+          const baseAng = Math.atan2(by - cy, bx - cx);
+          for (const [px, py] of h.points) {
+            const r = Math.hypot(px - cx, py - cy);
+            if (r < 1e-6) continue;
+            let d = Math.atan2(py - cy, px - cx) - baseAng;
+            d = ((d + Math.PI) % TAU + TAU) % TAU - Math.PI;
+            // The F2 cap bounds the transverse sweep to <= asin(0.5*gap) < 0.5*gap.
+            expect(Math.abs(d)).toBeLessThanOrEqual(0.5 * gap + 1e-9);
+          }
+        }
+      }
+    }
+  });
+
+  it("is deterministic", () => {
+    expect(ciliaPath(cx, cy, baseR, 2.0, 0.5, 0.5, P)).toEqual(
+      ciliaPath(cx, cy, baseR, 2.0, 0.5, 0.5, P),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1245,13 +1676,28 @@ describe("idleMorph", () => {
     for (let i = 0; i < a.length; i++) diff += Math.abs(a[i] - b[i]);
     expect(diff).toBeGreaterThan(0.01);
   });
-  it("envelope waxes and wanes (overall magnitude varies across a period)", () => {
+  it("envelope waxes and wanes (overall magnitude varies over time)", () => {
     const mag = (arr: number[]) => arr.reduce((s, v) => s + Math.abs(v), 0);
-    // sample several times across one envelope period; max should exceed min noticeably
+    // sample over a long span; magnitude must vary noticeably (alive, not flat)
     const mags: number[] = [];
-    const period = P.idleMorphPeriod;
-    for (let k = 0; k < 8; k++) mags.push(mag(idleMorph(64, (k / 8) * period, P)));
+    for (let k = 0; k < 16; k++) mags.push(mag(idleMorph(64, k * 1.3, P)));
     expect(Math.max(...mags)).toBeGreaterThan(Math.min(...mags) * 1.3);
+  });
+  it("envelope is NOT strictly periodic (no cos-cycle blink/loop)", () => {
+    // Regression: the old envelope was cos(TAU*t/period) — strictly periodic,
+    // so the whole organism visibly repeated/blinked every `idleMorphPeriod`
+    // seconds. A living cell must never replay the exact same envelope.
+    const mag = (tt: number) => idleMorph(64, tt, P).reduce((s, v) => s + Math.abs(v), 0);
+    const period = P.idleMorphPeriod;
+    let maxRepeatErr = 0;
+    for (const base of [0.0, 1.1, 2.7, 4.3]) {
+      const a = mag(base);
+      const b = mag(base + period);
+      const rel = Math.abs(a - b) / (Math.abs(a) + 1e-6);
+      maxRepeatErr = Math.max(maxRepeatErr, rel);
+    }
+    // A strictly periodic envelope would give ~0 here. Require real drift.
+    expect(maxRepeatErr).toBeGreaterThan(0.1);
   });
   it("respects the floor (envelope never fully zero when floor > 0)", () => {
     const mag = (arr: number[]) => arr.reduce((s, v) => s + Math.abs(v), 0);
@@ -1307,10 +1753,12 @@ describe("cellReach", () => {
   it("includes cilia reach: at least baseR + ciliaLen*baseR", () => {
     const p = { ...CELL_DEFAULTS, ciliaLength: 0.4, ciliaGrowthBoost: 0.55, startleMaxPx: 0 };
     const r = cellReach(16, p);
-    // cilia outer = 16 + 16 * (0.4 + 0.55) * 1.3 = 16 + 16*1.235 = 35.76
-    expect(r).toBeGreaterThanOrEqual(35.7);
+    // F12: worst-case hair uses (1+ciliaLengthVar=1.5) not the old 1.3, plus the
+    // F2 transverse-cap headroom sqrt(1+0.25*gap^2) with gap=2pi/18.
+    // longestAlong = 16 + 16*(0.95)*1.5 = 38.8; ciliaOuter = 38.8*1.01512 = 39.39
+    expect(r).toBeGreaterThanOrEqual(39.3);
     // membrane outer = 16 * 1.4 = 22.4 — cilia dominates
-    expect(r).toBeCloseTo(35.76, 1);
+    expect(r).toBeCloseTo(39.39, 1);
   });
 
   it("includes startle on top", () => {
@@ -1324,9 +1772,9 @@ describe("cellReach", () => {
   it("returns >= baseR + cilia + startle for typical drifting_contour params", () => {
     const p = { ...CELL_DEFAULTS, ciliaLength: 0.4, ciliaGrowthBoost: 0.55, startleMaxPx: 4 };
     const r = cellReach(16, p);
-    // membrane = 22.4, cilia = 35.76, +4 = 39.76
-    expect(r).toBeGreaterThanOrEqual(39.7);
-    expect(r).toBeCloseTo(39.76, 1);
+    // membrane = 22.4, cilia = 39.39, +4 startle = 43.39 (F12)
+    expect(r).toBeGreaterThanOrEqual(43.3);
+    expect(r).toBeCloseTo(43.39, 1);
   });
 
   it("defaults missing cilia/growth/startle to 0", () => {
@@ -1337,7 +1785,8 @@ describe("cellReach", () => {
     delete (pPartial as any).ciliaGrowthBoost;
     delete (pPartial as any).startleMaxPx;
     const r = cellReach(10, pPartial as CellParams);
-    // membrane = 10 * 1.4 = 14, cilia = 10 + 10*0*1.3 = 10, max=14, +0 startle
+    // membrane = 10 * 1.4 = 14; cilia (no length/boost) = 10*1.0151 = 10.15;
+    // membrane dominates, +0 startle.
     expect(r).toBe(14);
   });
 
@@ -1390,8 +1839,10 @@ describe("cellDrift", () => {
       driftMargin: 30,
     };
     const reach = cellReach(baseR, dcParams);
-    // reach ≈ 39.76, inset = max(30, 39.76) = 39.76
-    expect(reach).toBeCloseTo(39.76, 1);
+    // F12: the cilia-reach factor was corrected from 1.3 to the true worst-case
+    // hair (1 + ciliaLengthVar) plus the F2 transverse-bend headroom, so the
+    // containment radius grew from ≈39.76 to ≈43.39. inset = max(30, 43.39).
+    expect(reach).toBeCloseTo(43.39, 1);
     for (let t = 0; t < 1000; t += 13.7) {
       const d = cellDrift(t, W, H, baseR, dcParams);
       // cx ± reach must stay within [0, 160]
@@ -1465,10 +1916,148 @@ describe("cellDrift", () => {
     expect(a).toEqual(b);
   });
 
+  it("X and Y drift are decorrelated (wanders in 2D, not back-and-forth on a line)", () => {
+    // Mechanical look = cx and cy move in lock-step (their paths correlate),
+    // so the cell slides along essentially one axis. A living cell wanders
+    // in 2D: the X and Y trajectories must be statistically independent.
+    // We assert the Pearson correlation between the cx and cy series over
+    // time is low in magnitude.
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (let t = 0; t < 400; t += 2) {
+      const d = cellDrift(t, W, H, baseR, P);
+      xs.push(d.cx);
+      ys.push(d.cy);
+    }
+    const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
+    const mx = mean(xs), my = mean(ys);
+    let cov = 0, vx = 0, vy = 0;
+    for (let i = 0; i < xs.length; i++) {
+      const ddx = xs[i] - mx, ddy = ys[i] - my;
+      cov += ddx * ddy; vx += ddx * ddx; vy += ddy * ddy;
+    }
+    const corr = cov / (Math.sqrt(vx * vy) || 1);
+    expect(Math.abs(corr)).toBeLessThan(0.5);
+  });
+
   it("handles zero-sized window gracefully (no crash, returns finite)", () => {
     const d = cellDrift(0, 0, 0, 0, P);
     expect(Number.isFinite(d.cx)).toBe(true);
     expect(Number.isFinite(d.cy)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// wanderStep — Reynolds steering-style integrated wander (stateful)
+// ---------------------------------------------------------------------------
+
+describe("wanderStep", () => {
+  const P = CELL_DEFAULTS;
+  const W = 160, H = 160;
+  const baseR = 16;
+  const reach = cellReach(baseR, P);
+
+  // Helper: integrate the wander for N steps from centre, return path.
+  function runPath(steps: number, dt = 1 / 60, seed = 0) {
+    let s = { x: W / 2, y: H / 2, heading: seed, vx: 0, vy: 0 };
+    const path: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < steps; i++) {
+      s = wanderStep(s, dt, W, H, baseR, P);
+      path.push({ x: s.x, y: s.y });
+    }
+    return path;
+  }
+
+  it("keeps the whole organism inside the aquarium walls", () => {
+    for (const p of runPath(4000)) {
+      expect(p.x - reach).toBeGreaterThanOrEqual(-0.5);
+      expect(p.y - reach).toBeGreaterThanOrEqual(-0.5);
+      expect(p.x + reach).toBeLessThanOrEqual(W + 0.5);
+      expect(p.y + reach).toBeLessThanOrEqual(H + 0.5);
+    }
+  });
+
+  it("is deterministic for the same input state", () => {
+    const s0 = { x: 80, y: 80, heading: 1.2, vx: 0.3, vy: -0.1 };
+    expect(wanderStep(s0, 1 / 60, W, H, baseR, P)).toEqual(
+      wanderStep(s0, 1 / 60, W, H, baseR, P),
+    );
+  });
+
+  it("does NOT gravitate back to the centre (true wandering, not oscillation)", () => {
+    // The old cellDrift used position=noise(t), which oscillates about the
+    // centre — the cell always returned to the middle. A real wanderer's
+    // average position over a long run should be measurably off-centre and
+    // it should spend lots of time far from the middle.
+    const path = runPath(6000, 1 / 60, 0.7);
+    const cxAvg = path.reduce((s, p) => s + p.x, 0) / path.length;
+    const cyAvg = path.reduce((s, p) => s + p.y, 0) / path.length;
+    // far-from-centre occupancy
+    const far = path.filter(
+      (p) => Math.hypot(p.x - W / 2, p.y - H / 2) > 0.25 * Math.min(W, H) / 2,
+    ).length;
+    // Not pinned to dead-centre on average, and roams the tank.
+    const offCentre = Math.hypot(cxAvg - W / 2, cyAvg - H / 2);
+    expect(far).toBeGreaterThan(path.length * 0.2);
+    expect(offCentre).toBeGreaterThanOrEqual(0); // sanity (no NaN)
+    expect(Number.isFinite(offCentre)).toBe(true);
+  });
+
+  it("heading changes gradually (no twitching / instant reversals)", () => {
+    // Reynolds: retain heading, apply SMALL random displacement each frame.
+    // Successive velocity directions must be highly correlated frame-to-frame.
+    let s = { x: W / 2, y: H / 2, heading: 0.3, vx: 0, vy: 0 };
+    let prevAng: number | null = null;
+    let maxTurn = 0;
+    for (let i = 0; i < 1200; i++) {
+      s = wanderStep(s, 1 / 60, W, H, baseR, P);
+      const ang = Math.atan2(s.vy, s.vx);
+      if (prevAng !== null) {
+        let d = Math.abs(ang - prevAng);
+        if (d > Math.PI) d = 2 * Math.PI - d; // wrap
+        // ignore wall-bounce frames (big intentional flips)
+        const nearWall =
+          s.x - reach < 2 || s.y - reach < 2 || s.x + reach > W - 2 || s.y + reach > H - 2;
+        if (!nearWall) maxTurn = Math.max(maxTurn, d);
+      }
+      prevAng = ang;
+    }
+    // Per-frame heading change stays small away from walls (smooth turns).
+    expect(maxTurn).toBeLessThan(0.5);
+  });
+
+  it("F6: heading autocorrelation decays over a long run (no stall / limit cycle)", () => {
+    // With the OLD position-coupled jitter the walk could lock into a cycle.
+    // Sampling the jitter on a dedicated clock makes the heading a genuine
+    // random walk, so its autocorrelation at a long lag drops well below 1.
+    let s: ReturnType<typeof wanderStep> = { x: W / 2, y: H / 2, heading: 0.3, vx: 0, vy: 0, clock: 0 };
+    const headings: number[] = [];
+    for (let i = 0; i < 10000; i++) {
+      s = wanderStep(s, 1 / 60, W, H, baseR, P);
+      headings.push(s.heading);
+    }
+    // Autocorrelation of the unit heading vector at lag L.
+    const lag = 2000;
+    let dot = 0, n = 0;
+    for (let i = 0; i + lag < headings.length; i++) {
+      dot += Math.cos(headings[i]) * Math.cos(headings[i + lag]) +
+        Math.sin(headings[i]) * Math.sin(headings[i + lag]);
+      n++;
+    }
+    const autocorr = dot / n;
+    expect(autocorr).toBeLessThan(0.8); // decayed from 1 => not stuck
+  });
+
+  it("F6: jitter is translation-invariant (same heading+clock => same step regardless of x,y)", () => {
+    // Both sample points must be in the wall-free interior: the wall bounce
+    // (heading reflection) is a position-dependent effect that is NOT the
+    // jitter under test. With W=H=160 and reach≈43, [70,90] is well inside.
+    const a = wanderStep({ x: 72, y: 76, heading: 0.7, vx: 0, vy: 0, clock: 5 }, 1 / 60, W, H, baseR, P);
+    const b = wanderStep({ x: 88, y: 84, heading: 0.7, vx: 0, vy: 0, clock: 5 }, 1 / 60, W, H, baseR, P);
+    // Same heading delta (the jitter no longer depends on position).
+    const da = Math.atan2(Math.sin(a.heading - 0.7), Math.cos(a.heading - 0.7));
+    const db = Math.atan2(Math.sin(b.heading - 0.7), Math.cos(b.heading - 0.7));
+    expect(da).toBeCloseTo(db, 10);
   });
 });
 

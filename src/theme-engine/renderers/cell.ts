@@ -14,10 +14,11 @@ import type { ThemeState } from "../contract";
 import type { Renderer } from "./types";
 import {
   noise2D, fbm, catmullRom, integrateDeformation, hsla, TAU, growthLevel,
+  lerp, smoothstep,
 } from "./shared";
 
 // Backward-compat re-exports: existing imports of these from "./cell" keep working.
-export { noise2D, fbm, catmullRom, lowpassRadii, integrateDeformation, TAU } from "./shared";
+export { noise2D, fbm, catmullRom, lowpassRadii, integrateDeformation, TAU, smoothstep } from "./shared";
 
 
 
@@ -70,6 +71,14 @@ export interface CellParams {
   driftSpeed?: number;
   /** Margin in pixels from window edges the cell centre must respect. */
   driftMargin?: number;
+  /** Wander heading turn rate (radians/sec scale for the random walk of the
+   * travel direction). Larger = curvier, more restless path; smaller = long
+   * sweeping arcs. Used by `wanderStep`. */
+  wanderTurnRate?: number;
+  /** Wander-clock frequency (Hz-like) at which the heading-jitter noise is
+   * sampled. F6: decouples the random walk from position so it never stalls.
+   * ~0.6 keeps turns gentle and aperiodic. Used by `wanderStep`. */
+  wanderFreq?: number;
   /** Per-frame blend factor when deformation is being pushed further.
    * ~0.20 reaches ~90% of a new shape within ~0.2s at 60fps. */
   attack: number;
@@ -102,6 +111,35 @@ export interface CellParams {
   ciliaWave: number;
   /** Cilia wave speed. */
   ciliaWaveSpeed: number;
+  /** Sideways bow of each cilium as a fraction of its length (Bezier control
+   * point perpendicular offset). 0 = straight needle, ~0.4 = clearly bowed
+   * flagellum. Drives the organic curved look. */
+  ciliaCurl: number;
+  // --- Biologically-motivated ciliary beat (Gompper/Elgeti et al.; Nature
+  // Commun. 2023 flagella waveform). Real motile cilia have a two-phase
+  // ASYMMETRIC beat: a fast near-straight POWER stroke and a slow strongly-
+  // curved RECOVERY stroke; the bending wave travels base->tip; neighbouring
+  // cilia beat with a phase lag so a METACHRONAL wave sweeps round the cell. ---
+  /** Beat frequency in Hz (cycles/sec) of a single cilium. ~0.6–1.2 reads as
+   * lively but not buzzing at overlay scale. */
+  ciliaBeatHz?: number;
+  /** Power/recovery time asymmetry in [0,1). 0 = symmetric sine; 0.6 = fast
+   * power stroke, slow recovery (more biological). */
+  ciliaAsymmetry?: number;
+  /** Metachronal phase lag between adjacent cilia, in radians. Non-zero makes
+   * a wave travel around the crown instead of all hairs beating in unison. */
+  ciliaMetachronal?: number;
+  /** Number of segments per cilium polyline (>=2). More = smoother bend wave. */
+  ciliaSegments?: number;
+  /** Per-hair length variation, fraction in [0,1). 0 = all equal length;
+   * 0.5 = lengths span roughly ±50% around the mean (biologically diverse). */
+  ciliaLengthVar?: number;
+  /** Per-hair angular jitter as a fraction of the mean gap between hairs.
+   * 0 = perfectly even spacing; ~0.6 = clearly irregular, aperiodic crown. */
+  ciliaAngleJitter?: number;
+  /** Base stroke width (px) at the thickest hair; thinner hairs taper from
+   * this. Each hair also tapers base->tip. */
+  ciliaWidth?: number;
   /** Growth attack per-frame (fast rise during speech). */
   growthAttack: number;
   /** Growth release per-frame (slow shrink in silence). */
@@ -163,6 +201,14 @@ export const CELL_DEFAULTS: CellParams = {
   ciliaGrowthBoost: 0.6,
   ciliaWave: 0.5,
   ciliaWaveSpeed: 1.6,
+  ciliaCurl: 0.7,
+  ciliaBeatHz: 0.9,
+  ciliaAsymmetry: 0.6,
+  ciliaMetachronal: 0.8,
+  ciliaSegments: 6,
+  ciliaLengthVar: 0.5,
+  ciliaAngleJitter: 0.55,
+  ciliaWidth: 1.6,
   growthAttack: 0.05,
   growthRelease: 0.012,
   growthSwell: 0.22,
@@ -175,6 +221,8 @@ export const CELL_DEFAULTS: CellParams = {
   idleMorphPeriod: 7,
   idleMorphFloor: 0.25,
   driftActivationRate: 0.02,
+  wanderTurnRate: 1.1,
+  wanderFreq: 0.6,
 };
 
 
@@ -271,8 +319,12 @@ export function pseudopodOffset(
     let delta = angle - theta;
     // Wrap to [-π, π]
     delta = ((delta + Math.PI) % TAU + TAU) % TAU - Math.PI;
-    // Bell-shaped lobe: cos(delta)^sharpness, clamped to positive
-    const lobe = Math.pow(Math.max(0, Math.cos(delta)), params.sharpness);
+    // Bell-shaped lobe: cos(delta)^sharpness, clamped to positive. The exponent
+    // is clamped to >=2 so the lobe is C1 at its edge (cos(delta)^1 has a
+    // non-zero one-sided slope where the max(0,...) clips it, which would put a
+    // kink in the contour); >=2 guarantees a smooth, differentiable shoulder.
+    const sharp = Math.max(2, params.sharpness);
+    const lobe = Math.pow(Math.max(0, Math.cos(delta)), sharp);
     // Amplitude grows with audio level and energy; idle gives tiny twitches
     const audioDrive = params.idle + audioLevel * params.levelGain;
     const amp = params.push * audioDrive * energy;
@@ -282,7 +334,16 @@ export function pseudopodOffset(
   return total;
 }
 
-export interface Cilium { x1: number; y1: number; x2: number; y2: number; }
+export interface Cilium {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  /** Quadratic Bezier control point — bent sideways off the base->tip chord
+   * so the cilium bows like a living flagellum instead of a rigid spike. */
+  cpx: number;
+  cpy: number;
+}
 
 /**
  * Hair-like cilia around the membrane. Each cilium base sits on the cell
@@ -317,7 +378,184 @@ export function ciliaEndpoints(
     const y1 = cy + baseR * Math.sin(baseAngle);
     const x2 = cx + (baseR + lenPx) * Math.cos(tipAngle);
     const y2 = cy + (baseR + lenPx) * Math.sin(tipAngle);
-    out.push({ x1, y1, x2, y2 });
+
+    // Bow the hair sideways: place a quadratic Bezier control point at the
+    // chord midpoint, displaced PERPENDICULAR to the base->tip direction by
+    // a noise-driven amount that differs per hair (k) and drifts over time.
+    // This makes each cilium curve organically and chaotically rather than
+    // standing as a straight needle.
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const segLen = Math.hypot(dx, dy) || 1;
+    // unit perpendicular to the chord
+    const px = -dy / segLen;
+    const py = dx / segLen;
+    // bend amount: each hair always bows to one side (deterministic sign per
+    // hair, so no cilium is ever a straight needle), modulated by drifting
+    // noise for a living, chaotic wobble. Scaled by hair length so longer
+    // hairs bow more (∝ flagellar flexibility).
+    const bias = ((k * 2654435761) % 2 === 0 ? 1 : -1); // stable per-hair side
+    const wobble = noise2D(k * 9.7 + 0.5, t * params.ciliaWaveSpeed * 0.6 + k * 1.7); // [-1,1]
+    // base bow (always present) + noise wobble; keep within ~[0.4,1.4]*curl
+    const bendMag = (0.7 + 0.5 * wobble) * params.ciliaCurl;
+    const bend = bias * bendMag * lenPx;
+    const midx = (x1 + x2) / 2;
+    const midy = (y1 + y2) / 2;
+    const cpx = midx + px * bend;
+    const cpy = midy + py * bend;
+    out.push({ x1, y1, x2, y2, cpx, cpy });
+  }
+  return out;
+}
+
+/**
+ * Asymmetric two-phase ciliary beat clock.
+ *
+ * Real motile cilia spend LESS time in the fast power stroke and MORE in the
+ * slow recovery stroke (Gompper/Elgeti et al.). We model the beat as a phase
+ * in [0,1) that advances NON-uniformly in time: fast through the power band,
+ * slow through recovery. `ciliaAsymmetry` in [0,1) controls the skew
+ * (0 = symmetric). `index` applies a metachronal phase lag so neighbouring
+ * cilia are offset, producing a wave that travels around the crown.
+ *
+ * Pure & deterministic.
+ */
+export function ciliaBeatPhase(
+  t: number,
+  index: number,
+  params: CellParams,
+): number {
+  const hz = params.ciliaBeatHz ?? 0.9;
+  const lag = (params.ciliaMetachronal ?? 0) * index;
+  // Linear phase advance + metachronal offset, wrapped to [0,1).
+  const lin = (t * hz + lag / TAU) % 1;
+  const u = ((lin % 1) + 1) % 1; // guard negatives
+  const a = Math.max(0, Math.min(0.95, params.ciliaAsymmetry ?? 0));
+  if (a === 0) return u;
+  // F3 (C1 beat clock): warp the uniform clock u -> phase with a SMOOTH,
+  // PERIODIC velocity profile instead of a piecewise-linear ramp. We want the
+  // power stroke (early phase) to pass quickly and the recovery (late phase) to
+  // dwell. Define a positive periodic phase velocity
+  //     dphase/du = g(u) = 1 + A*sin(2*pi*u),   A = a (< 1 keeps g > 0)
+  // which is fastest near u=0.25 (power) and slowest near u=0.75 (recovery).
+  // Integrating from 0 (so phase(0)=0, phase(1)=1) gives a closed form:
+  //     phase(u) = u + (A / 2pi) * (1 - cos(2*pi*u)).
+  // g is C-infinity AND periodic, so dphase/du is continuous across the period
+  // wrap u: 1->0 (the old piecewise map had a slope jump there). The map is
+  // monotone for A<1 and reduces to the identity at A=0 (symmetric beat).
+  const A = a; // a is already clamped to [0, 0.95]
+  const phase = u + (A / TAU) * (1 - Math.cos(TAU * u));
+  return ((phase % 1) + 1) % 1; // keep in [0,1) against FP drift
+}
+
+/** A cilium rendered as a multi-point spine plus its stroke width. */
+export interface CiliumPath {
+  /** Polyline points base->tip. */
+  points: Array<[number, number]>;
+  /** Stroke width in px for this hair (thicker hairs read as nearer/stronger). */
+  width: number;
+}
+
+/**
+ * Biologically-motivated cilium: a multi-segment spine with a bending wave
+ * that travels from base to tip, beating with an asymmetric power/recovery
+ * cycle and a metachronal phase lag between neighbours.
+ *
+ * Construction (per cilium, per segment s in [0,1] along arclength):
+ *  - spine goes radially outward from the membrane (base at radius baseR);
+ *  - a transverse bend offset is applied perpendicular to the radial axis;
+ *  - the bend is a travelling sine: sin(2pi*(waves*s - phase)), so the hump
+ *    moves outward along the hair over time (base->tip propagation);
+ *  - amplitude tapers toward the base (anchored) and grows toward the tip,
+ *    and scales with the beat envelope so the power stroke is straighter and
+ *    the recovery stroke more curled.
+ *
+ * Pure & deterministic given t.
+ */
+export function ciliaPath(
+  cx: number,
+  cy: number,
+  baseR: number,
+  t: number,
+  energy: number,
+  growth: number,
+  params: CellParams,
+): CiliumPath[] {
+  const out: CiliumPath[] = [];
+  const n = Math.max(1, params.ciliaCount);
+  const seg = Math.max(2, params.ciliaSegments ?? 6);
+  const curl = params.ciliaCurl;
+  const lenVar = Math.max(0, Math.min(0.95, params.ciliaLengthVar ?? 0.5));
+  // A1: clamp jitter to [0, 0.9] (mirrors lenVar's [0, 0.95] clamp). The base
+  // angular offset below is angleJit*gap*0.5, so capping at 0.9 keeps each hair
+  // within <0.45*gap of its grid slot — strictly less than the half-gap that
+  // would let neighbours swap order.
+  const angleJit = Math.max(0, Math.min(0.9, params.ciliaAngleJitter ?? 0.55));
+  const baseWidth = params.ciliaWidth ?? 1.6;
+  // Number of spatial wavelengths along the hair (a flagellum shows ~1 wave).
+  const waves = 1.1;
+  const gap = TAU / n; // mean angular spacing between hairs
+
+  // Mean hair length. CRITICAL: drive length by the SMOOTHED `growth`
+  // accumulator (asymmetric attack/release) plus the resting `ciliaLength`,
+  // NOT by the instantaneous `energy`. This makes the crown shrink GRADUALLY
+  // when speech stops (growth releases slowly) instead of snapping shut.
+  const lenMean =
+    baseR * (params.ciliaLength + growth * params.ciliaGrowthBoost) * (0.55 + 0.45 * energy);
+
+  for (let k = 0; k < n; k++) {
+    // --- Aperiodic placement: jitter each hair off the even grid by a stable
+    // per-hair noise offset, so spacing is irregular (biological crowns are
+    // aperiodic, not perfectly hexagonal). A2: |angOff| <= angleJit*gap*0.5 and
+    // angleJit<=0.9, so each hair stays within <0.45*gap of its slot. That bounds
+    // the ADJACENT-hair angular DIFFERENCE to gap*(1 - 0.45 - 0.45) = 0.1*gap > 0,
+    // i.e. neighbours can never cross / reorder.
+    const angOff = noise2D(k * 12.9898, 7.2) * angleJit * gap * 0.5;
+    const baseAngle = k * gap + angOff;
+    const ux = Math.cos(baseAngle); // radial unit (outward)
+    const uy = Math.sin(baseAngle);
+    const pxn = -uy; // perpendicular unit
+    const pyn = ux;
+
+    // --- Per-hair size diversity: a stable [0,1] random scalar per hair. ---
+    const r01 = noise2D(k * 3.7 + 0.3, 1.3) * 0.5 + 0.5; // [0,1]
+    // Length spans [1-lenVar, 1+lenVar] around the mean.
+    const lenK = lenMean * (1 - lenVar + 2 * lenVar * r01);
+    // Thickness correlates loosely with length (longer ~ slightly thicker),
+    // plus its own variation so it doesn't look mechanical.
+    const r01b = noise2D(k * 5.1 + 2.7, 4.9) * 0.5 + 0.5;
+    const hairWidth = baseWidth * (0.55 + 0.9 * (0.5 * r01 + 0.5 * r01b));
+
+    // Beat phase for this hair (asymmetric + metachronal). Per-hair phase
+    // seed so even neighbours at the same metachronal index aren't identical.
+    const phase = ciliaBeatPhase(t + r01 * 0.6, k, params);
+    // F3: smooth the recovery envelope instead of a hard {0.35,1} step at
+    // phase=0.5. smoothstep((phase-0.35)/0.3) ramps 0->1 over phase in
+    // [0.35,0.65], Lipschitz and C1, so the bend amplitude no longer jumps.
+    const recovery = smoothstep((phase - 0.35) / 0.3);
+    const beat = Math.sin(phase * TAU); // overall sway sign/strength [-1,1]
+
+    const pts: Array<[number, number]> = [];
+    for (let i = 0; i <= seg; i++) {
+      const sFrac = i / seg; // 0 at base, 1 at tip
+      const along = baseR + lenK * sFrac;
+      // travelling bend wave (base->tip): the hump moves outward over time
+      const wave = Math.sin(TAU * (waves * sFrac - phase));
+      // amplitude: anchored at base (taper), grows to tip, stronger during
+      // recovery, scaled by curl and this hair's length.
+      const amp = curl * lenK * 0.6 * Math.pow(sFrac, 1.2) * (0.4 + 0.6 * recovery);
+      const rawBend = (wave * 0.7 + beat * 0.3) * amp;
+      // F2: cap the transverse offset so a hair's angular sweep at radius `along`
+      // stays under half the angular gap to its neighbour. The transverse offset
+      // `bend` subtends angle ~bend/along; capping |bend| <= 0.5*gap*along keeps
+      // that under half a gap, so beating hairs never cross / reorder.
+      const bendCap = 0.5 * gap * along;
+      const bend = Math.max(-bendCap, Math.min(bendCap, rawBend));
+      const x = cx + ux * along + pxn * bend;
+      const y = cy + uy * along + pyn * bend;
+      pts.push([x, y]);
+    }
+    out.push({ points: pts, width: hairWidth });
   }
   return out;
 }
@@ -408,6 +646,34 @@ export function iridescentHue(
 
 
 /**
+ * A3: sample the spectrum bins at a continuous normalized angle [0,1) with
+ * LINEAR interpolation and WRAPAROUND.
+ *
+ * The old code did `floor(normalized * nBins)` — a hard staircase, so the
+ * radius jumped between adjacent vertices that fell in different bins, and the
+ * value at angle 0 (bin 0) did not match angle 2pi (bin nBins-1), leaving a
+ * seam at the contour's closure. Interpolating bin centres with a smoothstep
+ * weight, wrapping bin nBins-1 -> bin 0, removes both artifacts (binDeform is
+ * periodic: value(0) == value(1)).
+ *
+ * @param bins        Spectrum bins (each [0,1]); any length, 0 -> returns 0.
+ * @param normalized  Angle as a fraction of the full circle, in [0,1).
+ */
+export function sampleBinLevel(bins: number[], normalized: number): number {
+  const nBins = bins.length;
+  if (nBins === 0) return 0;
+  if (nBins === 1) return bins[0];
+  // Bin centres sit at (i + 0.5)/nBins. Position the sample relative to them so
+  // the interpolation is symmetric and wraps cleanly across the 0/1 seam.
+  const u = (((normalized % 1) + 1) % 1) * nBins - 0.5;
+  const i0 = Math.floor(u);
+  const frac = u - i0;
+  const a = bins[((i0 % nBins) + nBins) % nBins];
+  const b = bins[(((i0 + 1) % nBins) + nBins) % nBins];
+  return lerp(a, b, smoothstep(frac));
+}
+
+/**
  * Per-vertex target deformation fractions for the cell membrane.
  *
  * Returns `sampleCount` values where each `deform[i]` is the fractional
@@ -448,10 +714,10 @@ export function buildTargetDeformation(
   for (let i = 0; i < sampleCount; i++) {
     const angle = (i / sampleCount) * TAU;
 
-    // Spectrum bin under this angle modulates local radius slightly
+    // Spectrum bin under this angle modulates local radius slightly (A3:
+    // interpolated + wraparound so there is no staircase or 0/2pi seam).
     const normalized = ((angle % TAU) + TAU) % TAU / TAU;
-    const binIdx = bins.length === 0 ? 0 : Math.min(Math.floor(normalized * bins.length), bins.length - 1);
-    const binLevel = bins.length === 0 ? 0 : bins[binIdx];
+    const binLevel = sampleBinLevel(bins, normalized);
 
     // FBM deformation (rFbm = 1.0 + noise * amp, so deformation = rFbm - 1)
     const rFbm = cellRadius(angle, t, energy, params);
@@ -511,10 +777,10 @@ export function buildCellContour(
   for (let i = 0; i < sampleCount; i++) {
     const angle = (i / sampleCount) * TAU;
 
-    // Spectrum bin under this angle modulates local radius slightly
+    // Spectrum bin under this angle modulates local radius slightly (A3:
+    // interpolated + wraparound so there is no staircase or 0/2pi seam).
     const normalized = ((angle % TAU) + TAU) % TAU / TAU;
-    const binIdx = bins.length === 0 ? 0 : Math.min(Math.floor(normalized * bins.length), bins.length - 1);
-    const binLevel = bins.length === 0 ? 0 : bins[binIdx];
+    const binLevel = sampleBinLevel(bins, normalized);
 
     const rFbm = cellRadius(angle, t, energy, params);
     const rPseudo = pseudopodOffset(angle, t, audioLevel, energy, params);
@@ -706,9 +972,20 @@ export function cellReach(baseR: number, params: CellParams): number {
   const startleMaxPx = params.startleMaxPx ?? 0;
 
   const membraneOuter = baseR * 1.4; // baseR + 40% membrane headroom
-  // Cilia at max growth and energy: lenPx = baseR*(ciliaLen + growth*boost)*(0.7+energy*0.6)
-  // worst case growth=1, energy=1 → factor = (ciliaLen + boost) * 1.3
-  const ciliaOuter = baseR + baseR * (ciliaLength + ciliaGrowthBoost) * 1.3;
+  // F12: match the ACTUAL worst-case cilium in ciliaPath, which the old 1.3
+  // factor underestimated (so the longest hairs clipped the wall).
+  //  lenMean = baseR*(ciliaLength + growth*boost)*(0.55 + 0.45*energy)
+  //          ≤ baseR*(ciliaLength + boost)            (growth=1, energy=1)
+  //  longest hair: lenK = lenMean*(1 - lenVar + 2*lenVar*r01), max at r01=1
+  //          → lenMean*(1 + lenVar)
+  //  so the tip sits at radial distance `along` = baseR + lenK_max.
+  const lenVar = Math.max(0, Math.min(0.95, params.ciliaLengthVar ?? 0));
+  const longestAlong = baseR + baseR * (ciliaLength + ciliaGrowthBoost) * (1 + lenVar);
+  // The transverse bend is capped (F2) at 0.5*gap*along, so the tip's distance
+  // from centre is along*sqrt(1 + (0.5*gap)^2); include that headroom too.
+  const ciliaCount = params.ciliaCount ?? 0;
+  const gap = ciliaCount > 0 ? TAU / ciliaCount : 0;
+  const ciliaOuter = longestAlong * Math.sqrt(1 + 0.25 * gap * gap);
 
   return Math.max(membraneOuter, ciliaOuter) + startleMaxPx;
 }
@@ -778,6 +1055,106 @@ export function cellDrift(
 }
 
 // ---------------------------------------------------------------------------
+// Wander — Reynolds steering-style integrated wander (the natural, non-
+// returning motion). Unlike `cellDrift` (position = noise(t), which merely
+// oscillates the centre about the middle and so always "comes back"), this
+// INTEGRATES position along a slowly turning heading:
+//
+//   heading += smallRandomDisplacement      (random walk — Reynolds wander)
+//   velocity  = dir(heading) * speed
+//   position += velocity * dt
+//   on wall contact: reflect heading (bounce) and clamp inside
+//
+// Result: the cell roams the tank organically and does not gravitate to the
+// centre. The random displacement is small per frame, so turns are smooth
+// (no twitching). Deterministic given the input state (the "randomness" is
+// value-noise sampled on the heading itself, so no RNG/Date needed).
+// ---------------------------------------------------------------------------
+
+export interface WanderState {
+  x: number;
+  y: number;
+  heading: number; // radians
+  vx: number;
+  vy: number;
+  /** Monotonic wander clock (seconds). F6: the heading jitter is sampled on
+   * this clock, NOT on position (x+y). Sampling on (x+y) made the random walk
+   * couple to where the cell happens to be, which produced stalls and limit
+   * cycles (the noise argument stops advancing when the cell slows or circles).
+   * A dedicated clock keeps the heading a genuine, position-independent walk. */
+  clock?: number;
+}
+
+export function wanderStep(
+  s: WanderState,
+  dt: number,
+  width: number,
+  height: number,
+  baseR: number,
+  params: CellParams,
+): WanderState {
+  const reach = cellReach(baseR, params);
+  const inset = Math.max(params.driftMargin ?? 4, reach);
+  const minX = inset, maxX = width - inset;
+  const minY = inset, maxY = height - inset;
+
+  // Degenerate tank (organism doesn't fit): pin to centre.
+  if (maxX <= minX || maxY <= minY) {
+    return { x: width / 2, y: height / 2, heading: s.heading, vx: 0, vy: 0, clock: (s.clock ?? 0) + dt };
+  }
+
+  // Speed in px/sec. driftSpeed historically was a noise-phase rate (~0.03);
+  // reinterpret as a gentle linear speed scaled to the tank so motion reads
+  // the same regardless of window size.
+  const speed = (params.driftSpeed ?? 0.03) * Math.min(width, height) * 1.2;
+
+  // --- Reynolds wander: small random displacement of the heading. ---
+  // Use value-noise sampled along the *current heading + a wander clock*
+  // so the turn is smooth and deterministic but never periodic in (x,y).
+  // turnRate scales the per-second angular wander (radians/sec).
+  const turnRate = params.wanderTurnRate ?? 1.1;
+  // F6: advance a dedicated wander clock and sample the heading jitter on it,
+  // decoupled from position. noise2D in [-1,1]; the two args are the heading
+  // (so the walk still varies smoothly with current direction) and the clock
+  // scaled by wanderFreq (so the walk keeps evolving regardless of where the
+  // cell is or how fast it moves).
+  const wanderFreq = params.wanderFreq ?? 0.6;
+  const clock = (s.clock ?? 0) + dt;
+  const jitter = noise2D(s.heading * 0.5 + 13.0, clock * wanderFreq);
+  let heading = s.heading + jitter * turnRate * dt;
+
+  // Integrate position.
+  let vx = Math.cos(heading) * speed;
+  let vy = Math.sin(heading) * speed;
+  let x = s.x + vx * dt;
+  let y = s.y + vy * dt;
+
+  // --- Wall bounce: reflect heading off the wall normal, clamp inside. ---
+  if (x < minX) {
+    x = minX;
+    heading = Math.PI - heading; // reflect about vertical wall
+  } else if (x > maxX) {
+    x = maxX;
+    heading = Math.PI - heading;
+  }
+  if (y < minY) {
+    y = minY;
+    heading = -heading; // reflect about horizontal wall
+  } else if (y > maxY) {
+    y = maxY;
+    heading = -heading;
+  }
+  // Recompute velocity after any reflection so callers see the true heading.
+  vx = Math.cos(heading) * speed;
+  vy = Math.sin(heading) * speed;
+
+  // Normalize heading to [-PI, PI] to keep noise sampling well-conditioned.
+  heading = Math.atan2(Math.sin(heading), Math.cos(heading));
+
+  return { x, y, heading, vx, vy, clock };
+}
+
+// ---------------------------------------------------------------------------
 // Canvas helper
 // ---------------------------------------------------------------------------
 
@@ -833,6 +1210,12 @@ export function createCellRenderer(
   let baseline = 0; // slow-tracking audio baseline for startle edge detection
   let drift01 = 0; // smoothed drift activation (0=centered, 1=full drift)
 
+  // Reynolds-style integrated wander state (replaces position=noise(t), which
+  // oscillated about the centre and kept "returning"). Lazily initialised at
+  // the tank centre on the first tick (width/height are stable per renderer).
+  let wander: WanderState | null = null;
+  let lastTickMs = performance.now();
+
   // Persistence: restore state from localStorage for continuity across restarts
   const PERSIST_KEY = "talri.cell.state.v1";
   let driftPhaseOffset = 0;
@@ -856,7 +1239,12 @@ export function createCellRenderer(
   let rafId: number | null = null;
 
   const tick = () => {
-    const t = (performance.now() - startedAt) / 1000;
+    const nowMs = performance.now();
+    const t = (nowMs - startedAt) / 1000;
+    // Real frame delta (clamped) so wander speed is frame-rate independent
+    // and a backgrounded tab resuming doesn't teleport the cell.
+    const dt = Math.min(0.05, Math.max(0.001, (nowMs - lastTickMs) / 1000));
+    lastTickMs = nowMs;
     const s = latestState;
 
     if (ctx) {
@@ -902,10 +1290,14 @@ export function createCellRenderer(
 
       // Hoisted cell centre + radius: includes drift blend, startle jolt (sdx,sdy) and growth swell.
       const baseR = resolveBaseRadius(width, height, params, growth);
-      const drift = cellDrift(t + driftPhaseOffset, width, height, baseR, params);
-      // Blend between rest center (width/2, height/2) and full-drift position
-      const driftedX = width / 2 + (drift.cx - width / 2) * drift01;
-      const driftedY = height / 2 + (drift.cy - height / 2) * drift01;
+      // Integrated wander (natural roaming that never gravitates to centre).
+      if (!wander) {
+        wander = { x: width / 2, y: height / 2, heading: noise2D(7.1, 3.3) * TAU, vx: 0, vy: 0, clock: 0 };
+      }
+      wander = wanderStep(wander, dt, width, height, baseR, params);
+      // Blend between rest center (width/2, height/2) and full-wander position
+      const driftedX = width / 2 + (wander.x - width / 2) * drift01;
+      const driftedY = height / 2 + (wander.y - height / 2) * drift01;
       const cx = driftedX + sdx;
       const cy = driftedY + sdy;
       const maxRadius = height * 0.46;
@@ -927,15 +1319,21 @@ export function createCellRenderer(
 
       if (splinePoints.length >= 3) {
         // --- Cilia (under the membrane) ---
+        // Multi-segment flagella with an asymmetric power/recovery beat and a
+        // metachronal wave travelling round the crown (biologically motivated).
         {
-          const cilia = ciliaEndpoints(cx, cy, baseR, t, energy, growth, params);
+          const cilia = ciliaPath(cx, cy, baseR, t, energy, growth, params);
           ctx.lineCap = "round";
-          ctx.lineWidth = 1;
-          for (const c of cilia) {
+          for (const hair of cilia) {
+            ctx.lineWidth = hair.width; // per-hair thickness (diverse)
             ctx.strokeStyle = hsla(baseHue, 0.6, 0.6, 0.35 + 0.35 * energy);
             ctx.beginPath();
-            ctx.moveTo(c.x1, c.y1);
-            ctx.lineTo(c.x2, c.y2);
+            ctx.moveTo(hair.points[0][0], hair.points[0][1]);
+            // Smooth the spine with a Catmull-Rom through the segment points.
+            const spline = catmullRom(hair.points, 4);
+            for (let i = 1; i < spline.length; i++) {
+              ctx.lineTo(spline[i][0], spline[i][1]);
+            }
             ctx.stroke();
           }
         }
