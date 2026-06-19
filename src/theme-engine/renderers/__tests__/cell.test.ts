@@ -612,10 +612,9 @@ describe("Commit 4: pipeline gates + frozen pre-B/C baseline", () => {
     expect(normalizeAreaDeform(field, { ...CELL_DEFAULTS, enableAreaNorm: true })).toEqual(field);
   });
 
-  it("affine seam is identity (length-preserving) when gate off", () => {
+  it("affine seam is identity when gate off (any k, phi)", () => {
     const pts: Array<[number, number]> = [[10, 20], [30, 40], [50, 60]];
-    expect(affineSqueezePoints(pts, 80, 80, CELL_DEFAULTS)).toEqual(pts);
-    expect(affineSqueezePoints(pts, 80, 80, { ...CELL_DEFAULTS, enableAffine: true })).toEqual(pts);
+    expect(affineSqueezePoints(pts, 2.0, 0.7, 80, 80, CELL_DEFAULTS)).toEqual(pts);
   });
 
   it("integrateDeformPipeline (steps 4–7) equals bare integrateDeformation when gates off", () => {
@@ -629,6 +628,78 @@ describe("Commit 4: pipeline gates + frozen pre-B/C baseline", () => {
   it("integrateDeformPipeline seeds from target on the first frame (prev=null)", () => {
     const target = buildTargetDeformation(W, H, drivenBins, 2, 0.6, 0.6, CELL_DEFAULTS, 0);
     expect(integrateDeformPipeline(null, target, CELL_DEFAULTS)).toEqual(target.slice());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 5 — C2 area-preserving affine squeeze (proven math, still GATED OFF)
+// ---------------------------------------------------------------------------
+// The map is M = R(+phi) . diag(k, 1/k) . R(-phi) about centre (cx,cy).
+// det M = 1 exactly, so shoelace area is invariant for ANY contour shape
+// (research-math-verify-v2.md item 1). These tests exercise the gate ON to
+// prove the math; CELL_DEFAULTS keeps enableAffine=false so the live render
+// (Commit-4 frozen baseline) is untouched.
+describe("Commit 5: C2 affine squeeze (area-preserving, det=1)", () => {
+  // Shoelace polygon area (signed -> abs). 2A = sum det[P_i, P_{i+1}].
+  const shoelace = (pts: Array<[number, number]>): number => {
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const [x1, y1] = pts[i];
+      const [x2, y2] = pts[(i + 1) % pts.length];
+      a += x1 * y2 - x2 * y1;
+    }
+    return Math.abs(a) / 2;
+  };
+  // A NOISY, non-circular closed contour about centre (cx,cy)=(80,90).
+  const CX = 80;
+  const CY = 90;
+  const noisy: Array<[number, number]> = Array.from({ length: 64 }, (_, i) => {
+    const th = (i / 64) * Math.PI * 2;
+    const r = 30 + 9 * Math.sin(3 * th) + 5 * Math.cos(7 * th + 1) + 3 * Math.sin(11 * th);
+    return [CX + r * Math.cos(th), CY + r * Math.sin(th)] as [number, number];
+  });
+  const on = { ...CELL_DEFAULTS, enableAffine: true };
+  const KS = [0.5, 0.8, 1.2, 2.0];
+  const PHIS = [0, 0.7, Math.PI / 2, 2.0];
+
+  it("preserves shoelace area to <=1e-9 for arbitrary k and phi on a noisy contour", () => {
+    const a0 = shoelace(noisy);
+    for (const k of KS) {
+      for (const phi of PHIS) {
+        const out = affineSqueezePoints(noisy, k, phi, CX, CY, on);
+        expect(Math.abs(shoelace(out) - a0)).toBeLessThanOrEqual(1e-9);
+      }
+    }
+  });
+
+  it("actually deforms the contour when k != 1 (not a no-op placeholder)", () => {
+    const out = affineSqueezePoints(noisy, 2.0, 0.7, CX, CY, on);
+    const maxDelta = Math.max(...out.map((p, i) => Math.hypot(p[0] - noisy[i][0], p[1] - noisy[i][1])));
+    expect(maxDelta).toBeGreaterThan(1); // visibly squeezed
+  });
+
+  it("k = 1 is the identity (points unchanged to ~1e-12)", () => {
+    for (const phi of PHIS) {
+      const out = affineSqueezePoints(noisy, 1, phi, CX, CY, on);
+      const maxDelta = Math.max(...out.map((p, i) => Math.hypot(p[0] - noisy[i][0], p[1] - noisy[i][1])));
+      expect(maxDelta).toBeLessThan(1e-12);
+    }
+  });
+
+  it("resulting area is independent of phi (rotation invariance of det)", () => {
+    const areas = PHIS.map((phi) => shoelace(affineSqueezePoints(noisy, 1.7, phi, CX, CY, on)));
+    for (const a of areas) expect(Math.abs(a - areas[0])).toBeLessThanOrEqual(1e-9);
+  });
+
+  it("is exactly area-preserving even about a non-centroid centre", () => {
+    const a0 = shoelace(noisy);
+    const out = affineSqueezePoints(noisy, 1.5, 1.1, 0, 0, on); // squeeze about origin
+    expect(Math.abs(shoelace(out) - a0)).toBeLessThanOrEqual(1e-9);
+  });
+
+  it("stays GATED OFF by default (enableAffine=false returns points untouched)", () => {
+    const out = affineSqueezePoints(noisy, 2.0, 0.7, CX, CY, CELL_DEFAULTS);
+    expect(out).toEqual(noisy);
   });
 });
 

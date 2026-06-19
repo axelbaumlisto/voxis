@@ -821,20 +821,45 @@ export function integrateDeformPipeline(
 }
 
 /**
- * Step 8 — area-preserving affine-squeeze seam [C2/D4, commit 7/8]. Operates on
- * contour POINTS (cx,cy is the cell centre). Identity until `enableAffine`.
- * When implemented: rotate by -phi, scale x by k and y by 1/k (det=1, exactly
- * area-preserving for ANY contour), rotate back — in the body-heading frame.
+ * Step 8 — area-preserving AFFINE SQUEEZE on contour POINTS [C2]. Identity until
+ * `enableAffine` (Commit 5 ships the math; Commit 8/D4 wires motion-driven k,phi).
+ *
+ * The map about centre `(cx,cy)` is `M = R(+phi) . diag(k, 1/k) . R(-phi)`:
+ * rotate into the heading frame by `-phi`, stretch x by `k` and y by `1/k`,
+ * rotate back by `+phi`. Because `det M = det R(phi) . det diag(k,1/k) . det R(-phi)
+ * = 1 . (k . 1/k) . 1 = 1`, the shoelace area is preserved EXACTLY for ANY
+ * contour shape (change-of-variables: `Area(M(Omega)) = |det M| . Area(Omega)`).
+ * See research-math-verify-v2.md item 1. This is why we use the point-squeeze and
+ * NOT a fixed-angle polar/radial multiply, which inflates a circle's area by
+ * `(k^2 + 1/k^2)/2` and is exact only for a circle.
+ *
+ * @param k   stretch factor along the heading axis (`phi`); `k=1` is identity.
+ * @param phi heading angle (radians) of the stretch axis.
  */
 export function affineSqueezePoints(
   points: Array<[number, number]>,
-  _cx: number,
-  _cy: number,
+  k: number,
+  phi: number,
+  cx: number,
+  cy: number,
   params: CellParams,
 ): Array<[number, number]> {
-  if (!params.enableAffine) return points;
-  // TODO commit 7/8 (C2/D4): real affine squeeze. Identity placeholder for now.
-  return points;
+  if (!params.enableAffine || k === 1) return points;
+  const cos = Math.cos(phi);
+  const sin = Math.sin(phi);
+  const invK = 1 / k;
+  return points.map(([x, y]) => {
+    // Translate to centre, rotate by -phi into the heading frame.
+    const dx = x - cx;
+    const dy = y - cy;
+    const xr = dx * cos + dy * sin;
+    const yr = -dx * sin + dy * cos;
+    // Squeeze: diag(k, 1/k) (det = 1, exactly area-preserving).
+    const xs = xr * k;
+    const ys = yr * invK;
+    // Rotate back by +phi and translate to absolute coords.
+    return [cx + xs * cos - ys * sin, cy + xs * sin + ys * cos] as [number, number];
+  });
 }
 
 export function buildTargetDeformation(
@@ -1469,8 +1494,10 @@ export function createCellRenderer(
         smoothedPoints.push([x, y]);
       }
       // Step 8: area-preserving affine squeeze on the contour POINTS in the
-      // body-heading frame (gated; identity when enableAffine is off).
-      const contourPoints = affineSqueezePoints(smoothedPoints, cx, cy, params);
+      // body-heading frame (gated; identity when enableAffine is off). Commit 5
+      // ships the math with neutral (k=1, phi=0); Commit 8/D4 wires motion-driven
+      // values from bodyHeading + speedNorm.
+      const contourPoints = affineSqueezePoints(smoothedPoints, 1, 0, cx, cy, params);
 
       // Smooth via Catmull-Rom (4 segments per span for smoothness)
       const splinePoints = catmullRom(contourPoints, 4);
