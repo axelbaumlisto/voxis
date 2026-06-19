@@ -13,12 +13,12 @@
 import type { ThemeState } from "../contract";
 import type { Renderer } from "./types";
 import {
-  noise2D, fbm, catmullRom, integrateDeformation, hsla, TAU, growthLevel,
+  noise2D, fbm, catmullRom, catmullRomOpen, integrateDeformation, hsla, TAU, growthLevel,
   lerp, smoothstep,
 } from "./shared";
 
 // Backward-compat re-exports: existing imports of these from "./cell" keep working.
-export { noise2D, fbm, catmullRom, lowpassRadii, integrateDeformation, TAU, smoothstep } from "./shared";
+export { noise2D, fbm, catmullRom, catmullRomOpen, lowpassRadii, integrateDeformation, TAU, smoothstep } from "./shared";
 
 
 
@@ -563,7 +563,8 @@ export function ciliaPath(
     // phase=0.5. smoothstep((phase-0.35)/0.3) ramps 0->1 over phase in
     // [0.35,0.65], Lipschitz and C1, so the bend amplitude no longer jumps.
     const recovery = smoothstep((phase - 0.35) / 0.3);
-    const beat = Math.sin(phase * TAU); // overall sway sign/strength [-1,1]
+    // F1: the old `beat = sin(phase*TAU)` drove a uniform `beat*0.3` tip sway and
+    // is no longer used — the travelling `wave` below carries all bend.
 
     const pts: Array<[number, number]> = [];
     for (let i = 0; i <= seg; i++) {
@@ -571,10 +572,17 @@ export function ciliaPath(
       const along = baseR + lenK * sFrac;
       // travelling bend wave (base->tip): the hump moves outward over time
       const wave = Math.sin(TAU * (waves * sFrac - phase));
-      // amplitude: anchored at base (taper), grows to tip, stronger during
-      // recovery, scaled by curl and this hair's length.
-      const amp = curl * lenK * 0.6 * Math.pow(sFrac, 1.2) * (0.4 + 0.6 * recovery);
-      const rawBend = (wave * 0.7 + beat * 0.3) * amp;
+      // F1: a cilium is a clamped-base / FREE-TIP elastic rod (9+2 axoneme).
+      // The bending moment -> 0 at the free tip, so curvature must VANISH there
+      // (kappa(L)=0). Use an INTERIOR-peaked envelope sin(pi*sFrac): exactly 0 at
+      // the base (sFrac=0, anchored) AND 0 at the tip (sFrac=1, free), peaking
+      // mid-shaft. The old tip-peaked pow(sFrac,1.2) flung the tip sideways,
+      // which is biologically wrong.
+      const amp = curl * lenK * 0.6 * Math.sin(Math.PI * sFrac) * (0.4 + 0.6 * recovery);
+      // F1: drop the uniform `beat*0.3` term — it added a constant (sFrac-flat)
+      // sway that did not vanish at the tip. The travelling wave alone keeps the
+      // tip free.
+      const rawBend = wave * 0.7 * amp;
       // F2: cap the transverse offset so a hair's angular sweep at radius `along`
       // stays under half the angular gap to its neighbour. The transverse offset
       // `bend` subtends angle ~bend/along; capping |bend| <= 0.5*gap*along keeps
@@ -1370,8 +1378,10 @@ export function createCellRenderer(
             ctx.strokeStyle = hsla(baseHue, 0.6, 0.6, 0.35 + 0.35 * energy);
             ctx.beginPath();
             ctx.moveTo(hair.points[0][0], hair.points[0][1]);
-            // Smooth the spine with a Catmull-Rom through the segment points.
-            const spline = catmullRom(hair.points, 4);
+            // M12: smooth the spine with an OPEN (non-wrapping) Catmull-Rom so
+            // the curve ends AT the tip. A closed catmullRom would wrap tip->base
+            // and re-introduce a spurious tip bend, fighting F1's kappa(L)=0.
+            const spline = catmullRomOpen(hair.points, 4);
             for (let i = 1; i < spline.length; i++) {
               ctx.lineTo(spline[i][0], spline[i][1]);
             }

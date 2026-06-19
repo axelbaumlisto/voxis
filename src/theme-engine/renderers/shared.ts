@@ -182,6 +182,74 @@ export function catmullRom(
   return result;
 }
 
+/**
+ * OPEN (non-wrapping) Catmull-Rom spline for an OPEN polyline such as a cilium
+ * spine. Unlike {@link catmullRom} (which wraps tip->base for a closed contour),
+ * the endpoints are CLAMPED by duplicating the first/last control points, so the
+ * curve starts exactly at the first point and ENDS exactly at the last point
+ * without curving back toward the other end.
+ *
+ * This matters for the cilia: a cilium is a clamped-base / free-tip elastic rod
+ * whose curvature vanishes at the tip (kappa(L)=0). A closed spline would force a
+ * spurious bend at the tip by interpolating back toward the base.
+ *
+ * @returns Sampled points; first sample == points[0], last sample == points[n-1].
+ */
+export function catmullRomOpen(
+  points: Array<[number, number]>,
+  segmentsPerSpan: number,
+): Array<[number, number]> {
+  const n = points.length;
+  if (n < 2) return [...points];
+
+  const result: Array<[number, number]> = [];
+
+  const segment = (
+    p0: [number, number],
+    p1: [number, number],
+    p2: [number, number],
+    p3: [number, number],
+    steps: number,
+  ): void => {
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps;
+      const t2 = t * t;
+      const t3 = t2 * t;
+
+      const x =
+        0.5 *
+        (2 * p1[0] +
+          (-p0[0] + p2[0]) * t +
+          (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 +
+          (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3);
+
+      const y =
+        0.5 *
+        (2 * p1[1] +
+          (-p0[1] + p2[1]) * t +
+          (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 +
+          (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3);
+
+      result.push([x, y]);
+    }
+  };
+
+  // CLAMPED ends: reflect/duplicate the first and last points instead of
+  // wrapping to the opposite end, so the curve does not close the loop.
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = points[i - 1 < 0 ? 0 : i - 1];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2 > n - 1 ? n - 1 : i + 2];
+    segment(p0, p1, p2, p3, segmentsPerSpan);
+  }
+  // Append the exact final point (the loops above stop before t=1 of the last
+  // span), so the open curve terminates AT points[n-1].
+  result.push([points[n - 1][0], points[n - 1][1]]);
+
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Temporal smoothing & integration
 // ---------------------------------------------------------------------------
