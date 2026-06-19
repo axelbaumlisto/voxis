@@ -167,6 +167,20 @@ export interface CellParams {
    * Default ~0.02 → the cell ramps from centered to fully drifting in
    * about 3 seconds at 60 fps. */
   driftActivationRate?: number;
+
+  // --- Pipeline gates (see .pi/plans/cell-bio-accuracy-plan.md RENDER PIPELINE).
+  // Each gate dark-launches a later-commit stage. ALL DEFAULT FALSE: with every
+  // gate off the deformation pipeline is byte-identical to the pre-pipeline
+  // behavior. The actual stage math lands in the noted commits; until then each
+  // gated stage is a transparent identity seam. ---
+  /** Step 4 — soft-saturate target deformation `d ← Dmax·tanh(d/Dmax)` [B1, commit 6]. */
+  enableSaturation?: boolean;
+  /** Step 7 — area normalization on the integrated field `mean((1+d)²)=1` [C1, commit 7]. */
+  enableAreaNorm?: boolean;
+  /** Step 8 — area-preserving affine squeeze in the heading frame [C2/D4, commit 7/8]. */
+  enableAffine?: boolean;
+  /** Step 2 — single activity scalar `a` driving amplitudes/propulsion [G1, commit 8]. */
+  enableActivity?: boolean;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -223,6 +237,11 @@ export const CELL_DEFAULTS: CellParams = {
   driftActivationRate: 0.02,
   wanderTurnRate: 1.1,
   wanderFreq: 0.6,
+  // Pipeline gates: ALL OFF by default (no-visible-change scaffold).
+  enableSaturation: false,
+  enableAreaNorm: false,
+  enableAffine: false,
+  enableActivity: false,
 };
 
 
@@ -732,6 +751,92 @@ export function sampleBinLevel(bins: number[], normalized: number): number {
  * @param params     Cell parameters.
  * @returns Array of `sampleCount` deformation fractions.
  */
+// ---------------------------------------------------------------------------
+// Deformation pipeline (see .pi/plans/cell-bio-accuracy-plan.md RENDER PIPELINE)
+// ---------------------------------------------------------------------------
+// The membrane radius at vertex i is `baseR * (1 + deform[i])`. The plan lays
+// out a fixed 9-step order so each stage preserves the next stage's invariant:
+//
+//   3. buildTargetDeformation  (FBM + pseudopod + interpolated bins + idle)
+//   4. [gate enableSaturation] soft-saturate target  d <- Dmax*tanh(d/Dmax)
+//   5. integrateDeformation    (EXISTING shared.ts; fast attack, slow release)
+//   6. [gate ...]              (optional cyclic Laplacian smoothing)
+//   7. [gate enableAreaNorm]   normalize area on the INTEGRATED field
+//   8. [gate enableAffine]     area-preserving affine squeeze (render-loop, on POINTS)
+//   9. clamp radius            [floorRadius, maxRadius]  (safety net, render-loop)
+//
+// THIS COMMIT IS A NO-VISIBLE-CHANGE SCAFFOLD. Steps 4, 6, 7 below are present
+// only as transparent identity SEAMS, gated off by default. The real math lands
+// in later commits (B1=6, C1=7). With every gate off the output of
+// `integrateDeformPipeline` is byte-identical to a bare `integrateDeformation`.
+
+/**
+ * Step 4 — soft-saturation seam [B1, commit 6]. Identity until `enableSaturation`.
+ * When implemented: `d <- Dmax*tanh(d/Dmax)` (unit slope at 0, strict bound).
+ */
+export function saturateTargetDeform(target: number[], params: CellParams): number[] {
+  if (!params.enableSaturation) return target;
+  // TODO commit 6 (B1): real tanh saturation. Identity placeholder for now.
+  return target;
+}
+
+/**
+ * Step 7 — area-normalization seam [C1, commit 7]. Identity until `enableAreaNorm`.
+ * When implemented: uniform offset `c = mean(e) - sqrt(1 - Var(e))`, `e = 1 + d`,
+ * applied to the INTEGRATED field so `mean((1+d)^2) = 1`.
+ */
+export function normalizeAreaDeform(integrated: number[], params: CellParams): number[] {
+  if (!params.enableAreaNorm) return integrated;
+  // TODO commit 7 (C1): real area normalization. Identity placeholder for now.
+  return integrated;
+}
+
+/**
+ * Steps 4–7 of the pipeline as one named, ordered transform on the deformation
+ * ARRAY: saturate(4) -> integrate(5, EXISTING) -> [smooth(6)] -> normalizeArea(7).
+ * Step 6 (cyclic Laplacian smoothing) has no seam yet — it is an unconditional
+ * optional polish [B2] with no gate; it will slot between 5 and 7 when added.
+ *
+ * @param prev    Prior integrated field, or null on the first frame / after a
+ *                NaN-poison reset (then the saturated target seeds it directly).
+ * @param target  Fresh per-vertex target from buildTargetDeformation (step 3).
+ * @param params  Cell parameters (gates + attack/release).
+ * @returns The new integrated deformation field.
+ */
+export function integrateDeformPipeline(
+  prev: number[] | null,
+  target: number[],
+  params: CellParams,
+): number[] {
+  // Step 4: soft-saturate the target (gated; identity when off).
+  const satTarget = saturateTargetDeform(target, params);
+  // Step 5: integrate with form memory (EXISTING shared.ts helper). On the first
+  // frame (or after a NaN reset) there is no prior field to blend from, so the
+  // saturated target seeds the memory directly — mirrors the pre-pipeline path.
+  const integrated = prev
+    ? integrateDeformation(prev, satTarget, params.attack, params.release)
+    : satTarget.slice();
+  // Step 7: area-normalize the INTEGRATED field (gated; identity when off).
+  return normalizeAreaDeform(integrated, params);
+}
+
+/**
+ * Step 8 — area-preserving affine-squeeze seam [C2/D4, commit 7/8]. Operates on
+ * contour POINTS (cx,cy is the cell centre). Identity until `enableAffine`.
+ * When implemented: rotate by -phi, scale x by k and y by 1/k (det=1, exactly
+ * area-preserving for ANY contour), rotate back — in the body-heading frame.
+ */
+export function affineSqueezePoints(
+  points: Array<[number, number]>,
+  _cx: number,
+  _cy: number,
+  params: CellParams,
+): Array<[number, number]> {
+  if (!params.enableAffine) return points;
+  // TODO commit 7/8 (C2/D4): real affine squeeze. Identity placeholder for now.
+  return points;
+}
+
 export function buildTargetDeformation(
   width: number,
   height: number,
@@ -1323,14 +1428,14 @@ export function createCellRenderer(
         idleFactor,
       );
 
-      // Integrate with form memory: fast attack, slow release.
+      // Deformation pipeline steps 4–7: [saturate] -> integrate(EXISTING) ->
+      // [smooth] -> [normalizeArea]. With all gates off this is byte-identical
+      // to a bare integrateDeformation (the no-visible-change scaffold).
       // M15: if the prior integrated field was poisoned (a non-finite slipped in
       // on some earlier frame), drop it and re-seed from the (sanitised) target
       // so a single bad frame cannot stick in form-memory forever.
       const safePrev = deform && deform.every((v) => Number.isFinite(v)) ? deform : null;
-      deform = safePrev
-        ? integrateDeformation(safePrev, targetDeform, params.attack, params.release)
-        : targetDeform.slice();
+      deform = integrateDeformPipeline(safePrev, targetDeform, params);
 
       // Drift activation ramp: cell stays centered at rest, drifts while recording.
       // setPointerCapture keeps the recording session even if the cell wanders
@@ -1357,14 +1462,18 @@ export function createCellRenderer(
       for (let i = 0; i < sampleCount; i++) {
         const angle = (i / sampleCount) * TAU;
         const rawRadius = baseR * (1 + deform[i]);
+        // Step 9: clamp radius LAST [floorRadius, maxRadius] (safety net).
         const radius = Math.max(floorRadius, Math.min(maxRadius, rawRadius));
         const x = cx + radius * Math.cos(angle);
         const y = cy + radius * Math.sin(angle);
         smoothedPoints.push([x, y]);
       }
+      // Step 8: area-preserving affine squeeze on the contour POINTS in the
+      // body-heading frame (gated; identity when enableAffine is off).
+      const contourPoints = affineSqueezePoints(smoothedPoints, cx, cy, params);
 
       // Smooth via Catmull-Rom (4 segments per span for smoothness)
-      const splinePoints = catmullRom(smoothedPoints, 4);
+      const splinePoints = catmullRom(contourPoints, 4);
 
       if (splinePoints.length >= 3) {
         // --- Cilia (under the membrane) ---
@@ -1443,7 +1552,7 @@ export function createCellRenderer(
 
         // Second pass: segment-by-segment with iridescent hue
         // Split the spline into segments matching the original control-point count
-        const segments = smoothedPoints.length;
+        const segments = contourPoints.length;
         const pointsPerSegment = splinePoints.length / segments;
 
         for (let seg = 0; seg < segments; seg++) {

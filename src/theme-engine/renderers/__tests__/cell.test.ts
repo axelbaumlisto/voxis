@@ -40,6 +40,10 @@ import {
   restoreSeed,
   CELL_DEFAULTS,
   createCellRenderer,
+  saturateTargetDeform,
+  normalizeAreaDeform,
+  integrateDeformPipeline,
+  affineSqueezePoints,
 } from "../cell";
 import type { CellParams, CellPersistState } from "../cell";
 
@@ -527,6 +531,104 @@ describe("buildTargetDeformation", () => {
     // The two deformation arrays must differ because invBaseR differs.
     const sumSqDiff = legacy.reduce((s, v, i) => s + (v - absolute[i]) ** 2, 0);
     expect(sumSqDiff).toBeGreaterThan(1e-6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 4 — deformation pipeline scaffold (gates default OFF) + FROZEN baseline
+// ---------------------------------------------------------------------------
+// The plan's INVARIANTS require a "frozen pre-B/C baseline": with every gate
+// OFF, the deformation/contour output MUST be byte-identical to the pre-pipeline
+// behavior. These goldens were captured from the pre-Commit-4 code path. Future
+// B1/C1 commits prove they only change output when THEIR gate is ON — i.e. these
+// gate-off goldens stay frozen across B1/C1.
+describe("Commit 4: pipeline gates + frozen pre-B/C baseline", () => {
+  const W = 160;
+  const H = 160;
+  const silentBins = new Array(32).fill(0);
+  const drivenBins = Array.from({ length: 32 }, (_, i) => 0.3 + 0.5 * Math.sin(i * 0.7) ** 2);
+  const r6 = (x: number) => Math.round(x * 1e6) / 1e6;
+  const sumA = (a: number[]) => r6(a.reduce((s, b) => s + b, 0));
+  const sumP = (a: Array<[number, number]>) => r6(a.flat().reduce((s, b) => s + b, 0));
+
+  // FROZEN goldens (captured from pre-Commit-4 output; do NOT edit for B1/C1).
+  const GOLDEN = {
+    restDeformSampled: [-0.01466, 0.005423, 0.019191, 0.006608, 0.020551, -0.025245, -0.015535, -0.013773],
+    restDeformSum: -0.222228,
+    driveDeformSampled: [0.046078, 0.109861, 0.157079, 0.105625, 0.095806, -0.03365, 0.036302, 0.076711],
+    driveDeformSum: 7.507509,
+    restContourSampled: [134.46826, 118.840515, 80, 41.414074, 25.496351, 42.611637, 80, 118.8121],
+    restContourSum: 15404.22804,
+    driveContourSampled: [136.906626, 122.692585, 80, 37.470345, 20.388171, 42.827781, 80, 121.417418],
+    driveContourSum: 15538.469603,
+  };
+  const DEFORM_IDX = [0, 12, 24, 36, 48, 60, 72, 84];
+  const PT_IDX = [0, 24, 48, 72, 96, 120, 144, 168];
+
+  it("all four gate params default to false in CELL_DEFAULTS", () => {
+    expect(CELL_DEFAULTS.enableSaturation).toBe(false);
+    expect(CELL_DEFAULTS.enableAreaNorm).toBe(false);
+    expect(CELL_DEFAULTS.enableAffine).toBe(false);
+    expect(CELL_DEFAULTS.enableActivity).toBe(false);
+  });
+
+  it("resting deformation matches frozen pre-B/C baseline (gates off)", () => {
+    const d = buildTargetDeformation(W, H, silentBins, 10, 0, CELL_DEFAULTS.idle, CELL_DEFAULTS, 1);
+    expect(DEFORM_IDX.map((i) => r6(d[i]))).toEqual(GOLDEN.restDeformSampled);
+    expect(sumA(d)).toBe(GOLDEN.restDeformSum);
+  });
+
+  it("driven deformation matches frozen pre-B/C baseline (gates off)", () => {
+    const d = buildTargetDeformation(W, H, drivenBins, 10, 0.7, 0.7, CELL_DEFAULTS, 0);
+    expect(DEFORM_IDX.map((i) => r6(d[i]))).toEqual(GOLDEN.driveDeformSampled);
+    expect(sumA(d)).toBe(GOLDEN.driveDeformSum);
+  });
+
+  it("resting contour matches frozen pre-B/C baseline (gates off)", () => {
+    const c = buildCellContour(W, H, silentBins, 10, 0, CELL_DEFAULTS.idle, CELL_DEFAULTS);
+    const flat = c.flat();
+    expect(PT_IDX.map((i) => r6(flat[i]))).toEqual(GOLDEN.restContourSampled);
+    expect(sumP(c)).toBe(GOLDEN.restContourSum);
+  });
+
+  it("driven contour matches frozen pre-B/C baseline (gates off)", () => {
+    const c = buildCellContour(W, H, drivenBins, 10, 0.7, 0.7, CELL_DEFAULTS);
+    const flat = c.flat();
+    expect(PT_IDX.map((i) => r6(flat[i]))).toEqual(GOLDEN.driveContourSampled);
+    expect(sumP(c)).toBe(GOLDEN.driveContourSum);
+  });
+
+  it("saturate seam is identity when gate off (and a no-op stays so for any input)", () => {
+    const target = buildTargetDeformation(W, H, drivenBins, 3, 0.5, 0.5, CELL_DEFAULTS, 0);
+    const out = saturateTargetDeform(target, CELL_DEFAULTS);
+    expect(out).toEqual(target);
+    // even with the gate ON, the placeholder is still identity (no math yet)
+    expect(saturateTargetDeform(target, { ...CELL_DEFAULTS, enableSaturation: true })).toEqual(target);
+  });
+
+  it("normalizeArea seam is identity when gate off", () => {
+    const field = buildTargetDeformation(W, H, drivenBins, 3, 0.5, 0.5, CELL_DEFAULTS, 0);
+    expect(normalizeAreaDeform(field, CELL_DEFAULTS)).toEqual(field);
+    expect(normalizeAreaDeform(field, { ...CELL_DEFAULTS, enableAreaNorm: true })).toEqual(field);
+  });
+
+  it("affine seam is identity (length-preserving) when gate off", () => {
+    const pts: Array<[number, number]> = [[10, 20], [30, 40], [50, 60]];
+    expect(affineSqueezePoints(pts, 80, 80, CELL_DEFAULTS)).toEqual(pts);
+    expect(affineSqueezePoints(pts, 80, 80, { ...CELL_DEFAULTS, enableAffine: true })).toEqual(pts);
+  });
+
+  it("integrateDeformPipeline (steps 4–7) equals bare integrateDeformation when gates off", () => {
+    const prev = buildTargetDeformation(W, H, silentBins, 1, 0, CELL_DEFAULTS.idle, CELL_DEFAULTS, 1);
+    const target = buildTargetDeformation(W, H, drivenBins, 2, 0.6, 0.6, CELL_DEFAULTS, 0);
+    const viaPipeline = integrateDeformPipeline(prev, target, CELL_DEFAULTS);
+    const viaBare = integrateDeformation(prev, target, CELL_DEFAULTS.attack, CELL_DEFAULTS.release);
+    expect(viaPipeline).toEqual(viaBare);
+  });
+
+  it("integrateDeformPipeline seeds from target on the first frame (prev=null)", () => {
+    const target = buildTargetDeformation(W, H, drivenBins, 2, 0.6, 0.6, CELL_DEFAULTS, 0);
+    expect(integrateDeformPipeline(null, target, CELL_DEFAULTS)).toEqual(target.slice());
   });
 });
 
