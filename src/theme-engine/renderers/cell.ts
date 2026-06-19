@@ -227,6 +227,36 @@ export const CELL_DEFAULTS: CellParams = {
 
 
 // ---------------------------------------------------------------------------
+// M15: NaN-poison guards
+// ---------------------------------------------------------------------------
+// External frame state (audioLevel, spectrum bins) and persistent form-memory
+// (integrated deform, growth, baseline) are all sanitised at the tick boundary.
+// A single NaN/Inf frame must NOT permanently poison form-memory: once a value
+// becomes non-finite, every subsequent EMA/integration step would stay NaN
+// forever (NaN propagates through +,*, and Math.min/max). These pure helpers
+// keep the state finite and identical for normal in-range input.
+
+/** Clamp to [0,1]; NaN/Inf -> 0. Identity for finite in-range input. */
+export function sanitizeUnit(x: number): number {
+  if (!Number.isFinite(x)) return 0;
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
+/** Pass finite values through unchanged; non-finite -> `fallback`. */
+export function sanitizeFinite(x: number, fallback: number): number {
+  return Number.isFinite(x) ? x : fallback;
+}
+
+/** Clamp each bin to [0,1]; bad/missing bins -> 0. Returns a new array. */
+export function sanitizeBins(bins: number[] | undefined | null): number[] {
+  if (!bins || bins.length === 0) return [];
+  const out = new Array<number>(bins.length);
+  for (let i = 0; i < bins.length; i++) out[i] = sanitizeUnit(bins[i]);
+  return out;
+}
+
+
+// ---------------------------------------------------------------------------
 // Cell geometry functions
 // ---------------------------------------------------------------------------
 
@@ -1247,15 +1277,22 @@ export function createCellRenderer(
     lastTickMs = nowMs;
     const s = latestState;
 
+    // M15: sanitise external frame state so a NaN/Inf audioLevel or bad spectrum
+    // bin can never enter the form-memory accumulators below.
+    const audioLevel = sanitizeUnit(s.audioLevel);
+    const spectrumBins = sanitizeBins(s.spectrumBins);
+
     if (ctx) {
       ctx.clearRect(0, 0, width, height);
 
-      const energy = cellEnergy(s.mode, s.audioLevel, t, params.idle, params.levelGain);
+      const energy = cellEnergy(s.mode, audioLevel, t, params.idle, params.levelGain);
 
       // Biological growth (shared accumulator) + startle reflex.
-      growth = growthLevel(growth, s.audioLevel, s.mode, params.growthAttack, params.growthRelease);
-      baseline = baseline + (s.audioLevel - baseline) * params.startleBaselineRate;
-      startle = startleOffset(startle, s.audioLevel, baseline, params.startleSensitivity, params.startleDecay);
+      // M15: guard the persistent accumulators against a poisoned prior value
+      // so they self-heal to a finite state on the next clean frame.
+      growth = sanitizeUnit(growthLevel(sanitizeUnit(growth), audioLevel, s.mode, params.growthAttack, params.growthRelease));
+      baseline = sanitizeFinite(baseline + (audioLevel - sanitizeFinite(baseline, 0)) * params.startleBaselineRate, 0);
+      startle = sanitizeUnit(startleOffset(sanitizeUnit(startle), audioLevel, baseline, params.startleSensitivity, params.startleDecay));
       // Startle direction: a noise-chosen angle that drifts slowly.
       const startleAngle = TAU * noise2D(900.5, t * 0.7);
       const sdx = Math.cos(startleAngle) * startle * params.startleMaxPx;
@@ -1264,23 +1301,27 @@ export function createCellRenderer(
       // Idle morphing only when at rest: full at idle/silence, fades as audio rises
       // or while actively recording, so it never fights speech-driven deformation.
       const recordingFade = s.mode === "recording" ? 0.3 : 1;
-      const idleFactor = Math.max(0, 1 - s.audioLevel * 3) * recordingFade;
+      const idleFactor = Math.max(0, 1 - audioLevel * 3) * recordingFade;
 
       // Build per-vertex target deformation fractions
       const targetDeform = buildTargetDeformation(
         width,
         height,
-        s.spectrumBins,
+        spectrumBins,
         t,
-        s.audioLevel,
+        audioLevel,
         energy,
         params,
         idleFactor,
       );
 
-      // Integrate with form memory: fast attack, slow release
-      deform = deform
-        ? integrateDeformation(deform, targetDeform, params.attack, params.release)
+      // Integrate with form memory: fast attack, slow release.
+      // M15: if the prior integrated field was poisoned (a non-finite slipped in
+      // on some earlier frame), drop it and re-seed from the (sanitised) target
+      // so a single bad frame cannot stick in form-memory forever.
+      const safePrev = deform && deform.every((v) => Number.isFinite(v)) ? deform : null;
+      deform = safePrev
+        ? integrateDeformation(safePrev, targetDeform, params.attack, params.release)
         : targetDeform.slice();
 
       // Drift activation ramp: cell stays centered at rest, drifts while recording.
@@ -1358,7 +1399,7 @@ export function createCellRenderer(
         ctx.fill();
 
         // --- Nucleus: denser organelle drifting/pulsing inside the cell ---
-        const nucleus = nucleusTransform(t, s.audioLevel, baseR, params);
+        const nucleus = nucleusTransform(t, audioLevel, baseR, params);
         if (nucleus.r >= 2.5) {
           const nx = cx + nucleus.cx;
           const ny = cy + nucleus.cy;
@@ -1406,7 +1447,7 @@ export function createCellRenderer(
           // Midpoint angle for this segment's hue lookup
           const midPt = splinePoints[Math.floor((segStart + segEnd) / 2) % splinePoints.length];
           const midAngle = Math.atan2(midPt[1] - cy, midPt[0] - cx);
-          const hue = iridescentHue(midAngle, t, s.audioLevel, baseHue, params);
+          const hue = iridescentHue(midAngle, t, audioLevel, baseHue, params);
 
           ctx.strokeStyle = hsla(hue, 0.85, 0.6, 0.85);
           ctx.lineWidth = 2.0;

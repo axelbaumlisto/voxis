@@ -31,6 +31,9 @@ import {
   cellDrift,
   wanderStep,
   driftActivation,
+  sanitizeUnit,
+  sanitizeFinite,
+  sanitizeBins,
   serializeCellState,
   parseCellState,
   restoreSeed,
@@ -1647,6 +1650,146 @@ describe("createCellRenderer", () => {
     }).not.toThrow();
     r.destroy();
     expect(container.innerHTML).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M15: NaN-poison guard
+// ---------------------------------------------------------------------------
+
+describe("M15: sanitize helpers", () => {
+  it("sanitizeUnit clamps to [0,1] and maps NaN/Inf to 0", () => {
+    expect(sanitizeUnit(0.5)).toBe(0.5);
+    expect(sanitizeUnit(0)).toBe(0);
+    expect(sanitizeUnit(1)).toBe(1);
+    expect(sanitizeUnit(-2)).toBe(0);
+    expect(sanitizeUnit(2)).toBe(1);
+    expect(sanitizeUnit(NaN)).toBe(0);
+    expect(sanitizeUnit(Infinity)).toBe(0);
+    expect(sanitizeUnit(-Infinity)).toBe(0);
+  });
+  it("sanitizeUnit is identity for normal in-range input (no behaviour change)", () => {
+    for (const v of [0, 0.1, 0.37, 0.5, 0.99, 1]) expect(sanitizeUnit(v)).toBe(v);
+  });
+  it("sanitizeFinite passes finite through, falls back otherwise", () => {
+    expect(sanitizeFinite(3.2, 9)).toBe(3.2);
+    expect(sanitizeFinite(-100, 9)).toBe(-100);
+    expect(sanitizeFinite(NaN, 9)).toBe(9);
+    expect(sanitizeFinite(Infinity, 0)).toBe(0);
+    expect(sanitizeFinite(-Infinity, 7)).toBe(7);
+  });
+  it("sanitizeBins clamps each bin and maps bad ones to 0", () => {
+    expect(sanitizeBins([0.2, NaN, Infinity, 5, -1])).toEqual([0.2, 0, 0, 1, 0]);
+    expect(sanitizeBins(undefined)).toEqual([]);
+    expect(sanitizeBins([])).toEqual([]);
+  });
+  it("sanitizeBins is identity for normal in-range bins (no behaviour change)", () => {
+    const ok = [0, 0.25, 0.5, 0.75, 1];
+    expect(sanitizeBins(ok)).toEqual(ok);
+  });
+});
+
+describe("M15: NaN-poison guard through update()", () => {
+  // jsdom's getContext('2d') returns null, so the tick body (where form-memory
+  // mutates) is skipped. Install a recording 2D context so the REAL poison path
+  // runs, capturing every drawn coordinate to prove the state stays finite.
+  function installRecordingContext() {
+    const coords: number[] = [];
+    const grad = { addColorStop: () => {} };
+    const ctx = {
+      clearRect: () => {},
+      beginPath: () => {},
+      closePath: () => {},
+      stroke: () => {},
+      fill: () => {},
+      moveTo: (x: number, y: number) => { coords.push(x, y); },
+      lineTo: (x: number, y: number) => { coords.push(x, y); },
+      arc: (x: number, y: number, r: number) => { coords.push(x, y, r); },
+      createRadialGradient: () => grad,
+      fillStyle: "", strokeStyle: "", lineWidth: 0, lineCap: "", lineJoin: "",
+    };
+    const proto = HTMLCanvasElement.prototype as unknown as {
+      getContext: (id: string) => unknown;
+    };
+    const orig = proto.getContext;
+    proto.getContext = () => ctx;
+    return { coords, restore: () => { proto.getContext = orig; } };
+  }
+
+  let restoreCtx: (() => void) | null = null;
+  afterEach(() => {
+    if (restoreCtx) { restoreCtx(); restoreCtx = null; }
+    vi.unstubAllGlobals();
+  });
+
+  it("a NaN/Inf frame keeps drawn state finite AND the next clean frame is normal (no permanent poison)", () => {
+    const rec = installRecordingContext();
+    restoreCtx = rec.restore;
+    const rafCalls: Array<() => void> = [];
+    let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, { width: 160, height: 160 });
+    // Each tick re-queues one rAF; step() runs exactly `k` bounded ticks.
+    const step = (k: number) => { for (let i = 0; i < k; i++) { if (rafCalls.length) rafCalls.shift()!(); } };
+
+    // Warm up with clean recording frames so form-memory is populated.
+    r.update({ mode: "recording", audioLevel: 0.6, spectrumBins: new Array(32).fill(0.4) });
+    step(4);
+
+    // POISON FRAME: NaN audioLevel + NaN/Inf spectrum bins.
+    const badBins = new Array(32).fill(0.3);
+    badBins[2] = NaN;
+    badBins[5] = Infinity;
+    badBins[9] = -Infinity;
+    r.update({ mode: "recording", audioLevel: NaN, spectrumBins: badBins });
+    rec.coords.length = 0;
+    step(1);
+    expect(rec.coords.length).toBeGreaterThan(0);
+    for (const c of rec.coords) expect(Number.isFinite(c)).toBe(true);
+
+    // NEXT CLEAN FRAME must produce normal finite output — proving the single
+    // bad frame did not permanently poison the integrated form-memory.
+    r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.4) });
+    rec.coords.length = 0;
+    step(1);
+    expect(rec.coords.length).toBeGreaterThan(0);
+    for (const c of rec.coords) expect(Number.isFinite(c)).toBe(true);
+
+    r.destroy();
+  });
+
+  it("sustained NaN input never throws and recovers to finite output after clean frames", () => {
+    const rec = installRecordingContext();
+    restoreCtx = rec.restore;
+    const rafCalls: Array<() => void> = [];
+    let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, { width: 160, height: 160 });
+    const step = (k: number) => { for (let i = 0; i < k; i++) { if (rafCalls.length) rafCalls.shift()!(); } };
+
+    // Many consecutive poison frames.
+    for (let i = 0; i < 6; i++) {
+      r.update({ mode: "recording", audioLevel: NaN, spectrumBins: new Array(32).fill(NaN) });
+      expect(() => step(1)).not.toThrow();
+    }
+
+    // Recover: clean frames must yield finite coordinates.
+    for (let i = 0; i < 4; i++) {
+      r.update({ mode: "recording", audioLevel: 0.4, spectrumBins: new Array(32).fill(0.3) });
+      step(1);
+    }
+    rec.coords.length = 0;
+    step(1);
+    expect(rec.coords.length).toBeGreaterThan(0);
+    for (const c of rec.coords) expect(Number.isFinite(c)).toBe(true);
+
+    r.destroy();
   });
 });
 
