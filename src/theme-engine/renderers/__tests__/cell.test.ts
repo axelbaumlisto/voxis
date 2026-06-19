@@ -17,6 +17,7 @@ import {
   iridescentHue,
   lowpassRadii,
   catmullRom,
+  catmullRomOpen,
   sampleBinLevel,
   buildCellContour,
   buildTargetDeformation,
@@ -1408,10 +1409,183 @@ describe("ciliaPath", () => {
     }
   });
 
+  // F1: a cilium is a clamped-base / FREE-TIP elastic rod (9+2 axoneme). The
+  // bending moment -> 0 at the free tip, so curvature must VANISH there:
+  // kappa(L) = 0. The bend amplitude envelope must be interior-peaked
+  // (sin(pi*sFrac): zero at base AND tip), NOT tip-peaked (pow(sFrac,1.2)).
+  // Curvature is measured as the turning angle between consecutive segment
+  // vectors of the RAW spine points.
+  const turnAngle = (
+    pts: Array<[number, number]>,
+    i: number,
+  ): number => {
+    const ax = pts[i][0] - pts[i - 1][0];
+    const ay = pts[i][1] - pts[i - 1][1];
+    const bx = pts[i + 1][0] - pts[i][0];
+    const by = pts[i + 1][1] - pts[i][1];
+    let d = Math.atan2(by, bx) - Math.atan2(ay, ax);
+    d = ((d + Math.PI) % TAU + TAU) % TAU - Math.PI;
+    return Math.abs(d);
+  };
+
+  it("F1: rendered tip curvature vanishes (smoothed tip turn-angle <= mid) for all beat phases & curls", () => {
+    // kappa(L)=0 is a claim about the RENDERED rod (the catmullRomOpen spline),
+    // not the coarse 6-point control polygon. Scan the whole beat cycle via t
+    // (each hair's phase advances with t) across a wide curl range: the
+    // free-tip region of the smoothed spine must never bend more sharply than
+    // the mid-shaft.
+    for (const curl of [0.7, 1.5, 3, 5]) {
+      let tipMax = 0;
+      let midMax = 0;
+      for (let t = 0; t < 4; t += 0.05) {
+        for (const h of ciliaPath(cx, cy, baseR, t, 0.6, 0.8, { ...P, ciliaCurl: curl })) {
+          const sp = catmullRomOpen(h.points, 4);
+          const m = sp.length;
+          tipMax = Math.max(tipMax, turnAngle(sp, m - 2));
+          midMax = Math.max(midMax, turnAngle(sp, Math.round(m / 2)));
+        }
+      }
+      // Tip must be no sharper than the mid-shaft peak (free-tip kappa->0).
+      expect(tipMax).toBeLessThanOrEqual(midMax + 1e-9);
+    }
+  });
+
+  it("F1: bend amplitude envelope is INTERIOR-peaked (mid-shaft sway envelope > tip & base-region sway)", () => {
+    // The envelope sin(pi*sFrac) peaks mid-shaft and is 0 at base AND tip. The
+    // travelling wave sweeps a hump along the hair, so per-FRAME the lateral at
+    // any one station can momentarily vanish (wave node); the ENVELOPE is the
+    // MAX sway over a full beat cycle. That envelope must peak mid-shaft: the
+    // OLD pow(sFrac,1.2) envelope was tip-peaked and would invert this.
+    // Use the default curl: at extreme curl the F2 anti-crossing clamp
+    // (bendCap ~ radius) saturates and governs the near-tip sway instead of the
+    // envelope. The envelope property is what F1 is about, so test it in the
+    // unclamped regime.
+    let baseLat = 0; // station 0: exactly on the membrane
+    let tipLat = 0; // station seg: the FREE tip
+    let midLat = 0; // mid-shaft
+    for (let t = 0; t < 4; t += 0.05) {
+      for (const h of ciliaPath(cx, cy, baseR, t, 0.7, 0.9, P)) {
+        const pts = h.points;
+        const seg = pts.length - 1;
+        const [bx, by] = pts[0];
+        const ux = (bx - cx) / baseR;
+        const uy = (by - cy) / baseR;
+        const lat = (i: number) =>
+          Math.abs((pts[i][0] - bx) * -uy + (pts[i][1] - by) * ux);
+        baseLat = Math.max(baseLat, lat(0));
+        midLat = Math.max(midLat, lat(Math.round(seg / 2)));
+        tipLat = Math.max(tipLat, lat(seg));
+      }
+    }
+    // sin(pi*sFrac) is exactly 0 at base (sFrac=0) AND tip (sFrac=1): both the
+    // membrane anchor and the FREE tip have ~0 transverse sway, while the
+    // mid-shaft swings widely. The OLD pow(sFrac,1.2) envelope put MAX sway at
+    // the tip, so this test fails loudly against it.
+    expect(baseLat).toBeLessThan(1e-9);
+    expect(tipLat).toBeLessThan(1e-9);
+    expect(midLat).toBeGreaterThan(1);
+  });
+
+  it("F1: tip lateral offset stays near zero (free-tip envelope is ~0 at sFrac=1)", () => {
+    // With an interior-peaked envelope the tip's transverse displacement from
+    // the radial axis is tiny (the envelope multiplies it to ~0), whereas a
+    // tip-peaked envelope would fling the tip sideways.
+    let maxTipLat = 0;
+    let maxMidLat = 0;
+    for (let t = 0; t < 4; t += 0.05) {
+      for (const h of ciliaPath(cx, cy, baseR, t, 0.7, 0.9, { ...P, ciliaCurl: 3 })) {
+        const pts = h.points;
+        const seg = pts.length - 1;
+        const [bx, by] = pts[0];
+        const ux = (bx - cx) / baseR;
+        const uy = (by - cy) / baseR;
+        const lat = (i: number) =>
+          Math.abs((pts[i][0] - bx) * -uy + (pts[i][1] - by) * ux);
+        maxTipLat = Math.max(maxTipLat, lat(seg));
+        maxMidLat = Math.max(maxMidLat, lat(Math.round(seg / 2)));
+      }
+    }
+    // Tip stays much closer to the radial axis than the mid-shaft.
+    expect(maxTipLat).toBeLessThan(maxMidLat * 0.5);
+  });
+
+  it("F1: base remains anchored on the membrane (envelope zero at sFrac=0)", () => {
+    for (let t = 0; t < 4; t += 0.25) {
+      for (const h of ciliaPath(cx, cy, baseR, t, 0.7, 0.9, P)) {
+        const [bx, by] = h.points[0];
+        expect(Math.hypot(bx - cx, by - cy)).toBeCloseTo(baseR, 6);
+      }
+    }
+  });
+
+  // M12: the cilia spine must be smoothed with an OPEN Catmull-Rom (clamped
+  // endpoints) so the curve ends AT the tip and does not wrap tip->base (a
+  // closed spline would re-introduce nonzero tip curvature, fighting F1).
+  it("M12: open Catmull-Rom on the cilia spine ends at the tip (no wrap)", () => {
+    for (const h of ciliaPath(cx, cy, baseR, 1.3, 0.7, 0.9, P)) {
+      const spline = catmullRomOpen(h.points, 4);
+      const tip = h.points[h.points.length - 1];
+      const last = spline[spline.length - 1];
+      expect(last[0]).toBeCloseTo(tip[0], 6);
+      expect(last[1]).toBeCloseTo(tip[1], 6);
+      // and it starts at the base point
+      expect(spline[0][0]).toBeCloseTo(h.points[0][0], 6);
+      expect(spline[0][1]).toBeCloseTo(h.points[0][1], 6);
+    }
+  });
+
+  it("M12: open Catmull-Rom keeps the tip-region curvature envelope <= mid envelope", () => {
+    // Curvature envelope = max turn-angle over the beat cycle at each station.
+    // The free tip of the SMOOTHED spine must relax (kappa->0) relative to the
+    // mid-shaft. (Per-frame comparison is meaningless: the wave node makes the
+    // mid turn momentarily ~0.)
+    let tipMax = 0;
+    let midMax = 0;
+    for (let t = 0; t < 4; t += 0.1) {
+      for (const h of ciliaPath(cx, cy, baseR, t, 0.6, 0.8, { ...P, ciliaCurl: 3 })) {
+        const spline = catmullRomOpen(h.points, 4);
+        const m = spline.length;
+        tipMax = Math.max(tipMax, turnAngle(spline, m - 2));
+        midMax = Math.max(midMax, turnAngle(spline, Math.round(m / 2)));
+      }
+    }
+    expect(tipMax).toBeLessThanOrEqual(midMax + 1e-9);
+  });
+
   it("is deterministic", () => {
     expect(ciliaPath(cx, cy, baseR, 2.0, 0.5, 0.5, P)).toEqual(
       ciliaPath(cx, cy, baseR, 2.0, 0.5, 0.5, P),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// catmullRomOpen (M12) — non-wrapping spline for the cilia spine
+// ---------------------------------------------------------------------------
+
+describe("catmullRomOpen (M12)", () => {
+  it("passes through every input point and ends at the LAST point (no wrap)", () => {
+    const pts: Array<[number, number]> = [[0, 0], [10, 5], [20, 0], [30, 8]];
+    const out = catmullRomOpen(pts, 4);
+    // first sample == first point, last sample == last point
+    expect(out[0][0]).toBeCloseTo(0, 9);
+    expect(out[0][1]).toBeCloseTo(0, 9);
+    expect(out[out.length - 1][0]).toBeCloseTo(30, 9);
+    expect(out[out.length - 1][1]).toBeCloseTo(8, 9);
+  });
+
+  it("does NOT close the loop (unlike catmullRom): straight input stays straight at the end", () => {
+    // A straight horizontal line: an OPEN spline must stay straight; a CLOSED
+    // one curves at the ends because it wraps to the far endpoint.
+    const pts: Array<[number, number]> = [[0, 0], [10, 0], [20, 0], [30, 0]];
+    const open = catmullRomOpen(pts, 4);
+    for (const [, y] of open) expect(Math.abs(y)).toBeLessThan(1e-9);
+  });
+
+  it("is deterministic and handles short inputs", () => {
+    expect(catmullRomOpen([[1, 2]], 4)).toEqual([[1, 2]]);
+    const pts: Array<[number, number]> = [[0, 0], [5, 5]];
+    expect(catmullRomOpen(pts, 3)).toEqual(catmullRomOpen(pts, 3));
   });
 });
 
