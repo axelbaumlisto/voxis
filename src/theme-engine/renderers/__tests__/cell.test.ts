@@ -565,69 +565,78 @@ describe("Commit 4: pipeline gates + frozen pre-B/C baseline", () => {
   const DEFORM_IDX = [0, 12, 24, 36, 48, 60, 72, 84];
   const PT_IDX = [0, 24, 48, 72, 96, 120, 144, 168];
 
-  it("all four gate params default to false in CELL_DEFAULTS", () => {
-    expect(CELL_DEFAULTS.enableSaturation).toBe(false);
+  // The frozen pre-B/C baseline must pin the gates OFF EXPLICITLY: Commit 6 (B1)
+  // flips the enableSaturation DEFAULT to true, so any test that wants the
+  // pre-saturation reference output must opt out of the new default. This keeps
+  // the two baselines (gates-off reference vs. B1 saturated) from collapsing.
+  const GATES_OFF: CellParams = {
+    ...CELL_DEFAULTS,
+    enableSaturation: false,
+    enableAreaNorm: false,
+    enableAffine: false,
+    enableActivity: false,
+  };
+
+  it("B1 flips enableSaturation ON; the other three gates stay OFF", () => {
+    expect(CELL_DEFAULTS.enableSaturation).toBe(true);
     expect(CELL_DEFAULTS.enableAreaNorm).toBe(false);
     expect(CELL_DEFAULTS.enableAffine).toBe(false);
     expect(CELL_DEFAULTS.enableActivity).toBe(false);
   });
 
   it("resting deformation matches frozen pre-B/C baseline (gates off)", () => {
-    const d = buildTargetDeformation(W, H, silentBins, 10, 0, CELL_DEFAULTS.idle, CELL_DEFAULTS, 1);
+    const d = buildTargetDeformation(W, H, silentBins, 10, 0, GATES_OFF.idle, GATES_OFF, 1);
     expect(DEFORM_IDX.map((i) => r6(d[i]))).toEqual(GOLDEN.restDeformSampled);
     expect(sumA(d)).toBe(GOLDEN.restDeformSum);
   });
 
   it("driven deformation matches frozen pre-B/C baseline (gates off)", () => {
-    const d = buildTargetDeformation(W, H, drivenBins, 10, 0.7, 0.7, CELL_DEFAULTS, 0);
+    const d = buildTargetDeformation(W, H, drivenBins, 10, 0.7, 0.7, GATES_OFF, 0);
     expect(DEFORM_IDX.map((i) => r6(d[i]))).toEqual(GOLDEN.driveDeformSampled);
     expect(sumA(d)).toBe(GOLDEN.driveDeformSum);
   });
 
   it("resting contour matches frozen pre-B/C baseline (gates off)", () => {
-    const c = buildCellContour(W, H, silentBins, 10, 0, CELL_DEFAULTS.idle, CELL_DEFAULTS);
+    const c = buildCellContour(W, H, silentBins, 10, 0, GATES_OFF.idle, GATES_OFF);
     const flat = c.flat();
     expect(PT_IDX.map((i) => r6(flat[i]))).toEqual(GOLDEN.restContourSampled);
     expect(sumP(c)).toBe(GOLDEN.restContourSum);
   });
 
   it("driven contour matches frozen pre-B/C baseline (gates off)", () => {
-    const c = buildCellContour(W, H, drivenBins, 10, 0.7, 0.7, CELL_DEFAULTS);
+    const c = buildCellContour(W, H, drivenBins, 10, 0.7, 0.7, GATES_OFF);
     const flat = c.flat();
     expect(PT_IDX.map((i) => r6(flat[i]))).toEqual(GOLDEN.driveContourSampled);
     expect(sumP(c)).toBe(GOLDEN.driveContourSum);
   });
 
-  it("saturate seam is identity when gate off (and a no-op stays so for any input)", () => {
-    const target = buildTargetDeformation(W, H, drivenBins, 3, 0.5, 0.5, CELL_DEFAULTS, 0);
-    const out = saturateTargetDeform(target, CELL_DEFAULTS);
-    expect(out).toEqual(target);
-    // even with the gate ON, the placeholder is still identity (no math yet)
-    expect(saturateTargetDeform(target, { ...CELL_DEFAULTS, enableSaturation: true })).toEqual(target);
+  it("saturate seam is identity when gate off", () => {
+    const target = buildTargetDeformation(W, H, drivenBins, 3, 0.5, 0.5, GATES_OFF, 0);
+    expect(saturateTargetDeform(target, GATES_OFF)).toEqual(target);
   });
 
   it("normalizeArea seam is identity when gate off", () => {
-    const field = buildTargetDeformation(W, H, drivenBins, 3, 0.5, 0.5, CELL_DEFAULTS, 0);
-    expect(normalizeAreaDeform(field, CELL_DEFAULTS)).toEqual(field);
-    expect(normalizeAreaDeform(field, { ...CELL_DEFAULTS, enableAreaNorm: true })).toEqual(field);
+    const field = buildTargetDeformation(W, H, drivenBins, 3, 0.5, 0.5, GATES_OFF, 0);
+    expect(normalizeAreaDeform(field, GATES_OFF)).toEqual(field);
+    expect(normalizeAreaDeform(field, { ...GATES_OFF, enableAreaNorm: true })).toEqual(field);
   });
 
   it("affine seam is identity when gate off (any k, phi)", () => {
     const pts: Array<[number, number]> = [[10, 20], [30, 40], [50, 60]];
-    expect(affineSqueezePoints(pts, 2.0, 0.7, 80, 80, CELL_DEFAULTS)).toEqual(pts);
+    expect(affineSqueezePoints(pts, 2.0, 0.7, 80, 80, GATES_OFF)).toEqual(pts);
   });
 
   it("integrateDeformPipeline (steps 4–7) equals bare integrateDeformation when gates off", () => {
-    const prev = buildTargetDeformation(W, H, silentBins, 1, 0, CELL_DEFAULTS.idle, CELL_DEFAULTS, 1);
-    const target = buildTargetDeformation(W, H, drivenBins, 2, 0.6, 0.6, CELL_DEFAULTS, 0);
-    const viaPipeline = integrateDeformPipeline(prev, target, CELL_DEFAULTS);
-    const viaBare = integrateDeformation(prev, target, CELL_DEFAULTS.attack, CELL_DEFAULTS.release);
+    const prev = buildTargetDeformation(W, H, silentBins, 1, 0, GATES_OFF.idle, GATES_OFF, 1);
+    const target = buildTargetDeformation(W, H, drivenBins, 2, 0.6, 0.6, GATES_OFF, 0);
+    const viaPipeline = integrateDeformPipeline(prev, target, GATES_OFF);
+    const viaBare = integrateDeformation(prev, target, GATES_OFF.attack, GATES_OFF.release);
     expect(viaPipeline).toEqual(viaBare);
   });
 
   it("integrateDeformPipeline seeds from target on the first frame (prev=null)", () => {
-    const target = buildTargetDeformation(W, H, drivenBins, 2, 0.6, 0.6, CELL_DEFAULTS, 0);
-    expect(integrateDeformPipeline(null, target, CELL_DEFAULTS)).toEqual(target.slice());
+    const target = buildTargetDeformation(W, H, drivenBins, 2, 0.6, 0.6, GATES_OFF, 0);
+    expect(integrateDeformPipeline(null, target, GATES_OFF)).toEqual(target.slice());
   });
 });
 
@@ -700,6 +709,117 @@ describe("Commit 5: C2 affine squeeze (area-preserving, det=1)", () => {
   it("stays GATED OFF by default (enableAffine=false returns points untouched)", () => {
     const out = affineSqueezePoints(noisy, 2.0, 0.7, CX, CY, CELL_DEFAULTS);
     expect(out).toEqual(noisy);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 6 — B1: soft-saturation `d <- Dmax*tanh(d/Dmax)` (gate flipped ON)
+// ---------------------------------------------------------------------------
+// tanh is the canonical soft clamp: g(d)=Dmax*tanh(d/Dmax) has unit slope at 0
+// (so small deformations pass through unchanged), is odd, monotone, and strictly
+// bounded |g| < Dmax. With saturation alone (motion/areaNorm off, k_max=1,
+// |c|_max=0) the radius budget baseR*(1+Dmax) <= maxRadius=min(w,h)*0.46 holds,
+// so the step-9 clamp is provably a no-op for the drifting_contour overlay.
+// (research-membrane-areacons.md 4a; research-math-verify-v2.md item 5.)
+describe("Commit 6: B1 soft-saturation (tanh)", () => {
+  const SAT: CellParams = { ...CELL_DEFAULTS, enableSaturation: true };
+  const OFF: CellParams = { ...CELL_DEFAULTS, enableSaturation: false };
+  const Dmax = CELL_DEFAULTS.deformMax ?? 0.6;
+
+  it("exposes a deformMax param with a sensible default", () => {
+    expect(CELL_DEFAULTS.deformMax).toBeGreaterThan(0);
+    expect(CELL_DEFAULTS.deformMax).toBeLessThanOrEqual(1);
+  });
+
+  it("has unit slope at 0 (g'(0)=1): tiny deformations are essentially unchanged", () => {
+    const h = 1e-5;
+    const out = saturateTargetDeform([h, -h], SAT);
+    // finite-difference slope across 0 ~ (g(h)-g(-h))/(2h) -> 1
+    const slope = (out[0] - out[1]) / (2 * h);
+    expect(slope).toBeCloseTo(1, 6);
+  });
+
+  it("is bounded by Dmax even for huge / extreme inputs (asymptote never exceeded)", () => {
+    // |Dmax*tanh| <= Dmax for all finite inputs; in float64 tanh saturates to
+    // exactly 1.0 for large args, so equality is reachable but the bound is
+    // never EXCEEDED — which is what the radius budget relies on.
+    const out = saturateTargetDeform([5, 50, 1e6, -5, -1e6], SAT);
+    for (const v of out) expect(Math.abs(v)).toBeLessThanOrEqual(Dmax);
+  });
+
+  it("is STRICTLY below Dmax for any moderate (non-saturating) input", () => {
+    const out = saturateTargetDeform([2, -2, 3.5], SAT);
+    for (const v of out) expect(Math.abs(v)).toBeLessThan(Dmax);
+  });
+
+  it("is odd-symmetric: g(-d) = -g(d)", () => {
+    const ds = [0.1, 0.4, 0.9, 2.0, 7.0];
+    const pos = saturateTargetDeform(ds, SAT);
+    const neg = saturateTargetDeform(ds.map((d) => -d), SAT);
+    pos.forEach((p, i) => expect(neg[i]).toBeCloseTo(-p, 12));
+  });
+
+  it("is monotone increasing in the input", () => {
+    const ds = [-3, -1, -0.3, 0, 0.3, 1, 3];
+    const out = saturateTargetDeform(ds, SAT);
+    for (let i = 1; i < out.length; i++) expect(out[i]).toBeGreaterThan(out[i - 1]);
+  });
+
+  it("leaves small deformations (|d| << Dmax) nearly unchanged (<0.5% at 0.1*Dmax)", () => {
+    const small = 0.1 * Dmax;
+    const out = saturateTargetDeform([small, -small], SAT);
+    // tanh(0.1)=0.09967 -> ~0.33% relative compression at 0.1*Dmax; well under 0.5%.
+    expect(Math.abs(out[0] - small) / small).toBeLessThan(0.005);
+    expect(Math.abs(out[1] - -small) / small).toBeLessThan(0.005);
+  });
+
+  it("is identity when the gate is OFF (no saturation applied)", () => {
+    const ds = [0.2, 1.5, -3.0];
+    expect(saturateTargetDeform(ds, OFF)).toEqual(ds);
+  });
+
+  it("radius budget: with saturation ON the step-9 clamp is a NO-OP under an audio x bin sweep", () => {
+    // drifting_contour overlay: 160x160, baseRadiusPx 16, growthSwell 0.2.
+    const W = 160;
+    const H = 160;
+    const maxRadius = Math.min(W, H) * 0.46; // 73.6
+    const dcParams: CellParams = {
+      ...CELL_DEFAULTS,
+      enableSaturation: true,
+      baseRadiusPx: 16,
+      growthSwell: 0.2,
+    };
+    let maxObserved = 0;
+    // Sweep audio level, growth, time, and bin energy; integrate frames so the
+    // pipeline (saturate -> integrate) reaches steady state, then measure radius.
+    for (const audio of [0, 0.3, 0.6, 1.0]) {
+      for (const growth of [0, 0.5, 1.0]) {
+        for (const t of [0, 3.3, 7.7, 13.1]) {
+          const bins = Array.from({ length: 32 }, (_, i) => audio * (0.5 + 0.5 * Math.sin(i * 0.9 + t)));
+          const baseR = resolveBaseRadius(W, H, dcParams, growth);
+          let deform: number[] | null = null;
+          for (let f = 0; f < 40; f++) {
+            const target = buildTargetDeformation(W, H, bins, t + f * 0.05, audio, Math.max(audio, growth), dcParams, growth);
+            deform = integrateDeformPipeline(deform, target, dcParams);
+          }
+          for (const d of deform!) {
+            const rawRadius = baseR * (1 + d);
+            maxObserved = Math.max(maxObserved, rawRadius);
+            // The clamp is min(maxRadius, rawRadius): a no-op iff rawRadius < maxRadius.
+            expect(rawRadius).toBeLessThan(maxRadius);
+          }
+        }
+      }
+    }
+    // Sanity: the cell actually deforms (not a trivially tiny radius).
+    expect(maxObserved).toBeGreaterThan(16);
+  });
+
+  it("closed-form budget holds: baseR*(1+Dmax) <= min(w,h)*0.46 for the drifting_contour overlay", () => {
+    const W = 160, H = 160;
+    const maxRadius = Math.min(W, H) * 0.46;
+    const maxBaseR = 16 * (1 + 1.0 * 0.2); // baseRadiusPx * (1 + growth*growthSwell) at growth=1
+    expect(maxBaseR * (1 + Dmax)).toBeLessThanOrEqual(maxRadius);
   });
 });
 

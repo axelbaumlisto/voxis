@@ -175,6 +175,10 @@ export interface CellParams {
   // gated stage is a transparent identity seam. ---
   /** Step 4 — soft-saturate target deformation `d ← Dmax·tanh(d/Dmax)` [B1, commit 6]. */
   enableSaturation?: boolean;
+  /** B1 saturation ceiling Dmax: the soft bound on |deformation| (strict: |out| < Dmax).
+   * tanh has unit slope at 0 so deformations well below Dmax are nearly unchanged.
+   * Sized with the radius budget: baseR·(1+Dmax) ≤ maxRadius = min(w,h)·0.46. */
+  deformMax?: number;
   /** Step 7 — area normalization on the integrated field `mean((1+d)²)=1` [C1, commit 7]. */
   enableAreaNorm?: boolean;
   /** Step 8 — area-preserving affine squeeze in the heading frame [C2/D4, commit 7/8]. */
@@ -237,8 +241,10 @@ export const CELL_DEFAULTS: CellParams = {
   driftActivationRate: 0.02,
   wanderTurnRate: 1.1,
   wanderFreq: 0.6,
-  // Pipeline gates: ALL OFF by default (no-visible-change scaffold).
-  enableSaturation: false,
+  // Pipeline gates. B1 (commit 6) flips enableSaturation ON — the first
+  // deliberately-visible stage; the rest stay OFF until their own commits.
+  enableSaturation: true,
+  deformMax: 0.6,
   enableAreaNorm: false,
   enableAffine: false,
   enableActivity: false,
@@ -771,13 +777,21 @@ export function sampleBinLevel(bins: number[], normalized: number): number {
 // `integrateDeformPipeline` is byte-identical to a bare `integrateDeformation`.
 
 /**
- * Step 4 — soft-saturation seam [B1, commit 6]. Identity until `enableSaturation`.
- * When implemented: `d <- Dmax*tanh(d/Dmax)` (unit slope at 0, strict bound).
+ * Step 4 — soft-saturation [B1]. `d <- Dmax*tanh(d/Dmax)`.
+ *
+ * tanh is the canonical soft clamp:
+ *   - g(0)=0 and g'(0)=1, so small deformations (|d| << Dmax) pass through
+ *     essentially unchanged — normal motion is NOT crushed;
+ *   - g is odd and strictly monotone increasing;
+ *   - |g(d)| < Dmax for all finite d (strict bound — the asymptote is never
+ *     reached), which feeds the radius budget so the step-9 clamp is a no-op.
+ * Identity when the gate is off.
  */
 export function saturateTargetDeform(target: number[], params: CellParams): number[] {
   if (!params.enableSaturation) return target;
-  // TODO commit 6 (B1): real tanh saturation. Identity placeholder for now.
-  return target;
+  const Dmax = params.deformMax ?? 0.6;
+  if (!(Dmax > 0)) return target; // defensive: a non-positive ceiling disables it
+  return target.map((d) => Dmax * Math.tanh(d / Dmax));
 }
 
 /**
@@ -960,8 +974,9 @@ export function buildCellContour(
       binLevel * baseR * 0.15 * energy;
 
     // Clamp: keep membrane fully visible within the window.
-    // Floor prevents pinching to a dot; ceiling respects window height.
-    const maxRadius = height * 0.46;
+    // Floor prevents pinching to a dot; ceiling respects the window (B1 radius
+    // budget): use the SHORTER side so a non-square overlay never clips.
+    const maxRadius = membraneMaxRadius(width, height);
     const radius = Math.max(baseR * 0.35, Math.min(maxRadius, rawRadius));
 
     const x = cx + radius * Math.cos(angle);
@@ -1102,6 +1117,21 @@ export function restoreSeed(
 // ---------------------------------------------------------------------------
 // Base radius resolution (absolute + growth swell)
 // ---------------------------------------------------------------------------
+
+/**
+ * Membrane clamp ceiling (step-9 safety net) [B1 radius budget].
+ *
+ * The membrane is contained by the SHORTER window side so a non-square overlay
+ * never clips the cell on its narrow axis: `maxRadius = min(w,h)*0.46`. This is
+ * the MEMBRANE radius only — distinct from {@link cellReach}, which also budgets
+ * cilia + drag-lean for whole-organism wall containment. With B1 saturation the
+ * deformation is bounded by Dmax, so `baseR*(1+Dmax) <= maxRadius` and this
+ * clamp is provably a no-op under normal audio (the saturation, not the clamp,
+ * keeps the radius in budget).
+ */
+export function membraneMaxRadius(width: number, height: number): number {
+  return Math.min(width, height) * 0.46;
+}
 
 export function resolveBaseRadius(
   width: number,
@@ -1479,7 +1509,7 @@ export function createCellRenderer(
       const driftedY = height / 2 + (wander.y - height / 2) * drift01;
       const cx = driftedX + sdx;
       const cy = driftedY + sdy;
-      const maxRadius = height * 0.46;
+      const maxRadius = membraneMaxRadius(width, height);
       const floorRadius = baseR * 0.35;
       const sampleCount = deform.length;
 
