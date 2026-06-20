@@ -522,6 +522,19 @@ export interface CellParams {
    * Default 0.15. */
   ectoplasmAlpha?: number;
 
+  /** v3.9D (OPT, default off): METACHRONAL LENGTH WAVE. When on, a visible
+   * traveling wave modulates cilia LENGTH along the contour — crests are at
+   * full length, troughs at ~60%. Creates the shimmering ripple that is the
+   * single most recognizable visual signature of Paramecium under DIC.
+   * Independent of the existing `ciliaMetachronal` beat-PHASE lag. When off,
+   * the length multiplier is 1.0 everywhere (golden frozen). */
+  enableMetachronal?: boolean;
+  /** v3.9D: wavelength of the length wave as a number of cilia. One full
+   * cosine cycle spans this many adjacent hairs. Default 20. */
+  metachronalWavelength?: number;
+  /** v3.9D: wave propagation speed in radians per second. Positive → wave
+   * travels in the direction of increasing contour index. Default 4.0. */
+  metachronalSpeed?: number;
   /** v3.8E (OPT, default off): TRICHOCYST DISCHARGE. Paramecium's most
    * dramatic defense — explosive radial crystalline needles projecting from
    * the pellicle on startle. When off, no trichocyst drawing occurs (golden
@@ -1486,7 +1499,19 @@ export function ciliaPath(
     }
     // Length spans [1-lenVar, 1+lenVar] around the mean (x*1===x exactly, so the
     // OFF path keeps lenK bit-identical).
-    const lenK = lenMean * (1 - lenVar + 2 * lenVar * r01) * lengthScale;
+    let lenK = lenMean * (1 - lenVar + 2 * lenVar * r01) * lengthScale;
+    // v3.9D: metachronal LENGTH wave — a visible traveling ripple of longer/
+    // shorter cilia along the contour. Independent of the existing beat-phase
+    // `ciliaMetachronal`. When off (default), multiplier is exactly 1.0.
+    if (params.enableMetachronal) {
+      const mWave = params.metachronalWavelength ?? 20;
+      const mSpd = params.metachronalSpeed ?? 4.0;
+      // Traveling cosine wave along the cilia index.
+      // cos range [-1,1] → modulation range [0.6, 1.0].
+      const metaPhase = (k / mWave) * TAU - t * mSpd;
+      const mod = 0.6 + 0.4 * (0.5 + 0.5 * Math.cos(metaPhase));
+      lenK *= mod;
+    }
     // Thickness correlates loosely with length (longer ~ slightly thicker),
     // plus its own variation so it doesn't look mechanical.
     const r01b = noise2D(k * 5.1 + 2.7, 4.9) * 0.5 + 0.5;
