@@ -2328,6 +2328,11 @@ export function createCellRenderer(
       // so a single bad frame cannot stick in form-memory forever.
       const safePrev = deform && deform.every((v) => Number.isFinite(v)) ? deform : null;
       deform = integrateDeformPipeline(safePrev, targetDeform, params);
+      // F13 (gate OFF): band-limit the membrane to low modes + low amplitude for
+      // a smooth ciliate look. Identity when the gate is off (deform untouched).
+      if (params.enableBandLimit) {
+        deform = bandLimitDeform(deform, params);
+      }
 
       // Drift activation ramp: cell stays centered at rest, drifts while recording.
       // setPointerCapture keeps the recording session even if the cell wanders
@@ -2406,13 +2411,20 @@ export function createCellRenderer(
         {
           // G2: scale the beat clock + curl by activity so a louder voice beats
           // faster and curls more (Stokes-linear). Gated: identity when off.
+          // E1 (gate OFF): drive the hair count from the perimeter so a bigger
+          // cell grows proportionally more cilia at ~constant arc spacing. When
+          // the gate is off this is identity (keeps params.ciliaCount).
+          const effectiveCount = params.enablePerimeterCount
+            ? perimeterCiliaCount(baseR, params)
+            : params.ciliaCount;
           const ciliaParams = params.enableActivity
             ? {
                 ...params,
+                ciliaCount: effectiveCount,
                 ciliaBeatHz: ciliaBeatHzEff(activity, params),
                 ciliaCurl: params.ciliaCurl * (1 + 0.3 * activity),
               }
-            : params;
+            : (params.enablePerimeterCount ? { ...params, ciliaCount: effectiveCount } : params);
           // D2: motion basis so the crown leans rearward while swimming. Tangent
           // is the body heading; speedNorm gates it (0 at rest => identity).
           const ciliaMotion: CiliaMotion = {
@@ -2494,6 +2506,32 @@ export function createCellRenderer(
           ctx.beginPath();
           ctx.arc(nx, ny, nr * 0.22, 0, TAU);
           ctx.fill();
+        }
+
+        // F11 (gate OFF): contractile vacuole — a peripheral vesicle that slowly
+        // fills then rapidly collapses each vacuolePeriod. Drawn near the membrane
+        // at a fixed bearing, scaled to stay inside the (possibly pinched) wall.
+        // Skipped entirely (no allocation/draw) unless enableVacuole is on.
+        if (params.enableVacuole) {
+          const vac = contractileVacuole(t, baseR, params);
+          if (vac.r >= 0.5) {
+            // Place its centre toward a fixed bearing, then ride the same body
+            // affine squeeze as the nucleus so it tracks a prolate body. Clamp the
+            // placement radius so the WHOLE vesicle (centre + vac.r) stays inside
+            // the live minimum membrane radius — a deep inward pinch can bring the
+            // wall in to baseR*0.35, so without this the vesicle could poke out.
+            const bearing = 2.3; // radians, an arbitrary but stable peripheral spot
+            const placeR = Math.max(0, Math.min(baseR * 0.6, minMembraneR - vac.r));
+            const vcx0 = cx + Math.cos(bearing) * placeR;
+            const vcy0 = cy + Math.sin(bearing) * placeR;
+            const [vx, vy] = affineSqueezePoints(
+              [[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params,
+            )[0];
+            ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.70, params.nucleusAlpha * 0.45);
+            ctx.beginPath();
+            ctx.arc(vx, vy, vac.r, 0, TAU);
+            ctx.fill();
+          }
         }
 
         // --- Stroke: iridescent outline ---

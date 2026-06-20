@@ -862,6 +862,53 @@ function resolveBaseRadius(width, height, params, growth) {
   const rawBaseR = params.baseRadiusPx ?? fallbackR;
   return rawBaseR * (1 + growth * params.growthSwell);
 }
+function perimeterCiliaCount(baseR, params) {
+  const spacing = Math.max(0.5, params.ciliaSpacingPx ?? 8);
+  const n = Math.round(TAU * Math.max(0, baseR) / spacing);
+  const cap = Math.max(1, params.ciliaCount);
+  return Math.max(1, Math.min(cap, n));
+}
+function bandLimitDeform(deform, params) {
+  const N = deform.length;
+  if (N === 0)
+    return [];
+  const K = Math.max(0, Math.floor(params.bandLimitMode ?? 4));
+  const cap = params.bandLimitAmp ?? 0.08;
+  const a = new Array(K + 1).fill(0);
+  const b = new Array(K + 1).fill(0);
+  for (let k = 0;k <= K; k++) {
+    let re = 0, im = 0;
+    for (let i = 0;i < N; i++) {
+      const ang = k * i / N * TAU;
+      re += deform[i] * Math.cos(ang);
+      im += deform[i] * Math.sin(ang);
+    }
+    a[k] = re / N;
+    b[k] = im / N;
+  }
+  const out = new Array(N);
+  for (let i = 0;i < N; i++) {
+    let v = a[0];
+    for (let k = 1;k <= K; k++) {
+      const ang = k * i / N * TAU;
+      v += 2 * (a[k] * Math.cos(ang) + b[k] * Math.sin(ang));
+    }
+    out[i] = v < -cap ? -cap : v > cap ? cap : v;
+  }
+  return out;
+}
+function contractileVacuole(t, baseR, params) {
+  const period = Math.max(0.1, params.vacuolePeriod ?? 7);
+  const Rmax = Math.max(0, params.vacuoleMaxFrac ?? 0.18) * Math.max(0, baseR);
+  const u = (t / period % 1 + 1) % 1;
+  let fill;
+  if (u <= 0.85) {
+    fill = smoothstep(u / 0.85);
+  } else {
+    fill = 1 - smoothstep((u - 0.85) / 0.15);
+  }
+  return { r: Rmax * fill };
+}
 function dipoleFlowAt(dx, dy, heading, strength) {
   if (strength === 0)
     return { vx: 0, vy: 0 };
@@ -1084,6 +1131,9 @@ function createCellRenderer(container, opts) {
       const targetDeform = buildTargetDeformation(width, height, spectrumBins, t, audioLevel, energy, params, idleFactor);
       const safePrev = deform && deform.every((v) => Number.isFinite(v)) ? deform : null;
       deform = integrateDeformPipeline(safePrev, targetDeform, params);
+      if (params.enableBandLimit) {
+        deform = bandLimitDeform(deform, params);
+      }
       drift01 = driftActivation(drift01, s.mode === "recording", params.driftActivationRate ?? 0.02, dt);
       const baseR = resolveBaseRadius(width, height, params, growth);
       if (!wander) {
@@ -1128,11 +1178,13 @@ function createCellRenderer(container, opts) {
       const splinePoints = catmullRom(contourPoints, 4);
       if (splinePoints.length >= 3) {
         {
+          const effectiveCount = params.enablePerimeterCount ? perimeterCiliaCount(baseR, params) : params.ciliaCount;
           const ciliaParams = params.enableActivity ? {
             ...params,
+            ciliaCount: effectiveCount,
             ciliaBeatHz: ciliaBeatHzEff(activity, params),
             ciliaCurl: params.ciliaCurl * (1 + 0.3 * activity)
-          } : params;
+          } : params.enablePerimeterCount ? { ...params, ciliaCount: effectiveCount } : params;
           const ciliaMotion = {
             tx: Math.cos(bodyHeading),
             ty: Math.sin(bodyHeading),
@@ -1184,6 +1236,20 @@ function createCellRenderer(container, opts) {
           ctx.beginPath();
           ctx.arc(nx, ny, nr * 0.22, 0, TAU);
           ctx.fill();
+        }
+        if (params.enableVacuole) {
+          const vac = contractileVacuole(t, baseR, params);
+          if (vac.r >= 0.5) {
+            const bearing = 2.3;
+            const placeR = Math.max(0, Math.min(baseR * 0.6, minMembraneR - vac.r));
+            const vcx0 = cx + Math.cos(bearing) * placeR;
+            const vcy0 = cy + Math.sin(bearing) * placeR;
+            const [vx, vy] = affineSqueezePoints([[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params)[0];
+            ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.7, params.nucleusAlpha * 0.45);
+            ctx.beginPath();
+            ctx.arc(vx, vy, vac.r, 0, TAU);
+            ctx.fill();
+          }
         }
         ctx.lineJoin = "round";
         ctx.lineCap = "round";

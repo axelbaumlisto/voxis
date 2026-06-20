@@ -2734,6 +2734,86 @@ describe("M15: NaN-poison guard through update()", () => {
     expect(firstMote[0]).toBeCloseTo(seeded[0].x, 6);
     expect(firstMote[1]).toBeCloseTo(seeded[0].y, 6);
   });
+
+  // Commit 20: wiring of the commit-17 pure helpers (E1/F13/F11) into the render
+  // loop behind their default-OFF gates. Each must be inert when off and produce
+  // a visible, correct change when on.
+  it("Commit 20 — E1 enablePerimeterCount drives more cilia arcs on a big cell", () => {
+    const rafCalls: Array<() => void> = []; let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const step = (k: number) => { for (let i = 0; i < k; i++) if (rafCalls.length) rafCalls.shift()!(); };
+    // A large baseR so the perimeter count exceeds the default 18 (cap raised so
+    // the perimeter formula, not the cap, governs). enableActivity on so cilia draw.
+    const big = { enablePerimeterCount: true, ciliaCount: 200, ciliaSpacingPx: 8, baseRadiusPx: 40 };
+    const recOn = installRecordingContext(); restoreCtx = recOn.restore;
+    const rOn = createCellRenderer(document.createElement("div"), { width: 200, height: 200, params: big });
+    rOn.update({ mode: "recording", audioLevel: 0.8, spectrumBins: new Array(32).fill(0.6) });
+    step(6); recOn.coords.length = 0; step(1);
+    const arcsBig = recOn.coords.length; rOn.destroy(); recOn.restore();
+    // OFF (fixed ciliaCount 18) on the same big cell => fewer cilia arcs.
+    const recOff = installRecordingContext(); restoreCtx = recOff.restore;
+    const rOff = createCellRenderer(document.createElement("div"), {
+      width: 200, height: 200, params: { ciliaCount: 18, baseRadiusPx: 40 },
+    });
+    rOff.update({ mode: "recording", audioLevel: 0.8, spectrumBins: new Array(32).fill(0.6) });
+    step(6); recOff.coords.length = 0; step(1);
+    const arcsSmall = recOff.coords.length; rOff.destroy(); recOff.restore();
+    // perimeter count at baseR~40, spacing 8 ≈ round(2π·40/8)=31 > 18.
+    expect(perimeterCiliaCount(40, { ...CELL_DEFAULTS, ciliaCount: 200, ciliaSpacingPx: 8 })).toBeGreaterThan(18);
+    expect(arcsBig).toBeGreaterThan(arcsSmall);
+  });
+
+  it("Commit 20 — F11 enableVacuole draws an extra peripheral vesicle arc", () => {
+    const rafCalls: Array<() => void> = []; let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const step = (k: number) => { for (let i = 0; i < k; i++) if (rafCalls.length) rafCalls.shift()!(); };
+    // Count nucleus/organelle arcs (r-bearing) with vacuole OFF vs ON at a sim
+    // time where the vacuole is filled (u≈0.85 of its period => near R_max).
+    const mkArcs = (params: Record<string, unknown>) => {
+      const rec = installRecordingContext(); restoreCtx = rec.restore;
+      const r = createCellRenderer(document.createElement("div"), { width: 160, height: 160, params });
+      r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      step(8); rec.coords.length = 0; step(1);
+      const c = rec.coords.length; r.destroy(); rec.restore();
+      return c;
+    };
+    // small vacuolePeriod so by frame ~9 (sim ~0.45s at 50ms) u is in the filled
+    // band; vacuoleMaxFrac large enough that vac.r>=0.5.
+    const on = mkArcs({ enableVacuole: true, vacuolePeriod: 1, vacuoleMaxFrac: 0.25 });
+    const off = mkArcs({ enableVacuole: false });
+    expect(on).toBeGreaterThan(off); // the vesicle adds one more arc triple
+  });
+
+  it("Commit 20 — F13 enableBandLimit produces finite, in-bounds membrane geometry", () => {
+    const rafCalls: Array<() => void> = []; let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const step = (k: number) => { for (let i = 0; i < k; i++) if (rafCalls.length) rafCalls.shift()!(); };
+    // With the band-limit gate on, the membrane contour must still be finite and
+    // inside the tank across active frames (the deform is clamped to bandLimitAmp
+    // then the renderer clamps radius to [floor,maxRadius]). Smoke-proves the
+    // wiring routes deform through bandLimitDeform without producing NaN/escape.
+    const rec = installRecordingContext(); restoreCtx = rec.restore;
+    const r = createCellRenderer(document.createElement("div"), {
+      width: 160, height: 160,
+      params: { enableBandLimit: true, bandLimitMode: 4, bandLimitAmp: 0.08 },
+    });
+    for (let i = 0; i < 6; i++) {
+      r.update({ mode: "recording", audioLevel: 0.7, spectrumBins: new Array(32).fill(0.5) });
+      step(1);
+    }
+    rec.coords.length = 0; step(1);
+    expect(rec.coords.length).toBeGreaterThan(0);
+    for (const c of rec.coords) {
+      expect(Number.isFinite(c)).toBe(true);
+      // membrane/organelle coords live within a generous tank-plus-margin box.
+      expect(c).toBeGreaterThan(-50);
+      expect(c).toBeLessThan(210);
+    }
+    r.destroy(); rec.restore();
+  });
 });
 
 // ---------------------------------------------------------------------------
