@@ -107,6 +107,11 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableEctoplasm: true,          // cortex/endoplasm boundary line
       ectoplasmFrac: 0.93,            // thin cortex at 93% radius (real: 92-96%)
       ectoplasmAlpha: 0.22,           // brighter thin rim (was 0.15)
+      helicalAmplitude: 0.3,           // sinusoidal lateral wobble (helical swimming)
+      foodVacuoleSizeMul: 1.8,         // food vacuoles visibly larger than granules
+      enableTrichocysts: true,         // radial needle discharge on startle
+      trichocystCount: 30,             // number of crystalline needles
+      trichocystLengthMul: 3.0,        // needle length = 3× cilia length
       enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)
       cyclosisGranuleCount: 52,      // pack the cytoplasm (biologist polish: crammed)
       granuleSizePx: 1.6,            // a touch brighter/bigger so they read
