@@ -976,10 +976,10 @@ function createCellRenderer(container, opts) {
   let wander = null;
   let bodyHeading = 0;
   let lastTickMs = performance.now();
+  let simTime = 0;
   const PERSIST_KEY = cellPersistKey(width, height);
   let driftPhaseOffset = 0;
   let lastPersist = 0;
-  let startedAt = performance.now();
   let restoredPose = null;
   if (typeof localStorage !== "undefined") {
     try {
@@ -988,7 +988,7 @@ function createCellRenderer(container, opts) {
       if (saved) {
         growth = saved.growth;
         const seed = restoreSeed(saved, performance.now());
-        startedAt = seed.startedAt;
+        simTime = saved.elapsed > 0 ? saved.elapsed : 0;
         driftPhaseOffset = seed.driftPhaseOffset;
         restoredPose = wanderPoseFromState(saved, width, height, resolveBaseRadius(width, height, params, growth), params);
       }
@@ -997,9 +997,10 @@ function createCellRenderer(container, opts) {
   let rafId = null;
   const tick = () => {
     const nowMs = performance.now();
-    const t = (nowMs - startedAt) / 1000;
     const dt = Math.min(0.05, Math.max(0.001, (nowMs - lastTickMs) / 1000));
     lastTickMs = nowMs;
+    simTime += dt;
+    const t = simTime;
     const s = latestState;
     const audioLevel = sanitizeUnit(s.audioLevel);
     const spectrumBins = sanitizeBins(s.spectrumBins);

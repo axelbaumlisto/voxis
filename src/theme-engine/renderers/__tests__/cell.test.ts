@@ -2356,6 +2356,126 @@ describe("createCellRenderer", () => {
 });
 
 // ---------------------------------------------------------------------------
+// M11: single simulation clock (simTime)
+// ---------------------------------------------------------------------------
+//
+// The tick loop must drive BOTH position integration AND phase clocks from ONE
+// accumulator that sums the SAME clamped per-frame dt. Otherwise a backgrounded
+// tab resuming with one huge real delta advances phases (wall-clock) far past
+// the position (clamped dt), and they desync permanently.
+//
+// Observable: the persisted `elapsed` field == the phase clock fed to all phase
+// formulas. Position-time == sum of clamped per-frame dt. The two must agree.
+describe("M11: single simulation clock (simTime)", () => {
+  const W = 160, H = 160;
+  const key = cellPersistKey(W, H);
+  let clock = 0;
+  let nowSpy: ReturnType<typeof vi.spyOn>;
+  const rafCalls: Array<() => void> = [];
+
+  beforeEach(() => {
+    rafCalls.length = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      rafCalls.push(cb);
+      return rafCalls.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    localStorage.clear();
+    clock = 1000;
+    nowSpy = vi.spyOn(performance, "now").mockImplementation(() => clock);
+  });
+  afterEach(() => {
+    nowSpy.mockRestore();
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  const readElapsed = (): number | null => {
+    const s = parseCellState(localStorage.getItem(key));
+    return s ? s.elapsed : null;
+  };
+  // Run the next queued tick with performance.now() pinned to `ms`.
+  const tickAt = (ms: number) => {
+    clock = ms;
+    const cb = rafCalls.shift();
+    if (cb) cb();
+  };
+
+  // Invariant A (60fps-unchanged): under on-time frames the clamped dt equals
+  // the true dt, so simTime must equal the pre-change wall-clock formula
+  // t = (now - startedAt)/1000 to floating-point. This locks the steady-state
+  // path so the single-clock refactor is numerically identical when no stall
+  // occurs. (Holds before AND after the fix — it is the regression lock.)
+  it("A: steady on-time frames keep phase-time == accumulated dt (1e-9)", () => {
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, { width: W, height: H });
+    // 50ms frames: each is exactly at the clamp ceiling, so clamped dt == true dt
+    // (the steady-state identity). Persist throttles to >500ms: it fires at frame
+    // 1 (t=1050) then next at frame 12 (t=1600, since 1600-1050=550>500). So after
+    // 12 frames the persisted elapsed == 12*0.05 = 0.6, which is BOTH the
+    // wall-clock total AND the accumulated clamped dt — they coincide precisely
+    // because no frame was ever stalled. No throttle-lag ambiguity.
+    let t = 1000;
+    let persisted = 0;
+    for (let i = 0; i < 12; i++) {
+      t += 50;
+      tickAt(t);
+      const e = readElapsed();
+      if (e !== null) persisted = e;
+    }
+    const accumulated = 12 * 0.05; // sum of clamped per-frame dt
+    const wallClock = (t - 1000) / 1000;
+    expect(persisted).toBeGreaterThan(0);
+    // phase-time equals BOTH accumulated dt and wall-clock when never stalled.
+    expect(Math.abs(persisted - accumulated)).toBeLessThan(1e-9);
+    expect(Math.abs(persisted - wallClock)).toBeLessThan(1e-9);
+    r.destroy();
+  });
+
+  // Invariant B (gap divergence fixed): after one 500ms stall frame, the
+  // persisted phase-time must equal the accumulated CLAMPED position-time
+  // (the 500ms frame is clamped to 50ms), NOT the wall-clock total. Before the
+  // fix the phase clock used wall-clock and would read ~0.532s while position
+  // only advanced ~0.082s — a ~0.45s permanent desync.
+  it("B: a 500ms gap frame advances phase-time by the CLAMPED dt, not wall-clock", () => {
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, { width: W, height: H });
+    // On-time frame (16ms). First persist fires here (now - lastPersist > 500).
+    tickAt(1016);
+    // 500ms STALL: one frame with a huge real delta (clamped to 50ms).
+    tickAt(1516);
+    // One more on-time frame to cross the next 500ms persist throttle boundary.
+    tickAt(1532);
+    const elapsed = readElapsed();
+    // Sum of CLAMPED per-frame dt = position-time = phase-time after the fix.
+    const expectedSim = 0.016 + 0.05 + 0.016; // 0.082
+    const wallClock = (1532 - 1000) / 1000; // 0.532 — the pre-fix (buggy) value
+    expect(elapsed).not.toBeNull();
+    expect(Math.abs(elapsed! - expectedSim)).toBeLessThan(1e-9);
+    // And it must NOT be the wall-clock value (proves the gap no longer diverges).
+    expect(Math.abs(elapsed! - wallClock)).toBeGreaterThan(0.4);
+    r.destroy();
+  });
+
+  // Restart seam (closes the review's test-gap nit): a restored state run through
+  // the LIVE tick must resume phase-time at saved.elapsed + one frame's dt, i.e.
+  // exactly the old wall-clock formula. Proves continuity end-to-end, not just
+  // via the pure restoreSeed round-trip.
+  it("C: a restored state resumes phase-time at saved.elapsed + dt (seamless)", () => {
+    localStorage.setItem(key, serializeCellState({ driftPhase: 7.5, growth: 0.3, elapsed: 5 }));
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, { width: W, height: H });
+    // First on-time frame: dt = 50ms. Persist fires (now-0>500) and writes the
+    // resumed elapsed = saved.elapsed (5) + dt (0.05) = 5.05.
+    tickAt(1050);
+    const elapsed = readElapsed();
+    expect(elapsed).not.toBeNull();
+    expect(Math.abs(elapsed! - 5.05)).toBeLessThan(1e-9);
+    r.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // M15: NaN-poison guard
 // ---------------------------------------------------------------------------
 

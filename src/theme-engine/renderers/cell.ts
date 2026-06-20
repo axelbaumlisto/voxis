@@ -2087,6 +2087,12 @@ export function createCellRenderer(
   let wander: WanderState | null = null;
   let bodyHeading = 0; // G4: smoothed body long-axis heading (radians)
   let lastTickMs = performance.now();
+  // M11: single simulation clock. Accumulates the SAME clamped per-frame dt that
+  // drives position integration, and feeds ALL phase formulas. This unifies the
+  // two former clocks (position used clamped dt; phases used true wall-elapsed),
+  // so a backgrounded tab resuming with one huge frame can no longer desync
+  // position from phase. Clamp only the per-frame dt, never this accumulator.
+  let simTime = 0;
 
   // Persistence: restore state from localStorage for continuity across restarts.
   // M5: key is namespaced by tank size so a pose saved for one overlay geometry
@@ -2094,7 +2100,6 @@ export function createCellRenderer(
   const PERSIST_KEY = cellPersistKey(width, height);
   let driftPhaseOffset = 0;
   let lastPersist = 0;
-  let startedAt = performance.now();
   // M4: a wander pose restored from persistence, consumed at lazy wander-init so
   // the cell resumes where it left off instead of teleporting to centre.
   let restoredPose: { x: number; y: number; heading: number } | null = null;
@@ -2107,7 +2112,12 @@ export function createCellRenderer(
       if (saved) {
         growth = saved.growth;
         const seed = restoreSeed(saved, performance.now());
-        startedAt = seed.startedAt;
+        // M11: seed the single clock from the saved elapsed so phases continue
+        // seamlessly. driftPhaseOffset is still derived via restoreSeed, so the
+        // first frame's driftPhase = saved.driftPhase + dt (one-frame advance) —
+        // exactly what the old wall-clock formula produced, so the seam is
+        // equivalent to pre-M11 behaviour.
+        simTime = saved.elapsed > 0 ? saved.elapsed : 0;
         driftPhaseOffset = seed.driftPhaseOffset;
         // baseR depends on growth (resolveBaseRadius); use the restored growth so
         // the inset clamp matches the cell's actual size.
@@ -2122,11 +2132,15 @@ export function createCellRenderer(
 
   const tick = () => {
     const nowMs = performance.now();
-    const t = (nowMs - startedAt) / 1000;
     // Real frame delta (clamped) so wander speed is frame-rate independent
     // and a backgrounded tab resuming doesn't teleport the cell.
     const dt = Math.min(0.05, Math.max(0.001, (nowMs - lastTickMs) / 1000));
     lastTickMs = nowMs;
+    // M11: advance the single clock by the SAME clamped dt used for position.
+    // `t` (formerly true wall-elapsed) is now this accumulator so phases and
+    // position stay locked together.
+    simTime += dt;
+    const t = simTime;
     const s = latestState;
 
     // M15: sanitise external frame state so a NaN/Inf audioLevel or bad spectrum
