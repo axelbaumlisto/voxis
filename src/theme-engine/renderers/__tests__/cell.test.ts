@@ -86,6 +86,8 @@ import {
   interiorPoint,
   seedInteriorGranules,
   profileCDFInv,
+  cyclosisLoopPoint,
+  buildProfilePts,
 } from "../cell";
 import { deformAt, wrapPi } from "../shared";
 import type { CellParams, CellPersistState, CiliaMotion, InteriorCtx } from "../cell";
@@ -6642,5 +6644,189 @@ describe("Commit 32b — body-coord granule distribution", () => {
       expect(a[i].phi0).toBe(b[i].phi0);
     }
     expect(profileCDFInv(0.37, eggParams)).toBe(profileCDFInv(0.37, eggParams));
+  });
+});
+
+describe("Commit 32c — streamfunction cyclosis", () => {
+  const TAU = Math.PI * 2;
+  const eggParams: CellParams = {
+    ...CELL_DEFAULTS,
+    enableBodyProfile: true,
+    bodyProfileType: "egg",
+    bodyProfileTaper: 0.27,
+    bodyAspect: 3,
+    cyclosisPeriod: 45,
+  };
+
+  it("(a) ON A CLOSED LOOP: |u|,|s| <= amp < 1; q=1 outer ~0.98, q=0 inner ~0.30", () => {
+    for (const q of [0, 0.25, 0.5, 0.75, 1]) {
+      const amp = 0.3 + 0.68 * Math.sqrt(q);
+      for (let k = 0; k <= 40; k++) {
+        const simTime = (k / 40) * eggParams.cyclosisPeriod!;
+        const { u, s } = cyclosisLoopPoint({ q, phi0: 0.3 }, simTime, eggParams);
+        expect(Math.abs(u)).toBeLessThanOrEqual(amp + 1e-9);
+        expect(Math.abs(s)).toBeLessThanOrEqual(amp + 1e-9);
+        expect(Math.abs(u)).toBeLessThan(1);
+        expect(Math.abs(s)).toBeLessThan(1);
+      }
+    }
+    // outer / inner loop amplitudes from q
+    const ampOuter = 0.3 + 0.68 * Math.sqrt(1);
+    const ampInner = 0.3 + 0.68 * Math.sqrt(0);
+    expect(Math.abs(ampOuter - 0.98)).toBeLessThan(1e-9);
+    expect(Math.abs(ampInner - 0.3)).toBeLessThan(1e-9);
+    // The actual max excursion over a circuit reaches amp.
+    let maxAbsU = 0;
+    for (let k = 0; k <= 200; k++) {
+      const simTime = (k / 200) * eggParams.cyclosisPeriod!;
+      const { u } = cyclosisLoopPoint({ q: 1, phi0: 0 }, simTime, eggParams);
+      maxAbsU = Math.max(maxAbsU, Math.abs(u));
+    }
+    expect(maxAbsU).toBeGreaterThan(0.97);
+  });
+
+  it("(b) CIRCULATES: returns near start after exactly cyclosisPeriod", () => {
+    const T = eggParams.cyclosisPeriod!;
+    const g = { q: 0.6, phi0: 1.1 };
+    const start = cyclosisLoopPoint(g, 0, eggParams);
+    const end = cyclosisLoopPoint(g, T, eggParams);
+    expect(Math.abs(end.u - start.u)).toBeLessThan(1e-6);
+    expect(Math.abs(end.s - start.s)).toBeLessThan(1e-6);
+    // and at half period it is NOT near the start (genuinely circulating)
+    const half = cyclosisLoopPoint(g, T / 2, eggParams);
+    expect(Math.hypot(half.u - start.u, half.s - start.s)).toBeGreaterThan(0.1);
+  });
+
+  it("(c) FRAME-RATE INDEPENDENT: depends only on simTime; phase linear", () => {
+    const g = { q: 0.5, phi0: 0.7 };
+    // identical simTime => identical output regardless of how we got there
+    const at2a = cyclosisLoopPoint(g, 2.0, eggParams);
+    const at2b = cyclosisLoopPoint(g, 2.0, eggParams);
+    expect(at2a.u).toBe(at2b.u);
+    expect(at2a.s).toBe(at2b.s);
+    // phase linear in simTime: phase(2t) - phi0 == 2*(phase(t) - phi0)
+    const T = eggParams.cyclosisPeriod!;
+    const amp = 0.3 + 0.68 * Math.sqrt(g.q);
+    const t = 3.0;
+    const ph_t = g.phi0 + (TAU / T) * t;
+    const ph_2t = g.phi0 + (TAU / T) * (2 * t);
+    const exp_t = { u: amp * Math.sin(ph_t), s: amp * Math.sin(ph_t + Math.PI / 2) };
+    const exp_2t = { u: amp * Math.sin(ph_2t), s: amp * Math.sin(ph_2t + Math.PI / 2) };
+    const got_t = cyclosisLoopPoint(g, t, eggParams);
+    const got_2t = cyclosisLoopPoint(g, 2 * t, eggParams);
+    expect(Math.abs(got_t.u - exp_t.u)).toBeLessThan(1e-12);
+    expect(Math.abs(got_2t.u - exp_2t.u)).toBeLessThan(1e-12);
+    expect(Math.abs(got_t.s - exp_t.s)).toBeLessThan(1e-12);
+  });
+
+  it("(d) SENSE FLIP: cyclosisSense=-1 reverses circulation direction", () => {
+    const g = { q: 0.5, phi0: 0 };
+    const dt = 0.01;
+    const pPlus = { ...eggParams, cyclosisSense: 1 };
+    const pMinus = { ...eggParams, cyclosisSense: -1 };
+    // du/dt at small +simTime
+    const a0 = cyclosisLoopPoint(g, 0, pPlus);
+    const a1 = cyclosisLoopPoint(g, dt, pPlus);
+    const b0 = cyclosisLoopPoint(g, 0, pMinus);
+    const b1 = cyclosisLoopPoint(g, dt, pMinus);
+    const duPlus = a1.u - a0.u;
+    const duMinus = b1.u - b0.u;
+    expect(Math.sign(duPlus)).toBe(-Math.sign(duMinus));
+    expect(duPlus).not.toBe(0);
+  });
+
+  it("(e) DECOUPLED FROM SPEED: period uses cyclosisPeriod only, ignores speedNorm", () => {
+    const g = { q: 0.4, phi0: 0.2 };
+    // changing a (hypothetical) speed field has no effect; the helper signature
+    // does not even take speedNorm. Two different period values change the loop
+    // closure time, proving the period is the only clock.
+    const slow = { ...eggParams, cyclosisPeriod: 60 };
+    const fast = { ...eggParams, cyclosisPeriod: 30 };
+    const closeSlow = cyclosisLoopPoint(g, 60, slow);
+    const startSlow = cyclosisLoopPoint(g, 0, slow);
+    const closeFast = cyclosisLoopPoint(g, 30, fast);
+    const startFast = cyclosisLoopPoint(g, 0, fast);
+    expect(Math.abs(closeSlow.u - startSlow.u)).toBeLessThan(1e-6);
+    expect(Math.abs(closeFast.u - startFast.u)).toBeLessThan(1e-6);
+  });
+
+  it("(f) buildProfilePts EQUIVALENCE: cache path === inline path, byte-identical", () => {
+    const baseR = 40;
+    const cx = 100, cy = 100, bodyHeading = 0.4;
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, eggParams);
+    const profilePts = buildProfilePts(baseR, eggParams);
+    const ctxWith: InteriorCtx = {
+      cx, cy, baseR, deform, squeezeK: 1, squeezePhi: 0, bodyHeading, params: eggParams, profilePts,
+    };
+    const ctxWithout: InteriorCtx = {
+      cx, cy, baseR, deform, squeezeK: 1, squeezePhi: 0, bodyHeading, params: eggParams,
+    };
+    for (let i = 0; i <= 12; i++) {
+      const u = -0.9 + (1.8 * i) / 12;
+      for (let j = 0; j <= 8; j++) {
+        const s = -0.9 + (1.8 * j) / 8;
+        const a = interiorPoint(u, s, ctxWith);
+        const b = interiorPoint(u, s, ctxWithout);
+        expect(a[0]).toBe(b[0]);
+        expect(a[1]).toBe(b[1]);
+      }
+    }
+  });
+
+  it("(f2) buildProfilePts matches the inline 96-sample build", () => {
+    const baseR = 37;
+    const pts = buildProfilePts(baseR, eggParams);
+    expect(pts.length).toBe(96);
+    for (let k = 0; k < 96; k++) {
+      const t = (k / 96) * TAU;
+      const [px, py] = bodyProfilePoint(t, baseR, eggParams);
+      expect(pts[k].ang).toBe(Math.atan2(py, px));
+      expect(pts[k].rad).toBe(Math.hypot(px, py));
+    }
+  });
+
+  it("(g) POLE REACH IN WORLD: q=1 granule trajectory spans most of body length", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.24,
+      bodyAspect: 3,
+      cyclosisPeriod: 45,
+    };
+    const baseR = 40;
+    const cx = 0, cy = 0, bodyHeading = 0; // heading 0 => body axis along world +x
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, params);
+    const profilePts = buildProfilePts(baseR, params);
+    const ctx: InteriorCtx = {
+      cx, cy, baseR, deform, squeezeK: 1, squeezePhi: 0, bodyHeading, params, profilePts,
+    };
+    const L = baseR * Math.sqrt(params.bodyAspect ?? 3);
+    const g = { q: 1, phi0: 0 };
+    let minXb = Infinity, maxXb = -Infinity;
+    for (let k = 0; k <= 360; k++) {
+      const simTime = (k / 360) * params.cyclosisPeriod!;
+      const loop = cyclosisLoopPoint(g, simTime, params);
+      const [wx] = interiorPoint(loop.u, loop.s, ctx);
+      minXb = Math.min(minXb, wx - cx);
+      maxXb = Math.max(maxXb, wx - cx);
+    }
+    // axial extent of the trajectory vs the half-length L
+    expect(maxXb / L).toBeGreaterThan(0.8);
+    expect(-minXb / L).toBeGreaterThan(0.8);
+  });
+
+  it("(h) DETERMINISM: identical args => identical output", () => {
+    const g = { q: 0.42, phi0: 1.3 };
+    const a = cyclosisLoopPoint(g, 7.25, eggParams);
+    const b = cyclosisLoopPoint(g, 7.25, eggParams);
+    expect(a.u).toBe(b.u);
+    expect(a.s).toBe(b.s);
+    const c = buildProfilePts(40, eggParams);
+    const d = buildProfilePts(40, eggParams);
+    for (let k = 0; k < c.length; k++) {
+      expect(c[k].ang).toBe(d[k].ang);
+      expect(c[k].rad).toBe(d[k].rad);
+    }
   });
 });
