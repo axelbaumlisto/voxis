@@ -98,6 +98,15 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       nucleusAlpha: 0.85,            // nucleus must be visible interior anchor (was 0.72)
       enableVacuoles: true,          // two asynchronous contractile vacuoles (Commit 26)
       enableCVCanals: true,          // radial canal star shape on CVs (v3.6)
+      canalLenMul: 2.5,              // longer canals into cytoplasm (was 2.0)
+      canalLineWidth: 1.0,           // thicker canal lines (was 0.5px)
+      canalAlphaMul: 0.5,            // more visible canals (was 0.3)
+      enableOralGroove: true,         // ventral concavity — Paramecium's defining feature
+      oralGrooveDepth: 0.04,          // 4% inward indent
+      cyclosisActivityBoost: 0.4,     // cyclosis 40% faster at full activity
+      enableEctoplasm: true,          // cortex/endoplasm boundary line
+      ectoplasmFrac: 0.85,            // inner boundary at 85% radius
+      ectoplasmAlpha: 0.15,           // subtle DIC-like rim
       enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)
       cyclosisGranuleCount: 52,      // pack the cytoplasm (biologist polish: crammed)
       granuleSizePx: 1.6,            // a touch brighter/bigger so they read

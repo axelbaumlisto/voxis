@@ -509,6 +509,13 @@ var CELL_DEFAULTS = {
   bodyProfileTaper: 0.27,
   bodyAspect: 3,
   bodyVentralBend: 0,
+  enableOralGroove: false,
+  oralGrooveDepth: 0.04,
+  oralGrooveAngle: 1.2,
+  oralGrooveWidth: 0.6,
+  enableEctoplasm: false,
+  ectoplasmFrac: 0.85,
+  ectoplasmAlpha: 0.15,
   enableVacuoles: false,
   vacuoleAnteriorBearing: 1.9,
   vacuolePosteriorBearing: -1.9,
@@ -582,6 +589,12 @@ function cellActivity(energy, growth, params) {
   const wg = params?.activityGrowthWeight ?? 0.4;
   const a = we * energy + wg * growth;
   return a < 0 ? 0 : a > 1 ? 1 : a;
+}
+function effectiveCyclosisPeriod(activity, params) {
+  const base = Math.max(0.1, params.cyclosisPeriod ?? 45);
+  const boost = params.cyclosisActivityBoost ?? 0;
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  return base / (1 + a * boost);
 }
 function swimSpeed(activity, width, height, params) {
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
@@ -1185,6 +1198,28 @@ function bodyProfileDeform(sampleCount, bodyHeading, baseR, params) {
   }
   return out;
 }
+function applyOralGroove(deform, bodyHeading, params) {
+  if (!params.enableOralGroove)
+    return deform;
+  const N = deform.length;
+  if (N < 3)
+    return deform;
+  const depth = params.oralGrooveDepth ?? 0.04;
+  const center = params.oralGrooveAngle ?? 1.2;
+  const halfW = params.oralGrooveWidth ?? 0.6;
+  for (let i = 0;i < N; i++) {
+    const canvasAng = i / N * TAU;
+    let bodyAng = canvasAng - bodyHeading;
+    bodyAng = (bodyAng % TAU + TAU + Math.PI) % TAU - Math.PI;
+    const dist = Math.abs(bodyAng - center);
+    if (dist < halfW) {
+      const t = dist / halfW;
+      const bell = 0.5 * (1 + Math.cos(Math.PI * t));
+      deform[i] -= depth * bell;
+    }
+  }
+  return deform;
+}
 function buildProfilePts(baseR, params, samples = 96) {
   const N = Math.max(3, Math.floor(samples));
   const pts = [];
@@ -1602,6 +1637,8 @@ function createCellRenderer(container, opts) {
       const energy = energySmoothed;
       growth = sanitizeUnit(growthLevel(sanitizeUnit(growth), audioLevel, s.mode, params.growthAttack, params.growthRelease));
       const activity = cellActivity(energy, growth, params);
+      const cyclPeriod = effectiveCyclosisPeriod(activity, params);
+      const cyclParams = params.cyclosisActivityBoost ? { ...params, cyclosisPeriod: cyclPeriod } : params;
       const effectiveFillAlpha = lerp(params.fillAlpha, params.fillAlphaActive ?? params.fillAlpha, activity);
       const baseMembraneLightness = params.membraneLightness ?? 0.6;
       const effectiveMembraneLightness = lerp(baseMembraneLightness, params.membraneLightnessActive ?? baseMembraneLightness, activity);
@@ -1655,6 +1692,7 @@ function createCellRenderer(container, opts) {
       if (params.enableBodyProfile) {
         deform = bodyProfileDeform(sampleCount, bodyHeading, baseR, params);
       }
+      applyOralGroove(deform, bodyHeading, params);
       const smoothedPoints = [];
       for (let i = 0;i < sampleCount; i++) {
         const angle = i / sampleCount * TAU;
@@ -1722,6 +1760,23 @@ function createCellRenderer(container, opts) {
         grad.addColorStop(1, hsla(baseHue, params.cytoplasmSat ?? 0.7, 0.45, effectiveFillAlpha));
         ctx.fillStyle = grad;
         ctx.fill();
+        if (params.enableEctoplasm) {
+          const ectoFrac = params.ectoplasmFrac ?? 0.85;
+          const ectoAlpha = params.ectoplasmAlpha ?? 0.15;
+          ctx.save();
+          ctx.beginPath();
+          const ex0 = cx + (splinePoints[0][0] - cx) * ectoFrac;
+          const ey0 = cy + (splinePoints[0][1] - cy) * ectoFrac;
+          ctx.moveTo(ex0, ey0);
+          for (let i = 1;i < splinePoints.length; i++) {
+            ctx.lineTo(cx + (splinePoints[i][0] - cx) * ectoFrac, cy + (splinePoints[i][1] - cy) * ectoFrac);
+          }
+          ctx.closePath();
+          ctx.strokeStyle = hsla(baseHue, (params.membraneSat ?? 0.85) * 0.5, effectiveMembraneLightness, ectoAlpha);
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+          ctx.restore();
+        }
         let minMembraneR = Infinity;
         for (const dv of deform)
           minMembraneR = Math.min(minMembraneR, baseR * (1 + dv));
@@ -1841,10 +1896,10 @@ function createCellRenderer(container, opts) {
               ctx.fill();
               if (params.enableCVCanals && e.r > 1) {
                 const canalCount = 6;
-                const canalLen = e.r * 2;
-                const canalAlpha = params.nucleusAlpha * 0.45 * 0.3;
+                const canalLen = e.r * (params.canalLenMul ?? 2);
+                const canalAlpha = params.nucleusAlpha * 0.45 * (params.canalAlphaMul ?? 0.3);
                 ctx.strokeStyle = hsla(cvH, 0.3, 0.72, canalAlpha);
-                ctx.lineWidth = 0.5;
+                ctx.lineWidth = params.canalLineWidth ?? 0.5;
                 for (let ci = 0;ci < canalCount; ci++) {
                   const angle = ci / canalCount * TAU;
                   ctx.beginPath();
@@ -1868,10 +1923,10 @@ function createCellRenderer(container, opts) {
               ctx.fill();
               if (params.enableCVCanals && e.r > 1) {
                 const canalCount = 6;
-                const canalLen = e.r * 2;
-                const canalAlpha = params.nucleusAlpha * 0.45 * 0.3;
+                const canalLen = e.r * (params.canalLenMul ?? 2);
+                const canalAlpha = params.nucleusAlpha * 0.45 * (params.canalAlphaMul ?? 0.3);
                 ctx.strokeStyle = hsla(cvH, 0.3, 0.72, canalAlpha);
-                ctx.lineWidth = 0.5;
+                ctx.lineWidth = params.canalLineWidth ?? 0.5;
                 for (let ci = 0;ci < canalCount; ci++) {
                   const angle = ci / canalCount * TAU;
                   ctx.beginPath();
@@ -1904,7 +1959,7 @@ function createCellRenderer(container, opts) {
             };
             for (let i = 0;i < interiorGranules.length; i++) {
               const g = interiorGranules[i];
-              const loop = cyclosisLoopPoint(g, t, params);
+              const loop = cyclosisLoopPoint(g, t, cyclParams);
               const [gx, gy] = interiorPoint(loop.u, loop.s, ictx);
               ctx.beginPath();
               ctx.arc(gx, gy, granuleSizePx, 0, TAU);
@@ -1914,7 +1969,7 @@ function createCellRenderer(container, opts) {
             if (!granules)
               granules = seedGranules(baseR, params);
             for (let i = 0;i < granules.length; i++) {
-              granules[i] = advectGranule(granules[i], baseR, dt, params);
+              granules[i] = advectGranule(granules[i], baseR, dt, cyclParams);
               const off = granules[i];
               const maxRad = Math.min((params.granuleMaxRadiusFrac ?? 0.75) * baseR, Math.max(0, minMembraneR - granuleSizePx));
               const rad = Math.hypot(off.x, off.y);
@@ -1946,7 +2001,7 @@ function createCellRenderer(container, opts) {
             };
             for (let i = 0;i < interiorFoodVacuoles.length; i++) {
               const fv = interiorFoodVacuoles[i];
-              const loop = cyclosisLoopPoint(fv, t, params);
+              const loop = cyclosisLoopPoint(fv, t, cyclParams);
               const size = foodVacuoleSize(t, fv.digestPhase, params);
               const drawR = fvSizePx * (0.4 + 0.6 * size);
               const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);
@@ -2111,6 +2166,15 @@ function mount(container, api) {
       nucleusAlpha: 0.85,
       enableVacuoles: true,
       enableCVCanals: true,
+      canalLenMul: 2.5,
+      canalLineWidth: 1,
+      canalAlphaMul: 0.5,
+      enableOralGroove: true,
+      oralGrooveDepth: 0.04,
+      cyclosisActivityBoost: 0.4,
+      enableEctoplasm: true,
+      ectoplasmFrac: 0.85,
+      ectoplasmAlpha: 0.15,
       enableCyclosis: true,
       cyclosisGranuleCount: 52,
       granuleSizePx: 1.6,
