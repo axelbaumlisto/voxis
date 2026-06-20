@@ -95,7 +95,7 @@ impl Orchestrator {
         load_config_from_app(&self.app)
     }
     pub async fn init_overlay(&self, config: &AppConfig) {
-        self.overlay_manager.init(config).await;
+        self.overlay_manager.ensure_init(config).await;
     }
     pub async fn reinit_overlay(&self, config: &AppConfig) {
         self.overlay_manager.reinit(config).await;

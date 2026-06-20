@@ -4,5 +4,7 @@
   "name": "Living Reed",
   "description": "Balanced motion, warm green palette — reference organic profile",
   "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
   "entry": "theme.js"
 }

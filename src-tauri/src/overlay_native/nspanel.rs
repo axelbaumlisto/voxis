@@ -471,17 +471,12 @@ mod imp {
         }
 
         pub fn shutdown(&mut self) {
-            if let Inner::Live { app, label } = self {
-                let label = label.clone();
-                Self::on_main_thread(app, move |app| {
-                    if let Ok(panel) = app.get_webview_panel(&label) {
-                        panel.hide();
-                    }
-                });
-                // Leave the panel registered; closing it requires the runtime
-                // to be alive and crossing FFI boundaries here would risk a
-                // deadlock if shutdown runs on a non-main thread.
-            }
+            // Do NOT hide/close the panel here. The panel window is a
+            // singleton reused across reinit (e.g. theme change). Hiding it
+            // on the main-thread queue would race with the new backend's
+            // reuse+show and leave the overlay invisible. The OverlayManager
+            // hides the window explicitly on the enabled -> disabled
+            // transition. The panel stays registered for reuse.
             *self = Inner::Unavailable;
         }
     }

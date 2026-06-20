@@ -422,14 +422,21 @@ impl OverlayBackend for WebviewOverlay {
     }
 
     fn shutdown(&mut self) {
+        // ONLY mark this backend instance inactive. Do NOT touch the OS
+        // window here.
+        //
+        // The overlay window is a singleton keyed by `label` and is reused
+        // across reinit (e.g. theme change). `reinit` does shutdown(old) +
+        // create(new), and the old backend is also dropped (Drop ->
+        // shutdown). If shutdown closed/hid the window, those hides —
+        // dispatched async to the main thread — would run AFTER the new
+        // backend has already reused and shown the same window on the
+        // caller thread, leaving the overlay invisible.
+        //
+        // Actually hiding the window when the overlay is disabled is the
+        // OverlayManager's job (`hide_overlay_window`), invoked only on the
+        // enabled -> disabled transition.
         self.running.store(false, Ordering::SeqCst);
-        let label = self.label.clone();
-        let app = self.app.clone();
-        let _ = app.clone().run_on_main_thread(move || {
-            if let Some(w) = app.get_webview_window(&label) {
-                let _ = w.close();
-            }
-        });
     }
 
     fn is_running(&self) -> bool {

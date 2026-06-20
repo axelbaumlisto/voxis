@@ -222,6 +222,10 @@ export function mount(container, api) {
 Place both files in `<themes dir>/pulsar/`, reload themes, select Pulsar, and
 speak — the circle pulses with your voice.
 
+> **Modifying an existing theme and want it live?** See the practical
+> workflow in [`THEME_EDITING.md`](./THEME_EDITING.md) — two file locations,
+> the seeding gotcha, harness/E2E, and deploy-without-rebuild.
+
 ## Editing Builtin Themes
 
 The builtin themes (Winamp Classic, Handy Pill, Default, Neon, etc.) are the

@@ -4,5 +4,7 @@
   "name": "Radiolarian",
   "description": "Luminous glass-skeleton plankton — radial spikes, hexagonal pore lattice, cyan rim that pulses with voice",
   "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
   "entry": "theme.js"
 }
