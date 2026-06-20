@@ -50,7 +50,7 @@ import {
   integrateDeformPipeline,
   affineSqueezePoints,
 } from "../cell";
-import type { CellParams, CellPersistState } from "../cell";
+import type { CellParams, CellPersistState, CiliaMotion } from "../cell";
 
 const TAU = Math.PI * 2;
 
@@ -3403,5 +3403,94 @@ describe("Commit 8b — affine gate", () => {
   it("flips enableAffine ON; body round at rest (floor 0)", () => {
     expect(CELL_DEFAULTS.enableAffine).toBe(true);
     expect(CELL_DEFAULTS.bodyElongationFloor).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 8c — cilia motion coupling (D2 drag-lean + biology params)
+// ---------------------------------------------------------------------------
+describe("ciliaPath D2 drag-lean", () => {
+  const cx = 80, cy = 80, baseR = 17, t = 1.0;
+  const P = { ...CELL_DEFAULTS };
+
+  it("collapses to identity at speedNorm=0 (back-compat: no motion => no lean)", () => {
+    const still = ciliaPath(cx, cy, baseR, t, 0.5, 0.5, P, { tx: 1, ty: 0, speedNorm: 0 });
+    const none = ciliaPath(cx, cy, baseR, t, 0.5, 0.5, P);
+    expect(still.length).toBe(none.length);
+    for (let h = 0; h < still.length; h++) {
+      for (let i = 0; i < still[h].points.length; i++) {
+        expect(still[h].points[i][0]).toBeCloseTo(none[h].points[i][0], 9);
+        expect(still[h].points[i][1]).toBeCloseTo(none[h].points[i][1], 9);
+      }
+    }
+  });
+
+  it("leans the crown REARWARD (opposite travel) when swimming", () => {
+    // Travelling along +x: tips should be displaced toward -x vs the still crown.
+    const motion: CiliaMotion = { tx: 1, ty: 0, speedNorm: 1 };
+    const moving = ciliaPath(cx, cy, baseR, t, 0.6, 0.6, P, motion);
+    const still = ciliaPath(cx, cy, baseR, t, 0.6, 0.6, P, { tx: 1, ty: 0, speedNorm: 0 });
+    // mean tip x-displacement must be negative (rearward, -x).
+    let sumDx = 0;
+    for (let h = 0; h < moving.length; h++) {
+      const tip = moving[h].points[moving[h].points.length - 1];
+      const tip0 = still[h].points[still[h].points.length - 1];
+      sumDx += tip[0] - tip0[0];
+    }
+    expect(sumDx / moving.length).toBeLessThan(0);
+  });
+
+  it("base stays anchored at the membrane (lean grows toward the tip)", () => {
+    const motion: CiliaMotion = { tx: 1, ty: 0, speedNorm: 1 };
+    const moving = ciliaPath(cx, cy, baseR, t, 0.6, 0.6, P, motion);
+    const still = ciliaPath(cx, cy, baseR, t, 0.6, 0.6, P, { tx: 1, ty: 0, speedNorm: 0 });
+    for (let h = 0; h < moving.length; h++) {
+      // base point (index 0) is unmoved by drag (pow(0,1.3)=0)
+      expect(moving[h].points[0][0]).toBeCloseTo(still[h].points[0][0], 9);
+      expect(moving[h].points[0][1]).toBeCloseTo(still[h].points[0][1], 9);
+    }
+  });
+
+  it("leading-face hairs lean more than trailing-face hairs", () => {
+    // lead = radial . tangent; dragGain = dragCoeff*speed*(0.6+0.4*lead).
+    // A hair pointing along +tangent (leading, lead=+1) should lean more than
+    // one pointing along -tangent (trailing, lead=-1).
+    const motion: CiliaMotion = { tx: 1, ty: 0, speedNorm: 1 };
+    const moving = ciliaPath(cx, cy, baseR, t, 0.6, 0.6, P, motion);
+    const still = ciliaPath(cx, cy, baseR, t, 0.6, 0.6, P, { tx: 1, ty: 0, speedNorm: 0 });
+    // find the hair most aligned with +x (leading) and -x (trailing)
+    let leadIdx = 0, trailIdx = 0, leadDot = -2, trailDot = 2;
+    for (let h = 0; h < moving.length; h++) {
+      const b = still[h].points[0];
+      const dx = b[0] - cx, dy = b[1] - cy;
+      const dot = dx / Math.hypot(dx, dy); // . (1,0)
+      if (dot > leadDot) { leadDot = dot; leadIdx = h; }
+      if (dot < trailDot) { trailDot = dot; trailIdx = h; }
+    }
+    const lean = (h: number) => {
+      const tip = moving[h].points[moving[h].points.length - 1];
+      const tip0 = still[h].points[still[h].points.length - 1];
+      return Math.abs(tip[0] - tip0[0]);
+    };
+    expect(lean(leadIdx)).toBeGreaterThan(lean(trailIdx));
+  });
+
+  it("is pure/deterministic with a motion basis", () => {
+    const m: CiliaMotion = { tx: 0.6, ty: 0.8, speedNorm: 0.7 };
+    const a = ciliaPath(cx, cy, baseR, t, 0.5, 0.5, P, m);
+    const b = ciliaPath(cx, cy, baseR, t, 0.5, 0.5, P, m);
+    expect(a).toEqual(b);
+  });
+});
+
+describe("Commit 8c — biology param corrections", () => {
+  it("ciliaAsymmetry default = 0.49 (power:recovery ~ 1:2.9)", () => {
+    expect(CELL_DEFAULTS.ciliaAsymmetry).toBeCloseTo(0.49, 12);
+  });
+  it("ciliaMetachronal default = 1.1 (lambda ~ 5-7 cilia)", () => {
+    expect(CELL_DEFAULTS.ciliaMetachronal).toBeCloseTo(1.1, 12);
+  });
+  it("dragCoeff default = 0.5", () => {
+    expect(CELL_DEFAULTS.dragCoeff).toBeCloseTo(0.5, 12);
   });
 });

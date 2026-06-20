@@ -141,6 +141,9 @@ export interface CellParams {
   /** Per-hair angular jitter as a fraction of the mean gap between hairs.
    * 0 = perfectly even spacing; ~0.6 = clearly irregular, aperiodic crown. */
   ciliaAngleJitter?: number;
+  /** D2: viscous drag-lean coefficient. How far (as a fraction of hair length)
+   * the crown leans rearward at full swim speed. Default 0.5. */
+  dragCoeff?: number;
   /** Base stroke width (px) at the thickest hair; thinner hairs taper from
    * this. Each hair also tapers base->tip. */
   ciliaWidth?: number;
@@ -242,8 +245,15 @@ export const CELL_DEFAULTS: CellParams = {
   ciliaCurl: 0.7,
   ciliaBeatHz: 0.9,
   ciliaBeatHzActive: 1.6,
-  ciliaAsymmetry: 0.6,
-  ciliaMetachronal: 0.8,
+  // Biology (D3): real power:recovery time ratio ~9ms:26ms = 1:2.9. We bump the
+  // asymmetry from 0.6 toward that target; under the F3 sine-warp clock
+  // (g(u)=1+a*sin(2pi*u)) a=0.49 yields recovery:power ~1.7:1 (more recovery
+  // than power, correct direction; asymmetry is an artistic-but-motivated param,
+  // SCOPE 4). A literal 2.9:1 would need a different clock model (future D3).
+  ciliaAsymmetry: 0.49,
+  // Metachronal wavelength lambda ~ 5-7 cilia: lag=2pi/lambda ~ 1.1 rad.
+  ciliaMetachronal: 1.1,
+  dragCoeff: 0.5,
   ciliaSegments: 6,
   ciliaLengthVar: 0.5,
   ciliaAngleJitter: 0.55,
@@ -627,6 +637,20 @@ export function ciliaBeatPhase(
   return ((phase % 1) + 1) % 1; // keep in [0,1) against FP drift
 }
 
+/**
+ * D2 motion basis for cilia drag-lean. When the cell swims, viscous drag bends
+ * the whole crown REARWARD (opposite the travel tangent), more on the leading
+ * face than the trailing one. (plan D2.)
+ */
+export interface CiliaMotion {
+  /** Unit travel tangent x (direction of motion). */
+  tx: number;
+  /** Unit travel tangent y. */
+  ty: number;
+  /** Normalized swim speed [0,1]; 0 => no lean (identity). */
+  speedNorm: number;
+}
+
 /** A cilium rendered as a multi-point spine plus its stroke width. */
 export interface CiliumPath {
   /** Polyline points base->tip. */
@@ -659,7 +683,14 @@ export function ciliaPath(
   energy: number,
   growth: number,
   params: CellParams,
+  motion?: CiliaMotion,
 ): CiliumPath[] {
+  // D2: drag-lean strength. Zero when there is no motion basis or speedNorm=0,
+  // so the crown is identical to the pre-D2 output at rest (back-compat).
+  const dragCoeff = params.dragCoeff ?? 0.5;
+  const mTx = motion?.tx ?? 0;
+  const mTy = motion?.ty ?? 0;
+  const mSpeed = motion ? Math.max(0, Math.min(1, motion.speedNorm)) : 0;
   const out: CiliumPath[] = [];
   const n = Math.max(1, params.ciliaCount);
   const seg = Math.max(2, params.ciliaSegments ?? 6);
@@ -738,8 +769,16 @@ export function ciliaPath(
       // that under half a gap, so beating hairs never cross / reorder.
       const bendCap = 0.5 * gap * along;
       const bend = Math.max(-bendCap, Math.min(bendCap, rawBend));
-      const x = cx + ux * along + pxn * bend;
-      const y = cy + uy * along + pyn * bend;
+      // D2: viscous drag-lean. While swimming, each hair leans REARWARD (along
+      // -tangent), growing toward the tip (pow(sFrac,1.3)) and stronger on the
+      // LEADING face (lead = radial . tangent): dragGain = dragCoeff*speedNorm*
+      // (0.6 + 0.4*lead). Zero at speedNorm=0 => identity (back-compat). The lean
+      // is a fraction of hair length, so longer hairs sweep more.
+      const lead = ux * mTx + uy * mTy;
+      const dragGain = dragCoeff * mSpeed * (0.6 + 0.4 * lead);
+      const dragPx = dragGain * lenK * Math.pow(sFrac, 1.3);
+      const x = cx + ux * along + pxn * bend - mTx * dragPx;
+      const y = cy + uy * along + pyn * bend - mTy * dragPx;
       pts.push([x, y]);
     }
     out.push({ points: pts, width: hairWidth });
@@ -1757,7 +1796,14 @@ export function createCellRenderer(
                 ciliaCurl: params.ciliaCurl * (1 + 0.3 * activity),
               }
             : params;
-          const cilia = ciliaPath(cx, cy, baseR, t, energy, growth, ciliaParams);
+          // D2: motion basis so the crown leans rearward while swimming. Tangent
+          // is the body heading; speedNorm gates it (0 at rest => identity).
+          const ciliaMotion: CiliaMotion = {
+            tx: Math.cos(bodyHeading),
+            ty: Math.sin(bodyHeading),
+            speedNorm,
+          };
+          const cilia = ciliaPath(cx, cy, baseR, t, energy, growth, ciliaParams, ciliaMotion);
           ctx.lineCap = "round";
           for (const hair of cilia) {
             ctx.lineWidth = hair.width; // per-hair thickness (diverse)
