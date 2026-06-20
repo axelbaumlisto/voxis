@@ -49,6 +49,10 @@ import {
   cyclosisField,
   seedGranules,
   advectGranule,
+  foodVacuoleSize,
+  seedFoodVacuoles,
+  advectFoodVacuole,
+  micronucleusTransform,
   cellReach,
   cellDrift,
   wanderStep,
@@ -5530,6 +5534,130 @@ describe("Commit 27 — cyclosis + granules", () => {
     }).not.toThrow();
     r.destroy();
     vi.unstubAllGlobals();
+  });
+});
+
+describe("Commit 28 — food vacuoles + micronucleus", () => {
+  const baseR = 24;
+
+  it("defaults: enableOrganelles OFF + documented organelle params", () => {
+    expect(CELL_DEFAULTS.enableOrganelles).toBe(false);
+    expect(CELL_DEFAULTS.foodVacuoleCount).toBe(5);
+    expect(CELL_DEFAULTS.foodVacuolePeriod).toBe(55);
+    expect(CELL_DEFAULTS.foodVacuoleMaxRadiusFrac).toBe(0.62);
+    expect(CELL_DEFAULTS.foodVacuoleSizePx).toBe(3.0);
+    expect(CELL_DEFAULTS.foodVacuoleDigestPeriod).toBe(30);
+    expect(CELL_DEFAULTS.micronucleusSizeFrac).toBe(0.32);
+    expect(CELL_DEFAULTS.micronucleusOffsetFrac).toBe(1.15);
+  });
+
+  it("(a) foodVacuoleSize: full at u=0, shrinks to ~0.3 before the wrap, resets, bounded", () => {
+    const P = { ...CELL_DEFAULTS, foodVacuoleDigestPeriod: 30 };
+    // fresh vacuole (t=0, phase=0) is full
+    expect(foodVacuoleSize(0, 0, P)).toBeCloseTo(1.0, 9);
+    // monotone decrease across one digest period
+    const period = 30;
+    let prev = foodVacuoleSize(0, 0, P);
+    for (let k = 1; k <= 20; k++) {
+      const t = (k / 20) * period * 0.999; // just before the wrap
+      const s = foodVacuoleSize(t, 0, P);
+      expect(s).toBeLessThanOrEqual(prev + 1e-9);
+      expect(s).toBeGreaterThanOrEqual(0.3 - 1e-9);
+      expect(s).toBeLessThanOrEqual(1 + 1e-9);
+      prev = s;
+    }
+    // just before the wrap -> ~0.3
+    expect(foodVacuoleSize(period * 0.999, 0, P)).toBeCloseTo(0.3, 1);
+    // resets at the wrap (period -> back to full)
+    expect(foodVacuoleSize(period, 0, P)).toBeCloseTo(1.0, 9);
+    // measured digest curve points
+    expect(foodVacuoleSize(period * 0.5, 0, P)).toBeCloseTo(0.65, 6);
+    // deterministic
+    expect(foodVacuoleSize(7.3, 0.25, P)).toBe(foodVacuoleSize(7.3, 0.25, P));
+  });
+
+  it("(b) seedFoodVacuoles: gate off -> []; on -> count entries within maxRad; phase in [0,1); deterministic", () => {
+    expect(seedFoodVacuoles(baseR, { ...CELL_DEFAULTS })).toEqual([]);
+    const P = { ...CELL_DEFAULTS, enableOrganelles: true };
+    const fv = seedFoodVacuoles(baseR, P);
+    expect(fv.length).toBe(P.foodVacuoleCount);
+    const maxRad = (P.foodVacuoleMaxRadiusFrac ?? 0.62) * baseR;
+    for (const o of fv) {
+      expect(Math.hypot(o.x, o.y)).toBeLessThanOrEqual(maxRad + 1e-9);
+      expect(o.phase).toBeGreaterThanOrEqual(0);
+      expect(o.phase).toBeLessThan(1);
+    }
+    // deterministic
+    expect(seedFoodVacuoles(baseR, P)).toEqual(fv);
+    // count 0 -> []
+    expect(seedFoodVacuoles(baseR, { ...P, foodVacuoleCount: 0 })).toEqual([]);
+  });
+
+  it("(c) advectFoodVacuole STAYS ON CIRCLE over 200 steps; carries phase; moves", () => {
+    const P = { ...CELL_DEFAULTS, enableOrganelles: true };
+    let v = { x: 10, y: 0, phase: 0.42 };
+    const r0 = Math.hypot(v.x, v.y);
+    const dt = 1 / 60;
+    const v1 = advectFoodVacuole(v, baseR, dt, P);
+    // moves (CCW for omega>0): angle advances
+    const a0 = Math.atan2(v.y, v.x);
+    const a1 = Math.atan2(v1.y, v1.x);
+    expect(wrapPi(a1 - a0)).toBeGreaterThan(0);
+    for (let i = 0; i < 200; i++) v = advectFoodVacuole(v, baseR, dt, P);
+    const r = Math.hypot(v.x, v.y);
+    expect(Math.abs(r - r0) / r0).toBeLessThan(0.01);
+    // phase carried through unchanged
+    expect(v.phase).toBe(0.42);
+  });
+
+  it("(d) micronucleusTransform: smaller than macro, offset just outside, scales, deterministic", () => {
+    const P = { ...CELL_DEFAULTS };
+    const macroR = 6;
+    const mn = micronucleusTransform(100, 50, macroR, P);
+    expect(mn.r).toBeCloseTo(macroR * 0.32, 9);
+    expect(mn.r).toBeLessThan(macroR);
+    const off = Math.hypot(mn.cx - 100, mn.cy - 50);
+    expect(off).toBeCloseTo(macroR * 1.15, 9);
+    // sits just outside the macronucleus
+    expect(off).toBeGreaterThan(macroR);
+    // scales with macroR
+    const mn2 = micronucleusTransform(100, 50, macroR * 2, P);
+    expect(mn2.r).toBeCloseTo(mn.r * 2, 9);
+    expect(Math.hypot(mn2.cx - 100, mn2.cy - 50)).toBeCloseTo(off * 2, 9);
+    // deterministic
+    expect(micronucleusTransform(100, 50, macroR, P)).toEqual(mn);
+  });
+
+  it("(e) RENDER SMOKE: enableOrganelles renders without throwing (alone and with cyclosis)", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn().mockReturnValue(7));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    for (const extra of [
+      { enableOrganelles: true, enableCyclosis: false },
+      { enableOrganelles: true, enableCyclosis: true },
+    ]) {
+      const container = document.createElement("div");
+      const r = createCellRenderer(container, {
+        width: 120,
+        height: 60,
+        params: { ...CELL_DEFAULTS, ...extra },
+      });
+      expect(() => {
+        for (let i = 0; i < 4; i++) {
+          r.update({ mode: "recording", audioLevel: 0.6, spectrumBins: new Array(32).fill(0.4) });
+        }
+      }).not.toThrow();
+      r.destroy();
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it("(f) DETERMINISM: identical args -> identical output for all four helpers", () => {
+    const P = { ...CELL_DEFAULTS, enableOrganelles: true };
+    expect(foodVacuoleSize(11.7, 0.33, P)).toBe(foodVacuoleSize(11.7, 0.33, P));
+    expect(seedFoodVacuoles(baseR, P)).toEqual(seedFoodVacuoles(baseR, P));
+    const v = { x: 7, y: 3, phase: 0.1 };
+    expect(advectFoodVacuole(v, baseR, 1 / 60, P)).toEqual(advectFoodVacuole(v, baseR, 1 / 60, P));
+    expect(micronucleusTransform(10, 20, 5, P)).toEqual(micronucleusTransform(10, 20, 5, P));
   });
 });
 

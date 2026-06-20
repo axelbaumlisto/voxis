@@ -325,6 +325,30 @@ export interface CellParams {
   granuleMaxRadiusFrac?: number;
   /** Commit 27: draw radius (px) of a granule dot. Default 1.3. */
   granuleSizePx?: number;
+  /** Commit 28 (OPT, default off): FOOD VACUOLES + MICRONUCLEUS — bigger digesting
+   * spheres that ride the cyclosis loop plus a small micronucleus beside the
+   * macronucleus. Draw-only; when off nothing is seeded/advected/drawn. */
+  enableOrganelles?: boolean;
+  /** Commit 28: number of food vacuoles (3-8). Default 5. */
+  foodVacuoleCount?: number;
+  /** Commit 28: seconds for a food vacuole to circulate (rides cyclosis).
+   * Default 55. */
+  foodVacuolePeriod?: number;
+  /** Commit 28: food vacuoles circulate within this fraction of baseR (a bit
+   * deeper than granules). Default 0.62. */
+  foodVacuoleMaxRadiusFrac?: number;
+  /** Commit 28: base draw radius (px) of a food vacuole (bigger than a granule).
+   * Default 3.0. */
+  foodVacuoleSizePx?: number;
+  /** Commit 28: seconds over which a vacuole shrinks from full to small then
+   * resets (digest cycle). Default 30. */
+  foodVacuoleDigestPeriod?: number;
+  /** Commit 28: micronucleus radius as a fraction of the macronucleus radius.
+   * Default 0.32. */
+  micronucleusSizeFrac?: number;
+  /** Commit 28: micronucleus centre offset from the macronucleus centre, in
+   * units of macronucleus radius (just outside it). Default 1.15. */
+  micronucleusOffsetFrac?: number;
   /** H4 (OPT, default off): advect ambient motes by the body's dipolar wake so a
    * swimming cell visibly drags the surrounding fluid. */
   enableFlowField?: boolean;
@@ -539,6 +563,17 @@ export const CELL_DEFAULTS: CellParams = {
   cyclosisPeriod: 45,
   granuleMaxRadiusFrac: 0.75,
   granuleSizePx: 1.3,
+  // Commit 28: food vacuoles + micronucleus. OFF (dark-launch) so
+  // seedFoodVacuoles returns [] / the gated draw blocks are skipped -> all
+  // goldens stay byte-identical.
+  enableOrganelles: false,
+  foodVacuoleCount: 5,
+  foodVacuolePeriod: 55,
+  foodVacuoleMaxRadiusFrac: 0.62,
+  foodVacuoleSizePx: 3.0,
+  foodVacuoleDigestPeriod: 30,
+  micronucleusSizeFrac: 0.32,
+  micronucleusOffsetFrac: 1.15,
 };
 
 
@@ -2472,6 +2507,94 @@ export function advectGranule(
   return { x: nx * s, y: ny * s };
 }
 
+/**
+ * Commit 28 — a food vacuole's [0..1] size scalar over its DIGEST cycle. Fresh
+ * vacuoles are full (1.0) and shrink linearly to ~0.3 over `foodVacuoleDigestPeriod`
+ * seconds, then reset (a new vacuole forms). `seedPhase` offsets each vacuole so
+ * they digest asynchronously. Pure & deterministic.
+ */
+export function foodVacuoleSize(t: number, seedPhase: number, params: CellParams): number {
+  const period = Math.max(0.1, params.foodVacuoleDigestPeriod ?? 30);
+  const u = (((t / period + seedPhase) % 1) + 1) % 1; // [0,1)
+  // full when fresh (u=0), shrinks to ~0.3 by u->1, then resets at the wrap.
+  return 1 - 0.7 * u;
+}
+
+/**
+ * Commit 28 — deterministic scatter of `foodVacuoleCount` food vacuoles as
+ * BODY-FRAME offsets within `foodVacuoleMaxRadiusFrac*baseR` (a bit deeper than
+ * granules), each with a per-vacuole digest `phase` in [0,1) from a third
+ * decorrelated noise seed. Returns [] when the gate is off or the count is 0.
+ * Pure & deterministic.
+ */
+export function seedFoodVacuoles(
+  baseR: number,
+  params: CellParams,
+): Array<{ x: number; y: number; phase: number }> {
+  if (!params.enableOrganelles) return [];
+  const n = Math.max(0, Math.floor(params.foodVacuoleCount ?? 0));
+  if (n === 0) return [];
+  const maxRad = Math.max(0, params.foodVacuoleMaxRadiusFrac ?? 0.62) * Math.max(0, baseR);
+  const out: Array<{ x: number; y: number; phase: number }> = [];
+  for (let i = 0; i < n; i++) {
+    const ang = (noise2D(i * 17.413 + 3.1, 52.917) + 1) * Math.PI; // [0, 2PI]
+    // sqrt of a [0,1] sample -> area-uniform fill of the disc.
+    const rad = Math.sqrt((noise2D(i * 44.197 + 9.7, 23.671) + 1) * 0.5) * maxRad;
+    // third decorrelated seed -> digest phase in [0,1).
+    const phase = (noise2D(i * 61.829 + 2.3, 88.541) + 1) * 0.5;
+    out.push({ x: rad * Math.cos(ang), y: rad * Math.sin(ang), phase });
+  }
+  return out;
+}
+
+/**
+ * Commit 28 — advance one food vacuole's BODY-FRAME offset by the SAME cyclosis
+ * rotation field as the granules (DRY: reuses cyclosisField), with
+ * omega = TAU / max(0.1, foodVacuolePeriod). The radius is renormalised back to
+ * its prior magnitude so the vacuole stays exactly on its circle (no spiral-out),
+ * clamped to foodVacuoleMaxRadiusFrac*baseR. `phase` (the digest clock) is
+ * carried through unchanged. Pure & deterministic.
+ */
+export function advectFoodVacuole(
+  v: { x: number; y: number; phase: number },
+  baseR: number,
+  dt: number,
+  params: CellParams,
+): { x: number; y: number; phase: number } {
+  const omega = TAU / Math.max(0.1, params.foodVacuolePeriod ?? 55);
+  const f = cyclosisField(v.x, v.y, omega);
+  const nx = v.x + f.vx * dt;
+  const ny = v.y + f.vy * dt;
+  const maxRad = Math.max(0, params.foodVacuoleMaxRadiusFrac ?? 0.62) * Math.max(0, baseR);
+  const r0 = Math.min(Math.hypot(v.x, v.y), maxRad);
+  const r1 = Math.hypot(nx, ny) || 1;
+  const s = r0 / r1;
+  return { x: nx * s, y: ny * s, phase: v.phase };
+}
+
+/**
+ * Commit 28 — the micronucleus sits just BESIDE (outside) the macronucleus. Its
+ * radius is `macroR * micronucleusSizeFrac` (smaller) and its centre is offset
+ * from the macronucleus centre by `macroR * micronucleusOffsetFrac` along a FIXED
+ * bearing (deterministic). Returns the ABSOLUTE centre + radius so the caller can
+ * draw it around the already-squeezed macronucleus centre. Pure.
+ */
+export function micronucleusTransform(
+  macroCx: number,
+  macroCy: number,
+  macroR: number,
+  params: CellParams,
+): { cx: number; cy: number; r: number } {
+  const r = macroR * (params.micronucleusSizeFrac ?? 0.32);
+  const off = macroR * (params.micronucleusOffsetFrac ?? 1.15);
+  const bearing = 0.7; // fixed, deterministic — sits just beside the macronucleus
+  return {
+    cx: macroCx + Math.cos(bearing) * off,
+    cy: macroCy + Math.sin(bearing) * off,
+    r,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Cell containment — full organism reach (membrane + cilia + startle)
 // ---------------------------------------------------------------------------
@@ -2830,6 +2953,12 @@ export function createCellRenderer(
   // enableCyclosis is on; stays null otherwise so the default path allocates
   // nothing and the shipped look is byte-unchanged.
   let granules: Array<{ x: number; y: number }> | null = null;
+  // Commit 28 (gate OFF): food-vacuole body-frame offsets (with a digest phase)
+  // that ride the SAME cyclosis loop as the granules, plus a micronucleus drawn
+  // beside the macronucleus. Lazily seeded on first tick when enableOrganelles
+  // is on; stays null otherwise so the default path allocates nothing and the
+  // shipped look is byte-unchanged.
+  let foodVacuoles: Array<{ x: number; y: number; phase: number }> | null = null;
   // H4: previous-frame flow source (centre, heading, swim speed) so motes can be
   // advected + drawn BEHIND the cell at the top of the tick without a forward
   // dependency on this frame's not-yet-computed centre.
@@ -3193,6 +3322,18 @@ export function createCellRenderer(
           ctx.beginPath();
           ctx.arc(nx, ny, nr * 0.22, 0, TAU);
           ctx.fill();
+
+          // Commit 28 (gate OFF): MICRONUCLEUS — a small dense nucleus sitting
+          // just beside the macronucleus. nx,ny is the SQUEEZED macronucleus
+          // centre and nr its radius, so the micronucleus tracks the prolate
+          // body too. Skipped unless enableOrganelles is on -> goldens unchanged.
+          if (params.enableOrganelles) {
+            const mn = micronucleusTransform(nx, ny, nr, params);
+            ctx.fillStyle = hsla(baseHue - 6, 0.82, 0.42, params.nucleusAlpha);
+            ctx.beginPath();
+            ctx.arc(mn.cx, mn.cy, mn.r, 0, TAU);
+            ctx.fill();
+          }
         }
 
         // F11 (gate OFF): contractile vacuole — a peripheral vesicle that slowly
@@ -3274,6 +3415,42 @@ export function createCellRenderer(
             ctx.beginPath();
             ctx.arc(gx, gy, granuleSizePx, 0, TAU);
             ctx.fill();
+          }
+        }
+
+        // Commit 28 (gate OFF): FOOD VACUOLES — a few larger digesting spheres
+        // that ride the SAME cyclosis loop as the granules (advectFoodVacuole
+        // reuses cyclosisField) and slowly shrink over their digest cycle before
+        // resetting. Body-frame offsets, clamped inside the live minimum membrane
+        // radius then squeezed with the body affine. Skipped (foodVacuoles stays
+        // null) unless enableOrganelles is on, so all goldens stay byte-identical.
+        if (params.enableOrganelles && (params.foodVacuoleCount ?? 0) > 0) {
+          if (!foodVacuoles) foodVacuoles = seedFoodVacuoles(baseR, params);
+          const fvSizePx = params.foodVacuoleSizePx ?? 3.0;
+          for (let i = 0; i < foodVacuoles.length; i++) {
+            foodVacuoles[i] = advectFoodVacuole(foodVacuoles[i], baseR, dt, params);
+            const v = foodVacuoles[i];
+            const size = foodVacuoleSize(t, v.phase, params);
+            const drawR = fvSizePx * (0.4 + 0.6 * size); // shrink as digested
+            // Containment: clamp the body-frame radius so vacuole + draw size
+            // stays inside the live minimum membrane radius.
+            const maxRad = Math.min(
+              (params.foodVacuoleMaxRadiusFrac ?? 0.62) * baseR,
+              Math.max(0, minMembraneR - drawR),
+            );
+            const rad = Math.hypot(v.x, v.y);
+            const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
+            const [fx, fy] = affineSqueezePoints(
+              [[cx + v.x * scale, cy + v.y * scale]], squeezeK, squeezePhi, cx, cy, params,
+            )[0];
+            // Translucent olive/greenish fill with a slightly darker rim.
+            ctx.fillStyle = hsla(baseHue - 30, 0.4, 0.5, params.nucleusAlpha * 0.4);
+            ctx.beginPath();
+            ctx.arc(fx, fy, drawR, 0, TAU);
+            ctx.fill();
+            ctx.strokeStyle = hsla(baseHue - 30, 0.45, 0.35, params.nucleusAlpha * 0.5);
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
           }
         }
 
