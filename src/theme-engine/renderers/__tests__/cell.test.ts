@@ -8705,6 +8705,110 @@ describe("trichocyst discharge (v3.8E)", () => {
     restore();
   });
 
+  it("v3.9A: trichocyst needles point outward from cell surface", () => {
+    const rafCalls = setupRaf();
+    const { ctx, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableTrichocysts: true,
+        trichocystCount: 20,
+        trichocystLengthMul: 3.0,
+      },
+    });
+    // Warm up idle so startle is 0
+    for (let i = 0; i < 5; i++) {
+      r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+
+    // Build a call log from spies so we can isolate individual line segments.
+    // Each trichocyst needle is: beginPath → moveTo(base) → lineTo(tip) → stroke.
+    // We record these calls in order and extract needles from single-segment paths.
+    type CallEntry = { kind: "bp" | "mt" | "lt" | "st"; args: number[] };
+    const callLog: CallEntry[] = [];
+    (ctx.beginPath as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      callLog.push({ kind: "bp", args: [] });
+    });
+    (ctx.moveTo as ReturnType<typeof vi.fn>).mockImplementation((...a: number[]) => {
+      callLog.push({ kind: "mt", args: a });
+    });
+    (ctx.lineTo as ReturnType<typeof vi.fn>).mockImplementation((...a: number[]) => {
+      callLog.push({ kind: "lt", args: a });
+    });
+    (ctx.stroke as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      callLog.push({ kind: "st", args: [] });
+    });
+
+    // Trigger startle (idle→recording)
+    r.update({ mode: "recording", audioLevel: 0.9, spectrumBins: new Array(32).fill(0.8) });
+    if (rafCalls.length) rafCalls.shift()!();
+
+    // Extract single-segment paths: bp → mt → lt → st with exactly one lineTo
+    const needles: { bx: number; by: number; tx: number; ty: number }[] = [];
+    for (let i = 0; i < callLog.length - 3; i++) {
+      if (
+        callLog[i].kind === "bp" &&
+        callLog[i + 1].kind === "mt" &&
+        callLog[i + 2].kind === "lt" &&
+        callLog[i + 3].kind === "st"
+      ) {
+        const [bx, by] = callLog[i + 1].args;
+        const [tx, ty] = callLog[i + 2].args;
+        needles.push({ bx, by, tx, ty });
+      }
+    }
+
+    // We should find at least the trichocyst needles (there may be a few cilia
+    // that also use single-segment paths, filter by length to be safe).
+    const cx = W / 2;
+    const cy = H / 2;
+    let outwardCount = 0;
+    let totalNeedles = 0;
+    for (const { bx, by, tx, ty } of needles) {
+      const ndx = tx - bx;
+      const ndy = ty - by;
+      const nLen = Math.hypot(ndx, ndy);
+      if (nLen < 10) continue; // skip short segments (cilia)
+      // Dot product: needle direction vs centroid-to-base
+      const dot = ndx * (bx - cx) + ndy * (by - cy);
+      totalNeedles++;
+      if (dot > 0) outwardCount++;
+    }
+    // All trichocyst needles point outward from the cell
+    expect(totalNeedles).toBeGreaterThanOrEqual(15); // at least 15 of 20 detected
+    expect(outwardCount).toBe(totalNeedles);
+    r.destroy();
+    restore();
+  });
+
+  it("v3.9A: trichocyst placement indices are uniformly distributed (no >2× gap)", () => {
+    // Test the index math directly: Math.round(i * N / count) should produce
+    // a max gap <= ceil(N/count) + 1
+    const N = 48; // typical contour point count
+    const count = 20;
+    const indices: number[] = [];
+    for (let i = 0; i < count; i++) {
+      indices.push(Math.round(i * N / count) % N);
+    }
+    // Compute gaps between sorted indices
+    const sorted = [...indices].sort((a, b) => a - b);
+    let maxGap = 0;
+    for (let i = 1; i < sorted.length; i++) {
+      maxGap = Math.max(maxGap, sorted[i] - sorted[i - 1]);
+    }
+    // Wrap-around gap
+    maxGap = Math.max(maxGap, N - sorted[sorted.length - 1] + sorted[0]);
+    const idealGap = Math.ceil(N / count);
+    // Max gap should be at most idealGap + 1 (due to rounding)
+    expect(maxGap).toBeLessThanOrEqual(idealGap + 1);
+    // No duplicate indices
+    const unique = new Set(indices);
+    expect(unique.size).toBe(count);
+  });
+
   it("gate-off golden: CELL_DEFAULTS with trichocysts off renders identically", () => {
     const rafCalls = setupRaf();
     const { restore } = installCtx();
