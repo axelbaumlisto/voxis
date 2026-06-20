@@ -4340,6 +4340,42 @@ describe("Commit 21c — cilia anchored on deformed+squeezed contour", () => {
     }
   });
 
+  // ---- (d2) ORTHOGONALITY ON RENDERER OUTPUT --------------------------------
+  // The (d) test re-derives the normal formula inside the test (tautology). This
+  // one consumes ciliaPath's REAL output: at the shaft TIP the bend term sin(pi)=0
+  // and at speedNorm=0 the drag=0, so points[seg]-points[0] == lenK*(anx,any) is
+  // exactly the renderer's squeezed outward normal. Flipping the cell.ts diagonal
+  // to the WRONG diag(k,1/k) makes this FAIL.
+  it("anchored shaft on a SQUEEZED contour is perpendicular to the contour tangent (renderer output, catches wrong diagonal)", () => {
+    const k = 1.5, phi = 0.4;
+    const P = { ...CELL_DEFAULTS, enableCiliaOnContour: true, enableAffine: true };
+    const crown = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, P, {
+      tx: 1, ty: 0, speedNorm: 0, axisStrength: 0,
+      contour: { deform: new Array<number>(96).fill(0), squeezeK: k, squeezePhi: phi },
+    });
+    const cphi = Math.cos(phi), sphi = Math.sin(phi);
+    // squeezed contour point of the undeformed circle at angle theta (point map diag(k,1/k))
+    const sqPt = (theta: number): [number, number] => {
+      const dx = Math.cos(theta) * baseR, dy = Math.sin(theta) * baseR;
+      const xr = dx * cphi + dy * sphi, yr = -dx * sphi + dy * cphi;
+      const xs = xr * k, ys = yr / k;
+      return [cx + xs * cphi - ys * sphi, cy + xs * sphi + ys * cphi];
+    };
+    const n = Math.max(1, P.ciliaCount);
+    for (let kk = 0; kk < crown.length; kk++) {
+      const h = crown[kk];
+      const tip = h.points[h.points.length - 1], base = h.points[0];
+      let sx = tip[0] - base[0], sy = tip[1] - base[1]; // == lenK*(anx,any): bend=0 & drag=0
+      const sl = Math.hypot(sx, sy) || 1; sx /= sl; sy /= sl;
+      // renderer's per-hair baseAngle (same formula the other 21c tests use)
+      const theta = baseAngleOf(kk, n);
+      const a = sqPt(theta - 1e-4), b = sqPt(theta + 1e-4);
+      let tx = b[0] - a[0], ty = b[1] - a[1];
+      const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      expect(Math.abs(sx * tx + sy * ty)).toBeLessThan(2e-2); // FAILS under diag(k,1/k)
+    }
+  });
+
   // ---- (e) NO CROSSING -------------------------------------------------------
   it("base points stay monotone in angle and never collide for several deform/squeeze cases", () => {
     const n = CELL_DEFAULTS.ciliaCount;
