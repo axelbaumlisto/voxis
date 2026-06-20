@@ -39,7 +39,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       hueSpread: 40,
       shimmerSpeed: 0.5,
       hueBoost: 20,
-      fillAlpha: 0.18,
+      fillAlpha: 0.30,               // translucent living envelope, not a dark void (colour biologist)
       tension: 0.15,
       // cilia ("усы"), startle ("шарахается"), growth ("растёт как живая")
       ciliaCount: 18,
@@ -74,7 +74,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableRigidMembrane: true,     // smooth firm contour, no FBM wobble (Commit 29)
       enableBodyProfile: true,       // authentic asymmetric slipper (Commit 31)
       bodyProfileType: "egg",        // biology-validated egg (not piriform teardrop)
-      bodyProfileTaper: 0.24,        // slightly rounder posterior heel (less teardrop)
+      bodyProfileTaper: 0.20,        // widest point ~0.42L (morphology biologist: 0.42-0.48)
       bodyAspect: 3,                 // ~3:1 aurelia slipper
       bodyVentralBend: 0.18,         // more legible banana curve at display scale
       enableAffine: true,            // forced k=1 when profile on (no double-elongate)
@@ -93,7 +93,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // в центре". interiorPoint distributes via the profile, so the legacy
       // disc granuleMaxRadiusFrac/foodVacuoleMaxRadiusFrac no longer apply.
       enableInteriorField: true,     // body-coord interior (not the central disc)
-      cyclosisPeriod: 38,            // ~38s circuit (biology 30-60s)
+      cyclosisPeriod: 26,            // ~26s circuit — visible flow between frames (physics biologist)
       ...userParams,
     },
   });

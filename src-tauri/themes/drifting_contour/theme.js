@@ -2012,7 +2012,7 @@ function mount(container, api) {
       hueSpread: 40,
       shimmerSpeed: 0.5,
       hueBoost: 20,
-      fillAlpha: 0.18,
+      fillAlpha: 0.3,
       tension: 0.15,
       ciliaCount: 18,
       ciliaLength: 0.4,
@@ -2041,7 +2041,7 @@ function mount(container, api) {
       enableRigidMembrane: true,
       enableBodyProfile: true,
       bodyProfileType: "egg",
-      bodyProfileTaper: 0.24,
+      bodyProfileTaper: 0.2,
       bodyAspect: 3,
       bodyVentralBend: 0.18,
       enableAffine: true,
@@ -2055,7 +2055,7 @@ function mount(container, api) {
       enableOrganelles: true,
       foodVacuoleCount: 10,
       enableInteriorField: true,
-      cyclosisPeriod: 38,
+      cyclosisPeriod: 26,
       ...userParams
     }
   });
