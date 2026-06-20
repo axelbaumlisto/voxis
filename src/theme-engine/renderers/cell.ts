@@ -539,6 +539,10 @@ export interface CellParams {
   /** v3.9D: wave propagation speed in radians per second. Positive → wave
    * travels in the direction of increasing contour index. Default 4.0. */
   metachronalSpeed?: number;
+  /** v4.0C: modulation depth of the metachronal length wave. 0 = no
+   * modulation (all multipliers 1.0), 0.4 = legacy range [0.6, 1.0],
+   * 0.6 = deeper range [0.4, 1.0]. Default 0.4. */
+  metachronalDepth?: number;
   /** v3.8E (OPT, default off): TRICHOCYST DISCHARGE. Paramecium's most
    * dramatic defense — explosive radial crystalline needles projecting from
    * the pellicle on startle. When off, no trichocyst drawing occurs (golden
@@ -1513,7 +1517,8 @@ export function ciliaPath(
       // Traveling cosine wave along the cilia index.
       // cos range [-1,1] → modulation range [0.6, 1.0].
       const metaPhase = (k / mWave) * TAU - t * mSpd;
-      const mod = 0.6 + 0.4 * (0.5 + 0.5 * Math.cos(metaPhase));
+      const depth = params.metachronalDepth ?? 0.4;
+      const mod = (1 - depth) + depth * (0.5 + 0.5 * Math.cos(metaPhase));
       lenK *= mod;
     }
     // Thickness correlates loosely with length (longer ~ slightly thicker),
