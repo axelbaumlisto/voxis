@@ -39,6 +39,9 @@ import {
   ciliaBeatPhase,
   idleMorph,
   resolveBaseRadius,
+  perimeterCiliaCount,
+  bandLimitDeform,
+  contractileVacuole,
   cellReach,
   cellDrift,
   wanderStep,
@@ -4168,5 +4171,83 @@ describe("sedimentationBias (H3)", () => {
   it("is zero by default (sedimentationFrac defaults 0)", () => {
     const { dvy } = sedimentationBias(100, CELL_DEFAULTS);
     expect(dvy).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 17 — E1 perimeter count + F13 band-limit + F11 contractile vacuole
+// (pure helpers, all OPT / gates OFF; H4 flow-field descoped — no mote substrate)
+// ---------------------------------------------------------------------------
+describe("perimeterCiliaCount (E1)", () => {
+  const P = { ...CELL_DEFAULTS, ciliaCount: 200, ciliaSpacingPx: 8 };
+  it("scales the count with perimeter (~constant hairs per unit arc)", () => {
+    const small = perimeterCiliaCount(17, P);
+    const big = perimeterCiliaCount(34, P); // 2x radius => ~2x perimeter
+    expect(big).toBeGreaterThan(small);
+    // density (hairs / perimeter) roughly constant +/-20%
+    const dSmall = small / (TAU * 17);
+    const dBig = big / (TAU * 34);
+    expect(Math.abs(dBig - dSmall) / dSmall).toBeLessThan(0.2);
+  });
+  it("is capped by ciliaCount and at least 1", () => {
+    const capped = { ...CELL_DEFAULTS, ciliaCount: 18, ciliaSpacingPx: 8 };
+    expect(perimeterCiliaCount(1000, capped)).toBeLessThanOrEqual(18);
+    expect(perimeterCiliaCount(0.1, capped)).toBeGreaterThanOrEqual(1);
+  });
+  it("returns an integer", () => {
+    expect(Number.isInteger(perimeterCiliaCount(20, P))).toBe(true);
+  });
+});
+
+describe("bandLimitDeform (F13)", () => {
+  const P = { ...CELL_DEFAULTS, bandLimitMode: 4, bandLimitAmp: 0.08 };
+  it("caps amplitude to bandLimitAmp", () => {
+    const raw = Array.from({ length: 64 }, (_, i) => 0.4 * Math.sin(i) + 0.3 * Math.cos(i * 3.3));
+    const out = bandLimitDeform(raw, P);
+    for (const d of out) expect(Math.abs(d)).toBeLessThanOrEqual(0.08 + 1e-9);
+  });
+  it("concentrates spectral power in low modes (|n|<=bandLimitMode)", () => {
+    // a low mode (2) + a high-mode ripple (12); the high mode must be removed so
+    // nearly all remaining power sits in |n|<=4.
+    const N = 64;
+    const raw = Array.from({ length: N }, (_, i) =>
+      0.06 * Math.sin((2 * i / N) * TAU) + 0.06 * Math.sin((12 * i / N) * TAU));
+    const out = bandLimitDeform(raw, P);
+    // DFT power in low band vs total
+    const power = (k: number) => {
+      let re = 0, im = 0;
+      for (let i = 0; i < N; i++) { const a = (k * i / N) * TAU; re += out[i] * Math.cos(a); im -= out[i] * Math.sin(a); }
+      return re * re + im * im;
+    };
+    let low = 0, total = 0;
+    for (let k = 0; k < N; k++) { const p = power(k); total += p; if (k <= 4 || k >= N - 4) low += p; }
+    expect(low / (total + 1e-12)).toBeGreaterThan(0.9);
+  });
+  it("preserves length and is deterministic", () => {
+    const raw = [0.1, -0.2, 0.3, -0.05, 0.15, -0.25];
+    expect(bandLimitDeform(raw, P).length).toBe(raw.length);
+    expect(bandLimitDeform(raw, P)).toEqual(bandLimitDeform(raw, P));
+  });
+});
+
+describe("contractileVacuole (F11)", () => {
+  const P = { ...CELL_DEFAULTS, vacuolePeriod: 6, vacuoleMaxFrac: 0.18 };
+  const baseR = 24;
+  it("fills then collapses: r(0+)~0, peaks near u=0.85, systole->0", () => {
+    const rAt = (frac: number) => contractileVacuole(frac * 6, baseR, P).r;
+    expect(rAt(0.001)).toBeLessThan(0.02 * baseR);
+    expect(rAt(0.85)).toBeGreaterThan(0.15 * baseR); // near R_max
+    expect(rAt(0.999)).toBeLessThan(0.05 * baseR); // collapsed
+  });
+  it("never exceeds vacuoleMaxFrac*baseR", () => {
+    for (let i = 0; i < 200; i++) {
+      const v = contractileVacuole(i * 0.1, baseR, P);
+      expect(v.r).toBeLessThanOrEqual(0.18 * baseR + 1e-9);
+    }
+  });
+  it("is periodic with vacuolePeriod and deterministic", () => {
+    const a = contractileVacuole(1.3, baseR, P);
+    const b = contractileVacuole(1.3 + 6, baseR, P);
+    expect(b.r).toBeCloseTo(a.r, 9);
   });
 });

@@ -253,6 +253,26 @@ export interface CellParams {
   enableSedimentation?: boolean;
   /** H3: sedimentation speed as a fraction (<0.15) of the swim speed. Default 0. */
   sedimentationFrac?: number;
+  /** E1 (OPT): target arc-spacing (px) between hairs. When enablePerimeterCount
+   * is on, the count tracks perimeter (n=round(2*pi*baseR/spacing)) capped by
+   * ciliaCount. Default 8. */
+  ciliaSpacingPx?: number;
+  /** E1 (OPT, default off): drive cilia count from perimeter (size) not a fixed
+   * number, so a bigger cell grows proportionally more hairs. */
+  enablePerimeterCount?: boolean;
+  /** F13 (OPT, default off): band-limit the membrane (low-mode, low-amp) for a
+   * smoother ciliate look. */
+  enableBandLimit?: boolean;
+  /** F13: highest spatial mode (|n|) kept when band-limiting. Default 4. */
+  bandLimitMode?: number;
+  /** F13: max |deform| after band-limiting. Default 0.08. */
+  bandLimitAmp?: number;
+  /** F11 (OPT, default off): render a contractile vacuole that fills + collapses. */
+  enableVacuole?: boolean;
+  /** F11: vacuole systole period (seconds). Default 7. */
+  vacuolePeriod?: number;
+  /** F11: vacuole max radius as a fraction of baseR. Default 0.18. */
+  vacuoleMaxFrac?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -1643,6 +1663,78 @@ export function resolveBaseRadius(
   const fallbackR = Math.min(width, height) * params.radiusFraction;
   const rawBaseR = params.baseRadiusPx ?? fallbackR;
   return rawBaseR * (1 + growth * params.growthSwell);
+}
+
+/**
+ * E1 (OPT) — perimeter-driven cilia count. A bigger cell should carry more
+ * hairs at roughly constant arc spacing, not a fixed number. Returns
+ * `round(2*pi*baseR / ciliaSpacingPx)`, at least 1 and capped by `ciliaCount`
+ * (so it never explodes on a huge overlay). Pure & deterministic.
+ */
+export function perimeterCiliaCount(baseR: number, params: CellParams): number {
+  const spacing = Math.max(0.5, params.ciliaSpacingPx ?? 8);
+  const n = Math.round((TAU * Math.max(0, baseR)) / spacing);
+  const cap = Math.max(1, params.ciliaCount);
+  return Math.max(1, Math.min(cap, n));
+}
+
+/**
+ * F13 (OPT) — band-limit the membrane deformation for a smooth ciliate look.
+ * Keeps only low spatial modes (|n| <= bandLimitMode) via a cyclic DFT
+ * truncation, then caps the amplitude to bandLimitAmp. Length-preserving, pure
+ * & deterministic. (Reconstruction uses the real cyclic DFT; O(N*K) with small K.)
+ */
+export function bandLimitDeform(deform: number[], params: CellParams): number[] {
+  const N = deform.length;
+  if (N === 0) return [];
+  const K = Math.max(0, Math.floor(params.bandLimitMode ?? 4));
+  const cap = params.bandLimitAmp ?? 0.08;
+  // Forward DFT coefficients for modes 0..K, reconstruct keeping only those.
+  const a: number[] = new Array(K + 1).fill(0);
+  const b: number[] = new Array(K + 1).fill(0);
+  for (let k = 0; k <= K; k++) {
+    let re = 0, im = 0;
+    for (let i = 0; i < N; i++) {
+      const ang = (k * i / N) * TAU;
+      re += deform[i] * Math.cos(ang);
+      im += deform[i] * Math.sin(ang);
+    }
+    a[k] = re / N;
+    b[k] = im / N;
+  }
+  const out = new Array<number>(N);
+  for (let i = 0; i < N; i++) {
+    let v = a[0]; // DC term
+    for (let k = 1; k <= K; k++) {
+      const ang = (k * i / N) * TAU;
+      // real cyclic reconstruction: 2*(a*cos + b*sin) for modes 1..K
+      v += 2 * (a[k] * Math.cos(ang) + b[k] * Math.sin(ang));
+    }
+    out[i] = v < -cap ? -cap : v > cap ? cap : v;
+  }
+  return out;
+}
+
+/**
+ * F11 (OPT) — contractile vacuole. A peripheral vesicle that slowly FILLS
+ * (diastole) then rapidly COLLAPSES (systole) each `vacuolePeriod`. Phase
+ * `u = (t/period) mod 1`; radius `R_max * smoothstep(0, 0.85, u)` rising to a
+ * peak near u=0.85, then dropping to ~0 by u=1. R_max = vacuoleMaxFrac*baseR.
+ * Returns `{ r }` (px). Pure & deterministic.
+ */
+export function contractileVacuole(t: number, baseR: number, params: CellParams): { r: number } {
+  const period = Math.max(0.1, params.vacuolePeriod ?? 7);
+  const Rmax = Math.max(0, params.vacuoleMaxFrac ?? 0.18) * Math.max(0, baseR);
+  const u = ((t / period) % 1 + 1) % 1;
+  let fill: number;
+  if (u <= 0.85) {
+    // diastole: smoothstep fill 0 -> 1 over [0, 0.85]
+    fill = smoothstep(u / 0.85);
+  } else {
+    // systole: rapid collapse 1 -> 0 over (0.85, 1]
+    fill = 1 - smoothstep((u - 0.85) / 0.15);
+  }
+  return { r: Rmax * fill };
 }
 
 // ---------------------------------------------------------------------------
