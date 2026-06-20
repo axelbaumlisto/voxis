@@ -695,8 +695,8 @@ export const CELL_DEFAULTS: CellParams = {
   enableTrichocysts: false,
   trichocystCount: 30,
   trichocystLengthMul: 3.0,
-  trichocystDecay: 2.0,
-  trichocystLineWidth: 1.0,
+  trichocystDecay: 1.0,
+  trichocystLineWidth: 1.5,
   // Commit 26: PLURAL pair of asynchronous contractile vacuoles. OFF
   // (dark-launch) so contractileVacuolePair returns [] and the gated draw
   // block is skipped -> all goldens stay byte-identical.
@@ -3835,11 +3835,11 @@ export function createCellRenderer(
         // (decoupled from startle fade), making needles visible ~500ms.
         if (params.enableTrichocysts) {
           // Detect startle onset (rising edge) to re-fire trichocystAlpha
-          if (startle > triPrevStartle + 0.05) {
+          if (startle > triPrevStartle + 0.02) {
             trichocystAlpha = 1.0;
           }
-          // Exponential decay at trichocystDecay rate (default 2.0 = ~500ms)
-          const triDecayRate = params.trichocystDecay ?? 2.0;
+          // Exponential decay at trichocystDecay rate (default 1.0 = ~3.5s visible)
+          const triDecayRate = params.trichocystDecay ?? 1.0;
           trichocystAlpha *= Math.exp(-triDecayRate * dt);
           if (trichocystAlpha < 0.005) trichocystAlpha = 0;
           triPrevStartle = startle;
@@ -3850,7 +3850,7 @@ export function createCellRenderer(
           const triAlpha = trichocystAlpha * 0.7;
           ctx.save();
           ctx.strokeStyle = hsla(0, 0.0, 0.95, triAlpha);
-          ctx.lineWidth = params.trichocystLineWidth ?? 1.0;
+          ctx.lineWidth = params.trichocystLineWidth ?? 1.5;
           ctx.lineCap = "round";
           // Use uniformly-spaced points on the deformed+squeezed membrane contour
           const cN = contourPoints.length;
