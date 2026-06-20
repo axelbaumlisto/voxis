@@ -6303,6 +6303,32 @@ describe("Commit 32a — interiorPoint (interior coupled to wall)", () => {
     expect(maxD).toBeLessThan(0.5);
   });
 
+  it("(a2) WALL-LANDING with ventral bend: interiorPoint(u, +-1) lands on the bent membrane polyline", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.24,
+      bodyAspect: 3,
+      bodyVentralBend: 0.18,
+    };
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, params);
+    const squeezeK = 1;
+    const squeezePhi = bodyHeading;
+    const ctx = makeCtx(deform, squeezeK, squeezePhi, params);
+    const poly = membranePolyline(deform, squeezeK, squeezePhi, params);
+    let maxD = 0;
+    for (const u of [-0.8, -0.4, 0, 0.4, 0.8]) {
+      for (const s of [1, -1]) {
+        const pt = interiorPoint(u, s, ctx);
+        const d = minDistToPolyline(pt, poly);
+        maxD = Math.max(maxD, d);
+        expect(d).toBeLessThan(0.5);
+      }
+    }
+    expect(maxD).toBeLessThan(0.5);
+  });
+
   it("(b) WALL-LANDING (synthetic FBM deform + affine): interiorPoint(u, +-1) lands on the squeezed FBM membrane", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,

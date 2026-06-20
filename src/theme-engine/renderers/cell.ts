@@ -2352,7 +2352,10 @@ export function interiorPoint(u: number, s: number, ctx: InteriorCtx): [number, 
   const W = baseR / Math.sqrt(aspect);
   const what = bodyHalfWidth(u, params); // normalised local half-width
   const xb = L * u;
-  const yb = s * W * what; // s scales the local half-width => |s|=1 is the wall
+  const bend = params.bodyVentralBend ?? 0;
+  // Match bodyProfilePoint's ventral-bend centerline shift (cell.ts ~2185:
+  // y += bend*W*max(0, cos t), cos t = u) so |s|=1 lands on the bent wall.
+  const yb = s * W * what + bend * W * Math.max(0, u); // s scales the local half-width => |s|=1 is the wall
   // 2. Body angle + radius of this interior point.
   const rho = Math.hypot(xb, yb);
   const thetaBody = Math.atan2(yb, xb);
