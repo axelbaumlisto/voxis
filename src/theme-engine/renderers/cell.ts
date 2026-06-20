@@ -817,7 +817,7 @@ export function effectiveCyclosisPeriod(
   const base = Math.max(0.1, params.cyclosisPeriod ?? 45);
   const boost = params.cyclosisActivityBoost ?? 0;
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
-  return base / (1 + a * boost);
+  return Math.max(0.1, base / (1 + a * boost));
 }
 
 /**

@@ -105,8 +105,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       oralGrooveDepth: 0.04,          // 4% inward indent
       cyclosisActivityBoost: 0.4,     // cyclosis 40% faster at full activity
       enableEctoplasm: true,          // cortex/endoplasm boundary line
-      ectoplasmFrac: 0.85,            // inner boundary at 85% radius
-      ectoplasmAlpha: 0.15,           // subtle DIC-like rim
+      ectoplasmFrac: 0.93,            // thin cortex at 93% radius (real: 92-96%)
+      ectoplasmAlpha: 0.22,           // brighter thin rim (was 0.15)
       enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)
       cyclosisGranuleCount: 52,      // pack the cytoplasm (biologist polish: crammed)
       granuleSizePx: 1.6,            // a touch brighter/bigger so they read
