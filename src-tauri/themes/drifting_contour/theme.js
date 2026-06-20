@@ -529,7 +529,7 @@ var CELL_DEFAULTS = {
   foodVacuoleMaxRadiusFrac: 0.62,
   foodVacuoleSizePx: 3,
   foodVacuoleDigestPeriod: 30,
-  micronucleusSizeFrac: 0.32,
+  micronucleusSizeFrac: 0.2,
   micronucleusOffsetFrac: 1.15,
   macronucleusU: -0.05,
   macronucleusS: 0.1,
@@ -1602,6 +1602,9 @@ function createCellRenderer(container, opts) {
       const energy = energySmoothed;
       growth = sanitizeUnit(growthLevel(sanitizeUnit(growth), audioLevel, s.mode, params.growthAttack, params.growthRelease));
       const activity = cellActivity(energy, growth, params);
+      const effectiveFillAlpha = lerp(params.fillAlpha, params.fillAlphaActive ?? params.fillAlpha, activity);
+      const baseMembraneLightness = params.membraneLightness ?? 0.6;
+      const effectiveMembraneLightness = lerp(baseMembraneLightness, params.membraneLightnessActive ?? baseMembraneLightness, activity);
       baseline = sanitizeFinite(baseline + (audioLevel - sanitizeFinite(baseline, 0)) * params.startleBaselineRate, 0);
       const prevStartle = startle;
       startle = sanitizeUnit(startleOffset(sanitizeUnit(startle), audioLevel, baseline, params.startleSensitivity, params.startleDecay));
@@ -1707,7 +1710,7 @@ function createCellRenderer(container, opts) {
         }
         const cvH = params.cvHue ?? baseHue + 20;
         const fvH = params.foodVacuoleHue ?? baseHue - 30;
-        ctx.fillStyle = hsla(baseHue, params.cytoplasmSat ?? 0.7, 0.55, params.fillAlpha);
+        ctx.fillStyle = hsla(baseHue, params.cytoplasmSat ?? 0.7, 0.55, effectiveFillAlpha);
         ctx.beginPath();
         ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
         for (let i = 1;i < splinePoints.length; i++) {
@@ -1715,8 +1718,8 @@ function createCellRenderer(container, opts) {
         }
         ctx.closePath();
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, baseR * 0.9));
-        grad.addColorStop(0, hsla(baseHue + 10, (params.cytoplasmSat ?? 0.7) * 0.71, 0.7, params.fillAlpha * 0.5));
-        grad.addColorStop(1, hsla(baseHue, params.cytoplasmSat ?? 0.7, 0.45, params.fillAlpha));
+        grad.addColorStop(0, hsla(baseHue + 10, (params.cytoplasmSat ?? 0.7) * 0.71, 0.7, effectiveFillAlpha * 0.5));
+        grad.addColorStop(1, hsla(baseHue, params.cytoplasmSat ?? 0.7, 0.45, effectiveFillAlpha));
         ctx.fillStyle = grad;
         ctx.fill();
         let minMembraneR = Infinity;
@@ -1753,7 +1756,12 @@ function createCellRenderer(container, opts) {
           nucGrad.addColorStop(1, hsla(baseHue - 10, 0.65 * nSm, 0.3, params.nucleusAlpha * 0.7));
           ctx.fillStyle = nucGrad;
           ctx.beginPath();
-          ctx.arc(nx, ny, nr, 0, TAU);
+          const nAspect = params.nucleusAspect ?? 1.8;
+          if (params.enableInteriorField && nAspect !== 1) {
+            ctx.ellipse(nx, ny, nr * nAspect, nr, squeezePhi, 0, TAU);
+          } else {
+            ctx.arc(nx, ny, nr, 0, TAU);
+          }
           ctx.fill();
           ctx.fillStyle = hsla(baseHue + 5, 0.55, 0.72, params.nucleusAlpha * 0.8);
           ctx.beginPath();
@@ -1831,6 +1839,20 @@ function createCellRenderer(container, opts) {
               ctx.beginPath();
               ctx.arc(vx, vy, e.r, 0, TAU);
               ctx.fill();
+              if (params.enableCVCanals && e.r > 1) {
+                const canalCount = 6;
+                const canalLen = e.r * 2;
+                const canalAlpha = params.nucleusAlpha * 0.45 * 0.3;
+                ctx.strokeStyle = hsla(cvH, 0.3, 0.72, canalAlpha);
+                ctx.lineWidth = 0.5;
+                for (let ci = 0;ci < canalCount; ci++) {
+                  const angle = ci / canalCount * TAU;
+                  ctx.beginPath();
+                  ctx.moveTo(vx, vy);
+                  ctx.lineTo(vx + Math.cos(angle) * canalLen, vy + Math.sin(angle) * canalLen);
+                  ctx.stroke();
+                }
+              }
             }
           } else {
             for (const e of pair) {
@@ -1844,6 +1866,20 @@ function createCellRenderer(container, opts) {
               ctx.beginPath();
               ctx.arc(vx, vy, e.r, 0, TAU);
               ctx.fill();
+              if (params.enableCVCanals && e.r > 1) {
+                const canalCount = 6;
+                const canalLen = e.r * 2;
+                const canalAlpha = params.nucleusAlpha * 0.45 * 0.3;
+                ctx.strokeStyle = hsla(cvH, 0.3, 0.72, canalAlpha);
+                ctx.lineWidth = 0.5;
+                for (let ci = 0;ci < canalCount; ci++) {
+                  const angle = ci / canalCount * TAU;
+                  ctx.beginPath();
+                  ctx.moveTo(vx, vy);
+                  ctx.lineTo(vx + Math.cos(angle) * canalLen, vy + Math.sin(angle) * canalLen);
+                  ctx.stroke();
+                }
+              }
             }
           }
         }
@@ -1947,7 +1983,7 @@ function createCellRenderer(container, opts) {
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
         const mSat = params.membraneSat ?? 0.85;
-        ctx.strokeStyle = hsla(baseHue, mSat * 0.94, params.membraneLightness ?? 0.6, 0.9);
+        ctx.strokeStyle = hsla(baseHue, mSat * 0.94, effectiveMembraneLightness, 0.9);
         ctx.lineWidth = 1.8;
         ctx.stroke();
         const segments = contourPoints.length;
@@ -1960,7 +1996,7 @@ function createCellRenderer(container, opts) {
           const midPt = splinePoints[Math.floor((segStart + segEnd) / 2) % splinePoints.length];
           const midAngle = Math.atan2(midPt[1] - cy, midPt[0] - cx);
           const hue = iridescentHue(midAngle, t, audioLevel, baseHue, params);
-          ctx.strokeStyle = hsla(hue, mSat, params.membraneLightness ?? 0.6, 0.85);
+          ctx.strokeStyle = hsla(hue, mSat, effectiveMembraneLightness, 0.85);
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.moveTo(splinePoints[segStart][0], splinePoints[segStart][1]);
@@ -2024,8 +2060,10 @@ function mount(container, api) {
       shimmerSpeed: 0.04,
       hueBoost: 4,
       fillAlpha: 0.18,
+      fillAlphaActive: 0.35,
       membraneSat: 0.12,
       membraneLightness: 0.75,
+      membraneLightnessActive: 0.88,
       cytoplasmSat: 0.1,
       ciliaSat: 0.08,
       granuleSat: 0.1,
@@ -2070,7 +2108,9 @@ function mount(container, api) {
       enableCiliaStructure: true,
       enableAxialSpin: true,
       axialSpinMax: 7,
+      nucleusAlpha: 0.72,
       enableVacuoles: true,
+      enableCVCanals: true,
       enableCyclosis: true,
       cyclosisGranuleCount: 52,
       granuleSizePx: 1.6,
