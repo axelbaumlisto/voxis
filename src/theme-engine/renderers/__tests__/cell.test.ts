@@ -4577,6 +4577,128 @@ describe("Commit 21c — cilia anchored on deformed+squeezed contour", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Commit 22b — somatic mex + contour wired into createCellRenderer
+//
+// Proves the render call-site composes somaticCiliaParams (count -> 72) and
+// attaches the deformed+squeezed contour to ciliaMotion, but ONLY when the
+// gates are on. With both gates off the default path is byte-identical to the
+// frozen GATES_OFF golden + commit-21b crown (exercised end-to-end here by a
+// hair count of 18).
+// ---------------------------------------------------------------------------
+describe("Commit 22b — somatic mex wired into render", () => {
+  // A recording 2D context that counts CILIA strokes. Each hair is drawn as
+  // beginPath -> moveTo -> lineTo* -> stroke, and the whole crown is rendered
+  // BEFORE the cytoplasm fill(). So the number of stroke() calls seen before the
+  // first fill() of a frame == the number of hairs rendered that frame. clearRect
+  // (top of tick) resets the per-frame counters.
+  function installCiliaCountingContext() {
+    const frames: number[] = []; // hair count per completed frame
+    let strokesBeforeFill = 0;
+    let fillSeen = false;
+    const grad = { addColorStop: () => {} };
+    const ctx = {
+      clearRect: () => {
+        // A frame boundary: push the previous frame's tally then reset.
+        frames.push(strokesBeforeFill);
+        strokesBeforeFill = 0;
+        fillSeen = false;
+      },
+      save: () => {},
+      restore: () => {},
+      beginPath: () => {},
+      closePath: () => {},
+      stroke: () => { if (!fillSeen) strokesBeforeFill++; },
+      fill: () => { fillSeen = true; },
+      moveTo: () => {},
+      lineTo: () => {},
+      arc: () => {},
+      createRadialGradient: () => grad,
+      fillStyle: "", strokeStyle: "", lineWidth: 0, lineCap: "", lineJoin: "",
+    };
+    const proto = HTMLCanvasElement.prototype as unknown as {
+      getContext: (id: string) => unknown;
+    };
+    const orig = proto.getContext;
+    proto.getContext = () => ctx;
+    // The last fully-rendered frame's hair count (frames are pushed on the NEXT
+    // tick's clearRect, so read frames[frames.length-1] after one extra step).
+    return {
+      lastFrameHairs: () => frames[frames.length - 1] ?? 0,
+      restore: () => { proto.getContext = orig; },
+    };
+  }
+
+  let restoreCtx: (() => void) | null = null;
+  afterEach(() => {
+    if (restoreCtx) { restoreCtx(); restoreCtx = null; }
+    vi.unstubAllGlobals();
+  });
+
+  function driveRenderer(params: Partial<CellParams> | undefined, frames: number) {
+    const rafCalls: Array<() => void> = [];
+    let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const step = (k: number) => { for (let i = 0; i < k; i++) if (rafCalls.length) rafCalls.shift()!(); };
+    const r = createCellRenderer(document.createElement("div"), {
+      width: 160, height: 160, ...(params ? { params } : {}),
+    });
+    // Drive recording frames so the swim/affine paths are exercised.
+    for (let i = 0; i < frames; i++) {
+      r.update({ mode: "recording", audioLevel: 0.7, spectrumBins: new Array(32).fill(0.5) });
+      step(1);
+    }
+    // One extra step so the LAST rendered frame's tally is flushed on clearRect.
+    step(1);
+    return { r, step };
+  }
+
+  it("(a) DEFAULT path (both gates off) renders exactly 18 hairs (commit-21b crown)", () => {
+    const rec = installCiliaCountingContext(); restoreCtx = rec.restore;
+    const { r } = driveRenderer(undefined, 5);
+    expect(rec.lastFrameHairs()).toBe(CELL_DEFAULTS.ciliaCount);
+    expect(rec.lastFrameHairs()).toBe(18);
+    r.destroy();
+  });
+
+  it("(b) MEX ON via renderer renders exactly 72 hairs (somaticCiliaCount wired through)", () => {
+    const rec = installCiliaCountingContext(); restoreCtx = rec.restore;
+    const { r } = driveRenderer({
+      enableSomaticCilia: true,
+      enableCiliaOnContour: true,
+      enableAffine: true,
+      enableActivity: true,
+    }, 5);
+    expect(rec.lastFrameHairs()).toBe(CELL_DEFAULTS.somaticCiliaCount);
+    expect(rec.lastFrameHairs()).toBe(72);
+    r.destroy();
+  });
+
+  it("(c) somaticCiliaParams flows the mex count into a real ciliaPath WITH contour anchoring", () => {
+    // Mirrors the call-site composition: somaticCiliaParams -> ciliaCount 72, and
+    // the contour is consumed (enableCiliaOnContour on) so the bases sit on the
+    // deformed contour rather than the bare circle.
+    const p = somaticCiliaParams({ ...CELL_DEFAULTS, enableSomaticCilia: true });
+    expect(p.ciliaCount).toBe(72);
+    expect(p.ciliaLength).toBe(CELL_DEFAULTS.somaticCiliaLength);
+    const anchoredParams = { ...p, enableCiliaOnContour: true };
+    // A +0.2 bump on the contour; anchored bases must reflect it.
+    const deform = new Array<number>(96).fill(0);
+    deform[10] = 0.2;
+    const crown = ciliaPath(80, 80, 24, 1.0, 0.6, 0.8, anchoredParams, {
+      tx: 1, ty: 0, speedNorm: 0, axisStrength: 0,
+      contour: { deform, squeezeK: 1, squeezePhi: 0 },
+    });
+    expect(crown.length).toBe(72);
+    // contour was actually consumed: at least one base sits off the bare circle.
+    const offCircle = crown.some(
+      (h) => Math.abs(Math.hypot(h.points[0][0] - 80, h.points[0][1] - 80) - 24) > 1e-3,
+    );
+    expect(offCircle).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Commit 13 — M4 (persist wander pose) + M5 (fraction storage, resize-safe)
 // ---------------------------------------------------------------------------
 describe("CellPersistState M4/M5 — pose round-trip + back-compat", () => {

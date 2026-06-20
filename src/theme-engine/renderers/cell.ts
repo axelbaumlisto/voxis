@@ -2530,17 +2530,25 @@ export function createCellRenderer(
           // E1 (gate OFF): drive the hair count from the perimeter so a bigger
           // cell grows proportionally more cilia at ~constant arc spacing. When
           // the gate is off this is identity (keeps params.ciliaCount).
+          // Commit 22b: somatic-mex param swap. somaticCiliaParams returns
+          // `params` UNCHANGED BY REFERENCE when enableSomaticCilia is off, so the
+          // default path allocates nothing and stays byte-identical. When on it
+          // raises the base count to somaticCiliaCount (72) and shortens hairs to
+          // somaticCiliaLength (0.15). enablePerimeterCount can still further
+          // override the count from the perimeter; the two compose cleanly because
+          // effectiveCount falls back to baseCiliaParams.ciliaCount.
+          const baseCiliaParams = somaticCiliaParams(params);
           const effectiveCount = params.enablePerimeterCount
             ? perimeterCiliaCount(baseR, params)
-            : params.ciliaCount;
+            : baseCiliaParams.ciliaCount;
           const ciliaParams = params.enableActivity
             ? {
-                ...params,
+                ...baseCiliaParams,
                 ciliaCount: effectiveCount,
                 ciliaBeatHz: ciliaBeatHzEff(activity, params),
-                ciliaCurl: params.ciliaCurl * (1 + 0.3 * activity),
+                ciliaCurl: baseCiliaParams.ciliaCurl * (1 + 0.3 * activity),
               }
-            : (params.enablePerimeterCount ? { ...params, ciliaCount: effectiveCount } : params);
+            : (params.enablePerimeterCount ? { ...baseCiliaParams, ciliaCount: effectiveCount } : baseCiliaParams);
           // D2: motion basis so the crown leans rearward while swimming. Tangent
           // is the body heading; speedNorm gates it (0 at rest => identity).
           const ciliaMotion: CiliaMotion = {
@@ -2550,6 +2558,15 @@ export function createCellRenderer(
             // F4/G3: how coherently the crown rows toward the heading, gated by
             // activity (idle ~isotropic, active coherent). 0 when activity off.
             axisStrength: params.enableActivity ? strokeAxisStrength(activity, params) : 0,
+            // Commit 22b: anchor hair bases on the real deformed+squeezed contour.
+            // ciliaPath ignores `contour` unless enableCiliaOnContour is on, but we
+            // only attach it on the gated path so the default path allocates no
+            // extra object and the frozen GATES_OFF / commit-21b golden stays
+            // byte-identical. `deform` is non-null here (assigned this tick), the
+            // guard just narrows the number[] | null type.
+            ...(params.enableCiliaOnContour && deform
+              ? { contour: { deform, squeezeK, squeezePhi } }
+              : {}),
           };
           const cilia = ciliaPath(cx, cy, baseR, t, energy, growth, ciliaParams, ciliaMotion);
           ctx.lineCap = "round";
