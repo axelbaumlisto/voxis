@@ -1445,6 +1445,12 @@ export interface CellPersistState {
   driftPhase: number;
   growth: number;
   elapsed: number;
+  /** M4/M5: persisted wander pose. Position is stored as a FRACTION of the tank
+   * (fx=x/width, fy=y/height) so it stays meaningful across resizes (M5). All
+   * three are optional for back-compat with legacy v1 payloads (no pose). */
+  fx?: number;
+  fy?: number;
+  heading?: number;
 }
 
 export function serializeCellState(s: CellPersistState): string {
@@ -1470,7 +1476,21 @@ export function parseCellState(raw: string | null): CellPersistState | null {
     // Reject absurd-but-finite values that could freeze/break animation
     if (obj.elapsed < 0 || obj.elapsed >= 1e7) return null;
     if (obj.driftPhase < -1e7 || obj.driftPhase > 1e7) return null;
-    return { driftPhase: obj.driftPhase, growth: obj.growth, elapsed: obj.elapsed };
+    const base: CellPersistState = { driftPhase: obj.driftPhase, growth: obj.growth, elapsed: obj.elapsed };
+    // M4/M5: attach the pose ONLY if all three fields are present, finite and in
+    // range. A corrupt/partial pose is dropped (base state still restores), so a
+    // bad fraction can never teleport the cell out of bounds.
+    if (
+      typeof obj.fx === "number" && Number.isFinite(obj.fx) && obj.fx >= 0 && obj.fx <= 1 &&
+      typeof obj.fy === "number" && Number.isFinite(obj.fy) && obj.fy >= 0 && obj.fy <= 1 &&
+      typeof obj.heading === "number" && Number.isFinite(obj.heading) &&
+      obj.heading > -1e4 && obj.heading < 1e4
+    ) {
+      base.fx = obj.fx;
+      base.fy = obj.fy;
+      base.heading = obj.heading;
+    }
+    return base;
   } catch {
     return null;
   }
@@ -1495,6 +1515,44 @@ export function restoreSeed(
     startedAt: now - elapsed * 1000,
     driftPhaseOffset: saved.driftPhase - elapsed,
   };
+}
+
+/**
+ * M4/M5 — reconstruct a wander pose (pixel x/y + heading) from a persisted
+ * state. Position is stored as a FRACTION of the tank, so we re-derive it
+ * against the CURRENT width/height (resize-safe) and clamp it into the wander
+ * inset (same `max(driftMargin, cellReach)` the wander itself uses) so a saved
+ * near-wall fraction can never start the cell out of bounds. Returns null when
+ * the saved state carries no pose (legacy payload). Pure & deterministic.
+ */
+export function wanderPoseFromState(
+  saved: CellPersistState,
+  width: number,
+  height: number,
+  baseR: number,
+  params: CellParams,
+): { x: number; y: number; heading: number } | null {
+  if (saved.fx === undefined || saved.fy === undefined || saved.heading === undefined) {
+    return null;
+  }
+  const reach = cellReach(baseR, params);
+  const inset = Math.max(params.driftMargin ?? 4, reach);
+  const clamp = (v: number, lo: number, hi: number) =>
+    lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v));
+  return {
+    x: clamp(saved.fx * width, inset, width - inset),
+    y: clamp(saved.fy * height, inset, height - inset),
+    heading: saved.heading,
+  };
+}
+
+/**
+ * M5 — persistence key namespaced by tank size so a state saved for one overlay
+ * geometry (e.g. the 160x160 square overlay) is never loaded into another (e.g.
+ * the 172x36 harness strip), which would restore a nonsensical pose.
+ */
+export function cellPersistKey(width: number, height: number): string {
+  return `talri.cell.state.v2.${Math.round(width)}x${Math.round(height)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1813,20 +1871,30 @@ export function createCellRenderer(
   let bodyHeading = 0; // G4: smoothed body long-axis heading (radians)
   let lastTickMs = performance.now();
 
-  // Persistence: restore state from localStorage for continuity across restarts
-  const PERSIST_KEY = "talri.cell.state.v1";
+  // Persistence: restore state from localStorage for continuity across restarts.
+  // M5: key is namespaced by tank size so a pose saved for one overlay geometry
+  // never loads into another.
+  const PERSIST_KEY = cellPersistKey(width, height);
   let driftPhaseOffset = 0;
   let lastPersist = 0;
   let startedAt = performance.now();
+  // M4: a wander pose restored from persistence, consumed at lazy wander-init so
+  // the cell resumes where it left off instead of teleporting to centre.
+  let restoredPose: { x: number; y: number; heading: number } | null = null;
 
   if (typeof localStorage !== "undefined") {
     try {
+      // M5: remove the orphaned pre-v2 key once so it doesn't linger forever.
+      localStorage.removeItem("talri.cell.state.v1");
       const saved = parseCellState(localStorage.getItem(PERSIST_KEY));
       if (saved) {
         growth = saved.growth;
         const seed = restoreSeed(saved, performance.now());
         startedAt = seed.startedAt;
         driftPhaseOffset = seed.driftPhaseOffset;
+        // baseR depends on growth (resolveBaseRadius); use the restored growth so
+        // the inset clamp matches the cell's actual size.
+        restoredPose = wanderPoseFromState(saved, width, height, resolveBaseRadius(width, height, params, growth), params);
       }
     } catch {
       // Silently ignore localStorage errors
@@ -1916,7 +1984,10 @@ export function createCellRenderer(
       const baseR = resolveBaseRadius(width, height, params, growth);
       // Integrated wander (natural roaming that never gravitates to centre).
       if (!wander) {
-        wander = { x: width / 2, y: height / 2, heading: noise2D(7.1, 3.3) * TAU, vx: 0, vy: 0, clock: 0 };
+        // M4: resume the persisted pose if present (no teleport to centre).
+        wander = restoredPose
+          ? { x: restoredPose.x, y: restoredPose.y, heading: restoredPose.heading, vx: 0, vy: 0, clock: 0 }
+          : { x: width / 2, y: height / 2, heading: noise2D(7.1, 3.3) * TAU, vx: 0, vy: 0, clock: 0 };
       }
       // H1: apply the startle heading kick to the wander BEFORE integrating, so
       // the cell darts off in a new direction on a sharp onset.
@@ -2114,6 +2185,10 @@ export function createCellRenderer(
           driftPhase: t + driftPhaseOffset,
           growth,
           elapsed: t,
+          // M4/M5: store the wander pose as a fraction of the tank (resize-safe).
+          ...(wander
+            ? { fx: wander.x / width, fy: wander.y / height, heading: wander.heading }
+            : {}),
         }));
         lastPersist = now;
       } catch {

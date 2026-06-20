@@ -48,6 +48,8 @@ import {
   serializeCellState,
   parseCellState,
   restoreSeed,
+  wanderPoseFromState,
+  cellPersistKey,
   CELL_DEFAULTS,
   createCellRenderer,
   saturateTargetDeform,
@@ -3868,5 +3870,74 @@ describe("Commit 12 — enableStrokeAxis gate + ciliaPath back-compat", () => {
       }
     }
     expect(differs).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 13 — M4 (persist wander pose) + M5 (fraction storage, resize-safe)
+// ---------------------------------------------------------------------------
+describe("CellPersistState M4/M5 — pose round-trip + back-compat", () => {
+  it("serializes & parses the optional pose fields (fx,fy,heading)", () => {
+    const s: CellPersistState = { driftPhase: 1.2, growth: 0.3, elapsed: 5, fx: 0.25, fy: 0.75, heading: 1.1 };
+    const round = parseCellState(serializeCellState(s));
+    expect(round).not.toBeNull();
+    expect(round!.fx).toBeCloseTo(0.25, 12);
+    expect(round!.fy).toBeCloseTo(0.75, 12);
+    expect(round!.heading).toBeCloseTo(1.1, 12);
+  });
+  it("still parses legacy payloads with no pose (back-compat -> undefined pose)", () => {
+    const legacy = JSON.stringify({ driftPhase: 0.5, growth: 0.2, elapsed: 3 });
+    const p = parseCellState(legacy);
+    expect(p).not.toBeNull();
+    expect(p!.fx).toBeUndefined();
+    expect(p!.fy).toBeUndefined();
+  });
+  it("rejects out-of-range fractions (corrupt pose -> drop pose, keep base)", () => {
+    const bad = JSON.stringify({ driftPhase: 0, growth: 0.2, elapsed: 3, fx: 5, fy: 0.5, heading: 1 });
+    const p = parseCellState(bad);
+    // base state still valid; pose dropped (fx out of [0,1])
+    expect(p).not.toBeNull();
+    expect(p!.fx).toBeUndefined();
+  });
+});
+
+describe("wanderPoseFromState M4/M5 — fraction -> clamped pixel pose", () => {
+  const P = CELL_DEFAULTS;
+  it("returns null when the saved state carries no pose", () => {
+    expect(wanderPoseFromState({ driftPhase: 0, growth: 0.2, elapsed: 1 }, 160, 160, 24, P)).toBeNull();
+  });
+  it("round-trips a centred pose to ~centre", () => {
+    const pose = wanderPoseFromState({ driftPhase: 0, growth: 0, elapsed: 1, fx: 0.5, fy: 0.5, heading: 0.7 }, 160, 160, 24, P)!;
+    expect(pose.x).toBeCloseTo(80, 6);
+    expect(pose.y).toBeCloseTo(80, 6);
+    expect(pose.heading).toBeCloseTo(0.7, 12);
+  });
+  it("M5: a 160x160 fraction loaded at 320x320 keeps the SAME relative position +/-1%", () => {
+    // Use the real absolute baseR (17px) so the inset is small and the relative
+    // position is preserved (a giant baseR would clamp everything to centre).
+    const saved = { driftPhase: 0, growth: 0, elapsed: 1, fx: 0.3, fy: 0.7, heading: 0 };
+    const pose = wanderPoseFromState(saved, 320, 320, 17, P)!;
+    expect(pose.x / 320).toBeCloseTo(0.3, 2);
+    expect(pose.y / 320).toBeCloseTo(0.7, 2);
+  });
+  it("M5: clamps the pose inside the wander inset (never out of bounds)", () => {
+    // fx=0.99 would be near the wall; the inset must pull it inside.
+    const pose = wanderPoseFromState({ driftPhase: 0, growth: 0, elapsed: 1, fx: 0.99, fy: 0.01, heading: 0 }, 160, 160, 24, P)!;
+    const reach = cellReach(24, P);
+    const inset = Math.max(P.driftMargin ?? 4, reach);
+    expect(pose.x).toBeLessThanOrEqual(160 - inset + 1e-6);
+    expect(pose.x).toBeGreaterThanOrEqual(inset - 1e-6);
+    expect(pose.y).toBeLessThanOrEqual(160 - inset + 1e-6);
+    expect(pose.y).toBeGreaterThanOrEqual(inset - 1e-6);
+  });
+});
+
+describe("cellPersistKey M5 — namespaced by tank size", () => {
+  it("differs by size so a harness overlay never loads a square-overlay pose", () => {
+    expect(cellPersistKey(160, 160)).not.toBe(cellPersistKey(172, 36));
+    expect(cellPersistKey(160, 160)).toBe(cellPersistKey(160, 160));
+  });
+  it("includes the dimensions", () => {
+    expect(cellPersistKey(160, 160)).toContain("160x160");
   });
 });

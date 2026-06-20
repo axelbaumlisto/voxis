@@ -806,7 +806,13 @@ function parseCellState(raw) {
       return null;
     if (obj.driftPhase < -1e7 || obj.driftPhase > 1e7)
       return null;
-    return { driftPhase: obj.driftPhase, growth: obj.growth, elapsed: obj.elapsed };
+    const base = { driftPhase: obj.driftPhase, growth: obj.growth, elapsed: obj.elapsed };
+    if (typeof obj.fx === "number" && Number.isFinite(obj.fx) && obj.fx >= 0 && obj.fx <= 1 && typeof obj.fy === "number" && Number.isFinite(obj.fy) && obj.fy >= 0 && obj.fy <= 1 && typeof obj.heading === "number" && Number.isFinite(obj.heading) && obj.heading > -1e4 && obj.heading < 1e4) {
+      base.fx = obj.fx;
+      base.fy = obj.fy;
+      base.heading = obj.heading;
+    }
+    return base;
   } catch {
     return null;
   }
@@ -817,6 +823,22 @@ function restoreSeed(saved, now) {
     startedAt: now - elapsed * 1000,
     driftPhaseOffset: saved.driftPhase - elapsed
   };
+}
+function wanderPoseFromState(saved, width, height, baseR, params) {
+  if (saved.fx === undefined || saved.fy === undefined || saved.heading === undefined) {
+    return null;
+  }
+  const reach = cellReach(baseR, params);
+  const inset = Math.max(params.driftMargin ?? 4, reach);
+  const clamp = (v, lo, hi) => lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v));
+  return {
+    x: clamp(saved.fx * width, inset, width - inset),
+    y: clamp(saved.fy * height, inset, height - inset),
+    heading: saved.heading
+  };
+}
+function cellPersistKey(width, height) {
+  return `talri.cell.state.v2.${Math.round(width)}x${Math.round(height)}`;
 }
 function membraneMaxRadius(width, height) {
   return Math.min(width, height) * 0.46;
@@ -909,18 +931,21 @@ function createCellRenderer(container, opts) {
   let wander = null;
   let bodyHeading = 0;
   let lastTickMs = performance.now();
-  const PERSIST_KEY = "talri.cell.state.v1";
+  const PERSIST_KEY = cellPersistKey(width, height);
   let driftPhaseOffset = 0;
   let lastPersist = 0;
   let startedAt = performance.now();
+  let restoredPose = null;
   if (typeof localStorage !== "undefined") {
     try {
+      localStorage.removeItem("talri.cell.state.v1");
       const saved = parseCellState(localStorage.getItem(PERSIST_KEY));
       if (saved) {
         growth = saved.growth;
         const seed = restoreSeed(saved, performance.now());
         startedAt = seed.startedAt;
         driftPhaseOffset = seed.driftPhaseOffset;
+        restoredPose = wanderPoseFromState(saved, width, height, resolveBaseRadius(width, height, params, growth), params);
       }
     } catch {}
   }
@@ -957,7 +982,7 @@ function createCellRenderer(container, opts) {
       drift01 = driftActivation(drift01, s.mode === "recording", params.driftActivationRate ?? 0.02, dt);
       const baseR = resolveBaseRadius(width, height, params, growth);
       if (!wander) {
-        wander = { x: width / 2, y: height / 2, heading: noise2D(7.1, 3.3) * TAU, vx: 0, vy: 0, clock: 0 };
+        wander = restoredPose ? { x: restoredPose.x, y: restoredPose.y, heading: restoredPose.heading, vx: 0, vy: 0, clock: 0 } : { x: width / 2, y: height / 2, heading: noise2D(7.1, 3.3) * TAU, vx: 0, vy: 0, clock: 0 };
       }
       if (useKick) {
         const kick = startleHeadingKick(startle, prevStartle, t, params);
@@ -1083,7 +1108,8 @@ function createCellRenderer(container, opts) {
         localStorage.setItem(PERSIST_KEY, serializeCellState({
           driftPhase: t + driftPhaseOffset,
           growth,
-          elapsed: t
+          elapsed: t,
+          ...wander ? { fx: wander.x / width, fy: wander.y / height, heading: wander.heading } : {}
         }));
         lastPersist = now;
       } catch {}
