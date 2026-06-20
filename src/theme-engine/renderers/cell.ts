@@ -441,8 +441,8 @@ export const CELL_DEFAULTS: CellParams = {
   // Commit 31a: authentic asymmetric slipper body profile. OFF (dark-launch);
   // helpers are pure math with no render-loop caller yet.
   enableBodyProfile: false,
-  bodyProfileType: "taperedEllipse",
-  bodyProfileTaper: 0.3,
+  bodyProfileType: "egg",
+  bodyProfileTaper: 0.27,
   bodyAspect: 3,
   bodyVentralBend: 0,
 };

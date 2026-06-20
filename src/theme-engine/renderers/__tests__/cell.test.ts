@@ -5281,10 +5281,12 @@ describe("Commit 31a — authentic body profile (pure math)", () => {
     "piriform",
   ];
 
-  it("(a) DEFAULTS are dark + slipper", () => {
+  it("(a) DEFAULTS are dark + biologically-validated egg slipper", () => {
+    // Commit 31c: default profile params set to the validated egg shape
+    // (gate still OFF so the default render path never calls the helper).
     expect(CELL_DEFAULTS.enableBodyProfile).toBe(false);
-    expect(CELL_DEFAULTS.bodyProfileType).toBe("taperedEllipse");
-    expect(CELL_DEFAULTS.bodyProfileTaper).toBe(0.3);
+    expect(CELL_DEFAULTS.bodyProfileType).toBe("egg");
+    expect(CELL_DEFAULTS.bodyProfileTaper).toBe(0.27);
     expect(CELL_DEFAULTS.bodyAspect).toBe(3);
     expect(CELL_DEFAULTS.bodyVentralBend).toBe(0);
   });
@@ -5413,6 +5415,98 @@ describe("Commit 31a — authentic body profile (pure math)", () => {
     expect(bodyProfilePoint(1.2, baseR, P)).toEqual(bodyProfilePoint(1.2, baseR, P));
     expect(bodyProfileArea(baseR, P)).toEqual(bodyProfileArea(baseR, P));
     expect(bodyProfileAreaScale(baseR, P)).toEqual(bodyProfileAreaScale(baseR, P));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 31c — bodyProfileMorphometry (biology validator)
+// Encodes the morphometric acceptance bounds measured from 3 real Paramecium
+// reference photos. These bounds ACCEPT the validated egg slipper default and
+// REJECT the front-heavy / sharp-tailed piriform (see contrast test below).
+// ---------------------------------------------------------------------------
+
+describe("Commit 31c — bodyProfileMorphometry (biology validator)", () => {
+  // Sample w(u) on a fine grid to find the global max half-width and its u.
+  function morphometry(p: CellParams) {
+    let wMax = -Infinity;
+    let uMax = -1;
+    const N = 800;
+    for (let k = 0; k <= N; k++) {
+      const u = -1 + (2 * k) / N; // 801 points
+      const w = bodyHalfWidth(u, p);
+      if (w > wMax) {
+        wMax = w;
+        uMax = u;
+      }
+    }
+    const widestFrac = (1 - uMax) / 2; // 0 at anterior pole, 1 at posterior
+    const r08 = bodyHalfWidth(0.8, p) / bodyHalfWidth(-0.8, p);
+    const postBlunt = bodyHalfWidth(-0.8, p) / wMax;
+    return { wMax, uMax, widestFrac, r08, postBlunt };
+  }
+
+  it("egg default PASSES all morphometric acceptance bounds", () => {
+    const p: CellParams = { ...CELL_DEFAULTS };
+    const m = morphometry(p);
+
+    // (1) widest point near mid-body, biased slightly forward
+    expect(m.widestFrac).toBeGreaterThanOrEqual(0.36);
+    expect(m.widestFrac).toBeLessThanOrEqual(0.5);
+
+    // (2) fore-aft asymmetry moderate (anterior broader, not lopsided)
+    expect(m.r08).toBeGreaterThanOrEqual(1.3);
+    expect(m.r08).toBeLessThanOrEqual(2.3);
+
+    // (3) anterior strictly broader than posterior (not a symmetric ellipse)
+    expect(bodyHalfWidth(0.8, p)).toBeGreaterThan(bodyHalfWidth(-0.8, p));
+
+    // (4) posterior pole blunt, not a needle
+    expect(m.postBlunt).toBeGreaterThanOrEqual(0.35);
+
+    // (5) posterior pole ROUNDED: w ~ sqrt(1+u) near u=-1, so
+    //     w/sqrt(1+u) -> finite positive constant (NOT 0 like a linear tip).
+    const q1 = bodyHalfWidth(-0.99, p) / Math.sqrt(0.01);
+    const q2 = bodyHalfWidth(-0.999, p) / Math.sqrt(0.001);
+    expect(Number.isFinite(q1)).toBe(true);
+    expect(Number.isFinite(q2)).toBe(true);
+    expect(q1).toBeGreaterThan(0);
+    expect(q2).toBeGreaterThan(0);
+    expect(Math.abs(q1 - q2) / q1).toBeLessThan(0.15);
+
+    // (6) anterior pole rounded similarly
+    const qa = bodyHalfWidth(0.99, p) / Math.sqrt(1 - 0.99);
+    expect(Number.isFinite(qa)).toBe(true);
+    expect(qa).toBeGreaterThan(0);
+
+    // (7) aspect in slipper range, measured from the contour
+    const baseR = 17;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let maxAbsY = 0;
+    const M = 2000;
+    for (let k = 0; k < M; k++) {
+      const t = (TAU * k) / M;
+      const [x, y] = bodyProfilePoint(t, baseR, p);
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      maxAbsY = Math.max(maxAbsY, Math.abs(y));
+    }
+    const aspect = (maxX - minX) / (2 * maxAbsY);
+    expect(aspect).toBeGreaterThanOrEqual(2.7);
+    expect(aspect).toBeLessThanOrEqual(3.3);
+  });
+
+  it("sharp piriform FAILS the validator (bounds are not a tautology)", () => {
+    const p: CellParams = {
+      ...CELL_DEFAULTS,
+      bodyProfileType: "piriform",
+      bodyProfileTaper: 0.3,
+    };
+    const m = morphometry(p);
+    // At least one discriminating bound must reject the front-heavy/needle shape.
+    const rejected =
+      m.widestFrac < 0.36 || m.r08 > 2.3 || m.postBlunt < 0.35;
+    expect(rejected).toBe(true);
   });
 });
 
