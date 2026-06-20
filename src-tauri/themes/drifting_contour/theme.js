@@ -776,7 +776,7 @@ function buildTargetDeformation(width, height, bins, t, audioLevel, energy, para
 }
 function nucleusTransform(t, audioLevel, baseR, params, minMembraneR) {
   const rawCx = baseR * params.nucleusWander * noise2D(137, t * params.nucleusDrift);
-  const rawCy = baseR * params.nucleusWander * noise2D(241, t * params.nucleusDrift);
+  const rawCy = baseR * params.nucleusWander * noise2D(241, t * params.nucleusDrift * 1.3 + 555.5);
   const idleBreath = Math.sin(t * 1.3) * params.nucleusPulse * 0.25;
   let r = baseR * (params.nucleusRadius + audioLevel * params.nucleusPulse + idleBreath);
   const MIN_PX_RADIUS = 2.5;

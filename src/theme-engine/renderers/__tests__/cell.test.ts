@@ -4028,3 +4028,66 @@ describe("smoothEnergy (M6 mode-change pop)", () => {
     expect(CELL_DEFAULTS.enableEnergySmoothing).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Commit 15 — M10 (organelle seed de-correlation) + F10 (near-immobile nucleus)
+// ---------------------------------------------------------------------------
+describe("M10 — nucleus drift streams are de-correlated", () => {
+  const P = { ...CELL_DEFAULTS };
+  // Cross-correlation of the nucleus x vs y offset over a long window.
+  const nucleusXcorr = () => {
+    const N = 5000, dtT = 0.016;
+    const xs: number[] = [], ys: number[] = [];
+    for (let i = 0; i < N; i++) {
+      const n = nucleusTransform(i * dtT, 0.3, 24, P);
+      xs.push(n.cx);
+      ys.push(n.cy);
+    }
+    const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
+    const mx = mean(xs), my = mean(ys);
+    let num = 0, dx = 0, dy = 0;
+    for (let i = 0; i < N; i++) {
+      num += (xs[i] - mx) * (ys[i] - my);
+      dx += (xs[i] - mx) ** 2;
+      dy += (ys[i] - my) ** 2;
+    }
+    return num / Math.sqrt(dx * dy);
+  };
+  it("x and y nucleus drift cross-correlation < 0.2 (was ~0.26 with the shared y-rate)", () => {
+    expect(Math.abs(nucleusXcorr())).toBeLessThan(0.2);
+  });
+});
+
+describe("F10 — near-immobile nucleus option", () => {
+  it("a low nucleusWander bounds the nuclear displacement (hard per-axis + envelope)", () => {
+    const baseR = 24;
+    const wander = 0.03;
+    const P = { ...CELL_DEFAULTS, nucleusWander: wander };
+    let sum = 0, maxOff = 0;
+    const N = 2000;
+    // Sweep a SHIFTED window so the bound doesn't rely on a lucky start offset.
+    for (let i = 0; i < N; i++) {
+      const n = nucleusTransform(123.7 + i * 0.016, 0.2, baseR, P);
+      sum += (n.cx * n.cx + n.cy * n.cy);
+      maxOff = Math.max(maxOff, Math.hypot(n.cx, n.cy));
+      // HARD invariant: each axis bounded by wander*baseR (|noise2D|<=1).
+      expect(Math.abs(n.cx)).toBeLessThanOrEqual(wander * baseR + 1e-9);
+      expect(Math.abs(n.cy)).toBeLessThanOrEqual(wander * baseR + 1e-9);
+    }
+    // HARD invariant: total offset within the sqrt(2) envelope.
+    expect(maxOff).toBeLessThanOrEqual(Math.SQRT2 * wander * baseR + 1e-9);
+    // Expectation-level: long-run RMS stays well under the envelope (near-immobile).
+    const rms = Math.sqrt(sum / N);
+    expect(rms).toBeLessThanOrEqual(wander * baseR + 1e-9);
+  });
+  it("default nucleusWander still allows visible drift (back-compat preserved)", () => {
+    const baseR = 24;
+    const P = { ...CELL_DEFAULTS };
+    let maxOff = 0;
+    for (let i = 0; i < 600; i++) {
+      const n = nucleusTransform(i * 0.05, 0.2, baseR, P);
+      maxOff = Math.max(maxOff, Math.hypot(n.cx, n.cy));
+    }
+    expect(maxOff).toBeGreaterThan(0.02 * baseR);
+  });
+});
