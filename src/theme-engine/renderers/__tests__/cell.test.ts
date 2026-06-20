@@ -84,6 +84,7 @@ import {
   bodyProfileDeform,
   interpProfileRadius,
   axialSpin,
+  helicalOffset,
   interiorPoint,
   seedInteriorGranules,
   profileCDFInv,
@@ -6224,6 +6225,70 @@ describe("Commit 24 — axial spin", () => {
   it("(g) DETERMINISM: identical args => identical value (no Date/random)", () => {
     const p = { ...CELL_DEFAULTS, enableAxialSpin: true };
     expect(axialSpin(3.3, 0.8, p)).toBe(axialSpin(3.3, 0.8, p));
+  });
+});
+
+describe("v3.8B — helicalOffset (helical swimming path)", () => {
+  const baseR = 30;
+
+  it("(a) default amplitude=0: returns [0,0] exactly", () => {
+    const p = { ...CELL_DEFAULTS };
+    expect(p.helicalAmplitude).toBeUndefined();
+    const [dx, dy] = helicalOffset(1.5, 0.7, baseR, p);
+    expect(dx).toBe(0);
+    expect(dy).toBe(0);
+  });
+
+  it("(b) explicit amplitude=0: returns [0,0]", () => {
+    const [dx, dy] = helicalOffset(1.5, 0.7, baseR, { helicalAmplitude: 0 });
+    expect(dx).toBe(0);
+    expect(dy).toBe(0);
+  });
+
+  it("(c) spinPhi=0 (rest): returns [0,0] even with amplitude>0", () => {
+    const [dx, dy] = helicalOffset(0, 0.7, baseR, { helicalAmplitude: 0.5 });
+    expect(dx).toBe(0);
+    expect(dy).toBe(0);
+  });
+
+  it("(d) positive amplitude + non-zero spinPhi: produces non-zero offset", () => {
+    const [dx, dy] = helicalOffset(Math.PI / 3, 0.5, baseR, { helicalAmplitude: 0.4 });
+    const mag = Math.hypot(dx, dy);
+    expect(mag).toBeGreaterThan(0);
+    // mag should be exactly |amp * baseR * sin(spinPhi)|
+    expect(mag).toBeCloseTo(0.4 * baseR * Math.abs(Math.sin(Math.PI / 3)), 10);
+  });
+
+  it("(e) offset is perpendicular to bodyHeading", () => {
+    // For several headings, the offset dot heading-vector should be ~0
+    for (const heading of [0, Math.PI / 4, Math.PI / 2, Math.PI, 3.7]) {
+      const [dx, dy] = helicalOffset(1.2, heading, baseR, { helicalAmplitude: 0.3 });
+      if (dx === 0 && dy === 0) continue;
+      // heading direction = (cos(heading), sin(heading))
+      const dot = dx * Math.cos(heading) + dy * Math.sin(heading);
+      expect(Math.abs(dot)).toBeLessThan(1e-10);
+    }
+  });
+
+  it("(f) amplitude scales linearly with baseR", () => {
+    const phi = 1.0;
+    const heading = 0.3;
+    const [dx1, dy1] = helicalOffset(phi, heading, 20, { helicalAmplitude: 0.5 });
+    const [dx2, dy2] = helicalOffset(phi, heading, 40, { helicalAmplitude: 0.5 });
+    expect(dx2).toBeCloseTo(dx1 * 2, 10);
+    expect(dy2).toBeCloseTo(dy1 * 2, 10);
+  });
+
+  it("(g) determinism: identical inputs -> identical outputs", () => {
+    const p = { helicalAmplitude: 0.3 };
+    expect(helicalOffset(2.1, 0.5, baseR, p)).toEqual(helicalOffset(2.1, 0.5, baseR, p));
+  });
+
+  it("(h) magnitude bounded by amplitude * baseR", () => {
+    for (const phi of [0.1, 0.5, 1.0, Math.PI, 5.0]) {
+      const [dx, dy] = helicalOffset(phi, 0, baseR, { helicalAmplitude: 0.6 });
+      expect(Math.hypot(dx, dy)).toBeLessThanOrEqual(0.6 * baseR + 1e-10);
+    }
   });
 });
 

@@ -130,6 +130,10 @@ export interface CellParams {
   idleSwimFrac?: number;
   /** Minimum drift activation floor (0-1). Default 0. Non-zero = wander position visible at idle. */
   idleDriftMin?: number;
+  /** Helical swimming: lateral sinusoidal offset as fraction of baseRadiusPx.
+    * In 2D the 3D helical path projects as a sinusoidal oscillation perpendicular
+    * to the swim direction. Phase = axial spin phase (left-handed). Default 0. */
+  helicalAmplitude?: number;
   /** Number of cilia (hair-like tentacles) around the membrane. */
   ciliaCount: number;
   /** Resting cilium length as fraction of baseR. */
@@ -923,6 +927,27 @@ export function axialSpin(simTime: number, speedNorm: number, params: CellParams
   const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm; // clamp01
   const rate = (params.axialSpinMax ?? 0) * s; // rad/s, proportional to speed
   return -rate * simTime; // LEFT-handed spin => negative
+}
+
+/**
+ * v3.8B: helical swimming offset.
+ * Returns the (dx, dy) lateral displacement perpendicular to bodyHeading.
+ * Phase = spinPhi (axial spin phase). Amplitude = helicalAmplitude × baseR.
+ * Default 0 = no offset = byte-identical to legacy.
+ */
+export function helicalOffset(
+  spinPhi: number,
+  bodyHeading: number,
+  baseR: number,
+  params: Pick<CellParams, "helicalAmplitude">,
+): [number, number] {
+  const hAmp = params.helicalAmplitude ?? 0;
+  if (hAmp === 0 || spinPhi === 0) return [0, 0];
+  const lateralOffset = hAmp * baseR * Math.sin(spinPhi);
+  return [
+    lateralOffset * -Math.sin(bodyHeading),
+    lateralOffset *  Math.cos(bodyHeading),
+  ];
 }
 
 /**
@@ -3596,8 +3621,8 @@ export function createCellRenderer(
       // Blend between rest center (width/2, height/2) and full-wander position
       const driftedX = width / 2 + (wander.x - width / 2) * drift01;
       const driftedY = height / 2 + (wander.y - height / 2) * drift01;
-      const cx = driftedX + sdx;
-      const cy = driftedY + sdy;
+      let cx = driftedX + sdx;
+      let cy = driftedY + sdy;
       const maxRadius = membraneMaxRadius(width, height);
       const floorRadius = baseR * 0.35;
       const sampleCount = deform.length;
@@ -3658,6 +3683,20 @@ export function createCellRenderer(
       // byte-identically there.
       const spinPhi = axialSpin(simTime, speedNorm, params);
       const squeezePhi = bodyHeading + spinPhi;
+
+      // v3.8B: helical swimming — lateral sinusoidal offset perpendicular to heading.
+      // Real Paramecium swims a left-handed helix; 2D projection = sine wave ⊥ swim.
+      // Phase reuses spinPhi (the axial rotation already computed). Applied to the
+      // RENDER position (cx,cy + smoothedPoints), NOT to wander state.
+      const [hdx, hdy] = helicalOffset(spinPhi, bodyHeading, baseR, params);
+      if (hdx !== 0 || hdy !== 0) {
+        cx += hdx;
+        cy += hdy;
+        for (let i = 0; i < smoothedPoints.length; i++) {
+          smoothedPoints[i] = [smoothedPoints[i][0] + hdx, smoothedPoints[i][1] + hdy];
+        }
+      }
+
       const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
 
       // Smooth via Catmull-Rom (4 segments per span for smoothness)
