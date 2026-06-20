@@ -112,6 +112,12 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableTrichocysts: true,         // radial needle discharge on startle
       trichocystCount: 30,             // number of crystalline needles
       trichocystLengthMul: 3.0,        // needle length = 3× cilia length
+      trichocystDecay: 2.0,            // ~500ms visible (was dead code at 5.0)
+      trichocystLineWidth: 1.0,        // visible needles (was 0.5px)
+      enableMetachronal: true,          // traveling metachronal wave on cilia
+      metachronalWavelength: 20,        // wavelength in cilia count
+      metachronalSpeed: 4.0,            // wave propagation speed rad/s
+      foodVacuoleSat: 0.25,             // warmer amber food vacuoles (was 0.10)
       enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)
       cyclosisGranuleCount: 52,      // pack the cytoplasm (biologist polish: crammed)
       granuleSizePx: 1.6,            // a touch brighter/bigger so they read
