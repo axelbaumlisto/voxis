@@ -191,6 +191,61 @@ export function catmullRom(
 }
 
 /**
+ * C1 periodic SCALAR Catmull-Rom interpolation of a deformation array sampled
+ * uniformly over [0, 2*PI). `deform[i]` is the value at angle i*(2*PI/n).
+ * Periodic: indices wrap modulo n. Returns the interpolated scalar at `theta`.
+ */
+export function deformAt(theta: number, deform: number[]): number {
+  const n = deform.length;
+  if (n === 0) return 0;
+  if (n === 1) return deform[0];
+  const TWO_PI = Math.PI * 2;
+  // fractional index in [0, n)
+  let f = (theta / TWO_PI) * n;
+  f = ((f % n) + n) % n;
+  const i = Math.floor(f);
+  const u = f - i;
+  const p0 = deform[(i - 1 + n) % n];
+  const p1 = deform[i % n];
+  const p2 = deform[(i + 1) % n];
+  const p3 = deform[(i + 2) % n];
+  const u2 = u * u;
+  const u3 = u2 * u;
+  return 0.5 * (
+    2 * p1 +
+    (-p0 + p2) * u +
+    (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 +
+    (-p0 + 3 * p1 - 3 * p2 + p3) * u3
+  );
+}
+
+/**
+ * Analytic derivative d(deformAt)/d(theta) of the same C1 periodic scalar
+ * Catmull-Rom (closed form, NOT a finite difference). Used for contour normals.
+ */
+export function deformDerivAt(theta: number, deform: number[]): number {
+  const n = deform.length;
+  if (n < 2) return 0;
+  const TWO_PI = Math.PI * 2;
+  let f = (theta / TWO_PI) * n;
+  f = ((f % n) + n) % n;
+  const i = Math.floor(f);
+  const u = f - i;
+  const p0 = deform[(i - 1 + n) % n];
+  const p1 = deform[i % n];
+  const p2 = deform[(i + 1) % n];
+  const p3 = deform[(i + 2) % n];
+  const u2 = u * u;
+  // d/du of the cubic, times du/dtheta = n / TWO_PI
+  const dDeform_du = 0.5 * (
+    (-p0 + p2) +
+    2 * (2 * p0 - 5 * p1 + 4 * p2 - p3) * u +
+    3 * (-p0 + 3 * p1 - 3 * p2 + p3) * u2
+  );
+  return dDeform_du * (n / TWO_PI);
+}
+
+/**
  * OPEN (non-wrapping) Catmull-Rom spline for an OPEN polyline such as a cilium
  * spine. Unlike {@link catmullRom} (which wraps tip->base for a closed contour),
  * the endpoints are CLAMPED by duplicating the first/last control points, so the
