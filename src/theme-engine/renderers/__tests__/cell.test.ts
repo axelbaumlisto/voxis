@@ -66,7 +66,9 @@ import {
   normalizeAreaDeform,
   integrateDeformPipeline,
   affineSqueezePoints,
+  somaticCiliaParams,
 } from "../cell";
+import { deformAt } from "../shared";
 import type { CellParams, CellPersistState, CiliaMotion } from "../cell";
 
 const TAU = Math.PI * 2;
@@ -2087,6 +2089,162 @@ describe("ciliaPath", () => {
     expect(ciliaPath(cx, cy, baseR, 2.0, 0.5, 0.5, P)).toEqual(
       ciliaPath(cx, cy, baseR, 2.0, 0.5, 0.5, P),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 22a — somatic ciliature params ("mex"): a default-OFF gate that swaps
+// the crown from 18 long flagella to many short stubs, via the pure
+// somaticCiliaParams helper. All assertions are pure (no canvas).
+// ---------------------------------------------------------------------------
+
+describe("Commit 22a — somatic ciliature params (mex)", () => {
+  const cx = 100;
+  const cy = 100;
+  const baseR = 40;
+  const t = 1.3;
+  const energy = 0.6;
+  const growth = 0.8;
+  // distance(base, tip) of one hair polyline.
+  const hairLen = (h: { points: Array<[number, number]> }) => {
+    const a = h.points[0];
+    const b = h.points[h.points.length - 1];
+    return Math.hypot(b[0] - a[0], b[1] - a[1]);
+  };
+  const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+
+  it("(a) GATE OFF IDENTITY: default is off, helper returns params unchanged, crown identical", () => {
+    expect(CELL_DEFAULTS.enableSomaticCilia).toBe(false);
+    const off = somaticCiliaParams({ ...CELL_DEFAULTS });
+    // Off path keeps the legacy crown spec.
+    expect(off.ciliaCount).toBe(18);
+    expect(off.ciliaLength).toBe(0.45);
+    // ciliaPath via the off-path params equals the plain CELL_DEFAULTS crown.
+    const viaHelper = ciliaPath(cx, cy, baseR, t, energy, growth, off);
+    const plain = ciliaPath(cx, cy, baseR, t, energy, growth, { ...CELL_DEFAULTS });
+    expect(viaHelper).toEqual(plain);
+    expect(viaHelper.length).toBe(18);
+  });
+
+  it("(b) GATE ON COUNT+LENGTH: helper yields 72 hairs of length 0.15, crown has 72 hairs", () => {
+    const on = somaticCiliaParams({ ...CELL_DEFAULTS, enableSomaticCilia: true });
+    expect(on.ciliaCount).toBe(72);
+    expect(on.ciliaLength).toBe(0.15);
+    const crown = ciliaPath(cx, cy, baseR, t, energy, growth, on);
+    expect(crown.length).toBe(72);
+  });
+
+  it("(c) SHORT STUBS: mex mean hair length is substantially shorter than the bare 18-hair crown", () => {
+    // Use growth=0 so the ciliaGrowthBoost term (shared by both crowns) does not
+    // mask the resting-length difference; the stub vs flagellum length ratio is
+    // then ciliaLength-driven (0.15 / 0.45 ≈ 0.33).
+    const g = 0;
+    const on = somaticCiliaParams({ ...CELL_DEFAULTS, enableSomaticCilia: true });
+    const mexMean = mean(ciliaPath(cx, cy, baseR, t, energy, g, on).map(hairLen));
+    const baseMean = mean(
+      ciliaPath(cx, cy, baseR, t, energy, g, { ...CELL_DEFAULTS }).map(hairLen),
+    );
+    expect(mexMean).toBeLessThan(0.6 * baseMean);
+  });
+
+  it("(d) POINT-ON-CONTOUR: every mex base lies on the deformed+squeezed contour", () => {
+    const N = 96;
+    const deform = Array.from(
+      { length: N },
+      (_, i) => 0.12 * Math.cos(3 * ((i * 2 * Math.PI) / N)),
+    );
+    const squeezeK = 1.3;
+    const squeezePhi = 0.4;
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableSomaticCilia: true,
+      enableCiliaOnContour: true,
+      enableAffine: true,
+    };
+    const on = somaticCiliaParams(params);
+    const motion: CiliaMotion = {
+      tx: 1,
+      ty: 0,
+      speedNorm: 0,
+      contour: { deform, squeezeK, squeezePhi },
+    };
+    const crown = ciliaPath(cx, cy, baseR, t, energy, growth, on, motion);
+    expect(crown.length).toBe(72);
+
+    // Build a fine reference polyline of the deformed+squeezed contour.
+    const M = 2880;
+    const ref: Array<[number, number]> = [];
+    for (let i = 0; i < M; i++) {
+      const th = (i * 2 * Math.PI) / M;
+      const r = baseR * (1 + deformAt(th, deform));
+      const p = affineSqueezePoints(
+        [[cx + Math.cos(th) * r, cy + Math.sin(th) * r]],
+        squeezeK,
+        squeezePhi,
+        cx,
+        cy,
+        params,
+      )[0];
+      ref.push(p);
+    }
+    const minDistToRef = (px: number, py: number) => {
+      let best = Infinity;
+      for (const [rx, ry] of ref) {
+        const d = Math.hypot(px - rx, py - ry);
+        if (d < best) best = d;
+      }
+      return best;
+    };
+    for (const h of crown) {
+      const [bx, by] = h.points[0];
+      expect(minDistToRef(bx, by)).toBeLessThan(0.5);
+    }
+  });
+
+  it("(e) NO CROSSING: mex bases keep monotone per-index angular order, none coincide", () => {
+    const N = 96;
+    const deform = Array.from(
+      { length: N },
+      (_, i) => 0.12 * Math.cos(3 * ((i * 2 * Math.PI) / N)),
+    );
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableSomaticCilia: true,
+      enableCiliaOnContour: true,
+      enableAffine: true,
+    };
+    const on = somaticCiliaParams(params);
+    const motion: CiliaMotion = {
+      tx: 1,
+      ty: 0,
+      speedNorm: 0,
+      contour: { deform, squeezeK: 1.3, squeezePhi: 0.4 },
+    };
+    const crown = ciliaPath(cx, cy, baseR, t, energy, growth, on, motion);
+    expect(crown.length).toBe(72);
+    // Per-hair base angle from centre, unwrapped, must be strictly increasing.
+    const bases = crown.map((h) => h.points[0]);
+    let prev = -Infinity;
+    let acc = 0;
+    let last = Math.atan2(bases[0][1] - cy, bases[0][0] - cx);
+    for (let i = 0; i < bases.length; i++) {
+      const a = Math.atan2(bases[i][1] - cy, bases[i][0] - cx);
+      // Unwrap into a monotone increasing sequence.
+      while (a + acc <= last) acc += 2 * Math.PI;
+      const unwrapped = a + acc;
+      expect(unwrapped).toBeGreaterThan(prev);
+      prev = unwrapped;
+      last = unwrapped;
+    }
+    // No two bases coincide.
+    let minPair = Infinity;
+    for (let i = 0; i < bases.length; i++) {
+      for (let j = i + 1; j < bases.length; j++) {
+        const d = Math.hypot(bases[i][0] - bases[j][0], bases[i][1] - bases[j][1]);
+        if (d < minPair) minPair = d;
+      }
+    }
+    expect(minPair).toBeGreaterThan(0);
   });
 });
 
