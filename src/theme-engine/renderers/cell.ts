@@ -3329,9 +3329,24 @@ export function createCellRenderer(
           // body too. Skipped unless enableOrganelles is on -> goldens unchanged.
           if (params.enableOrganelles) {
             const mn = micronucleusTransform(nx, ny, nr, params);
+            // Containment: pull the micronucleus centre inward along the line from
+            // the body centre so its OUTER edge can't poke past a pinched wall
+            // (the macronucleus is only clamped to minMembraneR*0.85, and the
+            // micronucleus sits ~1.15*nr beyond it). Gated path => goldens unchanged.
+            let mcx = mn.cx;
+            let mcy = mn.cy;
+            const ddx = mcx - cx;
+            const ddy = mcy - cy;
+            const dist = Math.hypot(ddx, ddy);
+            const maxDist = Math.max(0, minMembraneR - mn.r);
+            if (dist > maxDist && dist > 0) {
+              const s = maxDist / dist;
+              mcx = cx + ddx * s;
+              mcy = cy + ddy * s;
+            }
             ctx.fillStyle = hsla(baseHue - 6, 0.82, 0.42, params.nucleusAlpha);
             ctx.beginPath();
-            ctx.arc(mn.cx, mn.cy, mn.r, 0, TAU);
+            ctx.arc(mcx, mcy, mn.r, 0, TAU);
             ctx.fill();
           }
         }

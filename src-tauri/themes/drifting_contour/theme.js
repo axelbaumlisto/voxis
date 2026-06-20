@@ -325,6 +325,42 @@ function catmullRom(points, segmentsPerSpan) {
   }
   return result;
 }
+function deformAt(theta, deform) {
+  const n = deform.length;
+  if (n === 0)
+    return 0;
+  if (n === 1)
+    return deform[0];
+  const TWO_PI = Math.PI * 2;
+  let f = theta / TWO_PI * n;
+  f = (f % n + n) % n;
+  const i = Math.floor(f);
+  const u = f - i;
+  const p0 = deform[(i - 1 + n) % n];
+  const p1 = deform[i % n];
+  const p2 = deform[(i + 1) % n];
+  const p3 = deform[(i + 2) % n];
+  const u2 = u * u;
+  const u3 = u2 * u;
+  return 0.5 * (2 * p1 + (-p0 + p2) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 + (-p0 + 3 * p1 - 3 * p2 + p3) * u3);
+}
+function deformDerivAt(theta, deform) {
+  const n = deform.length;
+  if (n < 2)
+    return 0;
+  const TWO_PI = Math.PI * 2;
+  let f = theta / TWO_PI * n;
+  f = (f % n + n) % n;
+  const i = Math.floor(f);
+  const u = f - i;
+  const p0 = deform[(i - 1 + n) % n];
+  const p1 = deform[i % n];
+  const p2 = deform[(i + 1) % n];
+  const p3 = deform[(i + 2) % n];
+  const u2 = u * u;
+  const dDeform_du = 0.5 * (-p0 + p2 + 2 * (2 * p0 - 5 * p1 + 4 * p2 - p3) * u + 3 * (-p0 + 3 * p1 - 3 * p2 + p3) * u2);
+  return dDeform_du * (n / TWO_PI);
+}
 function catmullRomOpen(points, segmentsPerSpan) {
   const n = points.length;
   if (n < 2)
@@ -440,6 +476,10 @@ var CELL_DEFAULTS = {
   bodyHeadingTau: 0.4,
   bodyElongation: 0.13,
   bodyElongationFloor: 0,
+  enableRestingProlate: false,
+  prolateRestAspect: 1.7,
+  enableAxialSpin: false,
+  axialSpinMax: 3.5,
   enableStrokeAxis: true,
   strokeAxisKnee: 0.5,
   strokeAxisAlign: 1,
@@ -452,7 +492,43 @@ var CELL_DEFAULTS = {
   enableActivity: true,
   enableFlowField: false,
   flowMoteCount: 0,
-  flowStrength: 300
+  flowStrength: 300,
+  enableCiliaOnContour: false,
+  enableSomaticCilia: false,
+  somaticCiliaCount: 72,
+  somaticCiliaLength: 0.15,
+  enableCiliaStructure: false,
+  oralGapCenter: 1.2,
+  oralGapWidth: 0.75,
+  oralGapDip: 0.3,
+  caudalTuftWidth: 0.6,
+  caudalTuftLength: 1.7,
+  enableRigidMembrane: false,
+  enableBodyProfile: false,
+  bodyProfileType: "egg",
+  bodyProfileTaper: 0.27,
+  bodyAspect: 3,
+  bodyVentralBend: 0,
+  enableVacuoles: false,
+  vacuoleAnteriorBearing: 1.9,
+  vacuolePosteriorBearing: -1.9,
+  vacuoleAnteriorPeriod: 9,
+  vacuolePosteriorPeriod: 13,
+  vacuolePairMaxFrac: 0.16,
+  vacuolePosteriorPhase: 0.5,
+  enableCyclosis: false,
+  cyclosisGranuleCount: 14,
+  cyclosisPeriod: 45,
+  granuleMaxRadiusFrac: 0.75,
+  granuleSizePx: 1.3,
+  enableOrganelles: false,
+  foodVacuoleCount: 5,
+  foodVacuolePeriod: 55,
+  foodVacuoleMaxRadiusFrac: 0.62,
+  foodVacuoleSizePx: 3,
+  foodVacuoleDigestPeriod: 30,
+  micronucleusSizeFrac: 0.32,
+  micronucleusOffsetFrac: 1.15
 };
 function sanitizeUnit(x) {
   if (!Number.isFinite(x))
@@ -525,7 +601,18 @@ function prolateAspect(speedNorm, params) {
   const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
   const elong = params.bodyElongation ?? 0.13;
   const floor = params.bodyElongationFloor ?? 0;
-  return 1 + elong * Math.max(floor, s);
+  const base = 1 + elong * Math.max(floor, s);
+  if (!params.enableRestingProlate)
+    return base;
+  const rest = params.prolateRestAspect ?? 1.7;
+  return Math.max(rest, base);
+}
+function axialSpin(simTime, speedNorm, params) {
+  if (!params.enableAxialSpin)
+    return 0;
+  const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
+  const rate = (params.axialSpinMax ?? 0) * s;
+  return -rate * simTime;
 }
 function cellRadius(angle, t, energy, params) {
   const dx = Math.cos(angle);
@@ -584,11 +671,44 @@ function ciliaStrokeAngle(baseAngle, axis, strength) {
   const delta = wrapPi(2 * (axis - local)) / 2;
   return local + s * delta;
 }
+function somaticCiliaParams(params) {
+  if (!params.enableSomaticCilia)
+    return params;
+  return {
+    ...params,
+    ciliaCount: params.somaticCiliaCount ?? 72,
+    ciliaLength: params.somaticCiliaLength ?? 0.15
+  };
+}
+function ciliaStructureMod(psi, hairNoise, params) {
+  if (!params.enableCiliaStructure)
+    return { lengthScale: 1, keep: true };
+  const caudalTuftWidth = params.caudalTuftWidth ?? 0.6;
+  const caudalTuftLength = params.caudalTuftLength ?? 1.7;
+  const oralGapCenter = params.oralGapCenter ?? 1.2;
+  const oralGapWidth = params.oralGapWidth ?? 0.75;
+  const oralGapDip = params.oralGapDip ?? 0.3;
+  const dPost = Math.PI - Math.abs(psi);
+  let lengthScale = 1;
+  if (dPost < caudalTuftWidth) {
+    const f = 1 - dPost / caudalTuftWidth;
+    lengthScale = 1 + (caudalTuftLength - 1) * f;
+  }
+  let keep = true;
+  const dOral = Math.abs(wrapPi(psi - oralGapCenter));
+  if (dOral < oralGapWidth) {
+    const central = 1 - dOral / oralGapWidth;
+    if (hairNoise < oralGapDip * central)
+      keep = false;
+  }
+  return { lengthScale, keep };
+}
 function ciliaPath(cx, cy, baseR, t, energy, growth, params, motion) {
   const dragCoeff = params.dragCoeff ?? 0.5;
   const mTx = motion?.tx ?? 0;
   const mTy = motion?.ty ?? 0;
   const mSpeed = motion ? Math.max(0, Math.min(1, motion.speedNorm)) : 0;
+  const anchored = params.enableCiliaOnContour === true && motion?.contour !== undefined;
   const axisEngaged = (params.enableStrokeAxis ?? true) && motion !== undefined;
   const axisStrength = axisEngaged ? Math.max(0, Math.min(1, (motion?.axisStrength ?? 0) * (params.strokeAxisAlign ?? 1))) : 0;
   const strokeAxis = Math.atan2(mTy, mTx);
@@ -617,8 +737,54 @@ function ciliaPath(cx, cy, baseR, t, energy, growth, params, motion) {
       pxn = Math.cos(strokeAngle);
       pyn = Math.sin(strokeAngle);
     }
+    let bx = 0;
+    let by = 0;
+    let anx = 0;
+    let any = 0;
+    if (anchored) {
+      const contour = motion.contour;
+      const d = deformAt(baseAngle, contour.deform);
+      const dp = deformDerivAt(baseAngle, contour.deform);
+      const rTheta = baseR * (1 + d);
+      const bx0 = cx + ux * rTheta;
+      const by0 = cy + uy * rTheta;
+      const sq = affineSqueezePoints([[bx0, by0]], contour.squeezeK, contour.squeezePhi, cx, cy, params)[0];
+      bx = sq[0];
+      by = sq[1];
+      let n0x = ux * (1 + d) + uy * dp;
+      let n0y = uy * (1 + d) - ux * dp;
+      const n0len = Math.hypot(n0x, n0y) || 1;
+      n0x /= n0len;
+      n0y /= n0len;
+      if (params.enableAffine && contour.squeezeK !== 1) {
+        const cphi = Math.cos(contour.squeezePhi);
+        const sphi = Math.sin(contour.squeezePhi);
+        const xr = n0x * cphi + n0y * sphi;
+        const yr = -n0x * sphi + n0y * cphi;
+        const xs = xr / contour.squeezeK;
+        const ys = yr * contour.squeezeK;
+        const nx = xs * cphi - ys * sphi;
+        const ny = xs * sphi + ys * cphi;
+        const nlen = Math.hypot(nx, ny) || 1;
+        anx = nx / nlen;
+        any = ny / nlen;
+      } else {
+        anx = n0x;
+        any = n0y;
+      }
+      pxn = -any;
+      pyn = anx;
+    }
     const r01 = noise2D(k * 3.7 + 0.3, 1.3) * 0.5 + 0.5;
-    const lenK = lenMean * (1 - lenVar + 2 * lenVar * r01);
+    let lengthScale = 1;
+    if (params.enableCiliaStructure) {
+      const psi = wrapPi(baseAngle - strokeAxis);
+      const struct = ciliaStructureMod(psi, r01, params);
+      if (!struct.keep)
+        continue;
+      lengthScale = struct.lengthScale;
+    }
+    const lenK = lenMean * (1 - lenVar + 2 * lenVar * r01) * lengthScale;
     const r01b = noise2D(k * 5.1 + 2.7, 4.9) * 0.5 + 0.5;
     const hairWidth = baseWidth * (0.55 + 0.9 * (0.5 * r01 + 0.5 * r01b));
     const metaIdx = metachronalIndex(baseAngle, k, mSpeed, strokeAxis, gap, axisEngaged);
@@ -636,8 +802,8 @@ function ciliaPath(cx, cy, baseR, t, energy, growth, params, motion) {
       const lead = ux * mTx + uy * mTy;
       const dragGain = dragCoeff * mSpeed * (0.6 + 0.4 * lead);
       const dragPx = dragGain * lenK * Math.pow(sFrac, 1.3);
-      const x = cx + ux * along + pxn * bend - mTx * dragPx;
-      const y = cy + uy * along + pyn * bend - mTy * dragPx;
+      const x = anchored ? bx + anx * (along - baseR) + pxn * bend - mTx * dragPx : cx + ux * along + pxn * bend - mTx * dragPx;
+      const y = anchored ? by + any * (along - baseR) + pyn * bend - mTy * dragPx : cy + uy * along + pyn * bend - mTy * dragPx;
       pts.push([x, y]);
     }
     out.push({ points: pts, width: hairWidth });
@@ -764,6 +930,10 @@ function buildTargetDeformation(width, height, bins, t, audioLevel, energy, para
   const morph = idleFactor > 0 ? idleMorph(sampleCount, t, params) : null;
   const out = [];
   for (let i = 0;i < sampleCount; i++) {
+    if (params.enableRigidMembrane) {
+      out.push(0);
+      continue;
+    }
     const angle = i / sampleCount * TAU;
     const normalized = (angle % TAU + TAU) % TAU / TAU;
     const binLevel = sampleBinLevel(bins, normalized);
@@ -897,6 +1067,98 @@ function bandLimitDeform(deform, params) {
   }
   return out;
 }
+function bodyProfilePoint(t, baseR, params) {
+  const c = params.bodyProfileTaper ?? 0.3;
+  const aspect = params.bodyAspect ?? 3;
+  const L = baseR * Math.sqrt(aspect);
+  const W = baseR / Math.sqrt(aspect);
+  const ct = Math.cos(t);
+  const st = Math.sin(t);
+  const x = L * ct;
+  let y;
+  const type = params.bodyProfileType ?? "taperedEllipse";
+  switch (type) {
+    case "egg":
+      y = W * st / Math.sqrt(1 - 2 * c * ct + c * c);
+      break;
+    case "piriform":
+      y = W * st * (1 + c * ct) * Math.sqrt(Math.max(0, (1 + ct) / 2));
+      break;
+    case "taperedEllipse":
+    default:
+      y = W * st * (1 + c * ct);
+      break;
+  }
+  const bend = params.bodyVentralBend ?? 0;
+  if (bend !== 0) {
+    y += bend * W * Math.max(0, ct);
+  }
+  return [x, y];
+}
+function bodyProfileArea(baseR, params, samples = 96) {
+  const n = Math.max(3, Math.floor(samples));
+  let a = 0;
+  let [px, py] = bodyProfilePoint(0, baseR, params);
+  const [x0, y0] = [px, py];
+  for (let k = 1;k <= n; k++) {
+    const [cx, cy] = k === n ? [x0, y0] : bodyProfilePoint(TAU * k / n, baseR, params);
+    a += px * cy - cx * py;
+    px = cx;
+    py = cy;
+  }
+  return Math.abs(a) / 2;
+}
+function bodyProfileAreaScale(baseR, params, samples = 96) {
+  const area = bodyProfileArea(baseR, params, samples);
+  if (!(area > 0))
+    return 1;
+  return Math.sqrt(Math.PI * baseR * baseR / area);
+}
+function interpProfileRadius(angle, pts) {
+  const n = pts.length;
+  if (n === 0)
+    return 0;
+  let a = angle % TAU;
+  if (a < 0)
+    a += TAU;
+  const sorted = pts.map((p) => ({ ang: (p.ang % TAU + TAU) % TAU, rad: p.rad })).sort((u, v) => u.ang - v.ang);
+  for (let i = 0;i < n; i++) {
+    const lo2 = sorted[i];
+    const hi2 = sorted[(i + 1) % n];
+    let hiAng = hi2.ang;
+    if (i === n - 1)
+      hiAng += TAU;
+    if (a >= lo2.ang && a <= hiAng) {
+      const span2 = hiAng - lo2.ang;
+      const f2 = span2 > 0 ? (a - lo2.ang) / span2 : 0;
+      return lo2.rad + (hi2.rad - lo2.rad) * f2;
+    }
+  }
+  const lo = sorted[n - 1];
+  const hi = sorted[0];
+  const span = hi.ang + TAU - lo.ang;
+  const aShift = a + TAU;
+  const f = span > 0 ? (aShift - lo.ang) / span : 0;
+  return lo.rad + (hi.rad - lo.rad) * f;
+}
+function bodyProfileDeform(sampleCount, bodyHeading, baseR, params) {
+  const N = Math.max(3, Math.floor(sampleCount));
+  const pts = [];
+  for (let k = 0;k < N; k++) {
+    const t = k / N * TAU;
+    const [px, py] = bodyProfilePoint(t, baseR, params);
+    pts.push({ ang: Math.atan2(py, px), rad: Math.hypot(px, py) });
+  }
+  const scale = bodyProfileAreaScale(baseR, params, N);
+  const out = [];
+  for (let j = 0;j < N; j++) {
+    const phi = j / N * TAU;
+    const bodyAng = phi - bodyHeading;
+    const r = interpProfileRadius(bodyAng, pts) * scale;
+    out.push(r / baseR - 1);
+  }
+  return out;
+}
 function contractileVacuole(t, baseR, params) {
   const period = Math.max(0.1, params.vacuolePeriod ?? 7);
   const Rmax = Math.max(0, params.vacuoleMaxFrac ?? 0.18) * Math.max(0, baseR);
@@ -908,6 +1170,30 @@ function contractileVacuole(t, baseR, params) {
     fill = 1 - smoothstep((u - 0.85) / 0.15);
   }
   return { r: Rmax * fill };
+}
+function contractileVacuolePair(t, baseR, squeezePhi, params) {
+  if (!params.enableVacuoles)
+    return [];
+  const maxFrac = params.vacuolePairMaxFrac ?? 0.16;
+  const antPeriod = params.vacuoleAnteriorPeriod ?? 9;
+  const postPeriod = params.vacuolePosteriorPeriod ?? 13;
+  const antBearing = params.vacuoleAnteriorBearing ?? 1.9;
+  const postBearing = params.vacuolePosteriorBearing ?? -1.9;
+  const postPhase = params.vacuolePosteriorPhase ?? 0.5;
+  const anterior = contractileVacuole(t, baseR, {
+    ...params,
+    vacuolePeriod: antPeriod,
+    vacuoleMaxFrac: maxFrac
+  });
+  const posterior = contractileVacuole(t + postPhase * postPeriod, baseR, {
+    ...params,
+    vacuolePeriod: postPeriod,
+    vacuoleMaxFrac: maxFrac
+  });
+  return [
+    { bearing: squeezePhi + antBearing, r: anterior.r },
+    { bearing: squeezePhi + postBearing, r: posterior.r }
+  ];
 }
 function dipoleFlowAt(dx, dy, heading, strength) {
   if (strength === 0)
@@ -945,6 +1231,77 @@ function seedMotes(width, height, params) {
     out.push({ x: ux * width, y: uy * height });
   }
   return out;
+}
+function cyclosisField(dx, dy, omega) {
+  return { vx: -omega * dy, vy: omega * dx };
+}
+function seedGranules(baseR, params) {
+  if (!params.enableCyclosis)
+    return [];
+  const n = Math.max(0, Math.floor(params.cyclosisGranuleCount ?? 0));
+  if (n === 0)
+    return [];
+  const maxRad = Math.max(0, params.granuleMaxRadiusFrac ?? 0.75) * Math.max(0, baseR);
+  const out = [];
+  for (let i = 0;i < n; i++) {
+    const ang = (noise2D(i * 12.9898 + 1.7, 78.233) + 1) * Math.PI;
+    const rad = Math.sqrt((noise2D(i * 39.346 + 5.3, 11.135) + 1) * 0.5) * maxRad;
+    out.push({ x: rad * Math.cos(ang), y: rad * Math.sin(ang) });
+  }
+  return out;
+}
+function advectGranule(g, baseR, dt, params) {
+  const omega = TAU / Math.max(0.1, params.cyclosisPeriod ?? 45);
+  const v = cyclosisField(g.x, g.y, omega);
+  const nx = g.x + v.vx * dt;
+  const ny = g.y + v.vy * dt;
+  const maxRad = Math.max(0, params.granuleMaxRadiusFrac ?? 0.75) * Math.max(0, baseR);
+  const r0 = Math.min(Math.hypot(g.x, g.y), maxRad);
+  const r1 = Math.hypot(nx, ny) || 1;
+  const s = r0 / r1;
+  return { x: nx * s, y: ny * s };
+}
+function foodVacuoleSize(t, seedPhase, params) {
+  const period = Math.max(0.1, params.foodVacuoleDigestPeriod ?? 30);
+  const u = ((t / period + seedPhase) % 1 + 1) % 1;
+  return 1 - 0.7 * u;
+}
+function seedFoodVacuoles(baseR, params) {
+  if (!params.enableOrganelles)
+    return [];
+  const n = Math.max(0, Math.floor(params.foodVacuoleCount ?? 0));
+  if (n === 0)
+    return [];
+  const maxRad = Math.max(0, params.foodVacuoleMaxRadiusFrac ?? 0.62) * Math.max(0, baseR);
+  const out = [];
+  for (let i = 0;i < n; i++) {
+    const ang = (noise2D(i * 17.413 + 3.1, 52.917) + 1) * Math.PI;
+    const rad = Math.sqrt((noise2D(i * 44.197 + 9.7, 23.671) + 1) * 0.5) * maxRad;
+    const phase = (noise2D(i * 61.829 + 2.3, 88.541) + 1) * 0.5;
+    out.push({ x: rad * Math.cos(ang), y: rad * Math.sin(ang), phase });
+  }
+  return out;
+}
+function advectFoodVacuole(v, baseR, dt, params) {
+  const omega = TAU / Math.max(0.1, params.foodVacuolePeriod ?? 55);
+  const f = cyclosisField(v.x, v.y, omega);
+  const nx = v.x + f.vx * dt;
+  const ny = v.y + f.vy * dt;
+  const maxRad = Math.max(0, params.foodVacuoleMaxRadiusFrac ?? 0.62) * Math.max(0, baseR);
+  const r0 = Math.min(Math.hypot(v.x, v.y), maxRad);
+  const r1 = Math.hypot(nx, ny) || 1;
+  const s = r0 / r1;
+  return { x: nx * s, y: ny * s, phase: v.phase };
+}
+function micronucleusTransform(macroCx, macroCy, macroR, params) {
+  const r = macroR * (params.micronucleusSizeFrac ?? 0.32);
+  const off = macroR * (params.micronucleusOffsetFrac ?? 1.15);
+  const bearing = 0.7;
+  return {
+    cx: macroCx + Math.cos(bearing) * off,
+    cy: macroCy + Math.sin(bearing) * off,
+    r
+  };
 }
 function cellReach(baseR, params) {
   const ciliaLength = params.ciliaLength ?? 0;
@@ -1063,6 +1420,8 @@ function createCellRenderer(container, opts) {
   let wander = null;
   let bodyHeading = 0;
   let motes = null;
+  let granules = null;
+  let foodVacuoles = null;
   let flowCx = width / 2, flowCy = height / 2, flowHeading = 0, flowSpeed = 0;
   let lastTickMs = performance.now();
   let simTime = 0;
@@ -1155,6 +1514,9 @@ function createCellRenderer(container, opts) {
       const maxRadius = membraneMaxRadius(width, height);
       const floorRadius = baseR * 0.35;
       const sampleCount = deform.length;
+      if (params.enableBodyProfile) {
+        deform = bodyProfileDeform(sampleCount, bodyHeading, baseR, params);
+      }
       const smoothedPoints = [];
       for (let i = 0;i < sampleCount; i++) {
         const angle = i / sampleCount * TAU;
@@ -1172,24 +1534,27 @@ function createCellRenderer(container, opts) {
       flowCy = cy;
       flowHeading = bodyHeading;
       flowSpeed = curSpeed;
-      const squeezeK = params.enableAffine ? prolateAspect(speedNorm, params) : 1;
-      const squeezePhi = bodyHeading;
+      const squeezeK = params.enableBodyProfile ? 1 : params.enableAffine ? prolateAspect(speedNorm, params) : 1;
+      const spinPhi = axialSpin(simTime, speedNorm, params);
+      const squeezePhi = bodyHeading + spinPhi;
       const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
       const splinePoints = catmullRom(contourPoints, 4);
       if (splinePoints.length >= 3) {
         {
-          const effectiveCount = params.enablePerimeterCount ? perimeterCiliaCount(baseR, params) : params.ciliaCount;
+          const baseCiliaParams = somaticCiliaParams(params);
+          const effectiveCount = params.enablePerimeterCount ? perimeterCiliaCount(baseR, params) : baseCiliaParams.ciliaCount;
           const ciliaParams = params.enableActivity ? {
-            ...params,
+            ...baseCiliaParams,
             ciliaCount: effectiveCount,
             ciliaBeatHz: ciliaBeatHzEff(activity, params),
-            ciliaCurl: params.ciliaCurl * (1 + 0.3 * activity)
-          } : params.enablePerimeterCount ? { ...params, ciliaCount: effectiveCount } : params;
+            ciliaCurl: baseCiliaParams.ciliaCurl * (1 + 0.3 * activity)
+          } : params.enablePerimeterCount ? { ...baseCiliaParams, ciliaCount: effectiveCount } : baseCiliaParams;
           const ciliaMotion = {
             tx: Math.cos(bodyHeading),
             ty: Math.sin(bodyHeading),
             speedNorm,
-            axisStrength: params.enableActivity ? strokeAxisStrength(activity, params) : 0
+            axisStrength: params.enableActivity ? strokeAxisStrength(activity, params) : 0,
+            ...params.enableCiliaOnContour && deform ? { contour: { deform, squeezeK, squeezePhi } } : {}
           };
           const cilia = ciliaPath(cx, cy, baseR, t, energy, growth, ciliaParams, ciliaMotion);
           ctx.lineCap = "round";
@@ -1236,6 +1601,24 @@ function createCellRenderer(container, opts) {
           ctx.beginPath();
           ctx.arc(nx, ny, nr * 0.22, 0, TAU);
           ctx.fill();
+          if (params.enableOrganelles) {
+            const mn = micronucleusTransform(nx, ny, nr, params);
+            let mcx = mn.cx;
+            let mcy = mn.cy;
+            const ddx = mcx - cx;
+            const ddy = mcy - cy;
+            const dist = Math.hypot(ddx, ddy);
+            const maxDist = Math.max(0, minMembraneR - mn.r);
+            if (dist > maxDist && dist > 0) {
+              const s2 = maxDist / dist;
+              mcx = cx + ddx * s2;
+              mcy = cy + ddy * s2;
+            }
+            ctx.fillStyle = hsla(baseHue - 6, 0.82, 0.42, params.nucleusAlpha);
+            ctx.beginPath();
+            ctx.arc(mcx, mcy, mn.r, 0, TAU);
+            ctx.fill();
+          }
         }
         if (params.enableVacuole) {
           const vac = contractileVacuole(t, baseR, params);
@@ -1249,6 +1632,60 @@ function createCellRenderer(container, opts) {
             ctx.beginPath();
             ctx.arc(vx, vy, vac.r, 0, TAU);
             ctx.fill();
+          }
+        }
+        if (params.enableVacuoles) {
+          const pair = contractileVacuolePair(t, baseR, squeezePhi, params);
+          for (const e of pair) {
+            if (e.r < 0.5)
+              continue;
+            const placeR = Math.max(0, Math.min(baseR * 0.6, minMembraneR - e.r));
+            const vcx0 = cx + Math.cos(e.bearing) * placeR;
+            const vcy0 = cy + Math.sin(e.bearing) * placeR;
+            const [vx, vy] = affineSqueezePoints([[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params)[0];
+            ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.7, params.nucleusAlpha * 0.45);
+            ctx.beginPath();
+            ctx.arc(vx, vy, e.r, 0, TAU);
+            ctx.fill();
+          }
+        }
+        if (params.enableCyclosis && (params.cyclosisGranuleCount ?? 0) > 0) {
+          if (!granules)
+            granules = seedGranules(baseR, params);
+          const granuleSizePx = params.granuleSizePx ?? 1.3;
+          ctx.fillStyle = hsla(baseHue + 25, 0.6, 0.6, params.nucleusAlpha * 0.6);
+          for (let i = 0;i < granules.length; i++) {
+            granules[i] = advectGranule(granules[i], baseR, dt, params);
+            const off = granules[i];
+            const maxRad = Math.min((params.granuleMaxRadiusFrac ?? 0.75) * baseR, Math.max(0, minMembraneR - granuleSizePx));
+            const rad = Math.hypot(off.x, off.y);
+            const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
+            const [gx, gy] = affineSqueezePoints([[cx + off.x * scale, cy + off.y * scale]], squeezeK, squeezePhi, cx, cy, params)[0];
+            ctx.beginPath();
+            ctx.arc(gx, gy, granuleSizePx, 0, TAU);
+            ctx.fill();
+          }
+        }
+        if (params.enableOrganelles && (params.foodVacuoleCount ?? 0) > 0) {
+          if (!foodVacuoles)
+            foodVacuoles = seedFoodVacuoles(baseR, params);
+          const fvSizePx = params.foodVacuoleSizePx ?? 3;
+          for (let i = 0;i < foodVacuoles.length; i++) {
+            foodVacuoles[i] = advectFoodVacuole(foodVacuoles[i], baseR, dt, params);
+            const v = foodVacuoles[i];
+            const size = foodVacuoleSize(t, v.phase, params);
+            const drawR = fvSizePx * (0.4 + 0.6 * size);
+            const maxRad = Math.min((params.foodVacuoleMaxRadiusFrac ?? 0.62) * baseR, Math.max(0, minMembraneR - drawR));
+            const rad = Math.hypot(v.x, v.y);
+            const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
+            const [fx, fy] = affineSqueezePoints([[cx + v.x * scale, cy + v.y * scale]], squeezeK, squeezePhi, cx, cy, params)[0];
+            ctx.fillStyle = hsla(baseHue - 30, 0.4, 0.5, params.nucleusAlpha * 0.4);
+            ctx.beginPath();
+            ctx.arc(fx, fy, drawR, 0, TAU);
+            ctx.fill();
+            ctx.strokeStyle = hsla(baseHue - 30, 0.45, 0.35, params.nucleusAlpha * 0.5);
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
           }
         }
         ctx.lineJoin = "round";
@@ -1333,7 +1770,6 @@ function mount(container, api) {
       tension: 0.15,
       ciliaCount: 18,
       ciliaLength: 0.4,
-      ciliaGrowthBoost: 0.55,
       ciliaWave: 0.5,
       ciliaWaveSpeed: 1.6,
       growthAttack: 0.05,
@@ -1350,6 +1786,30 @@ function mount(container, api) {
       startleDecay: 0.86,
       startleMaxPx: 4,
       startleBaselineRate: 0.08,
+      enableSomaticCilia: true,
+      somaticCiliaCount: 104,
+      ciliaGrowthBoost: 0.08,
+      ciliaCurl: 0.32,
+      ciliaLengthVar: 0.35,
+      enableCiliaOnContour: true,
+      enableRigidMembrane: true,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.24,
+      bodyAspect: 3,
+      bodyVentralBend: 0.18,
+      enableAffine: true,
+      enableCiliaStructure: true,
+      enableAxialSpin: true,
+      axialSpinMax: 7,
+      enableVacuoles: true,
+      enableCyclosis: true,
+      cyclosisGranuleCount: 34,
+      granuleMaxRadiusFrac: 0.9,
+      granuleSizePx: 1.6,
+      enableOrganelles: true,
+      foodVacuoleCount: 7,
+      foodVacuoleMaxRadiusFrac: 0.72,
       ...userParams
     }
   });
