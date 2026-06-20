@@ -231,6 +231,17 @@ export interface CellParams {
   /** Commit 30: resting affine k for the spindle. The affine applies diag(k,1/k)
    * so the major/minor axis ratio = k^2; k=1.7 => ~2.9:1 (~3:1). Default 1.7. */
   prolateRestAspect?: number;
+  /** Commit 24: when true the cell SPINS about its long axis as it swims. A real
+   * Paramecium is a near-rigid spindle; the apparent breathe is the 2D
+   * foreshortening of that rotating spindle. Modelled as a pure body-frame
+   * rotation of the area-preserving affine squeeze (det=1 => area invariant),
+   * adding `-rate*simTime` to squeezePhi where rate = axialSpinMax*speedNorm.
+   * Default false (spinPhi=0 => squeezePhi=bodyHeading, byte-identical). */
+  enableAxialSpin?: boolean;
+  /** Commit 24: max axial spin rate (rad/s) at full speed. Paramecium spins
+   * ~0.5-2 rev/s; 3.5 rad/s ~= 0.56 rev/s is a calm default. Rate scales with
+   * speedNorm so a resting cell does not spin. Default 3.5. */
+  axialSpinMax?: number;
   /** F4/G3: bias every hair's beat plane toward ONE global stroke axis (the body
    * heading) so the crown ROWS coherently while swimming, weighted by activity
    * (G3). Default true; when false the crown uses per-hair local azimuth
@@ -406,6 +417,8 @@ export const CELL_DEFAULTS: CellParams = {
   bodyElongationFloor: 0,
   enableRestingProlate: false,
   prolateRestAspect: 1.7,
+  enableAxialSpin: false,
+  axialSpinMax: 3.5,
   enableStrokeAxis: true,
   strokeAxisKnee: 0.5,
   strokeAxisAlign: 1,
@@ -633,6 +646,33 @@ export function prolateAspect(speedNorm: number, params: CellParams): number {
   // Resting spindle: at least `rest` at rest, and never less than the speed-driven
   // base (so swimming can still elongate further). max keeps it monotone in speed.
   return Math.max(rest, base);
+}
+
+/**
+ * Commit 24 — AXIAL SPIN. A real Paramecium is a near-rigid spindle that SPINS
+ * about its long axis (~0.5-2 rev/s, LEFT-handed) as it swims; the apparent
+ * "breathe/contract-expand" is the 2D foreshortening of that rotating spindle.
+ * We model it as a pure body-frame ROTATION of the existing area-preserving
+ * affine squeeze: this returns the spin PHASE offset (radians) to ADD to
+ * `squeezePhi`. Because the affine map is `R(phi).diag(k,1/k).R(-phi)` with
+ * det=1, rotating its frame leaves the cell's AREA invariant — the spin only
+ * re-orients the elongation, it does not change size.
+ *
+ *   rate = axialSpinMax * clamp01(speedNorm)   (rad/s, bounded, ZERO at rest)
+ *   phase = -rate * simTime                     (LEFT-handed => negative sign)
+ *
+ * `phase = rate*simTime` is an APPROXIMATION of integral(rate dt) when speed
+ * varies, but it is PURE, MEMORYLESS and dt-independent (depends only on simTime
+ * + current speedNorm) — the plan explicitly forbids a separate oscillator
+ * accumulator (KISS). Gated OFF by default (returns 0 => squeezePhi unchanged);
+ * also returns 0 at rest even when the gate is ON. Deterministic: no Date.now /
+ * performance.now / Math.random.
+ */
+export function axialSpin(simTime: number, speedNorm: number, params: CellParams): number {
+  if (!params.enableAxialSpin) return 0;
+  const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm; // clamp01
+  const rate = (params.axialSpinMax ?? 0) * s; // rad/s, proportional to speed
+  return -rate * simTime; // LEFT-handed spin => negative
 }
 
 /**
@@ -2779,7 +2819,13 @@ export function createCellRenderer(
         : params.enableAffine
           ? prolateAspect(speedNorm, params)
           : 1;
-      const squeezePhi = bodyHeading;
+      // Commit 24: axial spin. A near-rigid spindle SPINS about its long axis as
+      // it swims; rotating the area-preserving (det=1) affine frame by spinPhi
+      // leaves area invariant and produces the apparent foreshorten-breathe.
+      // spinPhi=0 when the gate is off OR at rest, so squeezePhi===bodyHeading
+      // byte-identically there.
+      const spinPhi = axialSpin(simTime, speedNorm, params);
+      const squeezePhi = bodyHeading + spinPhi;
       const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
 
       // Smooth via Catmull-Rom (4 segments per span for smoothness)

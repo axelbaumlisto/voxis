@@ -73,6 +73,7 @@ import {
   bodyProfileAreaScale,
   bodyProfileDeform,
   interpProfileRadius,
+  axialSpin,
 } from "../cell";
 import { deformAt } from "../shared";
 import type { CellParams, CellPersistState, CiliaMotion } from "../cell";
@@ -5628,5 +5629,105 @@ describe("Commit 31b — body profile wired into contour", () => {
       proto.getContext = orig;
       vi.unstubAllGlobals();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 24 — AXIAL SPIN
+// ---------------------------------------------------------------------------
+// A real Paramecium is a near-rigid spindle that SPINS about its long axis as
+// it swims; the apparent "breathe/contract-expand" is the 2D foreshortening of
+// that rotating spindle. Model it as a pure body-frame ROTATION of the existing
+// area-preserving affine squeeze: spinPhi = -rate*simTime, rate = axialSpinMax*
+// clamp01(speedNorm). LEFT-HANDED => negative. Gated OFF by default; collapses
+// byte-identically to the static squeezePhi (= bodyHeading) when off OR at rest.
+describe("Commit 24 — axial spin", () => {
+  // Shoelace polygon area (signed -> abs). 2A = sum det[P_i, P_{i+1}].
+  const shoelace = (pts: Array<[number, number]>): number => {
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const [x1, y1] = pts[i];
+      const [x2, y2] = pts[(i + 1) % pts.length];
+      a += x1 * y2 - x2 * y1;
+    }
+    return Math.abs(a) / 2;
+  };
+
+  it("(defaults) gate OFF and a calm axialSpinMax", () => {
+    expect(CELL_DEFAULTS.enableAxialSpin).toBe(false);
+    expect(CELL_DEFAULTS.axialSpinMax).toBe(3.5);
+  });
+
+  it("(a) GATE OFF: returns 0 and squeezePhi === bodyHeading exactly", () => {
+    const p = { ...CELL_DEFAULTS }; // enableAxialSpin false
+    expect(axialSpin(5, 1, p)).toBe(0);
+    const bodyHeading = 0.73;
+    for (const simTime of [0, 1, 2.5, 9.999]) {
+      for (const s of [0, 0.3, 0.6, 1]) {
+        const squeezePhiEff = bodyHeading + axialSpin(simTime, s, p);
+        expect(squeezePhiEff).toBe(bodyHeading);
+      }
+    }
+  });
+
+  it("(b) REST COLLAPSE: gate ON but speedNorm=0 => no spin", () => {
+    const p = { ...CELL_DEFAULTS, enableAxialSpin: true };
+    // rate=0 => -0*simTime can be signed -0; +0 normalizes (math value is 0).
+    expect(axialSpin(5, 0, p) + 0).toBe(0);
+    expect(axialSpin(123.4, 0, p) + 0).toBe(0);
+    // negative speed clamps to 0 too
+    expect(axialSpin(5, -0.5, p) + 0).toBe(0);
+  });
+
+  it("(c) MONOTONE IN SPEED and bounded by axialSpinMax*t", () => {
+    const p = { ...CELL_DEFAULTS, enableAxialSpin: true };
+    const t = 2;
+    const mags = [0, 0.25, 0.5, 0.75, 1].map((s) => Math.abs(axialSpin(t, s, p)));
+    for (let i = 1; i < mags.length; i++) {
+      expect(mags[i]).toBeGreaterThan(mags[i - 1]);
+    }
+    const bound = (p.axialSpinMax ?? 0) * t;
+    for (const m of mags) expect(m).toBeLessThanOrEqual(bound + 1e-12);
+    // speedNorm>1 clamps to 1 (same as full speed)
+    expect(axialSpin(t, 5, p)).toBe(axialSpin(t, 1, p));
+  });
+
+  it("(d) DT-INDEPENDENCE: pure of simTime, phase scales linearly", () => {
+    const p = { ...CELL_DEFAULTS, enableAxialSpin: true };
+    const s = 0.6;
+    const at_t = axialSpin(2, s, p);
+    expect(axialSpin(2, s, p)).toBe(at_t); // pure
+    expect(axialSpin(4, s, p)).toBeCloseTo(2 * at_t, 12); // linear in simTime
+    expect(axialSpin(0, s, p) + 0).toBe(0); // simTime=0 => phase 0 (-0 normalized)
+  });
+
+  it("(e) SIGN = LEFT-HANDED: negative at t=1, speedNorm=1", () => {
+    const p = { ...CELL_DEFAULTS, enableAxialSpin: true };
+    expect(axialSpin(1, 1, p)).toBeLessThan(0);
+    expect(axialSpin(1, 1, p)).toBeCloseTo(-(p.axialSpinMax ?? 0), 12);
+  });
+
+  it("(f) AREA CONSERVED: rotating the squeeze frame by spinPhi keeps area", () => {
+    const on = { ...CELL_DEFAULTS, enableAffine: true, enableAxialSpin: true };
+    const CX = 80, CY = 90;
+    const noisy: Array<[number, number]> = [];
+    for (let i = 0; i < 24; i++) {
+      const th = (i / 24) * Math.PI * 2;
+      const r = 30 + 6 * Math.sin(3 * th) + 3 * Math.cos(5 * th);
+      noisy.push([CX + r * Math.cos(th), CY + r * Math.sin(th)]);
+    }
+    const k = 1.5;
+    const bodyHeading = 0.4;
+    const a0 = shoelace(affineSqueezePoints(noisy, k, bodyHeading, CX, CY, on));
+    for (const simTime of [0.5, 1, 3.7]) {
+      const phi = bodyHeading + axialSpin(simTime, 1, on);
+      const a1 = shoelace(affineSqueezePoints(noisy, k, phi, CX, CY, on));
+      expect(Math.abs(a1 - a0)).toBeLessThanOrEqual(1e-6);
+    }
+  });
+
+  it("(g) DETERMINISM: identical args => identical value (no Date/random)", () => {
+    const p = { ...CELL_DEFAULTS, enableAxialSpin: true };
+    expect(axialSpin(3.3, 0.8, p)).toBe(axialSpin(3.3, 0.8, p));
   });
 });
