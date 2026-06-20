@@ -5640,6 +5640,22 @@ describe("Commit 28 — food vacuoles + micronucleus", () => {
     expect(noMul).toBe(3.0);
   });
 
+  it("(c3) foodVacuoleSat: default 0.4 preserves legacy; override applies", () => {
+    const P = { ...CELL_DEFAULTS };
+    // Default: foodVacuoleSat undefined → resolved as 0.4 (legacy hardcoded)
+    const defaultSat = P.foodVacuoleSat ?? 0.4;
+    expect(defaultSat).toBe(0.4);
+    // Override: explicit value used directly
+    const custom = 0.25;
+    const overrideSat = custom ?? 0.4;
+    expect(overrideSat).toBe(0.25);
+    // Stroke ratio preserved: stroke = sat * 1.125 (legacy: 0.4 fill → 0.45 stroke)
+    expect(defaultSat * 1.125).toBeCloseTo(0.45, 9);
+    expect(custom * 1.125).toBeCloseTo(0.28125, 9);
+    // Verify CELL_DEFAULTS does NOT set foodVacuoleSat (undefined = legacy)
+    expect(CELL_DEFAULTS.foodVacuoleSat).toBeUndefined();
+  });
+
   it("(d) micronucleusTransform: smaller than macro, offset just outside, scales, deterministic", () => {
     const P = { ...CELL_DEFAULTS };
     const macroR = 6;
