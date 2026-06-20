@@ -84,6 +84,8 @@ import {
   interpProfileRadius,
   axialSpin,
   interiorPoint,
+  seedInteriorGranules,
+  profileCDFInv,
 } from "../cell";
 import { deformAt, wrapPi } from "../shared";
 import type { CellParams, CellPersistState, CiliaMotion, InteriorCtx } from "../cell";
@@ -6450,5 +6452,195 @@ describe("Commit 32a — interiorPoint (interior coupled to wall)", () => {
         expect(Number.isFinite(py)).toBe(true);
       }
     }
+  });
+});
+
+describe("Commit 32b — body-coord granule distribution", () => {
+  const TAU = Math.PI * 2;
+  const eggParams: CellParams = {
+    ...CELL_DEFAULTS,
+    enableBodyProfile: true,
+    bodyProfileType: "egg",
+    bodyProfileTaper: 0.27,
+    bodyAspect: 3,
+  };
+
+  // Mirror of profileCDFInv's table build, used to compute the analytic area
+  // fraction with u>0 the same way the seeding does.
+  function areaFractionUPos(params: CellParams): number {
+    const M = 128;
+    let acc = 0;
+    let cdfAt0 = 0;
+    let prevW = bodyHalfWidth(-1, params);
+    for (let k = 1; k <= M; k++) {
+      const u = -1 + (2 * k) / M;
+      const w = bodyHalfWidth(u, params);
+      acc += (prevW + w) * 0.5 * (2 / M);
+      prevW = w;
+      if (u <= 0) cdfAt0 = acc;
+    }
+    const Z = acc || 1;
+    return 1 - cdfAt0 / Z;
+  }
+
+  function minDistToPolyline(p: [number, number], poly: Array<[number, number]>): number {
+    let best = Infinity;
+    const n = poly.length;
+    for (let i = 0; i < n; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % n];
+      const dx = b[0] - a[0];
+      const dy = b[1] - a[1];
+      const len2 = dx * dx + dy * dy;
+      let t = len2 > 0 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const qx = a[0] + t * dx;
+      const qy = a[1] + t * dy;
+      const d = Math.hypot(p[0] - qx, p[1] - qy);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  function pointInPolygon(p: [number, number], poly: Array<[number, number]>): boolean {
+    let inside = false;
+    const n = poly.length;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const xi = poly[i][0], yi = poly[i][1];
+      const xj = poly[j][0], yj = poly[j][1];
+      const intersect =
+        yi > p[1] !== yj > p[1] &&
+        p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  it("(a) profileCDFInv MONOTONE + RANGE: u in [-1,1], monotone, endpoints", () => {
+    let prev = -Infinity;
+    for (let i = 0; i <= 20; i++) {
+      const xi = i / 20;
+      const u = profileCDFInv(xi, eggParams);
+      expect(u).toBeGreaterThanOrEqual(-1 - 1e-9);
+      expect(u).toBeLessThanOrEqual(1 + 1e-9);
+      expect(u).toBeGreaterThanOrEqual(prev - 1e-9);
+      prev = u;
+    }
+    expect(Math.abs(profileCDFInv(0, eggParams) - -1)).toBeLessThan(1e-6);
+    expect(Math.abs(profileCDFInv(1, eggParams) - 1)).toBeLessThan(1e-6);
+    const mid = profileCDFInv(0.5, eggParams);
+    expect(Number.isFinite(mid)).toBe(true);
+    expect(mid).toBeGreaterThan(-1);
+    expect(mid).toBeLessThan(1);
+  });
+
+  it("(b) AREA-UNIFORM: ensemble u>0 fraction ~= analytic area fraction; reaches poles", () => {
+    const N = 2000;
+    const seeds = seedInteriorGranules(N, 0, eggParams);
+    expect(seeds.length).toBe(N);
+    const fracUPos = seeds.filter((g) => g.u > 0).length / N;
+    const analytic = areaFractionUPos(eggParams);
+    expect(Math.abs(fracUPos - analytic)).toBeLessThan(0.05);
+    // Granules reach FAR toward the poles, unlike the old central disc. (The
+    // ceiling sits below 1.0 because area-uniform density p(u) ∝ w-hat(u) -> 0
+    // at the poles, so the inverse-CDF compresses the most extreme samples; the
+    // equivalent body-coord max for the old 0.75*baseR disc would be ~0.43.)
+    const maxAbsU = seeds.reduce((m, g) => Math.max(m, Math.abs(g.u)), 0);
+    expect(maxAbsU).toBeGreaterThan(0.85);
+    // s should span the full transverse range too.
+    const maxAbsS = seeds.reduce((m, g) => Math.max(m, Math.abs(g.s)), 0);
+    expect(maxAbsS).toBeGreaterThan(0.9);
+  });
+
+  it("(c) POLE COVERAGE via interiorPoint: elongated cloud, all contained", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.24,
+      bodyAspect: 3,
+      bodyVentralBend: 0.18,
+    };
+    const baseR = 40;
+    const cx = 100, cy = 100, bodyHeading = 0;
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, params);
+    const ctx: InteriorCtx = { cx, cy, baseR, deform, squeezeK: 1, squeezePhi: 0, bodyHeading, params };
+    const poly: Array<[number, number]> = [];
+    for (let i = 0; i < deform.length; i++) {
+      const angle = (i / deform.length) * TAU;
+      const r = baseR * (1 + deform[i]);
+      poly.push([cx + r * Math.cos(angle), cy + r * Math.sin(angle)]);
+    }
+    const N = 2000;
+    const seeds = seedInteriorGranules(N, 0, params);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    let allContained = true;
+    for (const g of seeds) {
+      const pt = interiorPoint(g.u, g.s, ctx);
+      minX = Math.min(minX, pt[0]); maxX = Math.max(maxX, pt[0]);
+      minY = Math.min(minY, pt[1]); maxY = Math.max(maxY, pt[1]);
+      // contained (allow a hair of polyline discretisation slack)
+      if (!pointInPolygon(pt, poly) && minDistToPolyline(pt, poly) > 0.5) {
+        allContained = false;
+      }
+    }
+    const aspect = (maxX - minX) / Math.max(1e-9, maxY - minY);
+    expect(aspect).toBeGreaterThan(1.8);
+    expect(allContained).toBe(true);
+  });
+
+  it("(d) GATE OFF: legacy disc path renders without throwing (interior gate off)", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn().mockReturnValue(7));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: 120,
+      height: 60,
+      params: { enableCyclosis: true, cyclosisGranuleCount: 20 },
+    });
+    expect(() => {
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.3) });
+      }
+    }).not.toThrow();
+    r.destroy();
+    vi.unstubAllGlobals();
+  });
+
+  it("(e) RENDER ON: interior field path renders finite without throwing", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn().mockReturnValue(7));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: 120,
+      height: 60,
+      params: {
+        enableInteriorField: true,
+        enableCyclosis: true,
+        cyclosisGranuleCount: 20,
+        enableBodyProfile: true,
+        bodyProfileType: "egg",
+      },
+    });
+    expect(() => {
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.3) });
+      }
+    }).not.toThrow();
+    r.destroy();
+    vi.unstubAllGlobals();
+  });
+
+  it("(f) DETERMINISM: identical args => identical seeds", () => {
+    const a = seedInteriorGranules(50, 0, eggParams);
+    const b = seedInteriorGranules(50, 0, eggParams);
+    expect(a.length).toBe(b.length);
+    for (let i = 0; i < a.length; i++) {
+      expect(a[i].u).toBe(b[i].u);
+      expect(a[i].s).toBe(b[i].s);
+      expect(a[i].q).toBe(b[i].q);
+      expect(a[i].phi0).toBe(b[i].phi0);
+    }
+    expect(profileCDFInv(0.37, eggParams)).toBe(profileCDFInv(0.37, eggParams));
   });
 });

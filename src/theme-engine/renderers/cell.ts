@@ -315,6 +315,12 @@ export interface CellParams {
    * small granules circulates on a divergence-free closed loop inside the body.
    * Draw-only; when off nothing is seeded/advected/drawn. */
   enableCyclosis?: boolean;
+  /** Commit 32b (OPT, default off): master gate for the body-coord interior
+   * rewrite. When on, the granule field is seeded area-uniformly in
+   * body-normalised (u, s) coords and drawn via `interiorPoint` (coupled to the
+   * live wall) so it fills the whole slipper instead of a central disc.
+   * ORTHOGONAL to enableCyclosis; when off the legacy disc path runs verbatim. */
+  enableInteriorField?: boolean;
   /** Commit 27: number of granules that circulate. Default 14. */
   cyclosisGranuleCount?: number;
   /** Commit 27: seconds for a granule near mid-radius to complete the loop
@@ -559,6 +565,9 @@ export const CELL_DEFAULTS: CellParams = {
   // seedGranules returns [] / the gated draw block is skipped -> all goldens
   // stay byte-identical.
   enableCyclosis: false,
+  // Commit 32b: body-coord interior rewrite. OFF (dark-launch) so the legacy
+  // disc granule path runs verbatim -> all goldens stay byte-identical.
+  enableInteriorField: false,
   cyclosisGranuleCount: 14,
   cyclosisPeriod: 45,
   granuleMaxRadiusFrac: 0.75,
@@ -2385,6 +2394,78 @@ export function interiorPoint(u: number, s: number, ctx: InteriorCtx): [number, 
 }
 
 /**
+ * Commit 32b — invert the CDF of the half-width density p(u) ∝ ŵ(u) =
+ * bodyHalfWidth(u, params), so a uniform sample `xi` in [0, 1] maps to an
+ * AREA-UNIFORM axial coordinate `u` in [-1, 1] (more samples where the body is
+ * fat, fewer at the thin poles). Builds a normalised CDF table (M=128 trapezoid
+ * samples) once per call, then inverts by binary search + linear interpolation.
+ * Works for ALL profile types (incl. ventral bend) since it only reads
+ * bodyHalfWidth. Pure & deterministic; O(M) per call (seeding happens lazily).
+ */
+export function profileCDFInv(xi: number, params: CellParams): number {
+  const M = 128;
+  const us: number[] = [];
+  const cdf: number[] = [];
+  let acc = 0;
+  let prevW = bodyHalfWidth(-1, params);
+  us.push(-1);
+  cdf.push(0);
+  for (let k = 1; k <= M; k++) {
+    const u = -1 + (2 * k) / M;
+    const w = bodyHalfWidth(u, params);
+    acc += (prevW + w) * 0.5 * (2 / M); // trapezoid step, du = 2/M
+    prevW = w;
+    us.push(u);
+    cdf.push(acc);
+  }
+  const Z = acc || 1; // guard degenerate (all-zero width)
+  const target = Math.max(0, Math.min(1, xi)) * Z;
+  // Binary search the first table node with cdf >= target.
+  let lo = 0;
+  let hi = cdf.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (cdf[mid] < target) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo === 0) return us[0];
+  // Lerp between node lo-1 and lo on the cumulative axis.
+  const c0 = cdf[lo - 1];
+  const c1 = cdf[lo];
+  const span = c1 - c0;
+  const frac = span > 0 ? (target - c0) / span : 0;
+  const u = us[lo - 1] + frac * (us[lo] - us[lo - 1]);
+  return u < -1 ? -1 : u > 1 ? 1 : u;
+}
+
+/**
+ * Commit 32b — seed `count` interior granules in BODY-NORMALISED coords (u, s).
+ * `s` is Uniform(-1, 1) transverse; `u` is area-uniform axial via profileCDFInv
+ * so the cloud fills the slipper to the poles (density ∝ ŵ(u)) instead of
+ * clustering centrally. `q` (loop label) and `phi0` (loop phase) are seeded now
+ * from decorrelated noise but UNUSED until the cyclosis advection lands in 32c —
+ * included so 32c needs no reseed. Pure & deterministic (noise2D only).
+ */
+export function seedInteriorGranules(
+  count: number,
+  seedBase: number,
+  params: CellParams,
+): Array<{ u: number; s: number; q: number; phi0: number }> {
+  const n = Math.max(0, Math.floor(count));
+  const out: Array<{ u: number; s: number; q: number; phi0: number }> = [];
+  for (let i = 0; i < n; i++) {
+    const xiU = (noise2D(i * 12.9898 + seedBase + 1.7, 78.233) + 1) * 0.5; // [0,1]
+    const xiS = (noise2D(i * 39.346 + seedBase + 5.3, 11.135) + 1) * 0.5; // [0,1]
+    const xiQ = (noise2D(i * 17.13 + seedBase + 2.9, 51.07) + 1) * 0.5; // [0,1] loop label (32c)
+    const xiP = (noise2D(i * 7.77 + seedBase + 9.1, 23.31) + 1) * 0.5; // [0,1] phase (32c)
+    const s = 2 * xiS - 1; // Uniform(-1, 1) transverse
+    const u = profileCDFInv(xiU, params); // area-uniform axial
+    out.push({ u, s, q: xiQ, phi0: xiP * TAU });
+  }
+  return out;
+}
+
+/**
  * F11 (OPT) — contractile vacuole. A peripheral vesicle that slowly FILLS
  * (diastole) then rapidly COLLAPSES (systole) each `vacuolePeriod`. Phase
  * `u = (t/period) mod 1`; radius `R_max * smoothstep(0, 0.85, u)` rising to a
@@ -3035,6 +3116,10 @@ export function createCellRenderer(
   // enableCyclosis is on; stays null otherwise so the default path allocates
   // nothing and the shipped look is byte-unchanged.
   let granules: Array<{ x: number; y: number }> | null = null;
+  // Commit 32b (gate OFF): body-coord interior granules in (u, s). Lazily seeded
+  // on first tick when enableInteriorField is on; stays null otherwise so the
+  // legacy disc path allocates nothing and goldens stay byte-identical.
+  let interiorGranules: Array<{ u: number; s: number; q: number; phi0: number }> | null = null;
   // Commit 28 (gate OFF): food-vacuole body-frame offsets (with a digest phase)
   // that ride the SAME cyclosis loop as the granules, plus a micronucleus drawn
   // beside the macronucleus. Lazily seeded on first tick when enableOrganelles
@@ -3492,26 +3577,46 @@ export function createCellRenderer(
         // they ride the prolate/spin. Skipped (granules stays null) unless
         // enableCyclosis is on, so all goldens stay byte-identical.
         if (params.enableCyclosis && (params.cyclosisGranuleCount ?? 0) > 0) {
-          if (!granules) granules = seedGranules(baseR, params);
           const granuleSizePx = params.granuleSizePx ?? 1.3;
           ctx.fillStyle = hsla(baseHue + 25, 0.6, 0.6, params.nucleusAlpha * 0.6);
-          for (let i = 0; i < granules.length; i++) {
-            granules[i] = advectGranule(granules[i], baseR, dt, params);
-            const off = granules[i];
-            // Containment: clamp the body-frame radius so granule + draw size
-            // stays inside the live minimum membrane radius (like the vacuoles).
-            const maxRad = Math.min(
-              (params.granuleMaxRadiusFrac ?? 0.75) * baseR,
-              Math.max(0, minMembraneR - granuleSizePx),
-            );
-            const rad = Math.hypot(off.x, off.y);
-            const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
-            const [gx, gy] = affineSqueezePoints(
-              [[cx + off.x * scale, cy + off.y * scale]], squeezeK, squeezePhi, cx, cy, params,
-            )[0];
-            ctx.beginPath();
-            ctx.arc(gx, gy, granuleSizePx, 0, TAU);
-            ctx.fill();
+          if (params.enableInteriorField) {
+            // Commit 32b (gate ON): body-coord path. Granules sit area-uniformly
+            // in (u, s) and are drawn via interiorPoint, so they fill the whole
+            // slipper and deform WITH the live wall. (Cyclosis MOTION lands in
+            // 32c; here they are drawn at their static seeded (u, s).)
+            if (!interiorGranules) {
+              interiorGranules = seedInteriorGranules(params.cyclosisGranuleCount ?? 0, 0, params);
+            }
+            const ictx: InteriorCtx = { cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params };
+            for (let i = 0; i < interiorGranules.length; i++) {
+              const g = interiorGranules[i];
+              const [gx, gy] = interiorPoint(g.u, g.s, ictx);
+              ctx.beginPath();
+              ctx.arc(gx, gy, granuleSizePx, 0, TAU);
+              ctx.fill();
+            }
+          } else {
+            // LEGACY disc path — VERBATIM (do not tidy), so the deployed look +
+            // golden are unchanged.
+            if (!granules) granules = seedGranules(baseR, params);
+            for (let i = 0; i < granules.length; i++) {
+              granules[i] = advectGranule(granules[i], baseR, dt, params);
+              const off = granules[i];
+              // Containment: clamp the body-frame radius so granule + draw size
+              // stays inside the live minimum membrane radius (like the vacuoles).
+              const maxRad = Math.min(
+                (params.granuleMaxRadiusFrac ?? 0.75) * baseR,
+                Math.max(0, minMembraneR - granuleSizePx),
+              );
+              const rad = Math.hypot(off.x, off.y);
+              const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
+              const [gx, gy] = affineSqueezePoints(
+                [[cx + off.x * scale, cy + off.y * scale]], squeezeK, squeezePhi, cx, cy, params,
+              )[0];
+              ctx.beginPath();
+              ctx.arc(gx, gy, granuleSizePx, 0, TAU);
+              ctx.fill();
+            }
           }
         }
 
