@@ -559,6 +559,57 @@ describe("buildTargetDeformation", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Commit 29 — smooth rigid membrane (enableRigidMembrane)
+// ---------------------------------------------------------------------------
+// A real Paramecium is a rigid smooth spindle, not a wobbling amoeboid blob.
+// When the gate is ON, the per-vertex deformation array is suppressed to a flat
+// 0 (no FBM, no pseudopods, no audio bins, no idle morph) so the pre-affine body
+// is a perfect circle that the downstream affine squeeze turns into a smooth
+// spindle. When OFF (default) behavior is byte-identical to today.
+describe("Commit 29 — smooth rigid membrane (enableRigidMembrane)", () => {
+  it("defaults OFF", () => {
+    expect(CELL_DEFAULTS.enableRigidMembrane).toBe(false);
+  });
+
+  it("gate ON ⇒ every vertex deform is exactly 0 (no input leaks through)", () => {
+    const params = { ...CELL_DEFAULTS, enableRigidMembrane: true };
+    const cases: Array<[number, number, number, number[]]> = [
+      [0, 0, 0, new Array(32).fill(0)],
+      [0.5, 0.7, 0.8, Array.from({ length: 32 }, (_, i) => i / 32)],
+      [3.0, 1.0, 1.0, new Array(32).fill(1)],
+      [7.3, 0.9, 0.95, Array.from({ length: 32 }, (_, i) => (i % 2 ? 1 : 0.3))],
+    ];
+    for (const [t, audioLevel, energy, bins] of cases) {
+      const deform = buildTargetDeformation(160, 160, bins, t, audioLevel, energy, params, 1);
+      expect(deform.length).toBe(96);
+      for (const v of deform) expect(v).toBe(0);
+    }
+  });
+
+  it("gate ON ⇒ max-min === 0 (perfectly round before squeeze)", () => {
+    const params = { ...CELL_DEFAULTS, enableRigidMembrane: true };
+    const deform = buildTargetDeformation(160, 160, new Array(32).fill(1), 2.5, 0.8, 0.9, params, 1);
+    expect(Math.max(...deform) - Math.min(...deform)).toBe(0);
+  });
+
+  it("OFF path is unchanged: nonzero, varying array (gate did not flatten default)", () => {
+    const params = { ...CELL_DEFAULTS, enableRigidMembrane: false };
+    const bins = Array.from({ length: 32 }, (_, i) => i / 32);
+    const deform = buildTargetDeformation(160, 160, bins, 0.5, 0.7, 0.8, params, 0);
+    const absMax = Math.max(...deform.map(Math.abs));
+    expect(absMax).toBeGreaterThan(0);
+    expect(Math.max(...deform) - Math.min(...deform)).toBeGreaterThan(0);
+  });
+
+  it("OFF path is byte-identical to omitting the flag entirely", () => {
+    const bins = Array.from({ length: 32 }, (_, i) => i / 32);
+    const withFlag = buildTargetDeformation(160, 160, bins, 0.5, 0.7, 0.8, { ...CELL_DEFAULTS, enableRigidMembrane: false }, 0);
+    const noFlag = buildTargetDeformation(160, 160, bins, 0.5, 0.7, 0.8, CELL_DEFAULTS, 0);
+    expect(withFlag).toEqual(noFlag);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Commit 4 — deformation pipeline scaffold (gates default OFF) + FROZEN baseline
 // ---------------------------------------------------------------------------
 // The plan's INVARIANTS require a "frozen pre-B/C baseline": with every gate
