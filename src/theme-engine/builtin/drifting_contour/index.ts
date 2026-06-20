@@ -109,15 +109,18 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       ectoplasmFrac: 0.93,            // thin cortex at 93% radius (real: 92-96%)
       ectoplasmAlpha: 0.22,           // brighter thin rim (was 0.15)
       helicalAmplitude: 0.3,           // sinusoidal lateral wobble (helical swimming)
+      enableWallReorient: true,         // ciliate avoidance reaction at walls (not specular)
       foodVacuoleSizeMul: 1.8,         // food vacuoles visibly larger than granules
       enableTrichocysts: true,         // radial needle discharge on startle
       trichocystCount: 30,             // number of crystalline needles
       trichocystLengthMul: 3.0,        // needle length = 3× cilia length
-      trichocystDecay: 2.0,            // ~500ms visible (was dead code at 5.0)
-      trichocystLineWidth: 1.0,        // visible needles (was 0.5px)
+      trichocystDecay: 1.0,            // ~700ms visible (was 2.0)
+      trichocystLineWidth: 1.5,        // thick needles (was 1.0px)
       enableMetachronal: true,          // traveling metachronal wave on cilia
       metachronalWavelength: 20,        // wavelength in cilia count
       metachronalSpeed: 4.0,            // wave propagation speed rad/s
+      metachronalDepth: 0.6,            // deeper wave crests [0.4, 1.0] (was 0.4)
+      nucleusIndent: 0.3,               // kidney-shaped macronucleus concavity
       foodVacuoleSat: 0.25,             // warmer amber food vacuoles (was 0.10)
       enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)
       cyclosisGranuleCount: 80,      // denser flow field (was 52)

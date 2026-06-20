@@ -519,8 +519,8 @@ var CELL_DEFAULTS = {
   enableTrichocysts: false,
   trichocystCount: 30,
   trichocystLengthMul: 3,
-  trichocystDecay: 2,
-  trichocystLineWidth: 1,
+  trichocystDecay: 1,
+  trichocystLineWidth: 1.5,
   enableVacuoles: false,
   vacuoleAnteriorBearing: 1.9,
   vacuolePosteriorBearing: -1.9,
@@ -826,7 +826,8 @@ function ciliaPath(cx, cy, baseR, t, energy, growth, params, motion) {
       const mWave = params.metachronalWavelength ?? 20;
       const mSpd = params.metachronalSpeed ?? 4;
       const metaPhase = k / mWave * TAU - t * mSpd;
-      const mod = 0.6 + 0.4 * (0.5 + 0.5 * Math.cos(metaPhase));
+      const depth = params.metachronalDepth ?? 0.4;
+      const mod = 1 - depth + depth * (0.5 + 0.5 * Math.cos(metaPhase));
       lenK *= mod;
     }
     const r01b = noise2D(k * 5.1 + 2.7, 4.9) * 0.5 + 0.5;
@@ -1780,10 +1781,10 @@ function createCellRenderer(container, opts) {
           }
         }
         if (params.enableTrichocysts) {
-          if (startle > triPrevStartle + 0.05) {
+          if (startle > triPrevStartle + 0.02) {
             trichocystAlpha = 1;
           }
-          const triDecayRate = params.trichocystDecay ?? 2;
+          const triDecayRate = params.trichocystDecay ?? 1;
           trichocystAlpha *= Math.exp(-triDecayRate * dt);
           if (trichocystAlpha < 0.005)
             trichocystAlpha = 0;
@@ -1795,7 +1796,7 @@ function createCellRenderer(container, opts) {
           const triAlpha = trichocystAlpha * 0.7;
           ctx.save();
           ctx.strokeStyle = hsla(0, 0, 0.95, triAlpha);
-          ctx.lineWidth = params.trichocystLineWidth ?? 1;
+          ctx.lineWidth = params.trichocystLineWidth ?? 1.5;
           ctx.lineCap = "round";
           const cN = contourPoints.length;
           for (let i = 0;i < triCount; i++) {
@@ -1891,7 +1892,29 @@ function createCellRenderer(container, opts) {
           ctx.beginPath();
           const nAspect = params.nucleusAspect ?? 1.8;
           if (params.enableInteriorField && nAspect !== 1) {
-            ctx.ellipse(nx, ny, nr * nAspect, nr, bodyHeading, 0, TAU);
+            const nIndent = params.nucleusIndent ?? 0;
+            if (nIndent > 0) {
+              const kSteps = 32;
+              const ch = Math.cos(bodyHeading);
+              const sh = Math.sin(bodyHeading);
+              for (let ki = 0;ki <= kSteps; ki++) {
+                const t2 = ki / kSteps * TAU;
+                const ct = Math.cos(t2);
+                const st = Math.sin(t2);
+                const kidFrac = st > 0 ? 1 - nIndent * st * st : 1;
+                const ex = ct * nr * nAspect;
+                const ey = st * nr * kidFrac;
+                const rx = nx + ex * ch - ey * sh;
+                const ry = ny + ex * sh + ey * ch;
+                if (ki === 0)
+                  ctx.moveTo(rx, ry);
+                else
+                  ctx.lineTo(rx, ry);
+              }
+              ctx.closePath();
+            } else {
+              ctx.ellipse(nx, ny, nr * nAspect, nr, bodyHeading, 0, TAU);
+            }
           } else {
             ctx.arc(nx, ny, nr, 0, TAU);
           }
@@ -2255,15 +2278,18 @@ function mount(container, api) {
       ectoplasmFrac: 0.93,
       ectoplasmAlpha: 0.22,
       helicalAmplitude: 0.3,
+      enableWallReorient: true,
       foodVacuoleSizeMul: 1.8,
       enableTrichocysts: true,
       trichocystCount: 30,
       trichocystLengthMul: 3,
-      trichocystDecay: 2,
-      trichocystLineWidth: 1,
+      trichocystDecay: 1,
+      trichocystLineWidth: 1.5,
       enableMetachronal: true,
       metachronalWavelength: 20,
       metachronalSpeed: 4,
+      metachronalDepth: 0.6,
+      nucleusIndent: 0.3,
       foodVacuoleSat: 0.25,
       enableCyclosis: true,
       cyclosisGranuleCount: 80,
