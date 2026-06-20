@@ -3805,18 +3805,28 @@ export function createCellRenderer(
           ctx.strokeStyle = hsla(0, 0.0, 0.95, triAlpha);
           ctx.lineWidth = 0.5;
           ctx.lineCap = "round";
-          // Use evenly-spaced points on the deformed+squeezed membrane contour
-          const step = Math.max(1, Math.floor(contourPoints.length / triCount));
+          // Use uniformly-spaced points on the deformed+squeezed membrane contour
+          const cN = contourPoints.length;
           for (let i = 0; i < triCount; i++) {
-            const idx = (i * step) % contourPoints.length;
+            const idx = Math.round(i * cN / triCount) % cN;
             const [px, py] = contourPoints[idx];
-            // Outward normal from cell centre
-            const dx = px - cx;
-            const dy = py - cy;
-            const d = Math.hypot(dx, dy);
-            if (d < 0.001) continue;
-            const nx = dx / d;
-            const ny = dy / d;
+            // Local outward normal from adjacent contour tangent
+            const prev = contourPoints[(idx - 1 + cN) % cN];
+            const next = contourPoints[(idx + 1) % cN];
+            const tx = next[0] - prev[0];
+            const ty = next[1] - prev[1];
+            // Perpendicular to tangent (candidate outward normal)
+            let nx = ty;
+            let ny = -tx;
+            const nLen = Math.hypot(nx, ny);
+            if (nLen < 1e-6) continue; // degenerate segment, skip
+            nx /= nLen;
+            ny /= nLen;
+            // Verify outward: dot with centroid-to-point must be positive
+            if (nx * (px - cx) + ny * (py - cy) < 0) {
+              nx = -nx;
+              ny = -ny;
+            }
             ctx.beginPath();
             ctx.moveTo(px, py);
             ctx.lineTo(px + nx * triLen, py + ny * triLen);
