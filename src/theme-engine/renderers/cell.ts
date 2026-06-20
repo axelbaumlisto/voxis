@@ -241,11 +241,12 @@ export const CELL_DEFAULTS: CellParams = {
   driftActivationRate: 0.02,
   wanderTurnRate: 1.1,
   wanderFreq: 0.6,
-  // Pipeline gates. B1 (commit 6) flips enableSaturation ON — the first
-  // deliberately-visible stage; the rest stay OFF until their own commits.
+  // Pipeline gates. B1 (commit 6) flips enableSaturation ON; C1 (commit 7) flips
+  // enableAreaNorm ON (area held at pi*baseR^2). enableAffine (D4) and
+  // enableActivity (G) land in later commits.
   enableSaturation: true,
   deformMax: 0.6,
-  enableAreaNorm: false,
+  enableAreaNorm: true,
   enableAffine: false,
   enableActivity: false,
 };
@@ -795,14 +796,61 @@ export function saturateTargetDeform(target: number[], params: CellParams): numb
 }
 
 /**
- * Step 7 — area-normalization seam [C1, commit 7]. Identity until `enableAreaNorm`.
- * When implemented: uniform offset `c = mean(e) - sqrt(1 - Var(e))`, `e = 1 + d`,
- * applied to the INTEGRATED field so `mean((1+d)^2) = 1`.
+ * Step 7 — area normalization [C1]. Holds the cell's enclosed AREA at
+ * `pi*baseR^2` by a UNIFORM radial offset on the INTEGRATED deform field.
+ *
+ * The polygon area is `pi*baseR^2 * mean((1+d)^2)` (mean over equiangular
+ * samples), so "area == pi*baseR^2" is exactly `mean((1+d)^2) = 1`. Let
+ * `e_i = 1 + d_i`, `m1 = mean(e)`, `Var = mean(e^2) - m1^2`. Subtracting a
+ * uniform `c` from every `d_i` (i.e. `e_i -> e_i - c`) gives
+ * `mean((e-c)^2) = mean(e^2) - 2c*m1 + c^2`. Setting that to 1 and solving the
+ * quadratic `c^2 - 2*m1*c + (mean(e^2) - 1) = 0` yields
+ * `c = m1 - sqrt(m1^2 - (mean(e^2) - 1)) = m1 - sqrt(1 - Var)` (smaller root, so
+ * |c| is minimal). This is real iff `Var <= 1`.
+ *
+ * When `Var > 1` (a very high-variance field — rare in practice) no uniform
+ * offset can reach area 1, so fall back to a MULTIPLICATIVE rescale
+ * `s = 1/sqrt(mean(e^2))`, `e_i -> e_i * s`, which also gives `mean((e*s)^2)=1`.
+ *
+ * Guard: clamp `c` so `1 + d_i - c > 0` for every vertex (no inside-out
+ * contour), i.e. `c <= min(e) - EPS`. Identity when the gate is off.
+ *
+ * Anti-balloon: today's pseudopod/bin terms are outward-only, so resting/driven
+ * area over-inflates; C1 makes a one-sided bulge BORROW from the opposite side
+ * instead of growing the whole cell. (research-membrane-areacons.md; plan C1.)
  */
 export function normalizeAreaDeform(integrated: number[], params: CellParams): number[] {
   if (!params.enableAreaNorm) return integrated;
-  // TODO commit 7 (C1): real area normalization. Identity placeholder for now.
-  return integrated;
+  const n = integrated.length;
+  if (n === 0) return integrated;
+
+  let sum = 0;
+  let sumSq = 0;
+  let minE = Infinity;
+  for (const d of integrated) {
+    const e = 1 + d;
+    sum += e;
+    sumSq += e * e;
+    if (e < minE) minE = e;
+  }
+  const m1 = sum / n;
+  const m2 = sumSq / n;
+  const variance = m2 - m1 * m1;
+
+  // Var > 1: no uniform offset reaches area 1 -> multiplicative fallback.
+  if (variance > 1 || !(m2 > 0)) {
+    const s = m2 > 0 ? 1 / Math.sqrt(m2) : 1;
+    return integrated.map((d) => (1 + d) * s - 1);
+  }
+
+  // Smaller root keeps |c| minimal. (1 - Var) >= 0 here.
+  let c = m1 - Math.sqrt(1 - variance);
+  // No-inside-out guard: every (1 + d_i - c) must stay strictly positive.
+  const EPS = 1e-4;
+  const cMax = minE - EPS;
+  if (c > cMax) c = cMax;
+
+  return integrated.map((d) => d - c);
 }
 
 /**
@@ -999,8 +1047,10 @@ export function buildCellContour(
  *
  * The nucleus drifts slowly via 2D value-noise (two orthogonal seeds),
  * pulses its radius with audio level, and breathes gently during silence.
- * The offset is clamped so the organelle always stays well inside the
- * membrane wall (within `baseR * 0.55` from center).
+ * The offset (and, if needed, the radius) is clamped so the organelle always
+ * stays inside the membrane. When the caller passes the LIVE minimum membrane
+ * radius (`minMembraneR`), containment uses `minMembraneR * (1 - 0.15)` (F9
+ * pinch-escape); otherwise it falls back to the legacy fixed `baseR * 0.55`.
  *
  * @param t          Continuous time in seconds.
  * @param audioLevel Smoothed audio level [0, 1].
@@ -1014,6 +1064,7 @@ export function nucleusTransform(
   audioLevel: number,
   baseR: number,
   params: CellParams,
+  minMembraneR?: number,
 ): { cx: number; cy: number; r: number } {
   // --- Drift: slow noise-driven offset inside the cell ---
   const rawCx = baseR * params.nucleusWander * noise2D(137, t * params.nucleusDrift);
@@ -1028,10 +1079,19 @@ export function nucleusTransform(
   r = Math.max(MIN_PX_RADIUS, r);
 
   // --- Safety clamp: nucleus must stay well inside the membrane ---
-  // The floor of the membrane contour is baseR * 0.35, but we use a more
-  // conservative inner-safe radius of baseR * 0.55 so the nucleus is
-  // always clearly separated from the wall.
-  const safeInner = baseR * 0.55;
+  // F9 (pinch-escape): when the caller knows the LIVE minimum membrane radius
+  // (which can floor near baseR*0.35 under a deep inward pinch), contain the
+  // nucleus inside `minMembraneR * (1 - 0.15)`. Without it, fall back to the
+  // legacy fixed inner-safe radius baseR*0.55, which assumes an undeformed wall.
+  const PINCH_MARGIN = 0.15;
+  const safeInner =
+    minMembraneR !== undefined && Number.isFinite(minMembraneR)
+      ? Math.max(0, minMembraneR) * (1 - PINCH_MARGIN)
+      : baseR * 0.55;
+  // F9: the nucleus radius itself must fit the safe zone, else it would poke out
+  // through a tightly-pinched wall. Shrink it (above the sub-pixel floor) so
+  // r + |offset| can satisfy the containment bound.
+  if (r > safeInner) r = Math.max(MIN_PX_RADIUS, safeInner);
   const offsetMag = Math.sqrt(rawCx * rawCx + rawCy * rawCy);
   const maxOffsetMag = Math.max(0, safeInner - r);
 
@@ -1527,7 +1587,9 @@ export function createCellRenderer(
       // body-heading frame (gated; identity when enableAffine is off). Commit 5
       // ships the math with neutral (k=1, phi=0); Commit 8/D4 wires motion-driven
       // values from bodyHeading + speedNorm.
-      const contourPoints = affineSqueezePoints(smoothedPoints, 1, 0, cx, cy, params);
+      const squeezeK = 1;
+      const squeezePhi = 0;
+      const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
 
       // Smooth via Catmull-Rom (4 segments per span for smoothness)
       const splinePoints = catmullRom(contourPoints, 4);
@@ -1575,10 +1637,20 @@ export function createCellRenderer(
         ctx.fill();
 
         // --- Nucleus: denser organelle drifting/pulsing inside the cell ---
-        const nucleus = nucleusTransform(t, audioLevel, baseR, params);
+        // F9: thread the LIVE minimum membrane radius so a deep inward pinch
+        // cannot let the nucleus poke through the wall.
+        let minMembraneR = Infinity;
+        for (const dv of deform) minMembraneR = Math.min(minMembraneR, baseR * (1 + dv));
+        const nucleus = nucleusTransform(t, audioLevel, baseR, params, minMembraneR);
         if (nucleus.r >= 2.5) {
-          const nx = cx + nucleus.cx;
-          const ny = cy + nucleus.cy;
+          // M14: the nucleus rides the same body affine squeeze (k, phi) as the
+          // membrane, so when the body becomes prolate (Commit 8/D4) the nucleus
+          // stays inside on both axes. While enableAffine is off (k=1) this is a
+          // no-op; the squeeze maps the CENTRE (the disk gains an elliptical
+          // draw when D4 lands).
+          const [nx, ny] = affineSqueezePoints(
+            [[cx + nucleus.cx, cy + nucleus.cy]], squeezeK, squeezePhi, cx, cy, params,
+          )[0];
           const nr = nucleus.r;
 
           // Soft radial gradient: denser warmer core → darker rim

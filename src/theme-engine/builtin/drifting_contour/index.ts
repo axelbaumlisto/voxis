@@ -49,7 +49,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       ciliaWaveSpeed: 1.6,
       growthAttack: 0.05,
       growthRelease: 0.012,
-      baseRadiusPx: 16,
+      baseRadiusPx: 17,
       driftSpeed: 0.03,
       driftMargin: 30,
       idleMorphAmplitude: 0.16,

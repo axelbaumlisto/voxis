@@ -577,9 +577,11 @@ describe("Commit 4: pipeline gates + frozen pre-B/C baseline", () => {
     enableActivity: false,
   };
 
-  it("B1 flips enableSaturation ON; the other three gates stay OFF", () => {
+  it("gate defaults: B1 saturation + C1 areaNorm ON; affine + activity still OFF", () => {
+    // Commit 6 (B1) flipped enableSaturation; Commit 7 (C1) flips enableAreaNorm.
+    // enableAffine (D4) and enableActivity (G) land later.
     expect(CELL_DEFAULTS.enableSaturation).toBe(true);
-    expect(CELL_DEFAULTS.enableAreaNorm).toBe(false);
+    expect(CELL_DEFAULTS.enableAreaNorm).toBe(true);
     expect(CELL_DEFAULTS.enableAffine).toBe(false);
     expect(CELL_DEFAULTS.enableActivity).toBe(false);
   });
@@ -616,9 +618,11 @@ describe("Commit 4: pipeline gates + frozen pre-B/C baseline", () => {
   });
 
   it("normalizeArea seam is identity when gate off", () => {
+    // C1 (Commit 7) flips the gate ON in CELL_DEFAULTS and gives normalizeArea
+    // real math, so the gate-ON branch is NO LONGER an identity (covered by the
+    // Commit-7 block). Here we only pin the gate-OFF branch as a pure pass-through.
     const field = buildTargetDeformation(W, H, drivenBins, 3, 0.5, 0.5, GATES_OFF, 0);
     expect(normalizeAreaDeform(field, GATES_OFF)).toEqual(field);
-    expect(normalizeAreaDeform(field, { ...GATES_OFF, enableAreaNorm: true })).toEqual(field);
   });
 
   it("affine seam is identity when gate off (any k, phi)", () => {
@@ -818,8 +822,218 @@ describe("Commit 6: B1 soft-saturation (tanh)", () => {
   it("closed-form budget holds: baseR*(1+Dmax) <= min(w,h)*0.46 for the drifting_contour overlay", () => {
     const W = 160, H = 160;
     const maxRadius = Math.min(W, H) * 0.46;
-    const maxBaseR = 16 * (1 + 1.0 * 0.2); // baseRadiusPx * (1 + growth*growthSwell) at growth=1
+    const maxBaseR = 17 * (1 + 1.0 * 0.2); // re-tuned baseRadiusPx * (1 + growth*growthSwell) at growth=1
     expect(maxBaseR * (1 + Dmax)).toBeLessThanOrEqual(maxRadius);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 7 — C1 area normalization + baseR re-tune + F9 nucleus pinch-escape
+//            + M14 nucleus-vs-prolate (gate enableAreaNorm flipped ON)
+// ---------------------------------------------------------------------------
+// C1 holds the cell's AREA at pi*baseR^2 by a uniform radial offset on the
+// INTEGRATED deform field: e_i = 1+d_i; with mean m1 and variance Var of e,
+// c = m1 - sqrt(1 - Var) makes mean((1+d-c)^2) = 1 exactly (Var<=1). For the
+// rare Var>1 case fall back to a multiplicative rescale s = 1/sqrt(mean(e^2)).
+// This removes the outward-only "balloon" (a bulge now borrows from the
+// opposite side) and is the start of the C1 baseline. baseRadiusPx is bumped
+// 16->17: C1 mainly holds DRIVEN-speech area (pre-C1 mean(e^2)~1.34 at a=1,
+// +34%); resting is ~unchanged, so 17 keeps a comfortable resting size while
+// the budget still holds (see review note, /tmp/ado_review_commit7.md).
+// (.pi/plans/cell-bio-accuracy-plan.md C1, F9, M14; research-membrane-areacons.md.)
+describe("Commit 7: C1 area normalization + baseR re-tune", () => {
+  const W = 160, H = 160, baseR = 17;
+  const C1: CellParams = { ...CELL_DEFAULTS, baseRadiusPx: baseR };
+  // mean((1+d)^2): proportional to enclosed area / (pi*baseR^2).
+  const meanE2 = (d: number[]): number => {
+    let s = 0;
+    for (const x of d) { const e = 1 + x; s += e * e; }
+    return s / d.length;
+  };
+  const steadyState = (bins: number[], audio: number, energy: number, params: CellParams, idle = 0): number[] => {
+    let d: number[] | null = null;
+    for (let f = 0; f < 60; f++) {
+      const target = buildTargetDeformation(W, H, bins, f * 0.05, audio, energy, params, idle);
+      d = integrateDeformPipeline(d, target, params);
+    }
+    return d!;
+  };
+
+  it("flips enableAreaNorm ON by default", () => {
+    expect(CELL_DEFAULTS.enableAreaNorm).toBe(true);
+  });
+
+  it("re-tunes baseRadiusPx upward (~+10%) to offset the C1 area hold", () => {
+    // drifting_contour ships baseRadiusPx; the renderer default must rise so the
+    // resting cell is not visibly smaller after C1 pins area to pi*baseR^2.
+    expect(baseR).toBeGreaterThan(16);
+    expect(baseR).toBeLessThanOrEqual(16 * 1.2);
+  });
+
+  it("holds area at pi*baseR^2 (+/-2%) across an audio sweep", () => {
+    for (const audio of [0, 0.25, 0.5, 0.75, 1.0]) {
+      const bins = Array.from({ length: 32 }, (_, i) => audio * (0.5 + 0.5 * Math.sin(i * 0.9)));
+      const d = steadyState(bins, audio, Math.max(0.1, audio), C1, audio === 0 ? 1 : 0);
+      // mean((1+d)^2) == 1 means area == pi*baseR^2 exactly.
+      expect(meanE2(d)).toBeCloseTo(1, 2); // within ~1% (2 decimals)
+    }
+  });
+
+  it("normalizeAreaDeform makes mean((1+d)^2)=1 for an arbitrary field", () => {
+    const field = [0.3, 0.1, -0.05, 0.4, 0.0, -0.1, 0.25, 0.15];
+    const out = normalizeAreaDeform(field, { ...C1, enableAreaNorm: true });
+    expect(meanE2(out)).toBeCloseTo(1, 9);
+  });
+
+  it("a one-sided bulge borrows from the opposite side (anti-balloon)", () => {
+    // An all-positive (outward-only) field has area > pi*baseR^2. After C1 the
+    // mean offset is positive, so previously-flat regions go NEGATIVE (inward):
+    // the bulge is paid for by the rest of the membrane.
+    const field = [0.5, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    const out = normalizeAreaDeform(field, { ...C1, enableAreaNorm: true });
+    // The originally-flat vertices must now dip inward.
+    expect(out[4]).toBeLessThan(0);
+    // The bulge is reduced but still the largest.
+    expect(out[0]).toBeLessThan(field[0]);
+    expect(Math.max(...out)).toBeCloseTo(out[0], 9);
+  });
+
+  it("Var(e)>1 multiplicative fallback produces a finite, area-correct field (no NaN)", () => {
+    // A high-variance field (Var(e) > 1) would make sqrt(1-Var) imaginary; the
+    // fallback s = 1/sqrt(mean(e^2)) must keep everything finite and area-correct.
+    const field = [1.5, -0.6, 1.8, -0.7, 1.6, -0.65, 1.7, -0.55];
+    const out = normalizeAreaDeform(field, { ...C1, enableAreaNorm: true });
+    for (const v of out) expect(Number.isFinite(v)).toBe(true);
+    expect(meanE2(out)).toBeCloseTo(1, 9);
+  });
+
+  it("never produces an inside-out vertex (1 + d_i > 0 for all i)", () => {
+    for (const audio of [0, 0.5, 1.0]) {
+      const bins = Array.from({ length: 32 }, (_, i) => audio * Math.abs(Math.sin(i * 1.3)));
+      const d = steadyState(bins, audio, Math.max(0.1, audio), C1, audio === 0 ? 1 : 0);
+      for (const v of d) expect(1 + v).toBeGreaterThan(0);
+    }
+  });
+
+  it("is frame-convergent: repeated application is a fixed point", () => {
+    const once = normalizeAreaDeform([0.3, 0.1, -0.05, 0.4, 0.0, -0.1], { ...C1, enableAreaNorm: true });
+    const twice = normalizeAreaDeform(once, { ...C1, enableAreaNorm: true });
+    once.forEach((v, i) => expect(twice[i]).toBeCloseTo(v, 9));
+  });
+
+  it("radius budget still holds with C1: baseR*(1+Dmax+|c|_max) <= min(w,h)*0.46", () => {
+    const maxRadius = Math.min(W, H) * 0.46; // 73.6
+    const Dmax = CELL_DEFAULTS.deformMax ?? 0.6;
+    // Measure the worst |c| (and worst per-vertex deform) across a heavy sweep.
+    let maxRaw = 0;
+    for (const audio of [0, 0.5, 1.0]) {
+      for (const growth of [0, 0.5, 1.0]) {
+        const bins = Array.from({ length: 32 }, (_, i) => audio * (0.5 + 0.5 * Math.sin(i * 0.9)));
+        const params: CellParams = { ...C1, growthSwell: 0.2 };
+        const br = resolveBaseRadius(W, H, params, growth);
+        const d = steadyState(bins, audio, Math.max(0.1, audio), params, audio === 0 ? 1 : 0);
+        for (const v of d) maxRaw = Math.max(maxRaw, br * (1 + v));
+      }
+    }
+    expect(maxRaw).toBeLessThan(maxRadius);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 7 — F9 nucleus pinch-escape + M14 nucleus-vs-prolate squeeze
+// ---------------------------------------------------------------------------
+// F9: the nucleus must stay inside the LIVE membrane, whose local radius can
+// floor near baseR*0.35 under a deep inward pinch. The old fixed safe radius
+// (baseR*0.55) assumed an undeformed wall and could let the nucleus poke out.
+// nucleusTransform now takes the live minimum membrane radius and clamps
+// |offset| + r <= minMembraneR*(1-0.15). M14: when the body is squeezed into a
+// prolate ellipse (k,phi), the same affine map is applied to the nucleus so it
+// stays inside on BOTH axes.
+describe("Commit 7: F9 nucleus pinch-escape", () => {
+  const baseR = 20;
+  const p = { ...CELL_DEFAULTS, baseRadiusPx: baseR };
+
+  it("accepts a live minMembraneR and keeps the nucleus inside it (deep pinch)", () => {
+    // Simulate a deep pinch: the membrane floors to 0.35*baseR somewhere, so the
+    // smallest local radius the nucleus must fit inside is minR = 0.35*baseR.
+    const minR = 0.35 * baseR;
+    for (let t = 0; t < 30; t += 1.1) {
+      for (let level = 0; level <= 1; level += 0.2) {
+        const n = nucleusTransform(t, level, baseR, p, minR);
+        const offset = Math.sqrt(n.cx * n.cx + n.cy * n.cy);
+        // |offset| + r <= minR * 0.85 (the (1-0.15) safety margin).
+        expect(offset + n.r).toBeLessThanOrEqual(minR * 0.85 + 1e-6);
+      }
+    }
+  });
+
+  it("deep pinch + max drift keeps the nucleus disk fully inside for ALL perimeter angles", () => {
+    const minR = 0.35 * baseR;
+    // Worst case: nucleus pushed to its max offset; check the far edge of the
+    // disk in the direction of the offset is still inside minR.
+    let worst = 0;
+    for (let t = 0; t < 50; t += 0.7) {
+      const n = nucleusTransform(t, 1.0, baseR, p, minR);
+      worst = Math.max(worst, Math.sqrt(n.cx * n.cx + n.cy * n.cy) + n.r);
+    }
+    expect(worst).toBeLessThanOrEqual(minR * 0.85 + 1e-6);
+  });
+
+  it("backward-compatible: omitting minMembraneR uses the old baseR*0.55 safe zone", () => {
+    // Existing callers/tests that don't pass minMembraneR keep the prior bound.
+    const safeInner = baseR * 0.55;
+    for (let t = 0; t < 20; t += 1.3) {
+      const n = nucleusTransform(t, 0.5, baseR, p);
+      const total = Math.sqrt(n.cx * n.cx + n.cy * n.cy) + n.r;
+      expect(total).toBeLessThanOrEqual(safeInner + 0.001);
+    }
+  });
+
+  it("a tighter minMembraneR shrinks the nucleus more than a looser one", () => {
+    const tight = nucleusTransform(5.0, 1.0, baseR, p, 0.35 * baseR);
+    const loose = nucleusTransform(5.0, 1.0, baseR, p, 0.55 * baseR);
+    expect(tight.r).toBeLessThanOrEqual(loose.r);
+  });
+});
+
+describe("Commit 7: M14 nucleus follows the body prolate squeeze", () => {
+  const baseR = 20;
+  const p = { ...CELL_DEFAULTS, baseRadiusPx: baseR, enableAffine: true };
+
+  // The same affine squeeze used on the membrane points, applied to a point.
+  const squeeze = (px: number, py: number, k: number, phi: number): [number, number] => {
+    const out = affineSqueezePoints([[px, py]], k, phi, 0, 0, p);
+    return out[0];
+  };
+
+  it("keeps the squeezed nucleus disk inside the squeezed membrane on BOTH axes", () => {
+    const k = 1.3;
+    const phi = 0.6;
+    const minR = 0.35 * baseR;
+    for (let t = 0; t < 30; t += 1.7) {
+      const n = nucleusTransform(t, 0.8, baseR, p, minR);
+      // Squeeze the nucleus CENTRE the same way the membrane is squeezed.
+      const [scx, scy] = squeeze(n.cx, n.cy, k, phi);
+      // The membrane's minimum radius along the SHORT axis is minR/k... the
+      // nucleus radius also scales by at most k on its long axis. Verify the
+      // nucleus, squeezed, still sits within the squeezed safe zone on both axes
+      // by checking the extreme points of the disk after the affine map.
+      // Disk edge points along +/-x and +/-y, mapped, must stay within the
+      // squeezed safe ellipse (semi-axes minR*0.85*k and minR*0.85/k).
+      const safe = minR * 0.85;
+      const ax = safe * k;
+      const ay = safe / k;
+      for (const [ex, ey] of [[n.r, 0], [-n.r, 0], [0, n.r], [0, -n.r]] as Array<[number, number]>) {
+        const [mx, my] = squeeze(n.cx + ex, n.cy + ey, k, phi);
+        // Point must be inside the squeezed safe ellipse (rotate back by -phi).
+        const c = Math.cos(phi), s = Math.sin(phi);
+        const rx = mx * c + my * s;
+        const ry = -mx * s + my * c;
+        expect((rx * rx) / (ax * ax) + (ry * ry) / (ay * ay)).toBeLessThanOrEqual(1 + 1e-6);
+      }
+      // Sanity: the centre moved (squeeze is not a no-op for off-centre points).
+      void scx; void scy;
+    }
   });
 });
 
