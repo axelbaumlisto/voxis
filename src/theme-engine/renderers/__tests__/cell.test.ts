@@ -14,6 +14,8 @@ import {
   cellActivity,
   swimSpeed,
   ciliaBeatHzEff,
+  bodyHeadingStep,
+  prolateAspect,
   cellRadius,
   pseudopodOffset,
   startleOffset,
@@ -580,13 +582,13 @@ describe("Commit 4: pipeline gates + frozen pre-B/C baseline", () => {
     enableActivity: false,
   };
 
-  it("gate defaults: B1 saturation + C1 areaNorm + G activity ON; affine still OFF", () => {
-    // Commit 6 (B1) flipped enableSaturation; Commit 7 (C1) flips enableAreaNorm;
-    // Commit 8a (G) flips enableActivity. enableAffine (D4) lands in commit 8b.
+  it("gate defaults: B1 saturation + C1 areaNorm + G activity + D4 affine ON", () => {
+    // Commit 6 (B1) flipped enableSaturation; Commit 7 (C1) enableAreaNorm;
+    // Commit 8a (G) enableActivity; Commit 8b (D4) enableAffine.
     expect(CELL_DEFAULTS.enableSaturation).toBe(true);
     expect(CELL_DEFAULTS.enableAreaNorm).toBe(true);
     expect(CELL_DEFAULTS.enableActivity).toBe(true);
-    expect(CELL_DEFAULTS.enableAffine).toBe(false);
+    expect(CELL_DEFAULTS.enableAffine).toBe(true);
   });
 
   it("resting deformation matches frozen pre-B/C baseline (gates off)", () => {
@@ -713,8 +715,10 @@ describe("Commit 5: C2 affine squeeze (area-preserving, det=1)", () => {
     expect(Math.abs(shoelace(out) - a0)).toBeLessThanOrEqual(1e-9);
   });
 
-  it("stays GATED OFF by default (enableAffine=false returns points untouched)", () => {
-    const out = affineSqueezePoints(noisy, 2.0, 0.7, CX, CY, CELL_DEFAULTS);
+  it("returns points untouched when the affine gate is off", () => {
+    // (enableAffine is ON by default since Commit 8b; pin it off to exercise the
+    // gate-off identity path the seam guarantees.)
+    const out = affineSqueezePoints(noisy, 2.0, 0.7, CX, CY, { ...CELL_DEFAULTS, enableAffine: false });
     expect(out).toEqual(noisy);
   });
 });
@@ -3280,8 +3284,124 @@ describe("wanderStep F5 memoryless velocity (G2)", () => {
 });
 
 describe("Commit 8a — activity gate", () => {
-  it("flips enableActivity ON by default; other later gates stay as set", () => {
+  it("flips enableActivity ON by default", () => {
     expect(CELL_DEFAULTS.enableActivity).toBe(true);
-    expect(CELL_DEFAULTS.enableAffine).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 8b — body motion (G4 bodyHeading, D1 motion basis, D4 prolate)
+// ---------------------------------------------------------------------------
+describe("bodyHeadingStep (G4)", () => {
+  const P = { ...CELL_DEFAULTS, bodyHeadingTau: 0.4 };
+
+  it("holds heading when essentially still (no defined travel direction)", () => {
+    expect(bodyHeadingStep(1.2, 0, 0, 0.016, P)).toBe(1.2);
+    expect(bodyHeadingStep(1.2, 1e-9, 1e-9, 0.016, P)).toBe(1.2);
+  });
+
+  it("chases the velocity heading (EMA toward atan2(vy,vx))", () => {
+    // moving along +x => target heading 0; start at 1.0 => should decrease toward 0
+    const next = bodyHeadingStep(1.0, 10, 0, 0.016, P);
+    expect(next).toBeLessThan(1.0);
+    expect(next).toBeGreaterThan(0);
+  });
+
+  it("converges to the target after many steps", () => {
+    let h = 2.5;
+    for (let i = 0; i < 2000; i++) h = bodyHeadingStep(h, 5, 5, 0.016, P);
+    expect(h).toBeCloseTo(Math.PI / 4, 3); // atan2(5,5)=pi/4
+  });
+
+  it("is Lipschitz from rest: per-step rotation bounded by the shortest-arc error", () => {
+    // worst case: target opposite current heading (pi away)
+    const h0 = 0;
+    const h1 = bodyHeadingStep(h0, -10, 1e-3, 0.016, P); // target ~ +pi
+    const alpha = 1 - Math.exp(-0.016 / 0.4);
+    // step magnitude must be <= |shortest arc| * alpha (+ fp slack)
+    expect(Math.abs(h1 - h0)).toBeLessThanOrEqual(Math.PI * alpha + 1e-9);
+  });
+
+  it("takes the shortest arc across the +/-pi wrap", () => {
+    // heading just under +pi, target just over -pi (i.e. crossing the seam):
+    // moving along -x with tiny -y => target ~ -pi+eps; shortest arc is small +.
+    const h = bodyHeadingStep(Math.PI - 0.05, -10, -1e-3, 0.016, P);
+    // should move toward -pi the SHORT way (increasing past pi / wrapping), not
+    // swing all the way back through 0.
+    expect(Math.abs(Math.atan2(Math.sin(h - Math.PI), Math.cos(h - Math.PI)))).toBeLessThan(0.05);
+  });
+});
+
+describe("prolateAspect (D4)", () => {
+  it("is identity (k=1) at rest with default floor 0 => round when still", () => {
+    expect(prolateAspect(0, CELL_DEFAULTS)).toBe(1);
+  });
+
+  it("elongates with speed: k = 1 + elong*speedNorm", () => {
+    const P = { ...CELL_DEFAULTS, bodyElongation: 0.13, bodyElongationFloor: 0 };
+    expect(prolateAspect(1, P)).toBeCloseTo(1.13, 12);
+    expect(prolateAspect(0.5, P)).toBeCloseTo(1.065, 12);
+  });
+
+  it("honors a nonzero floor (permanently prolate pellicle look)", () => {
+    const P = { ...CELL_DEFAULTS, bodyElongation: 0.2, bodyElongationFloor: 0.5 };
+    expect(prolateAspect(0, P)).toBeCloseTo(1.1, 12); // 1 + 0.2*0.5
+    expect(prolateAspect(1, P)).toBeCloseTo(1.2, 12);
+  });
+
+  it("clamps speedNorm to [0,1]", () => {
+    expect(prolateAspect(5, CELL_DEFAULTS)).toBe(prolateAspect(1, CELL_DEFAULTS));
+    expect(prolateAspect(-5, CELL_DEFAULTS)).toBe(1);
+  });
+
+  it("D4 collapses to identity at speedNorm=0 (back-compat invariant)", () => {
+    // The squeeze with k=1 is identity regardless of phi (proven in Commit 5);
+    // prolateAspect(0)=1 guarantees the resting body is unchanged by D4.
+    const noisy: Array<[number, number]> = [];
+    for (let i = 0; i < 32; i++) {
+      const th = (i / 32) * Math.PI * 2;
+      const r = 30 + 9 * Math.sin(3 * th);
+      noisy.push([80 + r * Math.cos(th), 90 + r * Math.sin(th)]);
+    }
+    const k = prolateAspect(0, CELL_DEFAULTS);
+    const out = affineSqueezePoints(noisy, k, 1.234, 80, 90, { ...CELL_DEFAULTS, enableAffine: true });
+    for (let i = 0; i < noisy.length; i++) {
+      expect(out[i][0]).toBeCloseTo(noisy[i][0], 9);
+      expect(out[i][1]).toBeCloseTo(noisy[i][1], 9);
+    }
+  });
+
+  it("D4 prolate preserves area (det=1) while elongating along travel", () => {
+    const shoelace = (pts: Array<[number, number]>) => {
+      let a = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const [x1, y1] = pts[i];
+        const [x2, y2] = pts[(i + 1) % pts.length];
+        a += x1 * y2 - x2 * y1;
+      }
+      return Math.abs(a) / 2;
+    };
+    const noisy: Array<[number, number]> = [];
+    for (let i = 0; i < 64; i++) {
+      const th = (i / 64) * Math.PI * 2;
+      const r = 30 + 7 * Math.sin(3 * th) + 4 * Math.cos(7 * th);
+      noisy.push([80 + r * Math.cos(th), 90 + r * Math.sin(th)]);
+    }
+    const before = shoelace(noisy);
+    const P = { ...CELL_DEFAULTS, enableAffine: true, bodyElongation: 0.13 };
+    const k = prolateAspect(1, P);
+    const out = affineSqueezePoints(noisy, k, 0.6, 80, 90, P);
+    expect(shoelace(out)).toBeCloseTo(before, 6);
+    // and it actually deformed (prolate, not identity)
+    let maxDelta = 0;
+    for (let i = 0; i < noisy.length; i++) maxDelta = Math.max(maxDelta, Math.hypot(out[i][0] - noisy[i][0], out[i][1] - noisy[i][1]));
+    expect(maxDelta).toBeGreaterThan(0.5);
+  });
+});
+
+describe("Commit 8b — affine gate", () => {
+  it("flips enableAffine ON; body round at rest (floor 0)", () => {
+    expect(CELL_DEFAULTS.enableAffine).toBe(true);
+    expect(CELL_DEFAULTS.bodyElongationFloor).toBe(0);
   });
 });

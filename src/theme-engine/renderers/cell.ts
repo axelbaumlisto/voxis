@@ -196,6 +196,15 @@ export interface CellParams {
   activityEnergyWeight?: number;
   /** G1: weight of the smoothed growth accumulator in the activity scalar (default 0.4). */
   activityGrowthWeight?: number;
+  /** G4: EMA time-constant (seconds) for the body heading chasing the velocity
+   * heading. Larger = lazier turning of the long axis. Default 0.4. */
+  bodyHeadingTau?: number;
+  /** D4: prolate elongation gain. Aspect k = 1 + bodyElongation*max(floor,speedNorm).
+   * ~0.12-0.15 is a mild, biological ciliate prolate. Default 0.13. */
+  bodyElongation?: number;
+  /** D4: minimum elongation fraction even at rest (0 = round at rest, so D4
+   * collapses to identity when still). Default 0. */
+  bodyElongationFloor?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -256,13 +265,17 @@ export const CELL_DEFAULTS: CellParams = {
   swimSpeedMaxFrac: 0.06,
   activityEnergyWeight: 0.6,
   activityGrowthWeight: 0.4,
+  bodyHeadingTau: 0.4,
+  bodyElongation: 0.13,
+  bodyElongationFloor: 0,
   // Pipeline gates. B1 (commit 6) flips enableSaturation ON; C1 (commit 7) flips
   // enableAreaNorm ON (area held at pi*baseR^2). G (commit 8a) flips
-  // enableActivity ON. enableAffine (D4) lands in commit 8b.
+  // enableActivity ON. D4 (commit 8b) flips enableAffine ON (body prolate along
+  // travel; round at rest since bodyElongationFloor=0).
   enableSaturation: true,
   deformMax: 0.6,
   enableAreaNorm: true,
-  enableAffine: false,
+  enableAffine: true,
   enableActivity: true,
 };
 
@@ -381,6 +394,48 @@ export function ciliaBeatHzEff(activity: number, params: CellParams): number {
   const f0 = params.ciliaBeatHz ?? 0.9;
   const f1 = params.ciliaBeatHzActive ?? 1.6;
   return f0 + (f1 - f0) * a;
+}
+
+/**
+ * G4 — smoothed body heading. EMA-chase the instantaneous velocity heading so
+ * the body's long axis turns gracefully (Lipschitz: per-step rotation is bounded
+ * by the shortest-arc error times the EMA factor). When the cell is essentially
+ * still the heading is HELD (a stopped low-Re swimmer has no defined travel
+ * direction, so we keep the last one rather than snapping). Pure; frame-rate
+ * independent via `1 - exp(-dt/tau)`. (plan G4.)
+ */
+export function bodyHeadingStep(
+  prev: number,
+  vx: number,
+  vy: number,
+  dt: number,
+  params: CellParams,
+): number {
+  const sp = Math.hypot(vx, vy);
+  if (sp < 1e-6) return prev; // hold heading when still
+  const target = Math.atan2(vy, vx);
+  const tau = params.bodyHeadingTau ?? 0.4;
+  const alpha = 1 - Math.exp(-dt / Math.max(1e-6, tau));
+  // Rotate prev toward target along the SHORTEST arc (wrap to [-pi, pi]).
+  let d = target - prev;
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  return prev + d * alpha;
+}
+
+/**
+ * D4 — body prolate aspect ratio `k` for the area-preserving affine squeeze.
+ * A swimming ciliate is a mild prolate spheroid aligned to travel. `k` rises
+ * with normalized speed: `k = 1 + elong * max(floor, speedNorm)`. With the
+ * default floor=0 the body is ROUND at rest (speedNorm=0 -> k=1, so D4 collapses
+ * to identity and the resting shape is unchanged) and elongates only while
+ * swimming. (A nonzero floor yields a permanently-prolate "rigid pellicle" look.)
+ * Pure. (plan D4; SCOPE 2.)
+ */
+export function prolateAspect(speedNorm: number, params: CellParams): number {
+  const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
+  const elong = params.bodyElongation ?? 0.13;
+  const floor = params.bodyElongationFloor ?? 0;
+  return 1 + elong * Math.max(floor, s);
 }
 
 /**
@@ -1547,6 +1602,7 @@ export function createCellRenderer(
   // oscillated about the centre and kept "returning"). Lazily initialised at
   // the tank centre on the first tick (width/height are stable per renderer).
   let wander: WanderState | null = null;
+  let bodyHeading = 0; // G4: smoothed body long-axis heading (radians)
   let lastTickMs = performance.now();
 
   // Persistence: restore state from localStorage for continuity across restarts
@@ -1665,12 +1721,23 @@ export function createCellRenderer(
         const y = cy + radius * Math.sin(angle);
         smoothedPoints.push([x, y]);
       }
-      // Step 8: area-preserving affine squeeze on the contour POINTS in the
-      // body-heading frame (gated; identity when enableAffine is off). Commit 5
-      // ships the math with neutral (k=1, phi=0); Commit 8/D4 wires motion-driven
-      // values from bodyHeading + speedNorm.
-      const squeezeK = 1;
-      const squeezePhi = 0;
+      // D1: motion basis. Normalize the wander speed to [0,1] against the peak
+      // swim speed so the prolate (D4) and (later 8c) cilia drag read a single
+      // speedNorm. G4: chase the body heading toward the velocity heading.
+      // speedNorm is the activity-driven swim speed normalized to its peak. Only
+      // meaningful when activity drives the speed; with the activity gate off the
+      // legacy constant driftSpeed would read as a permanent (non-motion) prolate,
+      // so force speedNorm=0 there (D4 then stays identity, matching back-compat).
+      const swimPeak = swimSpeed(1, width, height, params);
+      const curSpeed = Math.hypot(wander.vx, wander.vy);
+      const speedNorm = params.enableActivity && swimPeak > 0 ? Math.min(1, curSpeed / swimPeak) : 0;
+      bodyHeading = bodyHeadingStep(bodyHeading, wander.vx, wander.vy, dt, params);
+      // Step 8: D4 area-preserving affine squeeze on the contour POINTS in the
+      // body-heading frame. k=prolateAspect(speedNorm) (round at rest -> identity
+      // when still), phi=bodyHeading; det=1 keeps the C1 area. Gated by
+      // enableAffine; identity (k=1) when off OR when speedNorm=0.
+      const squeezeK = params.enableAffine ? prolateAspect(speedNorm, params) : 1;
+      const squeezePhi = bodyHeading;
       const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
 
       // Smooth via Catmull-Rom (4 segments per span for smoothness)
