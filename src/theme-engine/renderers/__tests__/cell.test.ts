@@ -71,6 +71,8 @@ import {
   bodyProfilePoint,
   bodyProfileArea,
   bodyProfileAreaScale,
+  bodyProfileDeform,
+  interpProfileRadius,
 } from "../cell";
 import { deformAt } from "../shared";
 import type { CellParams, CellPersistState, CiliaMotion } from "../cell";
@@ -5411,5 +5413,126 @@ describe("Commit 31a — authentic body profile (pure math)", () => {
     expect(bodyProfilePoint(1.2, baseR, P)).toEqual(bodyProfilePoint(1.2, baseR, P));
     expect(bodyProfileArea(baseR, P)).toEqual(bodyProfileArea(baseR, P));
     expect(bodyProfileAreaScale(baseR, P)).toEqual(bodyProfileAreaScale(baseR, P));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 31b — body profile wired into the render contour
+// ---------------------------------------------------------------------------
+
+describe("Commit 31b — body profile wired into contour", () => {
+  const baseR = 17;
+  const N = 96;
+
+  it("(a) bodyProfileDeform PURE: length 96 + asymmetric anterior flank wider", () => {
+    const P = { ...CELL_DEFAULTS, enableBodyProfile: true };
+    const out = bodyProfileDeform(N, 0, baseR, P);
+    expect(out).toHaveLength(N);
+    // The slipper's long axis is symmetric (both poles at +-L), so the fore-aft
+    // asymmetry shows in the FLANK width: with heading 0 the anterior is at +x,
+    // so the anterior flank (~45deg, idx 12) is WIDER than the mirror posterior
+    // flank (~135deg, idx 36). That is the "not an oval" asymmetry.
+    const rAnteriorFlank = baseR * (1 + out[12]);
+    const rPosteriorFlank = baseR * (1 + out[36]);
+    expect(rAnteriorFlank).toBeGreaterThan(rPosteriorFlank);
+  });
+
+  it("(b) AREA NEUTRAL: shoelace polygon area ~= pi baseR^2 (within 3%)", () => {
+    const P = { ...CELL_DEFAULTS, enableBodyProfile: true };
+    const out = bodyProfileDeform(N, 0, baseR, P);
+    const pts: Array<[number, number]> = [];
+    for (let j = 0; j < N; j++) {
+      const phi = (j / N) * TAU;
+      const r = baseR * (1 + out[j]);
+      pts.push([r * Math.cos(phi), r * Math.sin(phi)]);
+    }
+    let a = 0;
+    for (let j = 0; j < N; j++) {
+      const [x0, y0] = pts[j];
+      const [x1, y1] = pts[(j + 1) % N];
+      a += x0 * y1 - x1 * y0;
+    }
+    const area = Math.abs(a) / 2;
+    const circle = Math.PI * baseR * baseR;
+    expect(Math.abs(area - circle) / circle).toBeLessThan(0.03);
+  });
+
+  it("(c) HEADING ROTATES: heading=pi shifts the whole profile by 48 indices", () => {
+    const P = { ...CELL_DEFAULTS, enableBodyProfile: true };
+    const out0 = bodyProfileDeform(N, 0, baseR, P);
+    const outPi = bodyProfileDeform(N, Math.PI, baseR, P);
+    // A heading of pi rotates the body frame by pi -> the deform sample at
+    // canvas vertex j with heading=pi equals the sample at vertex (j+48) with
+    // heading=0 (48 = N/2 = pi). The wide anterior flank thus moves from ~45deg
+    // to ~225deg. Check the full array is the index-shifted copy.
+    for (let j = 0; j < N; j++) {
+      expect(outPi[j]).toBeCloseTo(out0[(j + N / 2) % N], 9);
+    }
+  });
+
+  it("(d) FINITE + positive radius everywhere", () => {
+    for (const type of ["taperedEllipse", "egg", "piriform"] as const) {
+      const P = { ...CELL_DEFAULTS, enableBodyProfile: true, bodyProfileType: type };
+      const out = bodyProfileDeform(N, 0.7, baseR, P);
+      for (const v of out) {
+        expect(Number.isFinite(v)).toBe(true);
+        expect(baseR * (1 + v)).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("interpProfileRadius: exact at sample points + wrap-aware", () => {
+    const P = { ...CELL_DEFAULTS, enableBodyProfile: true };
+    const pts: Array<{ ang: number; rad: number }> = [];
+    for (let k = 0; k < N; k++) {
+      const t = (k / N) * TAU;
+      const [px, py] = bodyProfilePoint(t, baseR, P);
+      pts.push({ ang: Math.atan2(py, px), rad: Math.hypot(px, py) });
+    }
+    for (const idx of [0, 10, 47, 80]) {
+      const r = interpProfileRadius(pts[idx].ang, pts);
+      expect(r).toBeCloseTo(pts[idx].rad, 6);
+    }
+    expect(Number.isFinite(interpProfileRadius(-0.3, pts))).toBe(true);
+    expect(Number.isFinite(interpProfileRadius(TAU + 0.3, pts))).toBe(true);
+  });
+
+  it("(f) RENDER GATE ON: end-to-end recording frames render a non-degenerate contour", () => {
+    const coords: number[] = [];
+    const grad = { addColorStop: () => {} };
+    const ctx = {
+      clearRect: () => {}, save: () => {}, restore: () => {},
+      beginPath: () => {}, closePath: () => {}, stroke: () => {}, fill: () => {},
+      moveTo: (x: number, y: number) => { coords.push(x, y); },
+      lineTo: (x: number, y: number) => { coords.push(x, y); },
+      arc: (x: number, y: number, r: number) => { coords.push(x, y, r); },
+      createRadialGradient: () => grad,
+      fillStyle: "", strokeStyle: "", lineWidth: 0, lineCap: "", lineJoin: "",
+    };
+    const proto = HTMLCanvasElement.prototype as unknown as { getContext: (id: string) => unknown };
+    const orig = proto.getContext;
+    proto.getContext = () => ctx;
+    const rafCalls: Array<() => void> = [];
+    let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    try {
+      const params: CellParams = {
+        ...CELL_DEFAULTS,
+        enableBodyProfile: true,
+        enableRigidMembrane: true,
+        enableActivity: true,
+      };
+      const r = createCellRenderer(document.createElement("div"), { width: 160, height: 160, params });
+      const step = (k: number) => { for (let i = 0; i < k; i++) { if (rafCalls.length) rafCalls.shift()!(); } };
+      r.update({ mode: "recording", audioLevel: 0.6, spectrumBins: new Array(32).fill(0.4) });
+      expect(() => step(5)).not.toThrow();
+      expect(coords.length).toBeGreaterThan(0);
+      for (const c of coords) expect(Number.isFinite(c)).toBe(true);
+      r.destroy();
+    } finally {
+      proto.getContext = orig;
+      vi.unstubAllGlobals();
+    }
   });
 });
