@@ -273,6 +273,16 @@ export interface CellParams {
   vacuolePeriod?: number;
   /** F11: vacuole max radius as a fraction of baseR. Default 0.18. */
   vacuoleMaxFrac?: number;
+  /** H4 (OPT, default off): advect ambient motes by the body's dipolar wake so a
+   * swimming cell visibly drags the surrounding fluid. */
+  enableFlowField?: boolean;
+  /** H4: number of ambient tracer motes. Default 0 (none drawn). */
+  flowMoteCount?: number;
+  /** H4: dipole strength multiplier. Folds in the body-size^2 length scale of a
+   * physical doublet (u = U*a^2/r^2), so the render wiring can pass the raw swim
+   * speed (px/s) as `strength` and get a px/s field at body-scale distances.
+   * Default 300 (~a^2 for baseR~17). */
+  flowStrength?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -361,6 +371,11 @@ export const CELL_DEFAULTS: CellParams = {
   enableAreaNorm: true,
   enableAffine: true,
   enableActivity: true,
+  // H4 ambient flow field: OFF by default (dark-launch). flowStrength folds the
+  // body-size^2 doublet length scale so the render path passes raw swim speed.
+  enableFlowField: false,
+  flowMoteCount: 0,
+  flowStrength: 300,
 };
 
 
@@ -1737,6 +1752,84 @@ export function contractileVacuole(t: number, baseR: number, params: CellParams)
   return { r: Rmax * fill };
 }
 
+/**
+ * H4 (OPT) — ambient flow field from the body's swimming wake. A low-Reynolds
+ * swimmer drags fluid; we model the far field as a 2-D SOURCE DIPOLE (doublet),
+ * the potential-flow signature of a translating body:
+ *
+ *   u(r) = (S / r^2) * [ 2 (e·r̂) r̂ - e ]
+ *
+ * where `e = (cos heading, sin heading)` is the swim direction and `r = (dx,dy)`
+ * is the offset from the cell centre to the sample point. Properties (all
+ * exercised by tests): decays as 1/r^2 for a fixed bearing; LINEAR in `e` so it
+ * reverses when heading reverses and scales with `strength`; frame-covariant
+ * (rotating point+heading rotates the velocity). The r->0 singularity is clamped
+ * to a small core so the field stays finite. Pure & deterministic.
+ */
+export function dipoleFlowAt(
+  dx: number,
+  dy: number,
+  heading: number,
+  strength: number,
+): { vx: number; vy: number } {
+  if (strength === 0) return { vx: 0, vy: 0 };
+  const CORE2 = 4; // clamp r^2 to >= 2px core so the doublet stays bounded
+  const r2 = Math.max(CORE2, dx * dx + dy * dy);
+  const r = Math.sqrt(r2);
+  const rxh = dx / r, ryh = dy / r;          // r̂
+  const ex = Math.cos(heading), ey = Math.sin(heading); // e
+  const edotr = ex * rxh + ey * ryh;         // e·r̂
+  const k = strength / r2;
+  return {
+    vx: k * (2 * edotr * rxh - ex),
+    vy: k * (2 * edotr * ryh - ey),
+  };
+}
+
+/**
+ * H4 (OPT) — advance one ambient mote by the local dipole flow for `dt`
+ * (memoryless, low-Re: position += velocity*dt, no inertia). Motes that leave
+ * the tank wrap toroidally so the field never depletes. Pure & deterministic.
+ */
+export function advectMote(
+  mote: { x: number; y: number },
+  cx: number,
+  cy: number,
+  heading: number,
+  strength: number,
+  dt: number,
+  width: number,
+  height: number,
+  params: CellParams,
+): { x: number; y: number } {
+  const v = dipoleFlowAt(mote.x - cx, mote.y - cy, heading, strength * (params.flowStrength ?? 1));
+  const wrap = (val: number, span: number) => {
+    if (span <= 0) return 0;
+    return ((val % span) + span) % span;
+  };
+  return {
+    x: wrap(mote.x + v.vx * dt, width),
+    y: wrap(mote.y + v.vy * dt, height),
+  };
+}
+
+/**
+ * H4 (OPT) — deterministic initial scatter of `flowMoteCount` motes across the
+ * tank (value-noise seeded, so the same geometry always reproduces the same
+ * field). Returns [] when the count is 0. Pure.
+ */
+export function seedMotes(width: number, height: number, params: CellParams): { x: number; y: number }[] {
+  const n = Math.max(0, Math.floor(params.flowMoteCount ?? 0));
+  const out: { x: number; y: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    // two decorrelated seeds per mote -> uniform-ish coverage, fully deterministic.
+    const ux = (noise2D(i * 12.9898 + 3.1, 78.233) + 1) * 0.5;
+    const uy = (noise2D(i * 39.346 + 7.7, 11.135) + 1) * 0.5;
+    out.push({ x: ux * width, y: uy * height });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Cell containment — full organism reach (membrane + cilia + startle)
 // ---------------------------------------------------------------------------
@@ -2086,6 +2179,14 @@ export function createCellRenderer(
   // the tank centre on the first tick (width/height are stable per renderer).
   let wander: WanderState | null = null;
   let bodyHeading = 0; // G4: smoothed body long-axis heading (radians)
+  // H4 (gate OFF): ambient tracer motes advected by the body's dipolar wake.
+  // Lazily seeded on first tick when enableFlowField is on; [] otherwise so the
+  // default path allocates nothing and the shipped look is unchanged.
+  let motes: { x: number; y: number }[] | null = null;
+  // H4: previous-frame flow source (centre, heading, swim speed) so motes can be
+  // advected + drawn BEHIND the cell at the top of the tick without a forward
+  // dependency on this frame's not-yet-computed centre.
+  let flowCx = width / 2, flowCy = height / 2, flowHeading = 0, flowSpeed = 0;
   let lastTickMs = performance.now();
   // M11: single simulation clock. Accumulates the SAME clamped per-frame dt that
   // drives position integration, and feeds ALL phase formulas. This unifies the
@@ -2150,6 +2251,22 @@ export function createCellRenderer(
 
     if (ctx) {
       ctx.clearRect(0, 0, width, height);
+
+      // H4 (gate OFF): advect + draw ambient motes behind the cell using the
+      // PREVIOUS frame's flow source. Default path (enableFlowField false) does
+      // nothing and allocates nothing, so the shipped look is byte-unchanged.
+      if (params.enableFlowField && (params.flowMoteCount ?? 0) > 0) {
+        if (!motes) motes = seedMotes(width, height, params);
+        ctx.save();
+        ctx.fillStyle = "rgba(255,255,255,0.18)";
+        for (let i = 0; i < motes.length; i++) {
+          motes[i] = advectMote(motes[i], flowCx, flowCy, flowHeading, flowSpeed, dt, width, height, params);
+          ctx.beginPath();
+          ctx.arc(motes[i].x, motes[i].y, 0.8, 0, TAU);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
 
       // M6: EMA-chase the per-mode energy target so a mode flip (which changes
       // the cellEnergy formula) no longer steps discontinuously. Seed to the
@@ -2269,6 +2386,8 @@ export function createCellRenderer(
       const curSpeed = Math.hypot(wander.vx, wander.vy);
       const speedNorm = params.enableActivity && swimPeak > 0 ? Math.min(1, curSpeed / swimPeak) : 0;
       bodyHeading = bodyHeadingStep(bodyHeading, wander.vx, wander.vy, dt, params);
+      // H4: record this frame's flow source for the NEXT frame's mote advection.
+      flowCx = cx; flowCy = cy; flowHeading = bodyHeading; flowSpeed = curSpeed;
       // Step 8: D4 area-preserving affine squeeze on the contour POINTS in the
       // body-heading frame. k=prolateAspect(speedNorm) (round at rest -> identity
       // when still), phi=bodyHeading; det=1 keeps the C1 area. Gated by

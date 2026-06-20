@@ -449,7 +449,10 @@ var CELL_DEFAULTS = {
   deformMax: 0.6,
   enableAreaNorm: true,
   enableAffine: true,
-  enableActivity: true
+  enableActivity: true,
+  enableFlowField: false,
+  flowMoteCount: 0,
+  flowStrength: 300
 };
 function sanitizeUnit(x) {
   if (!Number.isFinite(x))
@@ -859,6 +862,43 @@ function resolveBaseRadius(width, height, params, growth) {
   const rawBaseR = params.baseRadiusPx ?? fallbackR;
   return rawBaseR * (1 + growth * params.growthSwell);
 }
+function dipoleFlowAt(dx, dy, heading, strength) {
+  if (strength === 0)
+    return { vx: 0, vy: 0 };
+  const CORE2 = 4;
+  const r2 = Math.max(CORE2, dx * dx + dy * dy);
+  const r = Math.sqrt(r2);
+  const rxh = dx / r, ryh = dy / r;
+  const ex = Math.cos(heading), ey = Math.sin(heading);
+  const edotr = ex * rxh + ey * ryh;
+  const k = strength / r2;
+  return {
+    vx: k * (2 * edotr * rxh - ex),
+    vy: k * (2 * edotr * ryh - ey)
+  };
+}
+function advectMote(mote, cx, cy, heading, strength, dt, width, height, params) {
+  const v = dipoleFlowAt(mote.x - cx, mote.y - cy, heading, strength * (params.flowStrength ?? 1));
+  const wrap = (val, span) => {
+    if (span <= 0)
+      return 0;
+    return (val % span + span) % span;
+  };
+  return {
+    x: wrap(mote.x + v.vx * dt, width),
+    y: wrap(mote.y + v.vy * dt, height)
+  };
+}
+function seedMotes(width, height, params) {
+  const n = Math.max(0, Math.floor(params.flowMoteCount ?? 0));
+  const out = [];
+  for (let i = 0;i < n; i++) {
+    const ux = (noise2D(i * 12.9898 + 3.1, 78.233) + 1) * 0.5;
+    const uy = (noise2D(i * 39.346 + 7.7, 11.135) + 1) * 0.5;
+    out.push({ x: ux * width, y: uy * height });
+  }
+  return out;
+}
 function cellReach(baseR, params) {
   const ciliaLength = params.ciliaLength ?? 0;
   const ciliaGrowthBoost = params.ciliaGrowthBoost ?? 0;
@@ -975,6 +1015,8 @@ function createCellRenderer(container, opts) {
   let drift01 = 0;
   let wander = null;
   let bodyHeading = 0;
+  let motes = null;
+  let flowCx = width / 2, flowCy = height / 2, flowHeading = 0, flowSpeed = 0;
   let lastTickMs = performance.now();
   let simTime = 0;
   const PERSIST_KEY = cellPersistKey(width, height);
@@ -1006,6 +1048,19 @@ function createCellRenderer(container, opts) {
     const spectrumBins = sanitizeBins(s.spectrumBins);
     if (ctx) {
       ctx.clearRect(0, 0, width, height);
+      if (params.enableFlowField && (params.flowMoteCount ?? 0) > 0) {
+        if (!motes)
+          motes = seedMotes(width, height, params);
+        ctx.save();
+        ctx.fillStyle = "rgba(255,255,255,0.18)";
+        for (let i = 0;i < motes.length; i++) {
+          motes[i] = advectMote(motes[i], flowCx, flowCy, flowHeading, flowSpeed, dt, width, height, params);
+          ctx.beginPath();
+          ctx.arc(motes[i].x, motes[i].y, 0.8, 0, TAU);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
       const energyTarget = cellEnergy(s.mode, audioLevel, t, params.idle, params.levelGain);
       if (energySmoothed < 0)
         energySmoothed = energyTarget;
@@ -1063,6 +1118,10 @@ function createCellRenderer(container, opts) {
       const curSpeed = Math.hypot(wander.vx, wander.vy);
       const speedNorm = params.enableActivity && swimPeak > 0 ? Math.min(1, curSpeed / swimPeak) : 0;
       bodyHeading = bodyHeadingStep(bodyHeading, wander.vx, wander.vy, dt, params);
+      flowCx = cx;
+      flowCy = cy;
+      flowHeading = bodyHeading;
+      flowSpeed = curSpeed;
       const squeezeK = params.enableAffine ? prolateAspect(speedNorm, params) : 1;
       const squeezePhi = bodyHeading;
       const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
