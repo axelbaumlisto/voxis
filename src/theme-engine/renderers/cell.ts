@@ -223,6 +223,14 @@ export interface CellParams {
   /** D4: minimum elongation fraction even at rest (0 = round at rest, so D4
    * collapses to identity when still). Default 0. */
   bodyElongationFloor?: number;
+  /** Commit 30: when true the resting body is a prolate spindle (~3:1) even at
+   * speedNorm=0, like a real Paramecium, instead of a circle. Gates a resting
+   * floor on prolateAspect; swimming can still elongate further above it.
+   * Default false (byte-identical legacy circle-at-rest behavior). */
+  enableRestingProlate?: boolean;
+  /** Commit 30: resting affine k for the spindle. The affine applies diag(k,1/k)
+   * so the major/minor axis ratio = k^2; k=1.7 => ~2.9:1 (~3:1). Default 1.7. */
+  prolateRestAspect?: number;
   /** F4/G3: bias every hair's beat plane toward ONE global stroke axis (the body
    * heading) so the crown ROWS coherently while swimming, weighted by activity
    * (G3). Default true; when false the crown uses per-hair local azimuth
@@ -381,6 +389,8 @@ export const CELL_DEFAULTS: CellParams = {
   bodyHeadingTau: 0.4,
   bodyElongation: 0.13,
   bodyElongationFloor: 0,
+  enableRestingProlate: false,
+  prolateRestAspect: 1.7,
   enableStrokeAxis: true,
   strokeAxisKnee: 0.5,
   strokeAxisAlign: 1,
@@ -595,7 +605,12 @@ export function prolateAspect(speedNorm: number, params: CellParams): number {
   const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
   const elong = params.bodyElongation ?? 0.13;
   const floor = params.bodyElongationFloor ?? 0;
-  return 1 + elong * Math.max(floor, s);
+  const base = 1 + elong * Math.max(floor, s); // EXISTING expression, untouched
+  if (!params.enableRestingProlate) return base; // OFF => byte-identical
+  const rest = params.prolateRestAspect ?? 1.7;
+  // Resting spindle: at least `rest` at rest, and never less than the speed-driven
+  // base (so swimming can still elongate further). max keeps it monotone in speed.
+  return Math.max(rest, base);
 }
 
 /**
