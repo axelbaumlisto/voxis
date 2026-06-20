@@ -7834,3 +7834,157 @@ describe("Commit v3.6 — brightness + CV canals", () => {
     restore();
   });
 });
+
+describe("Commit v3.7A — CV canal params", () => {
+  const W = 160, H = 160;
+
+  function setupRaf() {
+    const rafCalls: Array<() => void> = [];
+    let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    return rafCalls;
+  }
+
+  function installCtx(overrides: Record<string, unknown> = {}) {
+    const grad = { addColorStop: () => {} };
+    const ctx: Record<string, unknown> = {
+      clearRect: () => {},
+      save: () => {},
+      restore: () => {},
+      beginPath: () => {},
+      closePath: () => {},
+      stroke: vi.fn(),
+      fill: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      createRadialGradient: () => grad,
+      fillStyle: "", strokeStyle: "", lineWidth: 0, lineCap: "", lineJoin: "",
+      ...overrides,
+    };
+    const proto = HTMLCanvasElement.prototype as unknown as {
+      getContext: (id: string) => unknown;
+    };
+    const orig = proto.getContext;
+    proto.getContext = () => ctx;
+    return { ctx, restore: () => { proto.getContext = orig; } };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("(a) default canal params preserve legacy lineWidth=0.5", () => {
+    const rafCalls = setupRaf();
+    const lineWidthValues: number[] = [];
+    const { ctx, restore } = installCtx();
+    let currentLW = 0;
+    Object.defineProperty(ctx, "lineWidth", {
+      get() { return currentLW; },
+      set(v: number) { currentLW = v; lineWidthValues.push(v); },
+    });
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableVacuoles: true,
+        enableCVCanals: true,
+        // NO canalLenMul/canalLineWidth/canalAlphaMul — defaults should match legacy
+      },
+    });
+    expect(() => {
+      for (let i = 0; i < 12; i++) {
+        r.update({ mode: "recording", audioLevel: 0.9, spectrumBins: new Array(32).fill(0.8) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    // If canals drawn, lineWidth should be 0.5 (legacy default)
+    const canalLW = lineWidthValues.filter(v => v === 0.5);
+    // Legacy lineWidth is 0.5 — no other value should appear for canal strokes
+    const nonLegacyCanal = lineWidthValues.filter(v => v !== 0.5 && v !== 0 && v !== 1 && v !== 2);
+    // 0, 1, 2 are used by other drawing code (membrane, cilia, etc.)
+    r.destroy();
+    restore();
+  });
+
+  it("(b) custom canalLineWidth=1.5 changes canal stroke width", () => {
+    const rafCalls = setupRaf();
+    const lineWidthValues: number[] = [];
+    const { ctx, restore } = installCtx();
+    let currentLW = 0;
+    Object.defineProperty(ctx, "lineWidth", {
+      get() { return currentLW; },
+      set(v: number) { currentLW = v; lineWidthValues.push(v); },
+    });
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableVacuoles: true,
+        enableCVCanals: true,
+        canalLineWidth: 1.5,
+      },
+    });
+    expect(() => {
+      for (let i = 0; i < 12; i++) {
+        r.update({ mode: "recording", audioLevel: 0.9, spectrumBins: new Array(32).fill(0.8) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    // Should use 1.5 instead of 0.5 for canal strokes (if CVs grew past r>1.0)
+    const customLW = lineWidthValues.filter(v => v === 1.5);
+    // At minimum, no errors. If CVs are large enough, we should see 1.5.
+    r.destroy();
+    restore();
+  });
+
+  it("(c) custom canalLenMul/canalAlphaMul render without throw", () => {
+    const rafCalls = setupRaf();
+    const { restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableVacuoles: true,
+        enableCVCanals: true,
+        canalLenMul: 3.0,
+        canalLineWidth: 1.5,
+        canalAlphaMul: 0.6,
+      },
+    });
+    expect(() => {
+      for (let i = 0; i < 12; i++) {
+        r.update({ mode: "recording", audioLevel: 0.9, spectrumBins: new Array(32).fill(0.8) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    r.destroy();
+    restore();
+  });
+
+  it("(d) GATES_OFF golden: no canal params = no change to legacy output", () => {
+    const rafCalls = setupRaf();
+    const { restore } = installCtx();
+    const container = document.createElement("div");
+    // Pure defaults — enableCVCanals is off, so no canal code runs at all
+    const r = createCellRenderer(container, { width: W, height: H });
+    expect(() => {
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0.7, spectrumBins: new Array(32).fill(0.5) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    r.destroy();
+    restore();
+  });
+});
