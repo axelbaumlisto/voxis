@@ -2303,6 +2303,85 @@ export function bodyProfileDeform(
 }
 
 /**
+ * Commit 32a — context for `interiorPoint`. Carries the SAME per-frame wall
+ * description the membrane + cilia use (`deform`, `squeezeK`, `squeezePhi`) plus
+ * the body geometry (`cx`, `cy`, `baseR`, `bodyHeading`, `params`). Bundling it
+ * keeps the helper a single pure mapping with no hidden globals.
+ */
+export interface InteriorCtx {
+  cx: number;
+  cy: number;
+  baseR: number;
+  /** SAME per-canvas-angle deform array the membrane uses this frame. */
+  deform: number[];
+  /** SAME body affine the membrane/cilia use this frame. */
+  squeezeK: number;
+  squeezePhi: number;
+  /** Body long-axis heading (rad). */
+  bodyHeading: number;
+  params: CellParams;
+}
+
+/**
+ * Commit 32a — map a BODY-NORMALISED interior coordinate (u, s) to a world
+ * point by RECONSTRUCTING the exact same wall the membrane + cilia draw, so the
+ * wall is literally `interiorPoint(., s=+-1)`. This is the shared coupling seam
+ * for every organelle (slices 32b-32e): each organelle deforms WITH the
+ * membrane via this one path, never via a separate disc.
+ *
+ * Coordinates: `u` in [-1, 1] is the axial fraction (u=+1 anterior, matching
+ * bodyHalfWidth/bodyProfilePoint which put the anterior at +x); `s` in [-1, 1]
+ * is the transverse fraction of the LOCAL half-width (s=+-1 = the wall, s=0 =
+ * the long axis).
+ *
+ * Construction (GUARANTEES wall-landing on BOTH the profile path and a
+ * synthetic FBM deform): at |s|=1 the radial fraction f === 1 exactly, so the
+ * point equals the membrane ray reconstruction `baseR*(1+deformAt(theta))` then
+ * the SAME affine. REUSES bodyHalfWidth / bodyProfilePoint / interpProfileRadius
+ * / deformAt / affineSqueezePoints — no duplicated profile or affine math.
+ * HEADING is applied EXACTLY once (thetaCanvas = thetaBody + bodyHeading).
+ * Pure & deterministic. The per-call 96-sample profile loop is acceptable for
+ * 32a (caching is a later optimisation; KISS).
+ */
+export function interiorPoint(u: number, s: number, ctx: InteriorCtx): [number, number] {
+  const { cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params } = ctx;
+  // 1. Body-frame interior point (anterior at +x), SAME embedding as
+  //    bodyProfilePoint: length L = baseR*sqrt(aspect), width W = baseR/sqrt(aspect).
+  const aspect = params.bodyAspect ?? 3;
+  const L = baseR * Math.sqrt(aspect);
+  const W = baseR / Math.sqrt(aspect);
+  const what = bodyHalfWidth(u, params); // normalised local half-width
+  const xb = L * u;
+  const yb = s * W * what; // s scales the local half-width => |s|=1 is the wall
+  // 2. Body angle + radius of this interior point.
+  const rho = Math.hypot(xb, yb);
+  const thetaBody = Math.atan2(yb, xb);
+  // 3. The UN-scaled profile wall radius at this body angle (same sampling as
+  //    bodyProfileDeform / bodyProfileAreaScale use).
+  const N = 96;
+  const pts: Array<{ ang: number; rad: number }> = [];
+  for (let k = 0; k < N; k++) {
+    const t = (k / N) * TAU;
+    const [px, py] = bodyProfilePoint(t, baseR, params);
+    pts.push({ ang: Math.atan2(py, px), rad: Math.hypot(px, py) });
+  }
+  const profileR = interpProfileRadius(thetaBody, pts);
+  // 4. Radial fraction f in [0, 1]: at |s|=1, rho === profileR so f === 1 (on
+  //    the wall); at the centre (rho=0) f === 0. Pole guard: profileR -> 0 at
+  //    u=+-1 falls back to 0 (no NaN).
+  const f = profileR > 1e-9 ? rho / profileR : 0;
+  // 5. The LIVE wall radius at the matching CANVAS angle (heading baked in once),
+  //    via the SAME deformAt the membrane uses.
+  const thetaCanvas = thetaBody + bodyHeading;
+  const wallR = baseR * (1 + deformAt(thetaCanvas, deform));
+  // 6. Interior point along that canvas ray at fraction f, then the SAME affine
+  //    (identity when squeezeK === 1 or enableAffine is off).
+  const px0 = cx + Math.cos(thetaCanvas) * f * wallR;
+  const py0 = cy + Math.sin(thetaCanvas) * f * wallR;
+  return affineSqueezePoints([[px0, py0]], squeezeK, squeezePhi, cx, cy, params)[0];
+}
+
+/**
  * F11 (OPT) — contractile vacuole. A peripheral vesicle that slowly FILLS
  * (diastole) then rapidly COLLAPSES (systole) each `vacuolePeriod`. Phase
  * `u = (t/period) mod 1`; radius `R_max * smoothstep(0, 0.85, u)` rising to a
