@@ -2763,6 +2763,7 @@ describe("M15: NaN-poison guard through update()", () => {
       moveTo: (x: number, y: number) => { coords.push(x, y); },
       lineTo: (x: number, y: number) => { coords.push(x, y); },
       arc: (x: number, y: number, r: number) => { coords.push(x, y, r); },
+      ellipse: () => {},
       createRadialGradient: () => grad,
       fillStyle: "", strokeStyle: "", lineWidth: 0, lineCap: "", lineJoin: "",
     };
@@ -4734,6 +4735,7 @@ describe("Commit 22b — somatic mex wired into render", () => {
       moveTo: () => {},
       lineTo: () => {},
       arc: () => {},
+      ellipse: () => {},
       createRadialGradient: () => grad,
       fillStyle: "", strokeStyle: "", lineWidth: 0, lineCap: "", lineJoin: "",
     };
@@ -5553,7 +5555,7 @@ describe("Commit 28 — food vacuoles + micronucleus", () => {
     expect(CELL_DEFAULTS.foodVacuoleMaxRadiusFrac).toBe(0.62);
     expect(CELL_DEFAULTS.foodVacuoleSizePx).toBe(3.0);
     expect(CELL_DEFAULTS.foodVacuoleDigestPeriod).toBe(30);
-    expect(CELL_DEFAULTS.micronucleusSizeFrac).toBe(0.32);
+    expect(CELL_DEFAULTS.micronucleusSizeFrac).toBe(0.20);
     expect(CELL_DEFAULTS.micronucleusOffsetFrac).toBe(1.15);
   });
 
@@ -5620,7 +5622,7 @@ describe("Commit 28 — food vacuoles + micronucleus", () => {
     const P = { ...CELL_DEFAULTS };
     const macroR = 6;
     const mn = micronucleusTransform(100, 50, macroR, P);
-    expect(mn.r).toBeCloseTo(macroR * 0.32, 9);
+    expect(mn.r).toBeCloseTo(macroR * 0.20, 9);
     expect(mn.r).toBeLessThan(macroR);
     const off = Math.hypot(mn.cx - 100, mn.cy - 50);
     expect(off).toBeCloseTo(macroR * 1.15, 9);
@@ -6091,6 +6093,7 @@ describe("Commit 31b — body profile wired into contour", () => {
       moveTo: (x: number, y: number) => { coords.push(x, y); },
       lineTo: (x: number, y: number) => { coords.push(x, y); },
       arc: (x: number, y: number, r: number) => { coords.push(x, y, r); },
+      ellipse: () => {},
       createRadialGradient: () => grad,
       fillStyle: "", strokeStyle: "", lineWidth: 0, lineCap: "", lineJoin: "",
     };
@@ -7267,6 +7270,7 @@ describe("Commit v3.5A — colour + idle-drift params", () => {
       moveTo: () => {},
       lineTo: () => {},
       arc: () => {},
+      ellipse: () => {},
       createRadialGradient: () => grad,
       fillStyle: "", strokeStyle: "", lineWidth: 0, lineCap: "", lineJoin: "",
     };
@@ -7483,5 +7487,173 @@ describe("Commit v3.5A — colour + idle-drift params", () => {
     }).not.toThrow();
     r.destroy();
     restoreCtx();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit v3.5F — macronucleus ellipse + smaller micronucleus
+// ---------------------------------------------------------------------------
+describe("Commit v3.5F — macronucleus ellipse", () => {
+  const W = 160, H = 160;
+
+  function setupRaf() {
+    const rafCalls: Array<() => void> = [];
+    let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    return rafCalls;
+  }
+
+  function installCtx() {
+    const grad = { addColorStop: () => {} };
+    const ellipseCalls: Array<number[]> = [];
+    const arcCalls: Array<number[]> = [];
+    const ctx = {
+      clearRect: () => {},
+      save: () => {},
+      restore: () => {},
+      beginPath: () => {},
+      closePath: () => {},
+      stroke: () => {},
+      fill: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      arc: (...args: number[]) => { arcCalls.push(args); },
+      ellipse: (...args: number[]) => { ellipseCalls.push(args); },
+      createRadialGradient: () => grad,
+      fillStyle: "", strokeStyle: "", lineWidth: 0, lineCap: "", lineJoin: "",
+    };
+    const proto = HTMLCanvasElement.prototype as unknown as {
+      getContext: (id: string) => unknown;
+    };
+    const orig = proto.getContext;
+    proto.getContext = () => ctx;
+    return { ellipseCalls, arcCalls, restore: () => { proto.getContext = orig; } };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("(a) gate OFF = circle: enableInteriorField:false renders arc, no ellipse for nucleus", () => {
+    const rafCalls = setupRaf();
+    const { ellipseCalls, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableOrganelles: true,
+        enableInteriorField: false,
+      },
+    });
+    expect(() => {
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.3) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    // No ellipse calls — legacy circular path
+    expect(ellipseCalls.length).toBe(0);
+    r.destroy();
+    restore();
+  });
+
+  it("(b) gate ON = ellipse: enableInteriorField:true renders ellipse for nucleus", () => {
+    const rafCalls = setupRaf();
+    const { ellipseCalls, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableOrganelles: true,
+        enableInteriorField: true,
+        enableBodyProfile: true,
+        bodyProfileType: "egg" as const,
+        bodyAspect: 3,
+        nucleusAspect: 1.8,
+      },
+    });
+    expect(() => {
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.3) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    // Ellipse was called (at least once per frame for the macronucleus)
+    expect(ellipseCalls.length).toBeGreaterThan(0);
+    r.destroy();
+    restore();
+  });
+
+  it("(c) nucleusAspect:1.0 = circle on new path (falls back to arc)", () => {
+    const rafCalls = setupRaf();
+    const { ellipseCalls, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableOrganelles: true,
+        enableInteriorField: true,
+        enableBodyProfile: true,
+        bodyProfileType: "egg" as const,
+        bodyAspect: 3,
+        nucleusAspect: 1.0,
+      },
+    });
+    expect(() => {
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.3) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    // nucleusAspect === 1 → no ellipse calls, falls through to arc
+    expect(ellipseCalls.length).toBe(0);
+    r.destroy();
+    restore();
+  });
+
+  it("(d) micronucleusSizeFrac default is 0.20", () => {
+    expect(CELL_DEFAULTS.micronucleusSizeFrac).toBe(0.20);
+  });
+
+  it("(e) determinism: two identical renders produce identical ellipse calls", () => {
+    const run = () => {
+      // Stub time so both runs see identical simTime
+      let fakeNow = 1000;
+      vi.stubGlobal("performance", { now: () => fakeNow });
+      const rafCalls = setupRaf();
+      const { ellipseCalls, arcCalls, restore } = installCtx();
+      localStorage.clear();
+      const container = document.createElement("div");
+      const r = createCellRenderer(container, {
+        width: W, height: H,
+        params: {
+          ...CELL_DEFAULTS,
+          enableOrganelles: true,
+          enableInteriorField: true,
+          enableBodyProfile: true,
+          bodyProfileType: "egg" as const,
+          bodyAspect: 3,
+          nucleusAspect: 1.8,
+        },
+      });
+      for (let i = 0; i < 5; i++) {
+        fakeNow += 16.67; // ~60fps
+        r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.3) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+      const result = { ellipse: [...ellipseCalls], arc: [...arcCalls] };
+      r.destroy();
+      restore();
+      vi.unstubAllGlobals();
+      return result;
+    };
+    const r1 = run();
+    const r2 = run();
+    expect(r1.ellipse).toEqual(r2.ellipse);
   });
 });
