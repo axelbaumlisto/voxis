@@ -443,6 +443,8 @@ var CELL_DEFAULTS = {
   enableStrokeAxis: true,
   strokeAxisKnee: 0.5,
   strokeAxisAlign: 1,
+  enableEnergySmoothing: true,
+  energySmoothTau: 0.08,
   enableSaturation: true,
   deformMax: 0.6,
   enableAreaNorm: true,
@@ -478,6 +480,15 @@ function cellEnergy(mode, audioLevel, t, idle, levelGain) {
     default:
       return idle;
   }
+}
+function smoothEnergy(prev, target, dt, params) {
+  if (params.enableEnergySmoothing === false)
+    return target;
+  const tau = params.energySmoothTau ?? 0.08;
+  if (tau <= 0)
+    return target;
+  const alpha = 1 - Math.exp(-Math.max(0, dt) / tau);
+  return prev + (target - prev) * alpha;
 }
 function cellActivity(energy, growth, params) {
   const we = params?.activityEnergyWeight ?? 0.6;
@@ -925,6 +936,7 @@ function createCellRenderer(container, opts) {
   };
   let deform = null;
   let growth = 0;
+  let energySmoothed = -1;
   let startle = 0;
   let baseline = 0;
   let drift01 = 0;
@@ -960,7 +972,11 @@ function createCellRenderer(container, opts) {
     const spectrumBins = sanitizeBins(s.spectrumBins);
     if (ctx) {
       ctx.clearRect(0, 0, width, height);
-      const energy = cellEnergy(s.mode, audioLevel, t, params.idle, params.levelGain);
+      const energyTarget = cellEnergy(s.mode, audioLevel, t, params.idle, params.levelGain);
+      if (energySmoothed < 0)
+        energySmoothed = energyTarget;
+      energySmoothed = sanitizeUnit(smoothEnergy(energySmoothed, energyTarget, dt, params));
+      const energy = energySmoothed;
       growth = sanitizeUnit(growthLevel(sanitizeUnit(growth), audioLevel, s.mode, params.growthAttack, params.growthRelease));
       const activity = cellActivity(energy, growth, params);
       baseline = sanitizeFinite(baseline + (audioLevel - sanitizeFinite(baseline, 0)) * params.startleBaselineRate, 0);

@@ -229,6 +229,12 @@ export interface CellParams {
   /** F4: max fraction [0,1] a fully-engaged hair rotates its beat plane from its
    * local azimuth toward the global axis. Default 1 (full alignment). */
   strokeAxisAlign?: number;
+  /** M6: EMA-chase the per-mode energy target to remove the mode-change pop.
+   * Default true; when false energy is the raw step value (pre-M6). */
+  enableEnergySmoothing?: boolean;
+  /** M6: energy EMA time-constant (seconds). Small (~0.08) so it smooths mode
+   * flips without flattening the idle breathing sine. Default 0.08. */
+  energySmoothTau?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -306,6 +312,8 @@ export const CELL_DEFAULTS: CellParams = {
   enableStrokeAxis: true,
   strokeAxisKnee: 0.5,
   strokeAxisAlign: 1,
+  enableEnergySmoothing: true,
+  energySmoothTau: 0.08,
   // Pipeline gates. B1 (commit 6) flips enableSaturation ON; C1 (commit 7) flips
   // enableAreaNorm ON (area held at pi*baseR^2). G (commit 8a) flips
   // enableActivity ON. D4 (commit 8b) flips enableAffine ON (body prolate along
@@ -379,6 +387,30 @@ export function cellEnergy(
     default:
       return idle;
   }
+}
+
+/**
+ * M6 — EMA-chase the (step-valued) energy target to kill the mode-change POP.
+ * `cellEnergy` returns a different formula per mode, so at a mode flip (idle ->
+ * recording -> transcribing -> idle) the raw energy jumps in one frame. We chase
+ * it with a fast exponential `e += (target - e)*(1 - exp(-dt/tau))`, so the
+ * change is C0 across the flip while staying responsive. tau is deliberately
+ * SMALL (~0.08s) so the idle breathing sine (0.8 rad/s) passes through with <1%
+ * attenuation — this smooths discontinuities, not the intended slow motion.
+ * Gated by `enableEnergySmoothing` (default on); off => returns target verbatim
+ * (byte-identical to pre-M6). Pure & frame-rate independent.
+ */
+export function smoothEnergy(
+  prev: number,
+  target: number,
+  dt: number,
+  params: CellParams,
+): number {
+  if (params.enableEnergySmoothing === false) return target;
+  const tau = params.energySmoothTau ?? 0.08;
+  if (tau <= 0) return target;
+  const alpha = 1 - Math.exp(-Math.max(0, dt) / tau);
+  return prev + (target - prev) * alpha;
 }
 
 /**
@@ -1860,6 +1892,7 @@ export function createCellRenderer(
   // accumulated across frames with asymmetric attack/release.
   let deform: number[] | null = null;
   let growth = 0;
+  let energySmoothed = -1; // M6: EMA-chased energy (lazy seed on first frame)
   let startle = 0;
   let baseline = 0; // slow-tracking audio baseline for startle edge detection
   let drift01 = 0; // smoothed drift activation (0=centered, 1=full drift)
@@ -1920,7 +1953,13 @@ export function createCellRenderer(
     if (ctx) {
       ctx.clearRect(0, 0, width, height);
 
-      const energy = cellEnergy(s.mode, audioLevel, t, params.idle, params.levelGain);
+      // M6: EMA-chase the per-mode energy target so a mode flip (which changes
+      // the cellEnergy formula) no longer steps discontinuously. Seed to the
+      // raw target on the very first frame so there is no startup ramp.
+      const energyTarget = cellEnergy(s.mode, audioLevel, t, params.idle, params.levelGain);
+      if (energySmoothed < 0) energySmoothed = energyTarget;
+      energySmoothed = sanitizeUnit(smoothEnergy(energySmoothed, energyTarget, dt, params));
+      const energy = energySmoothed;
 
       // Biological growth (shared accumulator) + startle reflex.
       // M15: guard the persistent accumulators against a poisoned prior value

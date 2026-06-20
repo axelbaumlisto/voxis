@@ -11,6 +11,7 @@ import {
   fbm,
   smoothstep,
   cellEnergy,
+  smoothEnergy,
   cellActivity,
   swimSpeed,
   ciliaBeatHzEff,
@@ -3939,5 +3940,91 @@ describe("cellPersistKey M5 — namespaced by tank size", () => {
   });
   it("includes the dimensions", () => {
     expect(cellPersistKey(160, 160)).toContain("160x160");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 14 — M6: EMA-chased energy removes the mode-change pop
+// ---------------------------------------------------------------------------
+describe("smoothEnergy (M6 mode-change pop)", () => {
+  const P = CELL_DEFAULTS;
+  const dt = 1 / 60;
+
+  it("converges to a steady target (idempotent at equilibrium)", () => {
+    let e = 0.4;
+    for (let i = 0; i < 600; i++) e = smoothEnergy(e, 0.4, dt, P);
+    expect(e).toBeCloseTo(0.4, 6);
+  });
+
+  it("removes the step discontinuity: first-frame change << the raw jump", () => {
+    // idle ~0.18 -> a loud recording target ~0.7 is a big raw jump.
+    const prev = 0.18, target = 0.7;
+    const next = smoothEnergy(prev, target, dt, P);
+    const step = next - prev;
+    expect(step).toBeGreaterThan(0); // moves toward target
+    expect(step).toBeLessThan((target - prev) * 0.5); // no instantaneous snap
+    // C0: the smoothed value never overshoots the target
+    expect(next).toBeLessThanOrEqual(target);
+  });
+
+  it("monotonically approaches the target (no oscillation/overshoot)", () => {
+    let e = 0.1;
+    let prev = e;
+    for (let i = 0; i < 120; i++) {
+      e = smoothEnergy(e, 0.8, dt, P);
+      expect(e).toBeGreaterThanOrEqual(prev - 1e-12);
+      expect(e).toBeLessThanOrEqual(0.8 + 1e-12);
+      prev = e;
+    }
+  });
+
+  it("smooths a FALLING target too (transcribing->idle): monotone decrease, no undershoot", () => {
+    let e = 0.8;
+    let prev = e;
+    const target = 0.18;
+    const firstStep = prev - smoothEnergy(prev, target, dt, P);
+    expect(firstStep).toBeGreaterThan(0); // moves down toward target
+    expect(firstStep).toBeLessThan((prev - target) * 0.5); // no instantaneous snap
+    for (let i = 0; i < 200; i++) {
+      e = smoothEnergy(e, target, dt, P);
+      expect(e).toBeLessThanOrEqual(prev + 1e-12);
+      expect(e).toBeGreaterThanOrEqual(target - 1e-12); // never undershoots
+      prev = e;
+    }
+    expect(e).toBeCloseTo(target, 4);
+  });
+
+  it("is frame-rate independent: same elapsed time => ~same value (dt vs 2*dt)", () => {
+    let a = 0.2;
+    for (let i = 0; i < 120; i++) a = smoothEnergy(a, 0.9, 1 / 60, P);
+    let b = 0.2;
+    for (let i = 0; i < 60; i++) b = smoothEnergy(b, 0.9, 2 / 60, P);
+    expect(a).toBeCloseTo(b, 2);
+  });
+
+  it("preserves idle breathing: a slow 0.8 rad/s sine target is tracked, not flattened", () => {
+    // Feed the idle oscillation as the target; the smoothed output must retain
+    // most of the amplitude (fast tau barely attenuates a slow sine).
+    const idle = 0.2;
+    let e = idle;
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i < 1200; i++) {
+      const t = i * dt;
+      const target = idle * (1 + Math.sin(t * 0.8) * 0.25);
+      e = smoothEnergy(e, target, dt, P);
+      if (i > 600) { min = Math.min(min, e); max = Math.max(max, e); }
+    }
+    const amp = (max - min) / 2;
+    const rawAmp = idle * 0.25;
+    expect(amp).toBeGreaterThan(rawAmp * 0.9); // <10% attenuation
+  });
+
+  it("gate off (enableEnergySmoothing=false) returns the target verbatim", () => {
+    const Poff = { ...CELL_DEFAULTS, enableEnergySmoothing: false };
+    expect(smoothEnergy(0.1, 0.9, dt, Poff)).toBe(0.9);
+  });
+
+  it("enableEnergySmoothing defaults ON", () => {
+    expect(CELL_DEFAULTS.enableEnergySmoothing).toBe(true);
   });
 });
