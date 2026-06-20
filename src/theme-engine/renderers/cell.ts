@@ -337,6 +337,12 @@ export interface CellParams {
   vacuolePosteriorPhase?: number;
   /** Draw radial canals on contractile vacuoles (star shape). Default false. */
   enableCVCanals?: boolean;
+  /** CV canal length multiplier relative to vesicle radius. Default 2.0. */
+  canalLenMul?: number;
+  /** CV canal line width in pixels. Default 0.5. */
+  canalLineWidth?: number;
+  /** CV canal alpha multiplier (applied to base nucleusAlpha×0.45). Default 0.3. */
+  canalAlphaMul?: number;
   /** Commit 27 (OPT, default off): cytoplasmic streaming (cyclosis) — a field of
    * small granules circulates on a divergence-free closed loop inside the body.
    * Draw-only; when off nothing is seeded/advected/drawn. */
@@ -3800,10 +3806,10 @@ export function createCellRenderer(
               // CV radial canals — star shape (biologist: 6-7 canals, visible during diastole)
               if (params.enableCVCanals && e.r > 1.0) {
                 const canalCount = 6;
-                const canalLen = e.r * 2.0;
-                const canalAlpha = params.nucleusAlpha * 0.45 * 0.3;
+                const canalLen = e.r * (params.canalLenMul ?? 2.0);
+                const canalAlpha = params.nucleusAlpha * 0.45 * (params.canalAlphaMul ?? 0.3);
                 ctx.strokeStyle = hsla(cvH, 0.30, 0.72, canalAlpha);
-                ctx.lineWidth = 0.5;
+                ctx.lineWidth = params.canalLineWidth ?? 0.5;
                 for (let ci = 0; ci < canalCount; ci++) {
                   const angle = (ci / canalCount) * TAU;
                   ctx.beginPath();
@@ -3832,10 +3838,10 @@ export function createCellRenderer(
               // CV radial canals — star shape (biologist: 6-7 canals, visible during diastole)
               if (params.enableCVCanals && e.r > 1.0) {
                 const canalCount = 6;
-                const canalLen = e.r * 2.0;
-                const canalAlpha = params.nucleusAlpha * 0.45 * 0.3;
+                const canalLen = e.r * (params.canalLenMul ?? 2.0);
+                const canalAlpha = params.nucleusAlpha * 0.45 * (params.canalAlphaMul ?? 0.3);
                 ctx.strokeStyle = hsla(cvH, 0.30, 0.72, canalAlpha);
-                ctx.lineWidth = 0.5;
+                ctx.lineWidth = params.canalLineWidth ?? 0.5;
                 for (let ci = 0; ci < canalCount; ci++) {
                   const angle = (ci / canalCount) * TAU;
                   ctx.beginPath();
