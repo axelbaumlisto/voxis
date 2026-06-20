@@ -8,13 +8,46 @@ import type { ThemeMode, ThemeState } from "../theme-engine/contract";
 
 const MODES: ThemeMode[] = ["idle", "recording", "transcribing", "error"];
 
+/** Read harness presets from the URL query so Playwright / deep-links can
+ * drive the preview without UI clicks. All optional:
+ *   ?theme=drifting_contour&mode=recording&level=0.7&w=160&h=160&scale=3
+ */
+interface UrlPresets {
+  theme?: string;
+  mode?: ThemeMode;
+  level?: string;
+  w?: string;
+  h?: string;
+  scale?: string;
+  params?: string;
+}
+function readUrlPresets(): UrlPresets {
+  if (typeof window === "undefined") return {};
+  const q = new URLSearchParams(window.location.search);
+  const get = (k: string) => q.get(k) ?? undefined;
+  return {
+    theme: get("theme"),
+    mode: get("mode") as ThemeMode | undefined,
+    level: get("level"),
+    w: get("w"),
+    h: get("h"),
+    scale: get("scale"),
+    params: get("params"),
+  };
+}
+
 export default function HarnessApp() {
-  const [themeId, setThemeId] = useState("drifting_contour");
-  const [mode, setMode] = useState<ThemeMode>("recording");
-  const [level, setLevel] = useState(0.6);
-  const [scale, setScale] = useState(4);
+  const url = readUrlPresets();
+  const [themeId, setThemeId] = useState(url.theme ?? "drifting_contour");
+  const [mode, setMode] = useState<ThemeMode>(url.mode ?? "recording");
+  const [level, setLevel] = useState(url.level ? Number(url.level) : 0.6);
+  const [scale, setScale] = useState(url.scale ? Number(url.scale) : 4);
+  // Canvas size — defaults to the pill 172×36; organic themes (cell/ring)
+  // need a 160×160 square, settable via ?w=160&h=160.
+  const [width] = useState(url.w ? Number(url.w) : 172);
+  const [height] = useState(url.h ? Number(url.h) : 36);
   const [bg, setBg] = useState("#111");
-  const [paramsText, setParamsText] = useState("{}");
+  const [paramsText, setParamsText] = useState(url.params ?? "{}");
   const [running, setRunning] = useState<string | null>(null);
   const [animate, setAnimate] = useState(true);
   const [frame, setFrame] = useState(0);
@@ -193,8 +226,8 @@ export default function HarnessApp() {
             fetchModule={fetchBuiltinThemeModule}
             fallbackModule={defaultTheme}
             onCancel={() => {}}
-            width={172}
-            height={36}
+            width={width}
+            height={height}
             params={parsedParams}
           />
         </div>

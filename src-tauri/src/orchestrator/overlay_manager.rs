@@ -13,6 +13,10 @@ use tokio::sync::Mutex;
 pub struct OverlayManager {
     app: AppHandle,
     overlay: Arc<Mutex<Box<dyn OverlayBackend>>>,
+    /// Serializes overlay (re)initialization so the startup and
+    /// window-focus paths can't race and both call `create_overlay`,
+    /// which would fail with `webview 'overlay' already exists`.
+    init_lock: Arc<Mutex<()>>,
 }
 
 /// Validate theme overlay dimensions against sane inclusive range.
@@ -26,7 +30,23 @@ fn validate_overlay_dimensions(w: Option<u32>, h: Option<u32>) -> Option<(u32, u
 
 impl OverlayManager {
     pub fn new(app: AppHandle, overlay: Arc<Mutex<Box<dyn OverlayBackend>>>) -> Self {
-        Self { app, overlay }
+        Self {
+            app,
+            overlay,
+            init_lock: Arc::new(Mutex::new(())),
+        }
+    }
+
+    /// Idempotent init: creates the overlay only if it isn't already
+    /// running. The whole check-and-create is serialized by `init_lock`
+    /// so concurrent callers (startup + window focus) can't both build
+    /// the webview.
+    pub async fn ensure_init(&self, config: &AppConfig) {
+        let _guard = self.init_lock.lock().await;
+        if self.overlay.lock().await.is_running() {
+            return;
+        }
+        self.init(config).await;
     }
 
     /// Resolve the overlay size declared by a theme's manifest.
@@ -40,7 +60,7 @@ impl OverlayManager {
         validate_overlay_dimensions(manifest.overlay_width, manifest.overlay_height)
     }
 
-    pub async fn init(&self, config: &AppConfig) {
+    async fn init(&self, config: &AppConfig) {
         let position = OverlayPositionConfig::parse(&config.overlay.position);
         let size = OverlaySizeConfig::parse(&config.overlay.size);
         let new_overlay = create_overlay(CreateOverlayParams {
@@ -72,12 +92,31 @@ impl OverlayManager {
             config.overlay.size
         );
 
+        let _guard = self.init_lock.lock().await;
         self.overlay.lock().await.shutdown();
         self.init(config).await;
 
         if config.overlay.enabled {
             self.overlay.lock().await.show(OverlayState::Idle);
+        } else {
+            // enabled -> disabled: backends no longer close/hide the shared
+            // window on shutdown (to avoid reinit races), so the manager
+            // explicitly hides the singleton overlay window here.
+            self.hide_overlay_window();
         }
+    }
+
+    /// Hide the singleton overlay OS window (label `overlay`) on the main
+    /// thread. Used when the overlay is turned off; backends intentionally
+    /// leave the window registered on `shutdown` so it can be reused across
+    /// reinit without a close/show race.
+    fn hide_overlay_window(&self) {
+        let app = self.app.clone();
+        let _ = app.clone().run_on_main_thread(move || {
+            if let Some(w) = app.get_webview_window(crate::overlay_native::OVERLAY_PANEL_LABEL) {
+                let _ = w.hide();
+            }
+        });
     }
 
     pub async fn preview_theme(&self, theme_id: &str) -> Result<(), String> {
@@ -86,9 +125,7 @@ impl OverlayManager {
             return Err("Enable overlay to preview themes".to_string());
         }
 
-        if !self.overlay.lock().await.is_running() {
-            self.init(&config).await;
-        }
+        self.ensure_init(&config).await;
 
         let overlay = self.overlay.lock().await;
         overlay.set_theme(theme_id);

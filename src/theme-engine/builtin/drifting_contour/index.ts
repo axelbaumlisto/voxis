@@ -22,7 +22,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   const renderer = createCellRenderer(container, {
     width: api.size.width,
     height: api.size.height,
-    baseHue: 34, // warm amber #d9a865
+    baseHue: 95, // olive-green (DIC microscopy) — colour biologist (was 34 amber)
     params: {
       noiseScale: 0.9,
       octaves: 4,
@@ -36,10 +36,10 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       intentDrift: 0.08,
       idle: 0.10,
       levelGain: 0.7,
-      hueSpread: 40,
+      hueSpread: 25,                 // subtler iridescence (was 40)
       shimmerSpeed: 0.5,
-      hueBoost: 20,
-      fillAlpha: 0.30,               // translucent living envelope, not a dark void (colour biologist)
+      hueBoost: 15,                    // less extreme hue boost (was 20)
+      fillAlpha: 0.28,               // translucent living envelope
       tension: 0.15,
       // cilia ("усы"), startle ("шарахается"), growth ("растёт как живая")
       ciliaCount: 18,
@@ -49,16 +49,17 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       growthAttack: 0.05,
       growthRelease: 0.012,
       baseRadiusPx: 17,
-      driftSpeed: 0.03,
+      driftSpeed: 0.08,              // resting cell still glides visibly (was 0.03)
       driftMargin: 30,
       idleMorphAmplitude: 0.16,
       idleMorphSpeed: 0.22,
       idleMorphPeriod: 7,
       idleMorphFloor: 0.3,
-      growthSwell: 0.2,
-      startleSensitivity: 2.2,
+      growthSwell: 0.0,               // Paramecium does NOT inflate on activation (was 0.2)
+      swimSpeedMaxFrac: 0.15,         // the REAL activation signal: faster swimming (was 0.06)
+      startleSensitivity: 2.8,        // trigger startle more easily (was 2.2)
       startleDecay: 0.86,
-      startleMaxPx: 4,
+      startleMaxPx: 5,                // sharper avoid reaction (was 4)
       startleBaselineRate: 0.08,
       // === Authentic Paramecium (v3.2-final) — BIOLOGY-APPROVED default look. ===
       // Reviewer (biology validator) approved these in lieu of user A/B:
@@ -67,7 +68,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // frozen); the authentic organism lives here in the theme config.
       enableSomaticCilia: true,      // short dense somatic cilia (Commit 22)
       somaticCiliaCount: 104,        // denser fringe (biology: velvet pile, not spokes)
-      ciliaGrowthBoost: 0.08,        // KEY: active hairs stay SHORT (was 0.6 => 5x whips)
+      ciliaGrowthBoost: 0.0,          // cilia length is FIXED (was 0.08) — beat FREQUENCY changes, not length
       ciliaCurl: 0.32,               // lower wave amplitude => rowing comb not free flagella
       ciliaLengthVar: 0.35,          // less length scatter => even comb
       enableCiliaOnContour: true,    // anchor on the real contour (Commit 21)
@@ -80,7 +81,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableAffine: true,            // forced k=1 when profile on (no double-elongate)
       enableCiliaStructure: true,    // oral-groove dip + caudal tuft (Commit 23)
       enableAxialSpin: true,         // spin about long axis while swimming (Commit 24)
-      axialSpinMax: 7,               // ~1.1 rev/s — livelier than the calm 3.5 default
+      axialSpinMax: 10,              // ~1.6 rev/s — more visible tumbling at peak (was 7)
       enableVacuoles: true,          // two asynchronous contractile vacuoles (Commit 26)
       enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)
       cyclosisGranuleCount: 52,      // pack the cytoplasm (biologist polish: crammed)

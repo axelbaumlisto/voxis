@@ -4,6 +4,7 @@ pub mod theme;
 pub mod webview;
 
 pub use backend::{NoopOverlay, OverlayBackend};
+pub use nspanel::OVERLAY_PANEL_LABEL;
 pub use theme::{ThemeInfo, ThemeTestResult};
 
 pub type OverlayState = crate::overlay::types::OverlayState;

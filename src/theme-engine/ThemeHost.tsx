@@ -5,7 +5,7 @@
  * DIP: module fetching and cancel action are injected via props.
  * Error policy: any load/mount failure → fallbackModule (never blank overlay).
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   THEME_API_VERSION,
   type ThemeApi,
@@ -44,6 +44,20 @@ export default function ThemeHost({
   const listenersRef = useRef<Set<Listener>>(new Set());
   const stateRef = useRef<ThemeState>(state);
   const instanceRef = useRef<ThemeInstance | null>(null);
+
+  // Stabilize params by VALUE, not identity. The overlay loads the manifest
+  // async and passes a fresh object/null on each render (setParams(null) then
+  // setParams(obj)); without this the mount effect below would remount the
+  // theme 2–3× on every show — a visible blink that also resets accumulated
+  // motion state (wander/growth/deform). Keying on the serialized value means
+  // we only remount when params actually change.
+  const paramsKey = useMemo(() => {
+    try {
+      return JSON.stringify(params ?? null);
+    } catch {
+      return String(params);
+    }
+  }, [params]);
 
   // Push state to mounted theme (no remount).
   stateRef.current = state;
@@ -109,7 +123,7 @@ export default function ThemeHost({
       instanceRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [themeId, params]);
+  }, [themeId, paramsKey, width, height]);
 
   return <div ref={containerRef} style={{ width, height }} data-testid="theme-host" />;
 }
