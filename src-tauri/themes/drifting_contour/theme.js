@@ -516,6 +516,10 @@ var CELL_DEFAULTS = {
   enableEctoplasm: false,
   ectoplasmFrac: 0.85,
   ectoplasmAlpha: 0.15,
+  enableTrichocysts: false,
+  trichocystCount: 30,
+  trichocystLengthMul: 3,
+  trichocystDecay: 5,
   enableVacuoles: false,
   vacuoleAnteriorBearing: 1.9,
   vacuolePosteriorBearing: -1.9,
@@ -536,6 +540,7 @@ var CELL_DEFAULTS = {
   foodVacuoleMaxRadiusFrac: 0.62,
   foodVacuoleSizePx: 3,
   foodVacuoleDigestPeriod: 30,
+  foodVacuoleSizeMul: 1,
   micronucleusSizeFrac: 0.2,
   micronucleusOffsetFrac: 1.15,
   macronucleusU: -0.05,
@@ -594,7 +599,7 @@ function effectiveCyclosisPeriod(activity, params) {
   const base = Math.max(0.1, params.cyclosisPeriod ?? 45);
   const boost = params.cyclosisActivityBoost ?? 0;
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
-  return base / (1 + a * boost);
+  return Math.max(0.1, base / (1 + a * boost));
 }
 function swimSpeed(activity, width, height, params) {
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
@@ -634,6 +639,16 @@ function axialSpin(simTime, speedNorm, params) {
   const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
   const rate = (params.axialSpinMax ?? 0) * s;
   return -rate * simTime;
+}
+function helicalOffset(spinPhi, bodyHeading, baseR, params) {
+  const hAmp = params.helicalAmplitude ?? 0;
+  if (hAmp === 0 || spinPhi === 0)
+    return [0, 0];
+  const lateralOffset = hAmp * baseR * Math.sin(spinPhi);
+  return [
+    lateralOffset * -Math.sin(bodyHeading),
+    lateralOffset * Math.cos(bodyHeading)
+  ];
 }
 function cellRadius(angle, t, energy, params) {
   const dx = Math.cos(angle);
@@ -1684,8 +1699,8 @@ function createCellRenderer(container, opts) {
       wander = wanderStep(wander, dt, width, height, baseR, params, swimPx);
       const driftedX = width / 2 + (wander.x - width / 2) * drift01;
       const driftedY = height / 2 + (wander.y - height / 2) * drift01;
-      const cx = driftedX + sdx;
-      const cy = driftedY + sdy;
+      let cx = driftedX + sdx;
+      let cy = driftedY + sdy;
       const maxRadius = membraneMaxRadius(width, height);
       const floorRadius = baseR * 0.35;
       const sampleCount = deform.length;
@@ -1713,6 +1728,14 @@ function createCellRenderer(container, opts) {
       const squeezeK = params.enableBodyProfile ? 1 : params.enableAffine ? prolateAspect(speedNorm, params) : 1;
       const spinPhi = axialSpin(simTime, speedNorm, params);
       const squeezePhi = bodyHeading + spinPhi;
+      const [hdx, hdy] = helicalOffset(spinPhi, bodyHeading, baseR, params);
+      if (hdx !== 0 || hdy !== 0) {
+        cx += hdx;
+        cy += hdy;
+        for (let i = 0;i < smoothedPoints.length; i++) {
+          smoothedPoints[i] = [smoothedPoints[i][0] + hdx, smoothedPoints[i][1] + hdy];
+        }
+      }
       const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
       const splinePoints = catmullRom(contourPoints, 4);
       if (splinePoints.length >= 3) {
@@ -1745,6 +1768,32 @@ function createCellRenderer(container, opts) {
             }
             ctx.stroke();
           }
+        }
+        if (params.enableTrichocysts && startle > 0.01) {
+          const triCount = params.trichocystCount ?? 30;
+          const triLen = (params.trichocystLengthMul ?? 3) * baseR * (params.ciliaLength ?? 0.45);
+          const triAlpha = startle * 0.7;
+          ctx.save();
+          ctx.strokeStyle = hsla(0, 0, 0.95, triAlpha);
+          ctx.lineWidth = 0.5;
+          ctx.lineCap = "round";
+          const step = Math.max(1, Math.floor(contourPoints.length / triCount));
+          for (let i = 0;i < triCount; i++) {
+            const idx = i * step % contourPoints.length;
+            const [px, py] = contourPoints[idx];
+            const dx = px - cx;
+            const dy = py - cy;
+            const d = Math.hypot(dx, dy);
+            if (d < 0.001)
+              continue;
+            const nx = dx / d;
+            const ny = dy / d;
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(px + nx * triLen, py + ny * triLen);
+            ctx.stroke();
+          }
+          ctx.restore();
         }
         const cvH = params.cvHue ?? baseHue + 20;
         const fvH = params.foodVacuoleHue ?? baseHue - 30;
@@ -1982,7 +2031,7 @@ function createCellRenderer(container, opts) {
           }
         }
         if (params.enableOrganelles && (params.foodVacuoleCount ?? 0) > 0) {
-          const fvSizePx = params.foodVacuoleSizePx ?? 3;
+          const fvSizePx = (params.foodVacuoleSizePx ?? 3) * (params.foodVacuoleSizeMul ?? 1);
           if (params.enableInteriorField) {
             if (!interiorFoodVacuoles) {
               interiorFoodVacuoles = seedInteriorFoodVacuoles(params.foodVacuoleCount ?? 0, params);
@@ -2173,8 +2222,13 @@ function mount(container, api) {
       oralGrooveDepth: 0.04,
       cyclosisActivityBoost: 0.4,
       enableEctoplasm: true,
-      ectoplasmFrac: 0.85,
-      ectoplasmAlpha: 0.15,
+      ectoplasmFrac: 0.93,
+      ectoplasmAlpha: 0.22,
+      helicalAmplitude: 0.3,
+      foodVacuoleSizeMul: 1.8,
+      enableTrichocysts: true,
+      trichocystCount: 30,
+      trichocystLengthMul: 3,
       enableCyclosis: true,
       cyclosisGranuleCount: 52,
       granuleSizePx: 1.6,
