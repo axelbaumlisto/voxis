@@ -44,7 +44,6 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // cilia ("усы"), startle ("шарахается"), growth ("растёт как живая")
       ciliaCount: 18,
       ciliaLength: 0.4,
-      ciliaGrowthBoost: 0.55,
       ciliaWave: 0.5,
       ciliaWaveSpeed: 1.6,
       growthAttack: 0.05,
@@ -61,16 +60,35 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       startleDecay: 0.86,
       startleMaxPx: 4,
       startleBaselineRate: 0.08,
-      // === TEMP PREVIEW (v3.2 A/B) — mex + rigid spindle, NOT a default flip. ===
-      // Remove this block to restore the shipped FBM crown look.
+      // === Authentic Paramecium (v3.2-final) — BIOLOGY-APPROVED default look. ===
+      // Reviewer (biology validator) approved these in lieu of user A/B:
+      // /tmp/ado_biology_final2.md (shape 4, ciliature 4, interior 4, motion 4).
+      // The cell renderer's own gates stay OFF by default (GATES_OFF golden
+      // frozen); the authentic organism lives here in the theme config.
       enableSomaticCilia: true,      // short dense somatic cilia (Commit 22)
+      somaticCiliaCount: 104,        // denser fringe (biology: velvet pile, not spokes)
+      ciliaGrowthBoost: 0.08,        // KEY: active hairs stay SHORT (was 0.6 => 5x whips)
+      ciliaCurl: 0.32,               // lower wave amplitude => rowing comb not free flagella
+      ciliaLengthVar: 0.35,          // less length scatter => even comb
       enableCiliaOnContour: true,    // anchor on the real contour (Commit 21)
       enableRigidMembrane: true,     // smooth firm contour, no FBM wobble (Commit 29)
       enableBodyProfile: true,       // authentic asymmetric slipper (Commit 31)
       bodyProfileType: "egg",        // biology-validated egg (not piriform teardrop)
-      bodyProfileTaper: 0.27,        // widest ~mid-body, rounded blunt poles
+      bodyProfileTaper: 0.24,        // slightly rounder posterior heel (less teardrop)
       bodyAspect: 3,                 // ~3:1 aurelia slipper
+      bodyVentralBend: 0.18,         // more legible banana curve at display scale
       enableAffine: true,            // forced k=1 when profile on (no double-elongate)
+      enableCiliaStructure: true,    // oral-groove dip + caudal tuft (Commit 23)
+      enableAxialSpin: true,         // spin about long axis while swimming (Commit 24)
+      axialSpinMax: 7,               // ~1.1 rev/s — livelier than the calm 3.5 default
+      enableVacuoles: true,          // two asynchronous contractile vacuoles (Commit 26)
+      enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)
+      cyclosisGranuleCount: 34,      // pack the cytoplasm (biology: crammed interior)
+      granuleMaxRadiusFrac: 0.9,     // granules spread to the poles (biologist polish)
+      granuleSizePx: 1.6,            // a touch brighter/bigger so they read
+      enableOrganelles: true,        // food vacuoles + micronucleus (Commit 28)
+      foodVacuoleCount: 7,           // more food vacuoles filling the body
+      foodVacuoleMaxRadiusFrac: 0.72, // spread them wider, not just near the nucleus
       ...userParams,
     },
   });
