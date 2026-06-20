@@ -299,6 +299,14 @@ export interface CellParams {
   /** Commit 22a: resting hair length (fraction of baseR) when enableSomaticCilia
    * is on. Default 0.15 (short stubs). */
   somaticCiliaLength?: number;
+  /** Commit 29 (OPT, default off): SMOOTH RIGID membrane. A real Paramecium is a
+   * rigid smooth spindle, not a wobbling amoeboid blob. When on,
+   * buildTargetDeformation suppresses the per-vertex deform to a flat 0 (no FBM
+   * wobble, no pseudopods, no audio-bin deformation, no idle morph), so the
+   * pre-affine body is a perfect circle that the downstream affine squeeze turns
+   * into a smooth firm spindle. OFF keeps the deform[] byte-identical to today
+   * (frozen GATES_OFF golden). */
+  enableRigidMembrane?: boolean;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -401,6 +409,10 @@ export const CELL_DEFAULTS: CellParams = {
   enableSomaticCilia: false,
   somaticCiliaCount: 72,
   somaticCiliaLength: 0.15,
+  // Commit 29: smooth rigid membrane. OFF (dark-launch) so the default deform[]
+  // stays byte-identical to the frozen GATES_OFF golden. When on, every vertex
+  // deform is a flat 0 -> perfect circle pre-affine -> smooth firm spindle.
+  enableRigidMembrane: false,
 };
 
 
@@ -1466,6 +1478,16 @@ export function buildTargetDeformation(
 
   const out: number[] = [];
   for (let i = 0; i < sampleCount; i++) {
+    // Commit 29: smooth rigid membrane. Suppress ALL per-vertex deformation
+    // (FBM wobble, pseudopods, audio bins, idle morph) to a flat 0 so the body
+    // is a perfect circle pre-affine; the downstream affine squeeze then makes a
+    // smooth firm spindle. The loop is independent per i, so an early continue
+    // here is safe. OFF path below stays byte-identical to the frozen golden.
+    if (params.enableRigidMembrane) {
+      out.push(0);
+      continue;
+    }
+
     const angle = (i / sampleCount) * TAU;
 
     // Spectrum bin under this angle modulates local radius slightly (A3:
