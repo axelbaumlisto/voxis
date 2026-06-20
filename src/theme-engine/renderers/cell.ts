@@ -120,6 +120,10 @@ export interface CellParams {
   ciliaSat?: number;
   /** Membrane stroke lightness (0-1). Default 0.60. Higher for silvery edge. */
   membraneLightness?: number;
+  /** fillAlpha at full activity. Default = fillAlpha (no change). Lerps with activity. */
+  fillAlphaActive?: number;
+  /** membraneLightness at full activity. Default = membraneLightness (no change). Lerps with activity. */
+  membraneLightnessActive?: number;
   /** Granule fill saturation (0-1). Default 0.60. Lower for refractile dots. */
   granuleSat?: number;
   /** Minimum swim speed fraction even at activity=0 (0-1). Default 0. Non-zero = cell drifts at idle. */
@@ -331,6 +335,8 @@ export interface CellParams {
   /** Commit 26: posterior phase offset (fraction of a cycle) so the two CVs
    * do not start together. Default 0.5. */
   vacuolePosteriorPhase?: number;
+  /** Draw radial canals on contractile vacuoles (star shape). Default false. */
+  enableCVCanals?: boolean;
   /** Commit 27 (OPT, default off): cytoplasmic streaming (cyclosis) — a field of
    * small granules circulates on a divergence-free closed loop inside the body.
    * Draw-only; when off nothing is seeded/advected/drawn. */
@@ -3378,6 +3384,17 @@ export function createCellRenderer(
       // Gated: when enableActivity is off, `activity` is unused and motion falls
       // back to the legacy driftSpeed path (byte-identical to pre-8a).
       const activity = cellActivity(energy, growth, params);
+      const effectiveFillAlpha = lerp(
+        params.fillAlpha,
+        params.fillAlphaActive ?? params.fillAlpha,
+        activity,
+      );
+      const baseMembraneLightness = params.membraneLightness ?? 0.60;
+      const effectiveMembraneLightness = lerp(
+        baseMembraneLightness,
+        params.membraneLightnessActive ?? baseMembraneLightness,
+        activity,
+      );
       baseline = sanitizeFinite(baseline + (audioLevel - sanitizeFinite(baseline, 0)) * params.startleBaselineRate, 0);
       const prevStartle = startle;
       startle = sanitizeUnit(startleOffset(sanitizeUnit(startle), audioLevel, baseline, params.startleSensitivity, params.startleDecay));
@@ -3598,7 +3615,7 @@ export function createCellRenderer(
         // Resolved organelle hues (overridable via params, defaults = legacy)
         const cvH = params.cvHue ?? (baseHue + 20);
         const fvH = params.foodVacuoleHue ?? (baseHue - 30);
-        ctx.fillStyle = hsla(baseHue, params.cytoplasmSat ?? 0.70, 0.55, params.fillAlpha);
+        ctx.fillStyle = hsla(baseHue, params.cytoplasmSat ?? 0.70, 0.55, effectiveFillAlpha);
         ctx.beginPath();
         ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
         for (let i = 1; i < splinePoints.length; i++) {
@@ -3611,8 +3628,8 @@ export function createCellRenderer(
           cx, cy, 0,
           cx, cy, Math.max(1, baseR * 0.9),
         );
-        grad.addColorStop(0, hsla(baseHue + 10, (params.cytoplasmSat ?? 0.70) * 0.71, 0.7, params.fillAlpha * 0.5));
-        grad.addColorStop(1, hsla(baseHue, params.cytoplasmSat ?? 0.70, 0.45, params.fillAlpha));
+        grad.addColorStop(0, hsla(baseHue + 10, (params.cytoplasmSat ?? 0.70) * 0.71, 0.7, effectiveFillAlpha * 0.5));
+        grad.addColorStop(1, hsla(baseHue, params.cytoplasmSat ?? 0.70, 0.45, effectiveFillAlpha));
         ctx.fillStyle = grad;
         ctx.fill();
 
@@ -3777,6 +3794,21 @@ export function createCellRenderer(
               ctx.beginPath();
               ctx.arc(vx, vy, e.r, 0, TAU);
               ctx.fill();
+              // CV radial canals — star shape (biologist: 6-7 canals, visible during diastole)
+              if (params.enableCVCanals && e.r > 1.0) {
+                const canalCount = 6;
+                const canalLen = e.r * 2.0;
+                const canalAlpha = params.nucleusAlpha * 0.45 * 0.3;
+                ctx.strokeStyle = hsla(cvH, 0.30, 0.72, canalAlpha);
+                ctx.lineWidth = 0.5;
+                for (let ci = 0; ci < canalCount; ci++) {
+                  const angle = (ci / canalCount) * TAU;
+                  ctx.beginPath();
+                  ctx.moveTo(vx, vy);
+                  ctx.lineTo(vx + Math.cos(angle) * canalLen, vy + Math.sin(angle) * canalLen);
+                  ctx.stroke();
+                }
+              }
             }
           } else {
             // LEGACY path — VERBATIM (do not tidy).
@@ -3794,6 +3826,21 @@ export function createCellRenderer(
               ctx.beginPath();
               ctx.arc(vx, vy, e.r, 0, TAU);
               ctx.fill();
+              // CV radial canals — star shape (biologist: 6-7 canals, visible during diastole)
+              if (params.enableCVCanals && e.r > 1.0) {
+                const canalCount = 6;
+                const canalLen = e.r * 2.0;
+                const canalAlpha = params.nucleusAlpha * 0.45 * 0.3;
+                ctx.strokeStyle = hsla(cvH, 0.30, 0.72, canalAlpha);
+                ctx.lineWidth = 0.5;
+                for (let ci = 0; ci < canalCount; ci++) {
+                  const angle = (ci / canalCount) * TAU;
+                  ctx.beginPath();
+                  ctx.moveTo(vx, vy);
+                  ctx.lineTo(vx + Math.cos(angle) * canalLen, vy + Math.sin(angle) * canalLen);
+                  ctx.stroke();
+                }
+              }
             }
           }
         }
@@ -3927,7 +3974,7 @@ export function createCellRenderer(
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
         const mSat = params.membraneSat ?? 0.85;
-        ctx.strokeStyle = hsla(baseHue, mSat * 0.94, params.membraneLightness ?? 0.60, 0.9);
+        ctx.strokeStyle = hsla(baseHue, mSat * 0.94, effectiveMembraneLightness, 0.9);
         ctx.lineWidth = 1.8;
         ctx.stroke();
 
@@ -3949,7 +3996,7 @@ export function createCellRenderer(
           const midAngle = Math.atan2(midPt[1] - cy, midPt[0] - cx);
           const hue = iridescentHue(midAngle, t, audioLevel, baseHue, params);
 
-          ctx.strokeStyle = hsla(hue, mSat, params.membraneLightness ?? 0.60, 0.85);
+          ctx.strokeStyle = hsla(hue, mSat, effectiveMembraneLightness, 0.85);
           ctx.lineWidth = 2.0;
           ctx.beginPath();
           ctx.moveTo(splinePoints[segStart][0], splinePoints[segStart][1]);
