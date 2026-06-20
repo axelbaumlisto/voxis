@@ -8520,8 +8520,12 @@ describe("trichocyst discharge (v3.8E)", () => {
     expect(CELL_DEFAULTS.trichocystLengthMul).toBe(3.0);
   });
 
-  it("trichocystDecay defaults to 5.0", () => {
-    expect(CELL_DEFAULTS.trichocystDecay).toBe(5.0);
+  it("trichocystDecay defaults to 2.0 (v3.9B: slower fade for visibility)", () => {
+    expect(CELL_DEFAULTS.trichocystDecay).toBe(2.0);
+  });
+
+  it("trichocystLineWidth defaults to 1.0", () => {
+    expect(CELL_DEFAULTS.trichocystLineWidth).toBe(1.0);
   });
 
   it("enableTrichocysts=false (default) \u2192 no trichocyst strokes during startle", () => {
@@ -8807,6 +8811,156 @@ describe("trichocyst discharge (v3.8E)", () => {
     // No duplicate indices
     const unique = new Set(indices);
     expect(unique.size).toBe(count);
+  });
+
+  it("v3.9B: trichocystDecay param affects needle count over time", () => {
+    // With slow decay (0.5/s), trichocyst needles persist for seconds.
+    // With fast decay (20/s), they vanish within a few frames.
+    // We mock performance.now to advance 16.67ms/frame so dt is realistic.
+
+    function countNeedlesDuringDecay(decay: number): number {
+      let clock = 1000;
+      const rafCalls = setupRaf();
+      // Override setupRaf's static performance.now mock with advancing clock
+      vi.stubGlobal("performance", { now: () => clock });
+      const { ctx, restore } = installCtx();
+      const container = document.createElement("div");
+      const r = createCellRenderer(container, {
+        width: W, height: H,
+        params: {
+          ...CELL_DEFAULTS,
+          enableTrichocysts: true,
+          trichocystCount: 10,
+          trichocystDecay: decay,
+        },
+      });
+      // Idle warmup (5 frames)
+      for (let i = 0; i < 5; i++) {
+        clock += 16.67;
+        r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+      // Trigger startle
+      clock += 16.67;
+      r.update({ mode: "recording", audioLevel: 0.95, spectrumBins: new Array(32).fill(0.9) });
+      if (rafCalls.length) rafCalls.shift()!();
+
+      // Track paths during decay phase (60 idle frames ≈ 1s)
+      type Call = { kind: string; args: number[] };
+      const log: Call[] = [];
+      (ctx.beginPath as ReturnType<typeof vi.fn>).mockImplementation(() => log.push({ kind: "bp", args: [] }));
+      (ctx.moveTo as ReturnType<typeof vi.fn>).mockImplementation((...a: number[]) => log.push({ kind: "mt", args: a }));
+      (ctx.lineTo as ReturnType<typeof vi.fn>).mockImplementation((...a: number[]) => log.push({ kind: "lt", args: a }));
+      (ctx.stroke as ReturnType<typeof vi.fn>).mockImplementation(() => log.push({ kind: "st", args: [] }));
+
+      for (let i = 0; i < 60; i++) {
+        clock += 16.67;
+        r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+
+      // Extract long single-segment paths (trichocyst needles > 10px)
+      let needles = 0;
+      for (let i = 0; i < log.length - 3; i++) {
+        if (log[i].kind === "bp" && log[i+1].kind === "mt" &&
+            log[i+2].kind === "lt" && log[i+3].kind === "st") {
+          const dx = log[i+2].args[0] - log[i+1].args[0];
+          const dy = log[i+2].args[1] - log[i+1].args[1];
+          if (Math.hypot(dx, dy) > 10) needles++;
+        }
+      }
+      r.destroy();
+      restore();
+      return needles;
+    }
+
+    const slowNeedles = countNeedlesDuringDecay(0.5);  // half-life ~1.4s
+    const fastNeedles = countNeedlesDuringDecay(20.0); // half-life ~35ms
+    // Slow decay should produce MORE needle draws than fast decay
+    expect(slowNeedles).toBeGreaterThan(fastNeedles);
+    // Slow should have many (10 needles × many frames)
+    expect(slowNeedles).toBeGreaterThan(100);
+  });
+
+  it("v3.9B: trichocystLineWidth param is respected", () => {
+    const rafCalls = setupRaf();
+    const { ctx, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableTrichocysts: true,
+        trichocystLineWidth: 2.5,
+      },
+    });
+    // Warmup idle
+    for (let i = 0; i < 5; i++) {
+      r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    // Track lineWidth assignments
+    const lineWidths: number[] = [];
+    Object.defineProperty(ctx, "lineWidth", {
+      set: (v: number) => { lineWidths.push(v); },
+      get: () => lineWidths[lineWidths.length - 1] ?? 1,
+      configurable: true,
+    });
+    // Trigger startle
+    r.update({ mode: "recording", audioLevel: 0.9, spectrumBins: new Array(32).fill(0.8) });
+    if (rafCalls.length) rafCalls.shift()!();
+    // Should have set lineWidth=2.5 at least once (for the trichocyst block)
+    expect(lineWidths).toContain(2.5);
+    r.destroy();
+    restore();
+  });
+
+  it("v3.9B: trichocystAlpha persists independently from startle", () => {
+    // Verify that trichocyst alpha outlives startle (different decay rates).
+    // startleDecay=0.90 at real dt=0.0167 decays rapidly.
+    // trichocystDecay=0.3 at dt=0.0167 is slow. After 60 frames (~1s),
+    // trichocystAlpha ≈ e^(-0.3*1) ≈ 0.74 (still above 0.005 threshold).
+    let clock = 1000;
+    const rafCalls = setupRaf();
+    vi.stubGlobal("performance", { now: () => clock });
+    const { ctx, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableTrichocysts: true,
+        trichocystCount: 10,
+        trichocystDecay: 0.3,    // very slow — half-life ~2.3s
+        startleDecay: 0.90,      // very fast startle decay
+      },
+    });
+    // Warmup
+    for (let i = 0; i < 5; i++) {
+      clock += 16.67;
+      r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    // Trigger startle
+    clock += 16.67;
+    r.update({ mode: "recording", audioLevel: 0.95, spectrumBins: new Array(32).fill(0.9) });
+    if (rafCalls.length) rafCalls.shift()!();
+    // Run 60 idle frames (~1s) — startle should be near-zero
+    for (let i = 0; i < 60; i++) {
+      clock += 16.67;
+      r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    // Now check that trichocysts are STILL being drawn (stroke calls should occur)
+    let strokeCount = 0;
+    (ctx.stroke as ReturnType<typeof vi.fn>).mockImplementation(() => { strokeCount++; });
+    clock += 16.67;
+    r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+    if (rafCalls.length) rafCalls.shift()!();
+    // With trichocystDecay=0.3 and ~1s elapsed, trichocystAlpha ≈ 0.74 >> 0.005
+    expect(strokeCount).toBeGreaterThan(0);
+    r.destroy();
+    restore();
   });
 
   it("gate-off golden: CELL_DEFAULTS with trichocysts off renders identically", () => {

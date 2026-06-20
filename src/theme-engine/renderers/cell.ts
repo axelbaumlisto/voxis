@@ -533,8 +533,10 @@ export interface CellParams {
    * ciliaLength). Default 3.0. */
   trichocystLengthMul?: number;
   /** v3.8E: alpha decay rate per second — controls how quickly the needles
-   * fade after a startle fires. Default 5.0 (~200ms visible). */
+   * fade after a startle fires. Default 2.0 (~500ms visible). */
   trichocystDecay?: number;
+  /** v3.9B: trichocyst needle stroke width in CSS px. Default 1.0. */
+  trichocystLineWidth?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -676,7 +678,8 @@ export const CELL_DEFAULTS: CellParams = {
   enableTrichocysts: false,
   trichocystCount: 30,
   trichocystLengthMul: 3.0,
-  trichocystDecay: 5.0,
+  trichocystDecay: 2.0,
+  trichocystLineWidth: 1.0,
   // Commit 26: PLURAL pair of asynchronous contractile vacuoles. OFF
   // (dark-launch) so contractileVacuolePair returns [] and the gated draw
   // block is skipped -> all goldens stay byte-identical.
@@ -3406,6 +3409,8 @@ export function createCellRenderer(
   let growth = 0;
   let energySmoothed = -1; // M6: EMA-chased energy (lazy seed on first frame)
   let startle = 0;
+  let trichocystAlpha = 0;  // v3.9B: independent trichocyst fade (decoupled from startle)
+  let triPrevStartle = 0;   // v3.9B: previous startle for onset detection (rising edge)
   let baseline = 0; // slow-tracking audio baseline for startle edge detection
   let drift01 = 0; // smoothed drift activation (0=centered, 1=full drift)
 
@@ -3793,17 +3798,30 @@ export function createCellRenderer(
           }
         }
 
-        // --- v3.8E: Trichocyst discharge ---
+        // --- v3.8E+v3.9B: Trichocyst discharge ---
         // Paramecium discharges crystalline trichocyst needles radially outward
         // from the pellicle on startle (defense reflex). Drawn AFTER cilia so
-        // needles visually project THROUGH the fringe. Alpha fades with startle.
-        if (params.enableTrichocysts && startle > 0.01) {
+        // needles visually project THROUGH the fringe.
+        // v3.9B: trichocystAlpha decays independently via trichocystDecay param
+        // (decoupled from startle fade), making needles visible ~500ms.
+        if (params.enableTrichocysts) {
+          // Detect startle onset (rising edge) to re-fire trichocystAlpha
+          if (startle > triPrevStartle + 0.05) {
+            trichocystAlpha = 1.0;
+          }
+          // Exponential decay at trichocystDecay rate (default 2.0 = ~500ms)
+          const triDecayRate = params.trichocystDecay ?? 2.0;
+          trichocystAlpha *= Math.exp(-triDecayRate * dt);
+          if (trichocystAlpha < 0.005) trichocystAlpha = 0;
+          triPrevStartle = startle;
+        }
+        if (params.enableTrichocysts && trichocystAlpha > 0.005) {
           const triCount = params.trichocystCount ?? 30;
           const triLen = (params.trichocystLengthMul ?? 3.0) * baseR * (params.ciliaLength ?? 0.45);
-          const triAlpha = startle * 0.7; // fades with startle decay
+          const triAlpha = trichocystAlpha * 0.7;
           ctx.save();
           ctx.strokeStyle = hsla(0, 0.0, 0.95, triAlpha);
-          ctx.lineWidth = 0.5;
+          ctx.lineWidth = params.trichocystLineWidth ?? 1.0;
           ctx.lineCap = "round";
           // Use uniformly-spaced points on the deformed+squeezed membrane contour
           const cN = contourPoints.length;
