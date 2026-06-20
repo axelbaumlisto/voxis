@@ -292,6 +292,25 @@ export interface CellParams {
   vacuolePeriod?: number;
   /** F11: vacuole max radius as a fraction of baseR. Default 0.18. */
   vacuoleMaxFrac?: number;
+  /** Commit 26 (OPT, default off): render the PLURAL pair of contractile
+   * vacuoles (anterior + posterior), each on its own asynchronous clock. */
+  enableVacuoles?: boolean;
+  /** Commit 26: body-frame bearing (rad, relative to anterior=squeezePhi) of
+   * the anterior contractile vacuole. Default 1.9. */
+  vacuoleAnteriorBearing?: number;
+  /** Commit 26: body-frame bearing of the posterior contractile vacuole
+   * (opposite flank, rear). Default -1.9. */
+  vacuolePosteriorBearing?: number;
+  /** Commit 26: anterior CV cycle period (seconds). Default 9. */
+  vacuoleAnteriorPeriod?: number;
+  /** Commit 26: posterior CV cycle period (seconds). DIFFERENT from anterior
+   * so the two pulse asynchronously. Default 13. */
+  vacuolePosteriorPeriod?: number;
+  /** Commit 26: R_max as a fraction of baseR for the pair. Default 0.16. */
+  vacuolePairMaxFrac?: number;
+  /** Commit 26: posterior phase offset (fraction of a cycle) so the two CVs
+   * do not start together. Default 0.5. */
+  vacuolePosteriorPhase?: number;
   /** H4 (OPT, default off): advect ambient motes by the body's dipolar wake so a
    * swimming cell visibly drags the surrounding fluid. */
   enableFlowField?: boolean;
@@ -488,6 +507,16 @@ export const CELL_DEFAULTS: CellParams = {
   bodyProfileTaper: 0.27,
   bodyAspect: 3,
   bodyVentralBend: 0,
+  // Commit 26: PLURAL pair of asynchronous contractile vacuoles. OFF
+  // (dark-launch) so contractileVacuolePair returns [] and the gated draw
+  // block is skipped -> all goldens stay byte-identical.
+  enableVacuoles: false,
+  vacuoleAnteriorBearing: 1.9,
+  vacuolePosteriorBearing: -1.9,
+  vacuoleAnteriorPeriod: 9,
+  vacuolePosteriorPeriod: 13,
+  vacuolePairMaxFrac: 0.16,
+  vacuolePosteriorPhase: 0.5,
 };
 
 
@@ -2239,6 +2268,51 @@ export function contractileVacuole(t: number, baseR: number, params: CellParams)
 }
 
 /**
+ * Commit 26 — TWO contractile vacuoles (anterior + posterior). A real
+ * Paramecium has a pair of CVs at opposite ends, each pulsing on its OWN clock
+ * (asynchronous: different periods + a posterior phase offset). This pure
+ * helper returns the pair's geometry in the WORLD frame (pre-affine-squeeze):
+ * each entry's `bearing` (world angle = squeezePhi + body-frame bearing, so the
+ * pair rotates with the body heading/spin) and `r` (px, the live vesicle
+ * radius). REUSES `contractileVacuole` for the fill/collapse curve (DRY) by
+ * passing a time-shifted `t` and a per-vacuole period/maxFrac. The renderer
+ * places each vesicle at a clamped `placeR` along `bearing` (containment vs
+ * `minMembraneR` lives in the renderer, since that is not known here). Returns
+ * [] when `enableVacuoles` is off so the gated draw block is skipped. Pure &
+ * deterministic — depends only on (t, baseR, squeezePhi, params).
+ */
+export function contractileVacuolePair(
+  t: number,
+  baseR: number,
+  squeezePhi: number,
+  params: CellParams,
+): Array<{ bearing: number; r: number }> {
+  if (!params.enableVacuoles) return [];
+  const maxFrac = params.vacuolePairMaxFrac ?? 0.16;
+  const antPeriod = params.vacuoleAnteriorPeriod ?? 9;
+  const postPeriod = params.vacuolePosteriorPeriod ?? 13;
+  const antBearing = params.vacuoleAnteriorBearing ?? 1.9;
+  const postBearing = params.vacuolePosteriorBearing ?? -1.9;
+  const postPhase = params.vacuolePosteriorPhase ?? 0.5;
+  // anterior CV: phase offset 0; posterior CV: out of phase by a fraction of
+  // its own cycle so the two never start together (asynchronous).
+  const anterior = contractileVacuole(t, baseR, {
+    ...params,
+    vacuolePeriod: antPeriod,
+    vacuoleMaxFrac: maxFrac,
+  });
+  const posterior = contractileVacuole(t + postPhase * postPeriod, baseR, {
+    ...params,
+    vacuolePeriod: postPeriod,
+    vacuoleMaxFrac: maxFrac,
+  });
+  return [
+    { bearing: squeezePhi + antBearing, r: anterior.r },
+    { bearing: squeezePhi + postBearing, r: posterior.r },
+  ];
+}
+
+/**
  * H4 (OPT) — ambient flow field from the body's swimming wake. A low-Reynolds
  * swimmer drags fluid; we model the far field as a 2-D SOURCE DIPOLE (doublet),
  * the potential-flow signature of a translating body:
@@ -3056,6 +3130,31 @@ export function createCellRenderer(
             ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.70, params.nucleusAlpha * 0.45);
             ctx.beginPath();
             ctx.arc(vx, vy, vac.r, 0, TAU);
+            ctx.fill();
+          }
+        }
+
+        // Commit 26 (gate OFF): the PLURAL pair of asynchronous contractile
+        // vacuoles (anterior + posterior). contractileVacuolePair returns the
+        // pair's world bearings + live radii (reusing the single-vacuole
+        // fill/collapse curve per CV). Each is placed + clamped + squeezed with
+        // the same pattern as the single block. Skipped (returns []) unless
+        // enableVacuoles is on, so all goldens stay byte-identical.
+        if (params.enableVacuoles) {
+          const pair = contractileVacuolePair(t, baseR, squeezePhi, params);
+          for (const e of pair) {
+            if (e.r < 0.5) continue;
+            // Containment: clamp placeR so the WHOLE vesicle stays inside the
+            // live minimum membrane radius, even when a pinch brings the wall in.
+            const placeR = Math.max(0, Math.min(baseR * 0.6, minMembraneR - e.r));
+            const vcx0 = cx + Math.cos(e.bearing) * placeR;
+            const vcy0 = cy + Math.sin(e.bearing) * placeR;
+            const [vx, vy] = affineSqueezePoints(
+              [[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params,
+            )[0];
+            ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.70, params.nucleusAlpha * 0.45);
+            ctx.beginPath();
+            ctx.arc(vx, vy, e.r, 0, TAU);
             ctx.fill();
           }
         }
