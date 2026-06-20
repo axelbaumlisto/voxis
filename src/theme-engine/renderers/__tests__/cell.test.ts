@@ -5558,6 +5558,7 @@ describe("Commit 28 — food vacuoles + micronucleus", () => {
     expect(CELL_DEFAULTS.foodVacuoleMaxRadiusFrac).toBe(0.62);
     expect(CELL_DEFAULTS.foodVacuoleSizePx).toBe(3.0);
     expect(CELL_DEFAULTS.foodVacuoleDigestPeriod).toBe(30);
+    expect(CELL_DEFAULTS.foodVacuoleSizeMul).toBe(1.0);
     expect(CELL_DEFAULTS.micronucleusSizeFrac).toBe(0.20);
     expect(CELL_DEFAULTS.micronucleusOffsetFrac).toBe(1.15);
   });
@@ -5619,6 +5620,24 @@ describe("Commit 28 — food vacuoles + micronucleus", () => {
     expect(Math.abs(r - r0) / r0).toBeLessThan(0.01);
     // phase carried through unchanged
     expect(v.phase).toBe(0.42);
+  });
+
+  it("(c2) foodVacuoleSizeMul: default 1.0 preserves legacy; >1 scales draw radius", () => {
+    const P = { ...CELL_DEFAULTS };
+    // Default 1.0 — multiplier is identity
+    expect(P.foodVacuoleSizeMul).toBe(1.0);
+    // Base size computation: fvSizePx = (foodVacuoleSizePx ?? 3.0) * (foodVacuoleSizeMul ?? 1.0)
+    const baseSizePx = (P.foodVacuoleSizePx ?? 3.0) * (P.foodVacuoleSizeMul ?? 1.0);
+    expect(baseSizePx).toBe(3.0); // identity
+    // With mul=1.5, draw radius scales up
+    const scaled = (P.foodVacuoleSizePx ?? 3.0) * 1.5;
+    expect(scaled).toBeCloseTo(4.5, 9);
+    // With mul=2.0
+    const double = (P.foodVacuoleSizePx ?? 3.0) * 2.0;
+    expect(double).toBeCloseTo(6.0, 9);
+    // Omitted param defaults to 1.0 (legacy)
+    const noMul = (P.foodVacuoleSizePx ?? 3.0) * (undefined ?? 1.0);
+    expect(noMul).toBe(3.0);
   });
 
   it("(d) micronucleusTransform: smaller than macro, offset just outside, scales, deterministic", () => {

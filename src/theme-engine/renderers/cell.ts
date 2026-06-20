@@ -391,6 +391,10 @@ export interface CellParams {
   /** Commit 28: seconds over which a vacuole shrinks from full to small then
    * resets (digest cycle). Default 30. */
   foodVacuoleDigestPeriod?: number;
+  /** v3.8D: food vacuole radius multiplier relative to base foodVacuoleSizePx.
+   * Makes food vacuoles visually distinct from granules at overlay scale.
+   * Default 1.0 = legacy (same size). */
+  foodVacuoleSizeMul?: number;
   /** Commit v3.5F: macronucleus major/minor axis ratio. Default 1.8 (bean-shaped).
    * 1.0 = circle. Only applies when enableInteriorField is on. */
   nucleusAspect?: number;
@@ -684,6 +688,7 @@ export const CELL_DEFAULTS: CellParams = {
   foodVacuoleMaxRadiusFrac: 0.62,
   foodVacuoleSizePx: 3.0,
   foodVacuoleDigestPeriod: 30,
+  foodVacuoleSizeMul: 1.0,
   micronucleusSizeFrac: 0.20,
   micronucleusOffsetFrac: 1.15,
   // Commit 32e: body-normalised (u, s) anchors for the macronucleus + the two
@@ -4094,7 +4099,7 @@ export function createCellRenderer(
         // radius then squeezed with the body affine. Skipped (foodVacuoles stays
         // null) unless enableOrganelles is on, so all goldens stay byte-identical.
         if (params.enableOrganelles && (params.foodVacuoleCount ?? 0) > 0) {
-          const fvSizePx = params.foodVacuoleSizePx ?? 3.0;
+          const fvSizePx = (params.foodVacuoleSizePx ?? 3.0) * (params.foodVacuoleSizeMul ?? 1.0);
           if (params.enableInteriorField) {
             // Commit 32d (gate ON): body-coord path. Food vacuoles ride the SAME
             // divergence-free streamfunction loop as the granules
