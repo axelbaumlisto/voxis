@@ -1425,9 +1425,17 @@ export function driftActivation(
   prev: number,
   recording: boolean,
   rate: number,
+  dt?: number,
 ): number {
   const target = recording ? 1 : 0;
-  const raw = prev + (target - prev) * rate;
+  // F8: frame-rate independence. `rate` is the historical per-frame (1/60 s) lerp
+  // factor. Generalize to any dt by compounding it: alpha = 1 - (1-rate)^(dt*60),
+  // which equals `rate` exactly at dt=1/60 (back-compat) and keeps the time
+  // constant fixed regardless of frame rate. When dt is omitted, fall back to
+  // the legacy per-frame factor.
+  const r = rate < 0 ? 0 : rate > 1 ? 1 : rate;
+  const alpha = dt === undefined ? r : 1 - Math.pow(1 - r, dt * 60);
+  const raw = prev + (target - prev) * alpha;
   if (raw > 1) return 1;
   if (raw < 0) return 0;
   return raw;
@@ -1700,10 +1708,14 @@ export function createCellRenderer(
       const sdx = Math.cos(startleAngle) * startle * params.startleMaxPx;
       const sdy = Math.sin(startleAngle) * startle * params.startleMaxPx;
 
-      // Idle morphing only when at rest: full at idle/silence, fades as audio rises
-      // or while actively recording, so it never fights speech-driven deformation.
+      // Idle morphing only when at rest: full at idle/silence, fades as the cell
+      // becomes active. M9: drive the fade from the SMOOTHED activity scalar
+      // (energy+growth EMA) via a smoothstep knee instead of a hard linear knee
+      // on RAW audioLevel, so noisy audio around the threshold no longer makes
+      // the idle morph flicker on/off. idle + active form a partition of unity:
+      // idleFactor = (1 - smoothstep(activity)) so the two never both spike.
       const recordingFade = s.mode === "recording" ? 0.3 : 1;
-      const idleFactor = Math.max(0, 1 - audioLevel * 3) * recordingFade;
+      const idleFactor = (1 - smoothstep(activity / 0.33)) * recordingFade;
 
       // Build per-vertex target deformation fractions
       const targetDeform = buildTargetDeformation(
@@ -1729,7 +1741,7 @@ export function createCellRenderer(
       // Drift activation ramp: cell stays centered at rest, drifts while recording.
       // setPointerCapture keeps the recording session even if the cell wanders
       // off the finger, so visual drift during recording is fine.
-      drift01 = driftActivation(drift01, s.mode === "recording", params.driftActivationRate ?? 0.02);
+      drift01 = driftActivation(drift01, s.mode === "recording", params.driftActivationRate ?? 0.02, dt);
 
       // Hoisted cell centre + radius: includes drift blend, startle jolt (sdx,sdy) and growth swell.
       const baseR = resolveBaseRadius(width, height, params, growth);

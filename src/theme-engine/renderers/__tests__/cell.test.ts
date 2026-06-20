@@ -3494,3 +3494,63 @@ describe("Commit 8c — biology param corrections", () => {
     expect(CELL_DEFAULTS.dragCoeff).toBeCloseTo(0.5, 12);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Commit 9 — robustness seams (F8 dt-consistency, M9 idle de-flicker)
+// ---------------------------------------------------------------------------
+describe("driftActivation F8 frame-rate independence", () => {
+  it("equals the legacy per-frame factor at dt=1/60 (back-compat)", () => {
+    const legacy = driftActivation(0.3, true, 0.02);
+    const dtForm = driftActivation(0.3, true, 0.02, 1 / 60);
+    expect(dtForm).toBeCloseTo(legacy, 12);
+  });
+
+  it("omitting dt reproduces the exact legacy behavior", () => {
+    expect(driftActivation(0.5, true, 0.02)).toBe(0.5 + (1 - 0.5) * 0.02);
+  });
+
+  it("reaches the same value after equal wall-clock time at different frame rates", () => {
+    // 1 second of activation: 60 steps @16.67ms vs 30 steps @33.3ms must match.
+    let a = 0, b = 0;
+    for (let i = 0; i < 60; i++) a = driftActivation(a, true, 0.02, 1 / 60);
+    for (let i = 0; i < 30; i++) b = driftActivation(b, true, 0.02, 1 / 30);
+    expect(b).toBeCloseTo(a, 4);
+  });
+
+  it("still clamps to [0,1] and moves toward the target", () => {
+    expect(driftActivation(0.99, true, 0.5, 0.05)).toBeLessThanOrEqual(1);
+    expect(driftActivation(0.01, false, 0.5, 0.05)).toBeGreaterThanOrEqual(0);
+    expect(driftActivation(0, true, 0.02, 1 / 60)).toBeGreaterThan(0); // toward 1
+    expect(driftActivation(1, false, 0.02, 1 / 60)).toBeLessThan(1); // toward 0
+  });
+});
+
+describe("M9 idle de-flicker (smoothstep on activity)", () => {
+  // idleFactor = (1 - smoothstep(activity/0.33)) * recordingFade. The property
+  // we lock: it is monotone-NONincreasing in activity and bounded/continuous —
+  // no hard knee that flips on small audio fluctuations.
+  const idleFactorOf = (activity: number) => 1 - smoothstep(activity / 0.33);
+
+  it("is full (1) at zero activity and ~0 once active", () => {
+    expect(idleFactorOf(0)).toBeCloseTo(1, 12);
+    expect(idleFactorOf(0.33)).toBeCloseTo(0, 12);
+    expect(idleFactorOf(1)).toBe(0);
+  });
+
+  it("is monotone non-increasing in activity (no flicker knee)", () => {
+    let prev = 2;
+    for (let a = 0; a <= 1.0001; a += 0.02) {
+      const f = idleFactorOf(a);
+      expect(f).toBeLessThanOrEqual(prev + 1e-12);
+      prev = f;
+    }
+  });
+
+  it("has bounded slope near the threshold (smoothstep has zero-derivative ends)", () => {
+    // smoothstep' = 0 at both ends, so small jitter at activity=0 or 0.33 barely
+    // moves idleFactor (unlike the old linear knee whose slope was a constant 3).
+    const eps = 0.005;
+    const dAtZero = Math.abs(idleFactorOf(eps) - idleFactorOf(0));
+    expect(dAtZero).toBeLessThan(0.01); // gentle, not the old ~3*eps*... jump
+  });
+});
