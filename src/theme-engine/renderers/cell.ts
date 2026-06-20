@@ -2017,6 +2017,84 @@ export function bodyProfileAreaScale(
 }
 
 /**
+ * Commit 31b — interpolate the slipper profile radius at a given BODY-frame
+ * angle from the sampled (angle, radius) polar table. The profile is
+ * star-convex, so radius(angle) is single-valued. `pts` is the raw, unsorted
+ * sampling (ascending parameter t, anterior at +x). We sort by angle once and
+ * linearly interpolate, wrapping the last->first pair across 2pi. Pure.
+ */
+export function interpProfileRadius(
+  angle: number,
+  pts: Array<{ ang: number; rad: number }>,
+): number {
+  const n = pts.length;
+  if (n === 0) return 0;
+  // Normalise query angle to [0, 2pi).
+  let a = angle % TAU;
+  if (a < 0) a += TAU;
+  // Sorted-by-angle copy (ascending).
+  const sorted = pts
+    .map((p) => ({ ang: ((p.ang % TAU) + TAU) % TAU, rad: p.rad }))
+    .sort((u, v) => u.ang - v.ang);
+  // Find the bracketing pair [sorted[i], sorted[i+1]] with sorted[i].ang <= a.
+  for (let i = 0; i < n; i++) {
+    const lo = sorted[i];
+    const hi = sorted[(i + 1) % n];
+    let hiAng = hi.ang;
+    // Wrap the seam pair (last -> first) across 2pi.
+    if (i === n - 1) hiAng += TAU;
+    if (a >= lo.ang && a <= hiAng) {
+      const span = hiAng - lo.ang;
+      const f = span > 0 ? (a - lo.ang) / span : 0;
+      return lo.rad + (hi.rad - lo.rad) * f;
+    }
+  }
+  // a < sorted[0].ang: fall in the seam pair (last -> first wrapped).
+  const lo = sorted[n - 1];
+  const hi = sorted[0];
+  const span = hi.ang + TAU - lo.ang;
+  const aShift = a + TAU;
+  const f = span > 0 ? (aShift - lo.ang) / span : 0;
+  return lo.rad + (hi.rad - lo.rad) * f;
+}
+
+/**
+ * Commit 31b — sample the asymmetric slipper profile as a deform[]-style array
+ * of per-canvas-angle radial deviations (radius = baseR*(1+deform[j])). The
+ * slipper lives in deform[] so BOTH the membrane and the cilia (which read the
+ * same {deform, squeezeK, squeezePhi} contour) ride it. Area-neutral (keeps the
+ * equivalent circle's area) and body-frame-rotated by `bodyHeading` so the wide
+ * anterior end points along the swim direction. Pure & deterministic.
+ */
+export function bodyProfileDeform(
+  sampleCount: number,
+  bodyHeading: number,
+  baseR: number,
+  params: CellParams,
+): number[] {
+  const N = Math.max(3, Math.floor(sampleCount));
+  // 1. Sample the profile polygon in the BODY frame (anterior at +x, t=0).
+  const pts: Array<{ ang: number; rad: number }> = [];
+  for (let k = 0; k < N; k++) {
+    const t = (k / N) * TAU;
+    const [px, py] = bodyProfilePoint(t, baseR, params);
+    pts.push({ ang: Math.atan2(py, px), rad: Math.hypot(px, py) });
+  }
+  // 2. Area-neutral scale so the slipper keeps the circle's area.
+  const scale = bodyProfileAreaScale(baseR, params, N);
+  // 3. For each uniform CANVAS vertex angle phi_j, convert to body angle and
+  //    interpolate the profile radius; bake the heading in here.
+  const out: number[] = [];
+  for (let j = 0; j < N; j++) {
+    const phi = (j / N) * TAU;
+    const bodyAng = phi - bodyHeading;
+    const r = interpProfileRadius(bodyAng, pts) * scale;
+    out.push(r / baseR - 1);
+  }
+  return out;
+}
+
+/**
  * F11 (OPT) — contractile vacuole. A peripheral vesicle that slowly FILLS
  * (diastole) then rapidly COLLAPSES (systole) each `vacuolePeriod`. Phase
  * `u = (t/period) mod 1`; radius `R_max * smoothstep(0, 0.85, u)` rising to a
@@ -2656,6 +2734,16 @@ export function createCellRenderer(
       const floorRadius = baseR * 0.35;
       const sampleCount = deform.length;
 
+      // Commit 31b (gate OFF by default): the authentic asymmetric slipper. The
+      // profile carries the WHOLE body form (aspect + fore-aft taper), so it
+      // REPLACES the radial deform[] shape. It lives in deform[] so the cilia
+      // (which read the same {deform, squeezeK, squeezePhi} contour) ride the
+      // slipper automatically. `bodyHeading` is the previous frame's smoothed
+      // value here (recomputed below); a one-frame-stale heading is invisible.
+      if (params.enableBodyProfile) {
+        deform = bodyProfileDeform(sampleCount, bodyHeading, baseR, params);
+      }
+
       const smoothedPoints: Array<[number, number]> = [];
       for (let i = 0; i < sampleCount; i++) {
         const angle = (i / sampleCount) * TAU;
@@ -2683,7 +2771,14 @@ export function createCellRenderer(
       // body-heading frame. k=prolateAspect(speedNorm) (round at rest -> identity
       // when still), phi=bodyHeading; det=1 keeps the C1 area. Gated by
       // enableAffine; identity (k=1) when off OR when speedNorm=0.
-      const squeezeK = params.enableAffine ? prolateAspect(speedNorm, params) : 1;
+      // Commit 31b: when the slipper profile is on, the profile already carries
+      // the aspect AND heading (baked into bodyProfileDeform), so FORCE k=1 here
+      // to stop the affine from double-elongating. Otherwise the legacy path.
+      const squeezeK = params.enableBodyProfile
+        ? 1
+        : params.enableAffine
+          ? prolateAspect(speedNorm, params)
+          : 1;
       const squeezePhi = bodyHeading;
       const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
 
