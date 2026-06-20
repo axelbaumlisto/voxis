@@ -11,6 +11,9 @@ import {
   fbm,
   smoothstep,
   cellEnergy,
+  cellActivity,
+  swimSpeed,
+  ciliaBeatHzEff,
   cellRadius,
   pseudopodOffset,
   startleOffset,
@@ -577,13 +580,13 @@ describe("Commit 4: pipeline gates + frozen pre-B/C baseline", () => {
     enableActivity: false,
   };
 
-  it("gate defaults: B1 saturation + C1 areaNorm ON; affine + activity still OFF", () => {
-    // Commit 6 (B1) flipped enableSaturation; Commit 7 (C1) flips enableAreaNorm.
-    // enableAffine (D4) and enableActivity (G) land later.
+  it("gate defaults: B1 saturation + C1 areaNorm + G activity ON; affine still OFF", () => {
+    // Commit 6 (B1) flipped enableSaturation; Commit 7 (C1) flips enableAreaNorm;
+    // Commit 8a (G) flips enableActivity. enableAffine (D4) lands in commit 8b.
     expect(CELL_DEFAULTS.enableSaturation).toBe(true);
     expect(CELL_DEFAULTS.enableAreaNorm).toBe(true);
+    expect(CELL_DEFAULTS.enableActivity).toBe(true);
     expect(CELL_DEFAULTS.enableAffine).toBe(false);
-    expect(CELL_DEFAULTS.enableActivity).toBe(false);
   });
 
   it("resting deformation matches frozen pre-B/C baseline (gates off)", () => {
@@ -3166,5 +3169,119 @@ describe("CellPersistState serialization", () => {
 
   it("rejects negative elapsed", () => {
     expect(parseCellState(JSON.stringify({ driftPhase: 0, growth: 0, elapsed: -1 }))).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 8a — activity backbone (G1 cellActivity, G2 propulsion, F5 memoryless)
+// ---------------------------------------------------------------------------
+describe("cellActivity (G1)", () => {
+  it("is the weighted blend 0.6*energy + 0.4*growth", () => {
+    expect(cellActivity(1, 0)).toBeCloseTo(0.6, 12);
+    expect(cellActivity(0, 1)).toBeCloseTo(0.4, 12);
+    expect(cellActivity(1, 1)).toBeCloseTo(1.0, 12);
+    expect(cellActivity(0, 0)).toBeCloseTo(0.0, 12);
+    expect(cellActivity(0.5, 0.5)).toBeCloseTo(0.5, 12);
+  });
+
+  it("clamps to [0,1]", () => {
+    expect(cellActivity(2, 2)).toBe(1);
+    expect(cellActivity(-1, -1)).toBe(0);
+    expect(cellActivity(5, 0)).toBe(1);
+  });
+
+  it("honors custom weights", () => {
+    expect(cellActivity(1, 0, { activityEnergyWeight: 0.8, activityGrowthWeight: 0.2 })).toBeCloseTo(0.8, 12);
+  });
+
+  it("is pure/deterministic", () => {
+    expect(cellActivity(0.37, 0.21)).toBe(cellActivity(0.37, 0.21));
+  });
+});
+
+describe("swimSpeed (G2 propulsion law)", () => {
+  const W = 160, H = 160;
+  const P = { ...CELL_DEFAULTS };
+
+  it("is ~zero at activity 0 (silence stops the cell, low-Re no coasting)", () => {
+    expect(swimSpeed(0, W, H, P)).toBe(0);
+  });
+
+  it("is monotone increasing in activity", () => {
+    let prev = -1;
+    for (const a of [0, 0.2, 0.4, 0.6, 0.8, 1.0]) {
+      const u = swimSpeed(a, W, H, P);
+      expect(u).toBeGreaterThanOrEqual(prev);
+      prev = u;
+    }
+  });
+
+  it("is linear in activity: U(2a) ~= 2*U(a)", () => {
+    const u1 = swimSpeed(0.3, W, H, P);
+    const u2 = swimSpeed(0.6, W, H, P);
+    expect(Math.abs(u2 / u1 - 2)).toBeLessThan(1e-9);
+  });
+
+  it("scales peak speed by swimSpeedMaxFrac*min(w,h)", () => {
+    expect(swimSpeed(1, W, H, P)).toBeCloseTo((P.swimSpeedMaxFrac ?? 0.06) * 160, 9);
+  });
+
+  it("clamps activity to [0,1]", () => {
+    expect(swimSpeed(5, W, H, P)).toBe(swimSpeed(1, W, H, P));
+    expect(swimSpeed(-5, W, H, P)).toBe(0);
+  });
+});
+
+describe("ciliaBeatHzEff (G2 beat-frequency coupling)", () => {
+  const P = { ...CELL_DEFAULTS, ciliaBeatHz: 0.9, ciliaBeatHzActive: 1.6 };
+
+  it("equals resting Hz at activity 0", () => {
+    expect(ciliaBeatHzEff(0, P)).toBeCloseTo(0.9, 12);
+  });
+
+  it("equals active Hz at activity 1", () => {
+    expect(ciliaBeatHzEff(1, P)).toBeCloseTo(1.6, 12);
+  });
+
+  it("ramps linearly and shares sign of dU/da (both rise with activity)", () => {
+    expect(ciliaBeatHzEff(0.5, P)).toBeCloseTo(1.25, 12);
+    const dHz = ciliaBeatHzEff(0.6, P) - ciliaBeatHzEff(0.3, P);
+    const W = 160, H = 160;
+    const dU = swimSpeed(0.6, W, H, P) - swimSpeed(0.3, W, H, P);
+    expect(Math.sign(dHz)).toBe(Math.sign(dU));
+  });
+});
+
+describe("wanderStep F5 memoryless velocity (G2)", () => {
+  const W = 320, H = 320;
+  const P = { ...CELL_DEFAULTS };
+  const baseR = 17;
+  const start = { x: 160, y: 160, heading: 0.5, vx: 0, vy: 0, clock: 0 };
+
+  it("speed override replaces driftSpeed (drives speed directly)", () => {
+    const fast = wanderStep(start, 0.016, W, H, baseR, P, 100);
+    const slow = wanderStep(start, 0.016, W, H, baseR, P, 1);
+    const dFast = Math.hypot(fast.x - start.x, fast.y - start.y);
+    const dSlow = Math.hypot(slow.x - start.x, slow.y - start.y);
+    expect(dFast).toBeGreaterThan(dSlow * 10);
+  });
+
+  it("is memoryless: dropping drive to ~0 stops motion the SAME step (no coasting)", () => {
+    // Build up motion at high speed for several steps...
+    let s = start;
+    for (let i = 0; i < 20; i++) s = wanderStep(s, 0.016, W, H, baseR, P, 120);
+    const movingSpeed = Math.hypot(s.vx, s.vy);
+    expect(movingSpeed).toBeGreaterThan(50);
+    // ...then cut the drive to 0: velocity must collapse immediately, no inertia.
+    const stopped = wanderStep(s, 0.016, W, H, baseR, P, 0);
+    expect(Math.hypot(stopped.vx, stopped.vy)).toBe(0);
+    expect(Math.hypot(stopped.x - s.x, stopped.y - s.y)).toBe(0);
+  });
+});
+
+describe("Commit 8a — activity gate", () => {
+  it("flips enableActivity ON by default; other later gates stay as set", () => {
+    expect(CELL_DEFAULTS.enableActivity).toBe(true);
+    expect(CELL_DEFAULTS.enableAffine).toBe(false);
   });
 });

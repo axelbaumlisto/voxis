@@ -120,9 +120,13 @@ export interface CellParams {
   // ASYMMETRIC beat: a fast near-straight POWER stroke and a slow strongly-
   // curved RECOVERY stroke; the bending wave travels base->tip; neighbouring
   // cilia beat with a phase lag so a METACHRONAL wave sweeps round the cell. ---
-  /** Beat frequency in Hz (cycles/sec) of a single cilium. ~0.6–1.2 reads as
-   * lively but not buzzing at overlay scale. */
+  /** Beat frequency in Hz (cycles/sec) of a single cilium at REST (activity 0).
+   * ~0.6–1.2 reads as lively but not buzzing at overlay scale. */
   ciliaBeatHz?: number;
+  /** G2: beat frequency in Hz at FULL activity (a=1). The effective beat Hz
+   * ramps f0=ciliaBeatHz -> f1=ciliaBeatHzActive linearly with activity, so a
+   * louder voice beats faster (Stokes-linear U ∝ f). */
+  ciliaBeatHzActive?: number;
   /** Power/recovery time asymmetry in [0,1). 0 = symmetric sine; 0.6 = fast
    * power stroke, slow recovery (more biological). */
   ciliaAsymmetry?: number;
@@ -185,6 +189,13 @@ export interface CellParams {
   enableAffine?: boolean;
   /** Step 2 — single activity scalar `a` driving amplitudes/propulsion [G1, commit 8]. */
   enableActivity?: boolean;
+  /** G2: peak swim speed at a=1 as a fraction of min(w,h) (px/sec = frac·min(w,h)·a).
+   * Replaces the free driftSpeed when enableActivity is on. */
+  swimSpeedMaxFrac?: number;
+  /** G1: weight of instantaneous energy in the activity scalar (default 0.6). */
+  activityEnergyWeight?: number;
+  /** G1: weight of the smoothed growth accumulator in the activity scalar (default 0.4). */
+  activityGrowthWeight?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -221,6 +232,7 @@ export const CELL_DEFAULTS: CellParams = {
   ciliaWaveSpeed: 1.6,
   ciliaCurl: 0.7,
   ciliaBeatHz: 0.9,
+  ciliaBeatHzActive: 1.6,
   ciliaAsymmetry: 0.6,
   ciliaMetachronal: 0.8,
   ciliaSegments: 6,
@@ -241,14 +253,17 @@ export const CELL_DEFAULTS: CellParams = {
   driftActivationRate: 0.02,
   wanderTurnRate: 1.1,
   wanderFreq: 0.6,
+  swimSpeedMaxFrac: 0.06,
+  activityEnergyWeight: 0.6,
+  activityGrowthWeight: 0.4,
   // Pipeline gates. B1 (commit 6) flips enableSaturation ON; C1 (commit 7) flips
-  // enableAreaNorm ON (area held at pi*baseR^2). enableAffine (D4) and
-  // enableActivity (G) land in later commits.
+  // enableAreaNorm ON (area held at pi*baseR^2). G (commit 8a) flips
+  // enableActivity ON. enableAffine (D4) lands in commit 8b.
   enableSaturation: true,
   deformMax: 0.6,
   enableAreaNorm: true,
   enableAffine: false,
-  enableActivity: false,
+  enableActivity: true,
 };
 
 
@@ -313,6 +328,59 @@ export function cellEnergy(
     default:
       return idle;
   }
+}
+
+/**
+ * G1 — master ACTIVITY scalar `a ∈ [0,1]`. ONE coherent drive so that
+ * audio → ciliary beat → swimming all share a single envelope. As of 8a it
+ * drives the swim speed + beat frequency + curl; pseudopod/nucleus amplitude
+ * are moved onto `a` in a later sub-commit (8c), after which raw `audioLevel`
+ * is used for COLOR (iridescentHue) only. Weighted blend of instantaneous energy
+ * (fast) and the smoothed growth accumulator (slow, asymmetric attack/release)
+ * so the cell ramps up promptly but winds down gracefully. (plan G1.)
+ *
+ * Pure & deterministic.
+ */
+export function cellActivity(
+  energy: number,
+  growth: number,
+  params?: Pick<CellParams, "activityEnergyWeight" | "activityGrowthWeight">,
+): number {
+  const we = params?.activityEnergyWeight ?? 0.6;
+  const wg = params?.activityGrowthWeight ?? 0.4;
+  const a = we * energy + wg * growth;
+  return a < 0 ? 0 : a > 1 ? 1 : a;
+}
+
+/**
+ * G2 — propulsion speed law. Low-Reynolds swimming is Stokes-linear: the swim
+ * speed is proportional to the ciliary beat, which we drive by activity `a`
+ * (U_norm = a). There is NO inertia — silence (a→0) means the cell stops in the
+ * SAME frame (memoryless; no coasting). Returns px/sec. (plan G2; low-Re:
+ * research-fluid-medium-motion.md, research-ciliate-propulsion-coupling.md.)
+ */
+export function swimSpeed(
+  activity: number,
+  width: number,
+  height: number,
+  params: CellParams,
+): number {
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  const frac = params.swimSpeedMaxFrac ?? 0.06;
+  return a * frac * Math.min(width, height);
+}
+
+/**
+ * G2 — effective ciliary beat frequency: ramps from the resting `ciliaBeatHz`
+ * (f0) to `ciliaBeatHzActive` (f1) linearly with activity. A louder voice beats
+ * faster, which (Stokes-linear) drives a faster swim — so sign(dU/da) ==
+ * sign(dBeatHz/da). Pure.
+ */
+export function ciliaBeatHzEff(activity: number, params: CellParams): number {
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  const f0 = params.ciliaBeatHz ?? 0.9;
+  const f1 = params.ciliaBeatHzActive ?? 1.6;
+  return f0 + (f1 - f0) * a;
 }
 
 /**
@@ -1350,6 +1418,7 @@ export function wanderStep(
   height: number,
   baseR: number,
   params: CellParams,
+  speedOverride?: number,
 ): WanderState {
   const reach = cellReach(baseR, params);
   const inset = Math.max(params.driftMargin ?? 4, reach);
@@ -1361,10 +1430,16 @@ export function wanderStep(
     return { x: width / 2, y: height / 2, heading: s.heading, vx: 0, vy: 0, clock: (s.clock ?? 0) + dt };
   }
 
-  // Speed in px/sec. driftSpeed historically was a noise-phase rate (~0.03);
-  // reinterpret as a gentle linear speed scaled to the tank so motion reads
-  // the same regardless of window size.
-  const speed = (params.driftSpeed ?? 0.03) * Math.min(width, height) * 1.2;
+  // Speed in px/sec. G2: when an activity-driven swim speed is supplied it
+  // REPLACES the free driftSpeed, so a louder voice (higher beat) swims faster
+  // and silence stops the cell in the SAME frame (memoryless, no coasting — the
+  // velocity is set from the current heading×speed every step; F5: there is no
+  // `v += a*dt` momentum accumulation). The legacy driftSpeed remains the
+  // fallback when no override is given (enableActivity off).
+  const speed =
+    speedOverride !== undefined
+      ? speedOverride
+      : (params.driftSpeed ?? 0.03) * Math.min(width, height) * 1.2;
 
   // --- Reynolds wander: small random displacement of the heading. ---
   // Use value-noise sampled along the *current heading + a wander clock*
@@ -1519,6 +1594,10 @@ export function createCellRenderer(
       // M15: guard the persistent accumulators against a poisoned prior value
       // so they self-heal to a finite state on the next clean frame.
       growth = sanitizeUnit(growthLevel(sanitizeUnit(growth), audioLevel, s.mode, params.growthAttack, params.growthRelease));
+      // G1: one master activity scalar drives swimming + beat (and later D/F4).
+      // Gated: when enableActivity is off, `activity` is unused and motion falls
+      // back to the legacy driftSpeed path (byte-identical to pre-8a).
+      const activity = cellActivity(energy, growth, params);
       baseline = sanitizeFinite(baseline + (audioLevel - sanitizeFinite(baseline, 0)) * params.startleBaselineRate, 0);
       startle = sanitizeUnit(startleOffset(sanitizeUnit(startle), audioLevel, baseline, params.startleSensitivity, params.startleDecay));
       // Startle direction: a noise-chosen angle that drifts slowly.
@@ -1563,7 +1642,10 @@ export function createCellRenderer(
       if (!wander) {
         wander = { x: width / 2, y: height / 2, heading: noise2D(7.1, 3.3) * TAU, vx: 0, vy: 0, clock: 0 };
       }
-      wander = wanderStep(wander, dt, width, height, baseR, params);
+      // G2: activity-driven swim speed (Stokes-linear, memoryless). When the
+      // activity gate is off, pass undefined so wanderStep uses legacy driftSpeed.
+      const swimPx = params.enableActivity ? swimSpeed(activity, width, height, params) : undefined;
+      wander = wanderStep(wander, dt, width, height, baseR, params, swimPx);
       // Blend between rest center (width/2, height/2) and full-wander position
       const driftedX = width / 2 + (wander.x - width / 2) * drift01;
       const driftedY = height / 2 + (wander.y - height / 2) * drift01;
@@ -1599,7 +1681,16 @@ export function createCellRenderer(
         // Multi-segment flagella with an asymmetric power/recovery beat and a
         // metachronal wave travelling round the crown (biologically motivated).
         {
-          const cilia = ciliaPath(cx, cy, baseR, t, energy, growth, params);
+          // G2: scale the beat clock + curl by activity so a louder voice beats
+          // faster and curls more (Stokes-linear). Gated: identity when off.
+          const ciliaParams = params.enableActivity
+            ? {
+                ...params,
+                ciliaBeatHz: ciliaBeatHzEff(activity, params),
+                ciliaCurl: params.ciliaCurl * (1 + 0.3 * activity),
+              }
+            : params;
+          const cilia = ciliaPath(cx, cy, baseR, t, energy, growth, ciliaParams);
           ctx.lineCap = "round";
           for (const hair of cilia) {
             ctx.lineWidth = hair.width; // per-hair thickness (diverse)
