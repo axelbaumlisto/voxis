@@ -3655,3 +3655,65 @@ describe("Commit 10 — startle kick gate", () => {
     expect(CELL_DEFAULTS.enableStartleKick).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Commit 11 — M16: bin-count robustness (sampleBinLevel works for ANY count)
+// ---------------------------------------------------------------------------
+describe("sampleBinLevel M16 — arbitrary bin count is periodic-continuous", () => {
+  const mkBins = (n: number) =>
+    Array.from({ length: n }, (_, i) => 0.5 + 0.4 * Math.sin((i / n) * Math.PI * 2));
+
+  for (const n of [16, 32, 64]) {
+    it(`is seam-continuous (value(0)==value(1)) for ${n} bins`, () => {
+      const bins = mkBins(n);
+      expect(sampleBinLevel(bins, 0)).toBeCloseTo(sampleBinLevel(bins, 1), 12);
+    });
+
+    it(`has a bounded cyclic step (no staircase/seam jump) for ${n} bins`, () => {
+      const bins = mkBins(n);
+      const SAMPLES = 720;
+      let prev = sampleBinLevel(bins, 0);
+      let maxStep = 0;
+      for (let i = 1; i <= SAMPLES; i++) {
+        const v = sampleBinLevel(bins, i / SAMPLES);
+        maxStep = Math.max(maxStep, Math.abs(v - prev));
+        prev = v;
+      }
+      // smoothstep interpolation keeps the per-sample change tiny vs the raw
+      // bin-to-bin amplitude (~0.4); generous bound proves no discontinuity.
+      expect(maxStep).toBeLessThan(0.05);
+    });
+
+    it(`returns values within the bin range for ${n} bins`, () => {
+      const bins = mkBins(n);
+      for (let i = 0; i <= 100; i++) {
+        const v = sampleBinLevel(bins, i / 100);
+        expect(v).toBeGreaterThanOrEqual(0.1 - 1e-9);
+        expect(v).toBeLessThanOrEqual(0.9 + 1e-9);
+      }
+    });
+  }
+
+  it("degenerate counts are safe (0 -> 0, 1 -> constant)", () => {
+    expect(sampleBinLevel([], 0.5)).toBe(0);
+    expect(sampleBinLevel([0.7], 0.0)).toBe(0.7);
+    expect(sampleBinLevel([0.7], 0.5)).toBe(0.7);
+    expect(sampleBinLevel([0.7], 1.0)).toBe(0.7);
+  });
+
+  it("renderer accepts a non-32 spectrumBins length without throwing", () => {
+    const rafCalls: Array<() => void> = [];
+    let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, { width: 160, height: 160 });
+    const step = (k: number) => { for (let i = 0; i < k; i++) { if (rafCalls.length) rafCalls.shift()!(); } };
+    for (const len of [16, 48, 64]) {
+      r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(len).fill(0.4) });
+      expect(() => step(1)).not.toThrow();
+    }
+    r.destroy();
+    vi.unstubAllGlobals();
+  });
+});
