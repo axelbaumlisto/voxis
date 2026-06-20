@@ -93,7 +93,12 @@ export interface CellParams {
    * During loud recording the nucleus visibly expands. */
   nucleusPulse: number;
   /** Nuclear drift amplitude — max offset from cell center as fraction of
-   * baseR. The nucleus wanders slowly via deterministic 2D noise. */
+   * baseR. The nucleus wanders slowly via deterministic 2D noise.
+   * F10: a real nucleus is near-immobile (Brownian D~0.01 um^2/s). Set this low
+   * (<=0.03) for a still nucleus; the default 0.14 keeps a gentle visible drift
+   * for the stylized look. Per-axis |offset| <= nucleusWander*baseR (|noise|<=1),
+   * so |offset| <= sqrt(2)*nucleusWander*baseR overall (the hard bound); long-run
+   * RMS is ~0.66*nucleusWander*baseR (expectation), not a hard cap. */
   nucleusWander: number;
   /** Drift speed — rate at which the nucleus noise seed advances (Hz-like).
    * Higher values produce a more restless organelle. */
@@ -1422,8 +1427,18 @@ export function nucleusTransform(
   minMembraneR?: number,
 ): { cx: number; cy: number; r: number } {
   // --- Drift: slow noise-driven offset inside the cell ---
+  // M10: give x and y DISTINCT 2-D walks. Sharing the same second coord
+  // `t*nucleusDrift` on adjacent first-coord rows (137 vs 241) made the two
+  // streams cross-correlate (~0.26 over the test window; the nucleus drifted
+  // diagonally). The y-walk uses a different rate (1.3x) and a large phase
+  // offset (555.5) so the streams decorrelate to |r|<0.2 (measured ~0.10) while
+  // staying smooth & deterministic. (xcorr of slow noise is window-sensitive;
+  // <0.2 is the contractual bound, not the exact finite-sample value.)
+  // SEED MAP (noise2D first coords): 137=nucleus-x, 241=nucleus-y, 811.3=startle
+  // angle, 900.5=legacy startle, 7.1=wander init, k*12.9898=cilia angle jitter,
+  // k*3.7/k*5.1=cilia size, k*5.3/k*9.7=cilia sway/wobble.
   const rawCx = baseR * params.nucleusWander * noise2D(137, t * params.nucleusDrift);
-  const rawCy = baseR * params.nucleusWander * noise2D(241, t * params.nucleusDrift);
+  const rawCy = baseR * params.nucleusWander * noise2D(241, t * params.nucleusDrift * 1.3 + 555.5);
 
   // --- Radius: base size + audio-driven pulse + idle breathing ---
   const idleBreath = Math.sin(t * 1.3) * params.nucleusPulse * 0.25;
