@@ -110,6 +110,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       ectoplasmAlpha: 0.22,           // brighter thin rim (was 0.15)
       helicalAmplitude: 0.3,           // sinusoidal lateral wobble (helical swimming)
       enableWallReorient: true,         // ciliate avoidance reaction at walls (not specular)
+      enableRotationalBrownian: true,    // subtle heading jitter at rest (D_r ≈ 0.02 rad²/s)
+      rotationalDiffusion: 0.02,         // measured for P. caudatum ~20°C
       foodVacuoleSizeMul: 1.8,         // food vacuoles visibly larger than granules
       enableTrichocysts: true,         // radial needle discharge on startle
       trichocystCount: 30,             // number of crystalline needles

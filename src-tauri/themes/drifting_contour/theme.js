@@ -2279,6 +2279,8 @@ function mount(container, api) {
       ectoplasmAlpha: 0.22,
       helicalAmplitude: 0.3,
       enableWallReorient: true,
+      enableRotationalBrownian: true,
+      rotationalDiffusion: 0.02,
       foodVacuoleSizeMul: 1.8,
       enableTrichocysts: true,
       trichocystCount: 30,
