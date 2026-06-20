@@ -3943,6 +3943,55 @@ describe("prolateAspect (D4)", () => {
   });
 });
 
+describe("Commit 30 — resting prolate spindle (enableRestingProlate)", () => {
+  it("(a) default OFF: byte-identical to legacy formula", () => {
+    expect(CELL_DEFAULTS.enableRestingProlate).toBe(false);
+    // circle at rest, unchanged
+    expect(prolateAspect(0, CELL_DEFAULTS)).toBe(1);
+    // at s=1 still the legacy 1 + 0.13*1 = 1.13
+    expect(prolateAspect(1, CELL_DEFAULTS)).toBeCloseTo(1.13, 12);
+  });
+
+  it("(b) gate ON at rest: k = prolateRestAspect (1.7), axis ratio k^2 ~ 3:1", () => {
+    const P = { ...CELL_DEFAULTS, enableRestingProlate: true };
+    const k = prolateAspect(0, P);
+    expect(k).toBeCloseTo(1.7, 9);
+    // affine applies diag(k,1/k) => major/minor axis ratio = k^2
+    expect(k * k).toBeCloseTo(2.89, 6);
+    expect(k * k).toBeGreaterThan(2.8); // ~3:1 spindle
+  });
+
+  it("(c) gate ON: non-decreasing in speed, never below the resting floor", () => {
+    const P = { ...CELL_DEFAULTS, enableRestingProlate: true };
+    let prev = -Infinity;
+    for (let i = 0; i <= 10; i++) {
+      const s = i / 10;
+      const k = prolateAspect(s, P);
+      expect(k).toBeGreaterThanOrEqual(1.7);
+      expect(k).toBeGreaterThanOrEqual(prev);
+      prev = k;
+    }
+    // with default elong the speed-driven base (1.13 < 1.7) never wins => 1.7 at s=1
+    expect(prolateAspect(1, P)).toBeCloseTo(1.7, 9);
+  });
+
+  it("(c2) gate ON: swimming elongates further above the resting floor", () => {
+    const P = { ...CELL_DEFAULTS, enableRestingProlate: true, bodyElongation: 1.0 };
+    // base at s=1 = 1 + 1.0*1 = 2.0 > 1.7 => speed wins above the floor
+    expect(prolateAspect(1, P)).toBeCloseTo(2.0, 9);
+    // at rest still pinned to the resting floor
+    expect(prolateAspect(0, P)).toBeCloseTo(1.7, 9);
+  });
+
+  it("(d) OFF byte-identity: gate-off path equals legacy 1+0.13*s", () => {
+    for (const s of [0, 0.1, 0.25, 0.5, 0.73, 1]) {
+      const legacy = 1 + 0.13 * s;
+      expect(prolateAspect(s, CELL_DEFAULTS)).toBe(prolateAspect(s, { ...CELL_DEFAULTS }));
+      expect(prolateAspect(s, CELL_DEFAULTS)).toBeCloseTo(legacy, 12);
+    }
+  });
+});
+
 describe("Commit 8b — affine gate", () => {
   it("flips enableAffine ON; body round at rest (floor 0)", () => {
     expect(CELL_DEFAULTS.enableAffine).toBe(true);
