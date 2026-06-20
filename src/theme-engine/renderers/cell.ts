@@ -3681,7 +3681,10 @@ export function createCellRenderer(
           // Commit v3.5F: ellipse aligned with the body axis when interior field is on
           const nAspect = params.nucleusAspect ?? 1.8;
           if (params.enableInteriorField && nAspect !== 1) {
-            ctx.ellipse(nx, ny, nr * nAspect, nr, squeezePhi, 0, TAU);
+            // Align with bodyHeading (NOT squeezePhi) — the macronucleus is
+            // anchored in the cytoplasm and rotates with the body, not with
+            // the fast axial spin (which is a surface/cilia phenomenon).
+            ctx.ellipse(nx, ny, nr * nAspect, nr, bodyHeading, 0, TAU);
           } else {
             ctx.arc(nx, ny, nr, 0, TAU);
           }
