@@ -2774,6 +2774,35 @@ export function seedFoodVacuoles(
 }
 
 /**
+ * Commit 32d — seed `count` food vacuoles in BODY-NORMALISED loop coords so they
+ * ride the SAME divergence-free cyclosis loop as the granules (cyclosisLoopPoint)
+ * and circulate through the elongated body to the poles, drawn via interiorPoint
+ * (coupled to the deforming wall). Each vacuole gets a loop label `q`, an initial
+ * loop phase `phi0`, and a per-vacuole `digestPhase` for foodVacuoleSize's shrink
+ * curve. REUSES the EXACT decorrelated noise seed constants the legacy
+ * seedFoodVacuoles used (17.413/52.917, 44.197/23.671, 61.829/88.541) so the
+ * vacuole RNG stream stays familiar/decorrelated from the granule stream. Pure &
+ * deterministic; returns [] when count is 0.
+ */
+export function seedInteriorFoodVacuoles(
+  count: number,
+  params: CellParams,
+): Array<{ q: number; phi0: number; digestPhase: number }> {
+  // params is part of the public signature for symmetry with the granule seeder
+  // (future profile-aware seeding); the loop coords here are profile-independent.
+  void params;
+  const n = Math.max(0, Math.floor(count));
+  const out: Array<{ q: number; phi0: number; digestPhase: number }> = [];
+  for (let i = 0; i < n; i++) {
+    const xi_q = (noise2D(i * 17.413 + 3.1, 52.917) + 1) * 0.5; // [0,1] loop label
+    const xi_p = (noise2D(i * 44.197 + 9.7, 23.671) + 1) * 0.5; // [0,1] initial loop phase
+    const xi_d = (noise2D(i * 61.829 + 2.3, 88.541) + 1) * 0.5; // [0,1] digest phase
+    out.push({ q: xi_q, phi0: xi_p * TAU, digestPhase: xi_d });
+  }
+  return out;
+}
+
+/**
  * Commit 28 — advance one food vacuole's BODY-FRAME offset by the SAME cyclosis
  * rotation field as the granules (DRY: reuses cyclosisField), with
  * omega = TAU / max(0.1, foodVacuolePeriod). The radius is renormalised back to
@@ -3189,6 +3218,12 @@ export function createCellRenderer(
   // is on; stays null otherwise so the default path allocates nothing and the
   // shipped look is byte-unchanged.
   let foodVacuoles: Array<{ x: number; y: number; phase: number }> | null = null;
+  // Commit 32d (gate OFF): food vacuoles in body-coord loop space (q, phi0,
+  // digestPhase) that ride the SAME cyclosis loop as the interior granules and
+  // are drawn via interiorPoint. Lazily seeded on first tick when
+  // enableInteriorField is on; stays null otherwise so the legacy disc path
+  // allocates nothing and goldens stay byte-identical.
+  let interiorFoodVacuoles: Array<{ q: number; phi0: number; digestPhase: number }> | null = null;
   // H4: previous-frame flow source (centre, heading, swim speed) so motes can be
   // advected + drawn BEHIND the cell at the top of the tick without a forward
   // dependency on this frame's not-yet-computed centre.
@@ -3696,32 +3731,64 @@ export function createCellRenderer(
         // radius then squeezed with the body affine. Skipped (foodVacuoles stays
         // null) unless enableOrganelles is on, so all goldens stay byte-identical.
         if (params.enableOrganelles && (params.foodVacuoleCount ?? 0) > 0) {
-          if (!foodVacuoles) foodVacuoles = seedFoodVacuoles(baseR, params);
           const fvSizePx = params.foodVacuoleSizePx ?? 3.0;
-          for (let i = 0; i < foodVacuoles.length; i++) {
-            foodVacuoles[i] = advectFoodVacuole(foodVacuoles[i], baseR, dt, params);
-            const v = foodVacuoles[i];
-            const size = foodVacuoleSize(t, v.phase, params);
-            const drawR = fvSizePx * (0.4 + 0.6 * size); // shrink as digested
-            // Containment: clamp the body-frame radius so vacuole + draw size
-            // stays inside the live minimum membrane radius.
-            const maxRad = Math.min(
-              (params.foodVacuoleMaxRadiusFrac ?? 0.62) * baseR,
-              Math.max(0, minMembraneR - drawR),
-            );
-            const rad = Math.hypot(v.x, v.y);
-            const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
-            const [fx, fy] = affineSqueezePoints(
-              [[cx + v.x * scale, cy + v.y * scale]], squeezeK, squeezePhi, cx, cy, params,
-            )[0];
-            // Translucent olive/greenish fill with a slightly darker rim.
-            ctx.fillStyle = hsla(baseHue - 30, 0.4, 0.5, params.nucleusAlpha * 0.4);
-            ctx.beginPath();
-            ctx.arc(fx, fy, drawR, 0, TAU);
-            ctx.fill();
-            ctx.strokeStyle = hsla(baseHue - 30, 0.45, 0.35, params.nucleusAlpha * 0.5);
-            ctx.lineWidth = 0.8;
-            ctx.stroke();
+          if (params.enableInteriorField) {
+            // Commit 32d (gate ON): body-coord path. Food vacuoles ride the SAME
+            // divergence-free streamfunction loop as the granules
+            // (cyclosisLoopPoint) in (u, s) and are drawn via interiorPoint, so
+            // they circulate through the elongated body to the poles and deform
+            // WITH the live wall. Containment is automatic (|s| <= 1). The digest
+            // shrink is preserved via foodVacuoleSize (reused unchanged).
+            if (!interiorFoodVacuoles) {
+              interiorFoodVacuoles = seedInteriorFoodVacuoles(params.foodVacuoleCount ?? 0, params);
+            }
+            const profilePts = buildProfilePts(baseR, params);
+            const ictx: InteriorCtx = {
+              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params, profilePts,
+            };
+            for (let i = 0; i < interiorFoodVacuoles.length; i++) {
+              const fv = interiorFoodVacuoles[i];
+              const loop = cyclosisLoopPoint(fv, t, params); // rides the SAME loop as granules
+              const size = foodVacuoleSize(t, fv.digestPhase, params); // digest shrink (reuse)
+              const drawR = fvSizePx * (0.4 + 0.6 * size);
+              const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);
+              ctx.fillStyle = hsla(baseHue - 30, 0.4, 0.5, params.nucleusAlpha * 0.4);
+              ctx.beginPath();
+              ctx.arc(fx, fy, drawR, 0, TAU);
+              ctx.fill();
+              ctx.strokeStyle = hsla(baseHue - 30, 0.45, 0.35, params.nucleusAlpha * 0.5);
+              ctx.lineWidth = 0.8;
+              ctx.stroke();
+            }
+          } else {
+            // LEGACY disc path — VERBATIM (do not tidy), so the deployed look +
+            // golden are unchanged.
+            if (!foodVacuoles) foodVacuoles = seedFoodVacuoles(baseR, params);
+            for (let i = 0; i < foodVacuoles.length; i++) {
+              foodVacuoles[i] = advectFoodVacuole(foodVacuoles[i], baseR, dt, params);
+              const v = foodVacuoles[i];
+              const size = foodVacuoleSize(t, v.phase, params);
+              const drawR = fvSizePx * (0.4 + 0.6 * size); // shrink as digested
+              // Containment: clamp the body-frame radius so vacuole + draw size
+              // stays inside the live minimum membrane radius.
+              const maxRad = Math.min(
+                (params.foodVacuoleMaxRadiusFrac ?? 0.62) * baseR,
+                Math.max(0, minMembraneR - drawR),
+              );
+              const rad = Math.hypot(v.x, v.y);
+              const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
+              const [fx, fy] = affineSqueezePoints(
+                [[cx + v.x * scale, cy + v.y * scale]], squeezeK, squeezePhi, cx, cy, params,
+              )[0];
+              // Translucent olive/greenish fill with a slightly darker rim.
+              ctx.fillStyle = hsla(baseHue - 30, 0.4, 0.5, params.nucleusAlpha * 0.4);
+              ctx.beginPath();
+              ctx.arc(fx, fy, drawR, 0, TAU);
+              ctx.fill();
+              ctx.strokeStyle = hsla(baseHue - 30, 0.45, 0.35, params.nucleusAlpha * 0.5);
+              ctx.lineWidth = 0.8;
+              ctx.stroke();
+            }
           }
         }
 

@@ -51,6 +51,7 @@ import {
   advectGranule,
   foodVacuoleSize,
   seedFoodVacuoles,
+  seedInteriorFoodVacuoles,
   advectFoodVacuole,
   micronucleusTransform,
   cellReach,
@@ -6828,5 +6829,185 @@ describe("Commit 32c — streamfunction cyclosis", () => {
       expect(c[k].ang).toBe(d[k].ang);
       expect(c[k].rad).toBe(d[k].rad);
     }
+  });
+});
+
+describe("Commit 32d — food vacuoles on cyclosis loop", () => {
+  const TAU = Math.PI * 2;
+  const eggParams: CellParams = {
+    ...CELL_DEFAULTS,
+    enableBodyProfile: true,
+    bodyProfileType: "egg",
+    bodyProfileTaper: 0.24,
+    bodyAspect: 3,
+    bodyVentralBend: 0.18,
+    cyclosisPeriod: 45,
+  };
+
+  function pointInPolygon(p: [number, number], poly: Array<[number, number]>): boolean {
+    let inside = false;
+    const n = poly.length;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const xi = poly[i][0], yi = poly[i][1];
+      const xj = poly[j][0], yj = poly[j][1];
+      const intersect =
+        yi > p[1] !== yj > p[1] &&
+        p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+  function minDistToPolyline(p: [number, number], poly: Array<[number, number]>): number {
+    let best = Infinity;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[j], b = poly[i];
+      const dx = b[0] - a[0], dy = b[1] - a[1];
+      const len2 = dx * dx + dy * dy || 1;
+      let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      const qx = a[0] + t * dx, qy = a[1] + t * dy;
+      best = Math.min(best, Math.hypot(p[0] - qx, p[1] - qy));
+    }
+    return best;
+  }
+
+  it("(a) seedInteriorFoodVacuoles: gate-independent pure; count entries in range; 0 -> []; deterministic", () => {
+    // gate-independent: works with the interior gate off too (it is just seeding).
+    const N = 7;
+    const fv = seedInteriorFoodVacuoles(N, eggParams);
+    expect(fv.length).toBe(N);
+    for (const v of fv) {
+      expect(v.q).toBeGreaterThanOrEqual(0);
+      expect(v.q).toBeLessThanOrEqual(1);
+      expect(v.phi0).toBeGreaterThanOrEqual(0);
+      expect(v.phi0).toBeLessThan(TAU);
+      expect(v.digestPhase).toBeGreaterThanOrEqual(0);
+      expect(v.digestPhase).toBeLessThan(1);
+    }
+    expect(seedInteriorFoodVacuoles(0, eggParams)).toEqual([]);
+    // deterministic + gate-independent (same result regardless of enableInteriorField)
+    expect(seedInteriorFoodVacuoles(N, eggParams)).toEqual(fv);
+    expect(seedInteriorFoodVacuoles(N, { ...eggParams, enableInteriorField: true })).toEqual(fv);
+  });
+
+  it("(b) RIDE THE LOOP: a vacuole circulates and closes after cyclosisPeriod", () => {
+    const T = eggParams.cyclosisPeriod!;
+    const [fv] = seedInteriorFoodVacuoles(3, eggParams);
+    const start = cyclosisLoopPoint(fv, 0, eggParams);
+    const end = cyclosisLoopPoint(fv, T, eggParams);
+    expect(Math.abs(end.u - start.u)).toBeLessThan(1e-6);
+    expect(Math.abs(end.s - start.s)).toBeLessThan(1e-6);
+    // genuinely circulating: not near the start at half period
+    const half = cyclosisLoopPoint(fv, T / 2, eggParams);
+    expect(Math.hypot(half.u - start.u, half.s - start.s)).toBeGreaterThan(0.1);
+  });
+
+  it("(c) DIGEST SHRINK preserved: size full at digestPhase=0 then shrinks with t", () => {
+    const [fv] = seedInteriorFoodVacuoles(1, { ...eggParams });
+    // The vacuole uses foodVacuoleSize for its shrink curve (reused unchanged).
+    expect(foodVacuoleSize(0, 0, eggParams)).toBeCloseTo(1.0, 9);
+    const period = eggParams.foodVacuoleDigestPeriod ?? 30;
+    let prev = foodVacuoleSize(0, 0, eggParams);
+    for (let k = 1; k <= 20; k++) {
+      const t = (k / 20) * period * 0.999;
+      const s = foodVacuoleSize(t, 0, eggParams);
+      expect(s).toBeLessThanOrEqual(prev + 1e-12);
+      prev = s;
+    }
+    // and the seeded vacuole carries a valid digest phase used by foodVacuoleSize
+    expect(Number.isFinite(foodVacuoleSize(3.0, fv.digestPhase, eggParams))).toBe(true);
+  });
+
+  it("(d) POLE REACH + CONTAINMENT via interiorPoint over a circuit", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.24,
+      bodyAspect: 3,
+      bodyVentralBend: 0.18,
+      cyclosisPeriod: 45,
+    };
+    const baseR = 40;
+    const cx = 0, cy = 0, bodyHeading = 0;
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, params);
+    const profilePts = buildProfilePts(baseR, params);
+    const ctx: InteriorCtx = {
+      cx, cy, baseR, deform, squeezeK: 1, squeezePhi: 0, bodyHeading, params, profilePts,
+    };
+    const poly: Array<[number, number]> = [];
+    for (let i = 0; i < deform.length; i++) {
+      const angle = (i / deform.length) * TAU;
+      const r = baseR * (1 + deform[i]);
+      poly.push([cx + r * Math.cos(angle), cy + r * Math.sin(angle)]);
+    }
+    const L = baseR * Math.sqrt(params.bodyAspect ?? 3);
+    const fv = { q: 1, phi0: 0, digestPhase: 0 };
+    let minXb = Infinity, maxXb = -Infinity;
+    let allContained = true;
+    for (let k = 0; k <= 360; k++) {
+      const simTime = (k / 360) * params.cyclosisPeriod!;
+      const loop = cyclosisLoopPoint(fv, simTime, params);
+      const pt = interiorPoint(loop.u, loop.s, ctx);
+      minXb = Math.min(minXb, pt[0] - cx);
+      maxXb = Math.max(maxXb, pt[0] - cx);
+      // centres inside the membrane polygon (finite drawR poke out of scope)
+      if (!pointInPolygon(pt, poly) && minDistToPolyline(pt, poly) > 0.5) {
+        allContained = false;
+      }
+    }
+    expect(maxXb / L).toBeGreaterThan(0.8);
+    expect(-minXb / L).toBeGreaterThan(0.8);
+    expect(allContained).toBe(true);
+  });
+
+  it("(e) GATE OFF: legacy disc food-vacuole path renders without throwing", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn().mockReturnValue(7));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: 120,
+      height: 60,
+      params: { enableInteriorField: false, enableOrganelles: true, foodVacuoleCount: 7 },
+    });
+    expect(() => {
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0.2, spectrumBins: new Array(32).fill(0.3) });
+      }
+    }).not.toThrow();
+    r.destroy();
+    vi.unstubAllGlobals();
+  });
+
+  it("(f) RENDER ON: interior-field food vacuoles render finite without throwing", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn().mockReturnValue(7));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: 120,
+      height: 60,
+      params: {
+        enableInteriorField: true,
+        enableOrganelles: true,
+        foodVacuoleCount: 7,
+        enableBodyProfile: true,
+        bodyProfileType: "egg",
+        bodyProfileTaper: 0.24,
+        bodyAspect: 3,
+      },
+    });
+    expect(() => {
+      for (let i = 0; i < 6; i++) {
+        r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.3) });
+      }
+    }).not.toThrow();
+    r.destroy();
+    vi.unstubAllGlobals();
+  });
+
+  it("(g) DETERMINISM: identical args => identical seeding", () => {
+    const a = seedInteriorFoodVacuoles(7, eggParams);
+    const b = seedInteriorFoodVacuoles(7, eggParams);
+    expect(a).toEqual(b);
   });
 });
