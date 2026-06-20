@@ -90,6 +90,7 @@ import {
   cyclosisLoopPoint,
   buildProfilePts,
   applyOralGroove,
+  effectiveCyclosisPeriod,
 } from "../cell";
 import { deformAt, wrapPi } from "../shared";
 import type { CellParams, CellPersistState, CiliaMotion, InteriorCtx } from "../cell";
@@ -6833,6 +6834,52 @@ describe("Commit 32c — streamfunction cyclosis", () => {
       expect(c[k].ang).toBe(d[k].ang);
       expect(c[k].rad).toBe(d[k].rad);
     }
+  });
+});
+
+describe("v3.7C — effectiveCyclosisPeriod (cyclosis × activity)", () => {
+  it("boost=0 (default) returns base period regardless of activity", () => {
+    const p = { ...CELL_DEFAULTS, cyclosisPeriod: 38 };
+    expect(effectiveCyclosisPeriod(0, p)).toBe(38);
+    expect(effectiveCyclosisPeriod(0.5, p)).toBe(38);
+    expect(effectiveCyclosisPeriod(1.0, p)).toBe(38);
+  });
+
+  it("boost=0 explicitly also preserves base period", () => {
+    const p = { ...CELL_DEFAULTS, cyclosisPeriod: 38, cyclosisActivityBoost: 0 };
+    expect(effectiveCyclosisPeriod(1.0, p)).toBe(38);
+  });
+
+  it("boost=0.4 at activity=1.0 gives period / 1.4", () => {
+    const p = { ...CELL_DEFAULTS, cyclosisPeriod: 38, cyclosisActivityBoost: 0.4 };
+    const result = effectiveCyclosisPeriod(1.0, p);
+    expect(result).toBeCloseTo(38 / 1.4, 10);
+  });
+
+  it("activity=0 gives base period regardless of boost value", () => {
+    const p = { ...CELL_DEFAULTS, cyclosisPeriod: 38, cyclosisActivityBoost: 0.4 };
+    expect(effectiveCyclosisPeriod(0, p)).toBe(38);
+  });
+
+  it("activity=0.5 with boost=0.4 gives period / 1.2", () => {
+    const p = { ...CELL_DEFAULTS, cyclosisPeriod: 38, cyclosisActivityBoost: 0.4 };
+    const result = effectiveCyclosisPeriod(0.5, p);
+    expect(result).toBeCloseTo(38 / 1.2, 10);
+  });
+
+  it("clamps negative activity to 0", () => {
+    const p = { ...CELL_DEFAULTS, cyclosisPeriod: 38, cyclosisActivityBoost: 0.4 };
+    expect(effectiveCyclosisPeriod(-0.5, p)).toBe(38);
+  });
+
+  it("clamps activity > 1 to 1", () => {
+    const p = { ...CELL_DEFAULTS, cyclosisPeriod: 38, cyclosisActivityBoost: 0.4 };
+    expect(effectiveCyclosisPeriod(1.5, p)).toBeCloseTo(38 / 1.4, 10);
+  });
+
+  it("uses default cyclosisPeriod=45 when not specified", () => {
+    const p = { ...CELL_DEFAULTS, cyclosisActivityBoost: 0.4 };
+    expect(effectiveCyclosisPeriod(1.0, p)).toBeCloseTo(45 / 1.4, 10);
   });
 });
 

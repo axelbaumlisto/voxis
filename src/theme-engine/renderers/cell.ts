@@ -360,6 +360,10 @@ export interface CellParams {
   cyclosisPeriod?: number;
   /** Commit 32c: direction of cyclosis circulation (+1 or -1). Default +1. */
   cyclosisSense?: number;
+  /** v3.7C: fractional boost to cyclosis speed at full activity (default 0 =
+   * legacy, no modulation). At boost=0.4 and activity=1.0 the effective
+   * period = cyclosisPeriod / 1.4 (~28% faster streaming). */
+  cyclosisActivityBoost?: number;
   /** Commit 27: granules live within this fraction of baseR (inside the wall).
    * Default 0.75. */
   granuleMaxRadiusFrac?: number;
@@ -781,6 +785,22 @@ export function cellActivity(
   const wg = params?.activityGrowthWeight ?? 0.4;
   const a = we * energy + wg * growth;
   return a < 0 ? 0 : a > 1 ? 1 : a;
+}
+
+/**
+ * v3.7C — effective cyclosis period modulated by activity.
+ * At rest (activity=0) returns the base `cyclosisPeriod`. At full activity
+ * and `cyclosisActivityBoost=0.4` the period = base / 1.4 (40% faster).
+ * Default boost=0 preserves legacy (no modulation). Pure & deterministic.
+ */
+export function effectiveCyclosisPeriod(
+  activity: number,
+  params: Pick<CellParams, "cyclosisPeriod" | "cyclosisActivityBoost">,
+): number {
+  const base = Math.max(0.1, params.cyclosisPeriod ?? 45);
+  const boost = params.cyclosisActivityBoost ?? 0;
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  return base / (1 + a * boost);
 }
 
 /**
@@ -3453,6 +3473,14 @@ export function createCellRenderer(
       // Gated: when enableActivity is off, `activity` is unused and motion falls
       // back to the legacy driftSpeed path (byte-identical to pre-8a).
       const activity = cellActivity(energy, growth, params);
+      // v3.7C: compute effective cyclosis period once (activity-modulated).
+      // Used by cyclosisLoopPoint and advectGranule below.
+      const cyclPeriod = effectiveCyclosisPeriod(activity, params);
+      // Shallow override so cyclosisLoopPoint / advectGranule read the
+      // activity-modulated period without changing their pure signatures.
+      const cyclParams: CellParams = params.cyclosisActivityBoost
+        ? { ...params, cyclosisPeriod: cyclPeriod }
+        : params; // no boost => reuse original (zero allocation)
       const effectiveFillAlpha = lerp(
         params.fillAlpha,
         params.fillAlphaActive ?? params.fillAlpha,
@@ -3947,7 +3975,7 @@ export function createCellRenderer(
             };
             for (let i = 0; i < interiorGranules.length; i++) {
               const g = interiorGranules[i];
-              const loop = cyclosisLoopPoint(g, t, params);
+              const loop = cyclosisLoopPoint(g, t, cyclParams);
               const [gx, gy] = interiorPoint(loop.u, loop.s, ictx);
               ctx.beginPath();
               ctx.arc(gx, gy, granuleSizePx, 0, TAU);
@@ -3958,7 +3986,7 @@ export function createCellRenderer(
             // golden are unchanged.
             if (!granules) granules = seedGranules(baseR, params);
             for (let i = 0; i < granules.length; i++) {
-              granules[i] = advectGranule(granules[i], baseR, dt, params);
+              granules[i] = advectGranule(granules[i], baseR, dt, cyclParams);
               const off = granules[i];
               // Containment: clamp the body-frame radius so granule + draw size
               // stays inside the live minimum membrane radius (like the vacuoles).
@@ -4002,7 +4030,7 @@ export function createCellRenderer(
             };
             for (let i = 0; i < interiorFoodVacuoles.length; i++) {
               const fv = interiorFoodVacuoles[i];
-              const loop = cyclosisLoopPoint(fv, t, params); // rides the SAME loop as granules
+              const loop = cyclosisLoopPoint(fv, t, cyclParams); // rides the SAME loop as granules
               const size = foodVacuoleSize(t, fv.digestPhase, params); // digest shrink (reuse)
               const drawR = fvSizePx * (0.4 + 0.6 * size);
               const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);
