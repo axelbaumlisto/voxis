@@ -53,6 +53,14 @@ export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+/** Wrap an angle (radians) to the principal range (-pi, pi]. */
+export function wrapPi(a: number): number {
+  const TWO_PI = Math.PI * 2;
+  let x = ((a + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI;
+  if (x <= -Math.PI) x += TWO_PI;
+  return x;
+}
+
 // ---------------------------------------------------------------------------
 // Noise & FBM
 // ---------------------------------------------------------------------------

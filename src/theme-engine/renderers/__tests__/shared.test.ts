@@ -1,8 +1,25 @@
 import { describe, it, expect } from "vitest";
 import {
   noise2D, fbm, catmullRom, lowpassRadii, integrateDeformation, hsla, TAU,
-  growthLevel,
+  growthLevel, wrapPi,
 } from "../shared";
+
+describe("wrapPi", () => {
+  it("is identity inside (-pi, pi]", () => {
+    for (const a of [-3, -1, 0, 1, 3, Math.PI]) {
+      expect(wrapPi(a)).toBeCloseTo(a, 12);
+    }
+  });
+  it("wraps into (-pi, pi] and is congruent mod 2pi", () => {
+    for (const a of [-10, -7, 4, 7, 12, 100]) {
+      const w = wrapPi(a);
+      expect(w).toBeGreaterThan(-Math.PI - 1e-12);
+      expect(w).toBeLessThanOrEqual(Math.PI + 1e-12);
+      const diff = (a - w) / (Math.PI * 2);
+      expect(Math.abs(diff - Math.round(diff))).toBeLessThan(1e-9);
+    }
+  });
+});
 
 describe("shared primitives", () => {
   it("noise2D is deterministic and bounded", () => {

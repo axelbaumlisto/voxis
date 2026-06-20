@@ -14,7 +14,7 @@ import type { ThemeState } from "../contract";
 import type { Renderer } from "./types";
 import {
   noise2D, fbm, catmullRom, catmullRomOpen, integrateDeformation, hsla, TAU, growthLevel,
-  lerp, smoothstep,
+  lerp, smoothstep, wrapPi,
 } from "./shared";
 
 // Backward-compat re-exports: existing imports of these from "./cell" keep working.
@@ -218,6 +218,17 @@ export interface CellParams {
   /** D4: minimum elongation fraction even at rest (0 = round at rest, so D4
    * collapses to identity when still). Default 0. */
   bodyElongationFloor?: number;
+  /** F4/G3: bias every hair's beat plane toward ONE global stroke axis (the body
+   * heading) so the crown ROWS coherently while swimming, weighted by activity
+   * (G3). Default true; when false the crown uses per-hair local azimuth
+   * (byte-identical to commit 11). */
+  enableStrokeAxis?: boolean;
+  /** G3: stroke-axis vigour curve. axisStrength = smoothstep(activity/knee), so
+   * idle is near-isotropic (R<0.2) and active is coherent (R>0.4). Default 0.5. */
+  strokeAxisKnee?: number;
+  /** F4: max fraction [0,1] a fully-engaged hair rotates its beat plane from its
+   * local azimuth toward the global axis. Default 1 (full alignment). */
+  strokeAxisAlign?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -292,6 +303,9 @@ export const CELL_DEFAULTS: CellParams = {
   bodyHeadingTau: 0.4,
   bodyElongation: 0.13,
   bodyElongationFloor: 0,
+  enableStrokeAxis: true,
+  strokeAxisKnee: 0.5,
+  strokeAxisAlign: 1,
   // Pipeline gates. B1 (commit 6) flips enableSaturation ON; C1 (commit 7) flips
   // enableAreaNorm ON (area held at pi*baseR^2). G (commit 8a) flips
   // enableActivity ON. D4 (commit 8b) flips enableAffine ON (body prolate along
@@ -663,6 +677,68 @@ export interface CiliaMotion {
   ty: number;
   /** Normalized swim speed [0,1]; 0 => no lean (identity). */
   speedNorm: number;
+  /** F4/G3: global stroke-axis coherence weight [0,1] (= strokeAxisStrength(a)).
+   * 0 => per-hair local azimuth (identity). Optional; defaults to 0. */
+  axisStrength?: number;
+}
+
+/**
+ * G3 — idle/active stroke-axis vigour. Maps the master activity scalar to a
+ * coherence weight in [0,1] via a smoothstep knee, so an idle crown is
+ * near-isotropic (weight≈0, R<0.2, no "rowing in place") and an active crown is
+ * coherent (weight≈1, R>0.4) driving propulsion. Pure & monotone in activity.
+ */
+export function strokeAxisStrength(activity: number, params: CellParams): number {
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  const knee = params.strokeAxisKnee ?? 0.5;
+  return smoothstep(a / (knee > 0 ? knee : 1e-6));
+}
+
+/**
+ * D3 — metachronal index on the MOTION axis. The metachronal wave's phase lag
+ * runs around the crown by hair index `k` at rest, but while swimming the wave
+ * should organise along the travel direction. We blend the integer crown index
+ * with an AXIAL index `wrapPi(baseAngle − axis)/gap` by `speedNorm`:
+ *   metaIdx = (1−speedNorm)·k + speedNorm·(wrapPi(baseAngle−axis)/gap)
+ * At speedNorm=0 (or gate off) this is exactly `k` (today's behaviour); at
+ * speedNorm=1 the wave is anchored to the heading, so the argmax-phase hair
+ * rotates WITH the heading. Fractional index is fine — ciliaBeatPhase accepts it.
+ * Pure & deterministic.
+ */
+export function metachronalIndex(
+  baseAngle: number,
+  k: number,
+  speedNorm: number,
+  axis: number,
+  gap: number,
+  engaged: boolean,
+): number {
+  if (!engaged) return k;
+  const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
+  if (s === 0) return k;
+  const axial = wrapPi(baseAngle - axis) / (gap > 0 ? gap : 1e-6);
+  return (1 - s) * k + s * axial;
+}
+
+/**
+ * F4 — shared global stroke axis. Each hair beats in a plane; at rest that plane
+ * is the LOCAL perpendicular `baseAngle + π/2` (per-hair azimuth, today's look).
+ * While swimming we rotate every hair's beat plane TOWARD one global axis LINE
+ * (the body heading), weighted by `strength` in [0,1]. We align to the nearest
+ * orientation of the axis (mod π, since a beat plane is a line, not a ray), so a
+ * hair never rotates more than π/2. strength=0 => identity. Pure.
+ */
+export function ciliaStrokeAngle(
+  baseAngle: number,
+  axis: number,
+  strength: number,
+): number {
+  const local = baseAngle + Math.PI / 2;
+  const s = strength < 0 ? 0 : strength > 1 ? 1 : strength;
+  if (s === 0) return local;
+  // Nearest axis orientation to `local` modulo π (beat plane is a line).
+  const delta = wrapPi(2 * (axis - local)) / 2; // in (-π/2, π/2]
+  return local + s * delta;
 }
 
 /** A cilium rendered as a multi-point spine plus its stroke width. */
@@ -705,6 +781,14 @@ export function ciliaPath(
   const mTx = motion?.tx ?? 0;
   const mTy = motion?.ty ?? 0;
   const mSpeed = motion ? Math.max(0, Math.min(1, motion.speedNorm)) : 0;
+  // F4/G3: global stroke-axis coherence weight. Zero (or gate off, or no motion)
+  // => per-hair local azimuth + integer metachronal index (identical to commit 11).
+  const axisEngaged = (params.enableStrokeAxis ?? true) && motion !== undefined;
+  const axisStrength = axisEngaged
+    ? Math.max(0, Math.min(1, (motion?.axisStrength ?? 0) * (params.strokeAxisAlign ?? 1)))
+    : 0;
+  // Global stroke axis = the travel heading (atan2 of the motion tangent).
+  const strokeAxis = Math.atan2(mTy, mTx);
   const out: CiliumPath[] = [];
   const n = Math.max(1, params.ciliaCount);
   const seg = Math.max(2, params.ciliaSegments ?? 6);
@@ -738,8 +822,28 @@ export function ciliaPath(
     const baseAngle = k * gap + angOff;
     const ux = Math.cos(baseAngle); // radial unit (outward)
     const uy = Math.sin(baseAngle);
-    const pxn = -uy; // perpendicular unit
-    const pyn = ux;
+    // F4: the transverse BEND plane. At rest this is the local perpendicular
+    // (baseAngle + pi/2). While swimming it rotates toward the global stroke
+    // axis (the heading), weighted by axisStrength, so the crown rows coherently.
+    // When axisStrength==0 take the EXACT legacy vectors (-uy, ux) rather than
+    // cos/sin(baseAngle+pi/2): trig of (ba+pi/2) differs from (-sin,cos) at ~1e-15
+    // (IEEE-754), so this fast-path keeps the gate-off / at-rest crown BYTE-
+    // identical to commit 11, not just visually identical.
+    // NOTE (partial-strength seam): ciliaStrokeAngle rotates a LINE toward the
+    // nearest axis orientation; for 0<axisStrength<1 the fore/aft hair pair
+    // straddling baseAngle≡strokeAxis (mod pi) can fan apart by up to ~axisStrength*pi
+    // before reconciling at axisStrength=1. It is one transient neighbour-pair
+    // during the activity ramp, bounded and gone at sustained activity.
+    let pxn: number;
+    let pyn: number;
+    if (axisStrength === 0) {
+      pxn = -uy; // legacy perpendicular unit (exact)
+      pyn = ux;
+    } else {
+      const strokeAngle = ciliaStrokeAngle(baseAngle, strokeAxis, axisStrength);
+      pxn = Math.cos(strokeAngle); // bend-plane unit
+      pyn = Math.sin(strokeAngle);
+    }
 
     // --- Per-hair size diversity: a stable [0,1] random scalar per hair. ---
     const r01 = noise2D(k * 3.7 + 0.3, 1.3) * 0.5 + 0.5; // [0,1]
@@ -752,7 +856,11 @@ export function ciliaPath(
 
     // Beat phase for this hair (asymmetric + metachronal). Per-hair phase
     // seed so even neighbours at the same metachronal index aren't identical.
-    const phase = ciliaBeatPhase(t + r01 * 0.6, k, params);
+    // D3: while swimming, the metachronal wave organises along the MOTION axis
+    // (metaIdx blends the crown index k -> axial index by speedNorm); at rest it
+    // is exactly k (today's around-the-crown wave).
+    const metaIdx = metachronalIndex(baseAngle, k, mSpeed, strokeAxis, gap, axisEngaged);
+    const phase = ciliaBeatPhase(t + r01 * 0.6, metaIdx, params);
     // F3: smooth the recovery envelope instead of a hard {0.35,1} step at
     // phase=0.5. smoothstep((phase-0.35)/0.3) ramps 0->1 over phase in
     // [0.35,0.65], Lipschitz and C1, so the bend amplitude no longer jumps.
@@ -1884,6 +1992,9 @@ export function createCellRenderer(
             tx: Math.cos(bodyHeading),
             ty: Math.sin(bodyHeading),
             speedNorm,
+            // F4/G3: how coherently the crown rows toward the heading, gated by
+            // activity (idle ~isotropic, active coherent). 0 when activity off.
+            axisStrength: params.enableActivity ? strokeAxisStrength(activity, params) : 0,
           };
           const cilia = ciliaPath(cx, cy, baseR, t, energy, growth, ciliaParams, ciliaMotion);
           ctx.lineCap = "round";

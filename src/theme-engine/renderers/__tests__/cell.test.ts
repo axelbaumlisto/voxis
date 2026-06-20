@@ -21,6 +21,9 @@ import {
   startleOffset,
   startleHeadingKick,
   startleBurstSpeed,
+  strokeAxisStrength,
+  metachronalIndex,
+  ciliaStrokeAngle,
   iridescentHue,
   lowpassRadii,
   catmullRom,
@@ -3715,5 +3718,155 @@ describe("sampleBinLevel M16 — arbitrary bin count is periodic-continuous", ()
     }
     r.destroy();
     vi.unstubAllGlobals();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 12 — D3 + F4 + G3 rowing coherence (enableStrokeAxis)
+// ---------------------------------------------------------------------------
+describe("strokeAxisStrength (G3 idle/active vigour)", () => {
+  it("is ~0 at rest (activity 0) and high at full activity", () => {
+    expect(strokeAxisStrength(0, CELL_DEFAULTS)).toBeLessThan(0.05);
+    expect(strokeAxisStrength(1, CELL_DEFAULTS)).toBeGreaterThan(0.6);
+  });
+  it("is monotonic non-decreasing in activity and bounded [0,1]", () => {
+    let prev = -1;
+    for (let a = 0; a <= 1.0001; a += 0.1) {
+      const w = strokeAxisStrength(a, CELL_DEFAULTS);
+      expect(w).toBeGreaterThanOrEqual(0);
+      expect(w).toBeLessThanOrEqual(1);
+      expect(w).toBeGreaterThanOrEqual(prev - 1e-9);
+      prev = w;
+    }
+  });
+  it("clamps out-of-range activity", () => {
+    expect(strokeAxisStrength(-5, CELL_DEFAULTS)).toBe(strokeAxisStrength(0, CELL_DEFAULTS));
+    expect(strokeAxisStrength(9, CELL_DEFAULTS)).toBe(strokeAxisStrength(1, CELL_DEFAULTS));
+  });
+});
+
+describe("metachronalIndex (D3 metachronal wave on motion axis)", () => {
+  const gap = (Math.PI * 2) / 18;
+  it("returns the integer index k when disengaged (gate off)", () => {
+    for (const k of [0, 3, 7, 17]) {
+      expect(metachronalIndex(k * gap, k, 0.8, 0.5, gap, false)).toBe(k);
+    }
+  });
+  it("returns k when engaged but speedNorm=0 (back-compat at rest)", () => {
+    for (const k of [0, 5, 11]) {
+      expect(metachronalIndex(k * gap, k, 0, 0.5, gap, true)).toBeCloseTo(k, 12);
+    }
+  });
+  it("at speedNorm=1 the index tracks (baseAngle-axis)/gap (rotates with heading)", () => {
+    const axis = 1.3;
+    const baseAngle = 1.3 + 2 * gap; // 2 gaps ahead of the axis
+    const idx = metachronalIndex(baseAngle, 99, 1, axis, gap, true);
+    expect(idx).toBeCloseTo(2, 6); // wrapPi(2*gap)/gap == 2
+  });
+  it("blends linearly between k and the axial index in speedNorm", () => {
+    const axis = 0.4, baseAngle = 0.4 + 3 * gap, k = 10;
+    const lo = metachronalIndex(baseAngle, k, 0, axis, gap, true);
+    const mid = metachronalIndex(baseAngle, k, 0.5, axis, gap, true);
+    const hi = metachronalIndex(baseAngle, k, 1, axis, gap, true);
+    expect(mid).toBeCloseTo((lo + hi) / 2, 6);
+  });
+});
+
+describe("ciliaStrokeAngle (F4 shared stroke axis)", () => {
+  it("is the local perpendicular (baseAngle+pi/2) when strength=0 (identity)", () => {
+    for (const ba of [0, 1, 2.5, 5]) {
+      expect(ciliaStrokeAngle(ba, 0.7, 0)).toBeCloseTo(ba + Math.PI / 2, 12);
+    }
+  });
+  it("rotates each hair toward the global axis LINE, never more than pi/2", () => {
+    const axis = 0.9;
+    for (const ba of [0, 1, 2, 3, 4, 5, 6]) {
+      const local = ba + Math.PI / 2;
+      const psi = ciliaStrokeAngle(ba, axis, 1);
+      // fully aligned: psi is the axis orientation (mod pi)
+      const d = ((psi - axis) % Math.PI + Math.PI) % Math.PI;
+      expect(Math.min(d, Math.PI - d)).toBeLessThan(1e-6);
+      // never rotates more than pi/2 from the local plane
+      const moved = Math.abs(((psi - local + Math.PI) % (2 * Math.PI)) - Math.PI);
+      expect(moved).toBeLessThanOrEqual(Math.PI / 2 + 1e-6);
+    }
+  });
+});
+
+describe("F4/G3 crown orientation coherence (R metric)", () => {
+  // Axial resultant R2 = |mean(exp(2 i psi))| over the crown's stroke directions.
+  const axialR = (strength: number) => {
+    const n = 18;
+    const gap = (Math.PI * 2) / n;
+    const axis = 0.7;
+    let re = 0, im = 0;
+    for (let k = 0; k < n; k++) {
+      const baseAngle = k * gap; // even crown (jitter omitted; tests the bias only)
+      const psi = ciliaStrokeAngle(baseAngle, axis, strength);
+      re += Math.cos(2 * psi);
+      im += Math.sin(2 * psi);
+    }
+    return Math.hypot(re, im) / n;
+  };
+  it("idle (strength~0) => near-isotropic crown R<0.2 (no rowing in place)", () => {
+    expect(axialR(strokeAxisStrength(0, CELL_DEFAULTS))).toBeLessThan(0.2);
+  });
+  it("active (strength from activity=1) => coherent crown R>0.4", () => {
+    expect(axialR(strokeAxisStrength(1, CELL_DEFAULTS))).toBeGreaterThan(0.4);
+  });
+});
+
+describe("Commit 12 — enableStrokeAxis gate + ciliaPath back-compat", () => {
+  it("enableStrokeAxis defaults ON", () => {
+    expect(CELL_DEFAULTS.enableStrokeAxis).toBe(true);
+  });
+  it("ciliaPath is byte-identical with no motion vs motion {speedNorm:0, axisStrength:0}", () => {
+    const P = { ...CELL_DEFAULTS };
+    const a = ciliaPath(80, 80, 24, 1.0, 0.6, 0.8, P);
+    const b = ciliaPath(80, 80, 24, 1.0, 0.6, 0.8, P, { tx: 1, ty: 0, speedNorm: 0, axisStrength: 0 });
+    expect(b).toEqual(a);
+  });
+  it("axisStrength=0 reproduces the EXACT legacy perpendicular bend (-uy,ux) byte-for-byte", () => {
+    // The fast-path uses (-uy,ux) directly rather than cos/sin(baseAngle+pi/2),
+    // which differ at ~1e-15 (IEEE-754). With axisStrength=0 AND speedNorm=0 (so
+    // D2 drag-lean is also identity) the crown must be byte-identical to the
+    // no-motion call (true commit-11 equivalence, not just visual).
+    const P = { ...CELL_DEFAULTS };
+    const withMotion = ciliaPath(80, 80, 24, 1.0, 0.6, 0.8, P, { tx: 1, ty: 0, speedNorm: 0, axisStrength: 0 });
+    const noMotion = ciliaPath(80, 80, 24, 1.0, 0.6, 0.8, P);
+    expect(withMotion).toEqual(noMotion);
+    // And with the gate explicitly off + a heading, the bend plane still uses the
+    // exact legacy vectors (axisStrength forced to 0 by the gate), speedNorm=0.
+    const Poff = { ...CELL_DEFAULTS, enableStrokeAxis: false };
+    const gateOff = ciliaPath(80, 80, 24, 1.0, 0.6, 0.8, Poff, { tx: 0.3, ty: 0.95, speedNorm: 0, axisStrength: 0.9 });
+    expect(gateOff).toEqual(noMotion);
+  });
+  it("F4 partial-strength fan-out stays bounded (no crown-wide flip mid-ramp)", () => {
+    // Note 2: 0<axisStrength<1 can fan the fore/aft hair pair; verify the max
+    // per-hair bend-plane rotation never exceeds pi/2 from local at any strength.
+    const n = 18;
+    const gap = (Math.PI * 2) / n;
+    const axis = 0.7;
+    for (const s of [0.1, 0.25, 0.5, 0.75, 0.9]) {
+      for (let k = 0; k < n; k++) {
+        const ba = k * gap;
+        const local = ba + Math.PI / 2;
+        const psi = ciliaStrokeAngle(ba, axis, s);
+        const moved = Math.abs(((psi - local + Math.PI) % (2 * Math.PI)) - Math.PI);
+        expect(moved).toBeLessThanOrEqual(Math.PI / 2 + 1e-9);
+      }
+    }
+  });
+  it("ciliaPath changes the crown when axisStrength>0 and the cell swims", () => {
+    const P = { ...CELL_DEFAULTS };
+    const rest = ciliaPath(80, 80, 24, 1.0, 0.6, 0.8, P);
+    const swim = ciliaPath(80, 80, 24, 1.0, 0.6, 0.8, P, { tx: 1, ty: 0, speedNorm: 0.9, axisStrength: 0.8 });
+    let differs = false;
+    for (let h = 0; h < rest.length && !differs; h++) {
+      for (let i = 0; i < rest[h].points.length; i++) {
+        if (Math.abs(rest[h].points[i][0] - swim[h].points[i][0]) > 1e-6) { differs = true; break; }
+      }
+    }
+    expect(differs).toBe(true);
   });
 });

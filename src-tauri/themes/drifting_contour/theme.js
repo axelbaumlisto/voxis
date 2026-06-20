@@ -265,6 +265,13 @@ function smoothstep(t) {
 function lerp(a, b, t) {
   return a + (b - a) * t;
 }
+function wrapPi(a) {
+  const TWO_PI = Math.PI * 2;
+  let x = ((a + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI;
+  if (x <= -Math.PI)
+    x += TWO_PI;
+  return x;
+}
 function noise2D(x, y) {
   const xi = Math.floor(x) & 255;
   const yi = Math.floor(y) & 255;
@@ -316,6 +323,31 @@ function catmullRom(points, segmentsPerSpan) {
     const p3 = points[(i + 2) % n];
     segment(p0, p1, p2, p3, segmentsPerSpan);
   }
+  return result;
+}
+function catmullRomOpen(points, segmentsPerSpan) {
+  const n = points.length;
+  if (n < 2)
+    return [...points];
+  const result = [];
+  const segment = (p0, p1, p2, p3, steps) => {
+    for (let i = 0;i < steps; i++) {
+      const t = i / steps;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const x = 0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3);
+      const y = 0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3);
+      result.push([x, y]);
+    }
+  };
+  for (let i = 0;i < n - 1; i++) {
+    const p0 = points[i - 1 < 0 ? 0 : i - 1];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2 > n - 1 ? n - 1 : i + 2];
+    segment(p0, p1, p2, p3, segmentsPerSpan);
+  }
+  result.push([points[n - 1][0], points[n - 1][1]]);
   return result;
 }
 function integrateDeformation(prevDeform, targetDeform, attack, release) {
@@ -374,6 +406,16 @@ var CELL_DEFAULTS = {
   ciliaGrowthBoost: 0.6,
   ciliaWave: 0.5,
   ciliaWaveSpeed: 1.6,
+  ciliaCurl: 0.7,
+  ciliaBeatHz: 0.9,
+  ciliaBeatHzActive: 1.6,
+  ciliaAsymmetry: 0.49,
+  ciliaMetachronal: 1.1,
+  dragCoeff: 0.5,
+  ciliaSegments: 6,
+  ciliaLengthVar: 0.5,
+  ciliaAngleJitter: 0.55,
+  ciliaWidth: 1.6,
   growthAttack: 0.05,
   growthRelease: 0.012,
   growthSwell: 0.22,
@@ -381,12 +423,48 @@ var CELL_DEFAULTS = {
   startleDecay: 0.86,
   startleMaxPx: 5,
   startleBaselineRate: 0.08,
+  enableStartleKick: true,
+  startleKickThreshold: 0.12,
+  startleKickMax: 1.2,
+  startleBurstFrac: 0.5,
   idleMorphAmplitude: 0.18,
   idleMorphSpeed: 0.25,
   idleMorphPeriod: 7,
   idleMorphFloor: 0.25,
-  driftActivationRate: 0.02
+  driftActivationRate: 0.02,
+  wanderTurnRate: 1.1,
+  wanderFreq: 0.6,
+  swimSpeedMaxFrac: 0.06,
+  activityEnergyWeight: 0.6,
+  activityGrowthWeight: 0.4,
+  bodyHeadingTau: 0.4,
+  bodyElongation: 0.13,
+  bodyElongationFloor: 0,
+  enableStrokeAxis: true,
+  strokeAxisKnee: 0.5,
+  strokeAxisAlign: 1,
+  enableSaturation: true,
+  deformMax: 0.6,
+  enableAreaNorm: true,
+  enableAffine: true,
+  enableActivity: true
 };
+function sanitizeUnit(x) {
+  if (!Number.isFinite(x))
+    return 0;
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+function sanitizeFinite(x, fallback) {
+  return Number.isFinite(x) ? x : fallback;
+}
+function sanitizeBins(bins) {
+  if (!bins || bins.length === 0)
+    return [];
+  const out = new Array(bins.length);
+  for (let i = 0;i < bins.length; i++)
+    out[i] = sanitizeUnit(bins[i]);
+  return out;
+}
 function cellEnergy(mode, audioLevel, t, idle, levelGain) {
   switch (mode) {
     case "idle":
@@ -400,6 +478,40 @@ function cellEnergy(mode, audioLevel, t, idle, levelGain) {
     default:
       return idle;
   }
+}
+function cellActivity(energy, growth, params) {
+  const we = params?.activityEnergyWeight ?? 0.6;
+  const wg = params?.activityGrowthWeight ?? 0.4;
+  const a = we * energy + wg * growth;
+  return a < 0 ? 0 : a > 1 ? 1 : a;
+}
+function swimSpeed(activity, width, height, params) {
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  const frac = params.swimSpeedMaxFrac ?? 0.06;
+  return a * frac * Math.min(width, height);
+}
+function ciliaBeatHzEff(activity, params) {
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  const f0 = params.ciliaBeatHz ?? 0.9;
+  const f1 = params.ciliaBeatHzActive ?? 1.6;
+  return f0 + (f1 - f0) * a;
+}
+function bodyHeadingStep(prev, vx, vy, dt, params) {
+  const sp = Math.hypot(vx, vy);
+  if (sp < 0.000001)
+    return prev;
+  const target = Math.atan2(vy, vx);
+  const tau = params.bodyHeadingTau ?? 0.4;
+  const alpha = 1 - Math.exp(-dt / Math.max(0.000001, tau));
+  let d = target - prev;
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  return prev + d * alpha;
+}
+function prolateAspect(speedNorm, params) {
+  const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
+  const elong = params.bodyElongation ?? 0.13;
+  const floor = params.bodyElongationFloor ?? 0;
+  return 1 + elong * Math.max(floor, s);
 }
 function cellRadius(angle, t, energy, params) {
   const dx = Math.cos(angle);
@@ -416,26 +528,105 @@ function pseudopodOffset(angle, t, audioLevel, energy, params) {
     const theta = TAU * noise2D(seed, t * params.intentDrift);
     let delta = angle - theta;
     delta = ((delta + Math.PI) % TAU + TAU) % TAU - Math.PI;
-    const lobe = Math.pow(Math.max(0, Math.cos(delta)), params.sharpness);
+    const sharp = Math.max(2, params.sharpness);
+    const lobe = Math.pow(Math.max(0, Math.cos(delta)), sharp);
     const audioDrive = params.idle + audioLevel * params.levelGain;
     const amp = params.push * audioDrive * energy;
     total += lobe * amp;
   }
   return total;
 }
-function ciliaEndpoints(cx, cy, baseR, t, energy, growth, params) {
+function ciliaBeatPhase(t, index, params) {
+  const hz = params.ciliaBeatHz ?? 0.9;
+  const lag = (params.ciliaMetachronal ?? 0) * index;
+  const lin = (t * hz + lag / TAU) % 1;
+  const u = (lin % 1 + 1) % 1;
+  const a = Math.max(0, Math.min(0.95, params.ciliaAsymmetry ?? 0));
+  if (a === 0)
+    return u;
+  const A = a;
+  const phase = u + A / TAU * (1 - Math.cos(TAU * u));
+  return (phase % 1 + 1) % 1;
+}
+function strokeAxisStrength(activity, params) {
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  const knee = params.strokeAxisKnee ?? 0.5;
+  return smoothstep(a / (knee > 0 ? knee : 0.000001));
+}
+function metachronalIndex(baseAngle, k, speedNorm, axis, gap, engaged) {
+  if (!engaged)
+    return k;
+  const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
+  if (s === 0)
+    return k;
+  const axial = wrapPi(baseAngle - axis) / (gap > 0 ? gap : 0.000001);
+  return (1 - s) * k + s * axial;
+}
+function ciliaStrokeAngle(baseAngle, axis, strength) {
+  const local = baseAngle + Math.PI / 2;
+  const s = strength < 0 ? 0 : strength > 1 ? 1 : strength;
+  if (s === 0)
+    return local;
+  const delta = wrapPi(2 * (axis - local)) / 2;
+  return local + s * delta;
+}
+function ciliaPath(cx, cy, baseR, t, energy, growth, params, motion) {
+  const dragCoeff = params.dragCoeff ?? 0.5;
+  const mTx = motion?.tx ?? 0;
+  const mTy = motion?.ty ?? 0;
+  const mSpeed = motion ? Math.max(0, Math.min(1, motion.speedNorm)) : 0;
+  const axisEngaged = (params.enableStrokeAxis ?? true) && motion !== undefined;
+  const axisStrength = axisEngaged ? Math.max(0, Math.min(1, (motion?.axisStrength ?? 0) * (params.strokeAxisAlign ?? 1))) : 0;
+  const strokeAxis = Math.atan2(mTy, mTx);
   const out = [];
   const n = Math.max(1, params.ciliaCount);
-  const lenPx = baseR * (params.ciliaLength + growth * params.ciliaGrowthBoost) * (0.7 + energy * 0.6);
+  const seg = Math.max(2, params.ciliaSegments ?? 6);
+  const curl = params.ciliaCurl;
+  const lenVar = Math.max(0, Math.min(0.95, params.ciliaLengthVar ?? 0.5));
+  const angleJit = Math.max(0, Math.min(0.9, params.ciliaAngleJitter ?? 0.55));
+  const baseWidth = params.ciliaWidth ?? 1.6;
+  const waves = 1.1;
+  const gap = TAU / n;
+  const lenMean = baseR * (params.ciliaLength + growth * params.ciliaGrowthBoost) * (0.55 + 0.45 * energy);
   for (let k = 0;k < n; k++) {
-    const baseAngle = k / n * TAU;
-    const sway = noise2D(k * 5.3, t * params.ciliaWaveSpeed) * params.ciliaWave;
-    const tipAngle = baseAngle + sway;
-    const x1 = cx + baseR * Math.cos(baseAngle);
-    const y1 = cy + baseR * Math.sin(baseAngle);
-    const x2 = cx + (baseR + lenPx) * Math.cos(tipAngle);
-    const y2 = cy + (baseR + lenPx) * Math.sin(tipAngle);
-    out.push({ x1, y1, x2, y2 });
+    const angOff = noise2D(k * 12.9898, 7.2) * angleJit * gap * 0.5;
+    const baseAngle = k * gap + angOff;
+    const ux = Math.cos(baseAngle);
+    const uy = Math.sin(baseAngle);
+    let pxn;
+    let pyn;
+    if (axisStrength === 0) {
+      pxn = -uy;
+      pyn = ux;
+    } else {
+      const strokeAngle = ciliaStrokeAngle(baseAngle, strokeAxis, axisStrength);
+      pxn = Math.cos(strokeAngle);
+      pyn = Math.sin(strokeAngle);
+    }
+    const r01 = noise2D(k * 3.7 + 0.3, 1.3) * 0.5 + 0.5;
+    const lenK = lenMean * (1 - lenVar + 2 * lenVar * r01);
+    const r01b = noise2D(k * 5.1 + 2.7, 4.9) * 0.5 + 0.5;
+    const hairWidth = baseWidth * (0.55 + 0.9 * (0.5 * r01 + 0.5 * r01b));
+    const metaIdx = metachronalIndex(baseAngle, k, mSpeed, strokeAxis, gap, axisEngaged);
+    const phase = ciliaBeatPhase(t + r01 * 0.6, metaIdx, params);
+    const recovery = smoothstep((phase - 0.35) / 0.3);
+    const pts = [];
+    for (let i = 0;i <= seg; i++) {
+      const sFrac = i / seg;
+      const along = baseR + lenK * sFrac;
+      const wave = Math.sin(TAU * (waves * sFrac - phase));
+      const amp = curl * lenK * 0.6 * Math.sin(Math.PI * sFrac) * (0.4 + 0.6 * recovery);
+      const rawBend = wave * 0.7 * amp;
+      const bendCap = 0.5 * gap * along;
+      const bend = Math.max(-bendCap, Math.min(bendCap, rawBend));
+      const lead = ux * mTx + uy * mTy;
+      const dragGain = dragCoeff * mSpeed * (0.6 + 0.4 * lead);
+      const dragPx = dragGain * lenK * Math.pow(sFrac, 1.3);
+      const x = cx + ux * along + pxn * bend - mTx * dragPx;
+      const y = cy + uy * along + pyn * bend - mTy * dragPx;
+      pts.push([x, y]);
+    }
+    out.push({ points: pts, width: hairWidth });
   }
   return out;
 }
@@ -443,6 +634,16 @@ function startleOffset(prevMag, level, baseline, sensitivity, decay) {
   const edge = Math.max(0, (level - baseline) * sensitivity);
   const decayed = prevMag * Math.max(0, Math.min(1, decay));
   return Math.max(0, Math.min(1, Math.max(decayed, edge)));
+}
+function startleHeadingKick(startle, prevStartle, t, params) {
+  const rising = startle - prevStartle;
+  if (rising <= (params.startleKickThreshold ?? 0.12))
+    return 0;
+  return noise2D(811.3, t * 1.7) * (params.startleKickMax ?? 1.2);
+}
+function startleBurstSpeed(startle, baseR, params) {
+  const s = startle < 0 ? 0 : startle > 1 ? 1 : startle;
+  return s * (params.startleBurstFrac ?? 0.5) * baseR;
 }
 function idleMorph(sampleCount, t, params) {
   const out = [];
@@ -470,6 +671,78 @@ function iridescentHue(angle, t, audioLevel, baseHue, params) {
   hue = (hue % 360 + 360) % 360;
   return hue;
 }
+function sampleBinLevel(bins, normalized) {
+  const nBins = bins.length;
+  if (nBins === 0)
+    return 0;
+  if (nBins === 1)
+    return bins[0];
+  const u = (normalized % 1 + 1) % 1 * nBins - 0.5;
+  const i0 = Math.floor(u);
+  const frac = u - i0;
+  const a = bins[(i0 % nBins + nBins) % nBins];
+  const b = bins[((i0 + 1) % nBins + nBins) % nBins];
+  return lerp(a, b, smoothstep(frac));
+}
+function saturateTargetDeform(target, params) {
+  if (!params.enableSaturation)
+    return target;
+  const Dmax = params.deformMax ?? 0.6;
+  if (!(Dmax > 0))
+    return target;
+  return target.map((d) => Dmax * Math.tanh(d / Dmax));
+}
+function normalizeAreaDeform(integrated, params) {
+  if (!params.enableAreaNorm)
+    return integrated;
+  const n = integrated.length;
+  if (n === 0)
+    return integrated;
+  let sum = 0;
+  let sumSq = 0;
+  let minE = Infinity;
+  for (const d of integrated) {
+    const e = 1 + d;
+    sum += e;
+    sumSq += e * e;
+    if (e < minE)
+      minE = e;
+  }
+  const m1 = sum / n;
+  const m2 = sumSq / n;
+  const variance = m2 - m1 * m1;
+  if (variance > 1 || !(m2 > 0)) {
+    const s = m2 > 0 ? 1 / Math.sqrt(m2) : 1;
+    return integrated.map((d) => (1 + d) * s - 1);
+  }
+  let c = m1 - Math.sqrt(1 - variance);
+  const EPS = 0.0001;
+  const cMax = minE - EPS;
+  if (c > cMax)
+    c = cMax;
+  return integrated.map((d) => d - c);
+}
+function integrateDeformPipeline(prev, target, params) {
+  const satTarget = saturateTargetDeform(target, params);
+  const integrated = prev ? integrateDeformation(prev, satTarget, params.attack, params.release) : satTarget.slice();
+  return normalizeAreaDeform(integrated, params);
+}
+function affineSqueezePoints(points, k, phi, cx, cy, params) {
+  if (!params.enableAffine || k === 1)
+    return points;
+  const cos = Math.cos(phi);
+  const sin = Math.sin(phi);
+  const invK = 1 / k;
+  return points.map(([x, y]) => {
+    const dx = x - cx;
+    const dy = y - cy;
+    const xr = dx * cos + dy * sin;
+    const yr = -dx * sin + dy * cos;
+    const xs = xr * k;
+    const ys = yr * invK;
+    return [cx + xs * cos - ys * sin, cy + xs * sin + ys * cos];
+  });
+}
 function buildTargetDeformation(width, height, bins, t, audioLevel, energy, params, idleFactor = 0) {
   const sampleCount = 96;
   const baseR = resolveBaseRadius(width, height, params, 0);
@@ -479,8 +752,7 @@ function buildTargetDeformation(width, height, bins, t, audioLevel, energy, para
   for (let i = 0;i < sampleCount; i++) {
     const angle = i / sampleCount * TAU;
     const normalized = (angle % TAU + TAU) % TAU / TAU;
-    const binIdx = bins.length === 0 ? 0 : Math.min(Math.floor(normalized * bins.length), bins.length - 1);
-    const binLevel = bins.length === 0 ? 0 : bins[binIdx];
+    const binLevel = sampleBinLevel(bins, normalized);
     const rFbm = cellRadius(angle, t, energy, params);
     const fbmDeform = rFbm - 1;
     const rPseudo = pseudopodOffset(angle, t, audioLevel, energy, params);
@@ -491,14 +763,17 @@ function buildTargetDeformation(width, height, bins, t, audioLevel, energy, para
   }
   return out;
 }
-function nucleusTransform(t, audioLevel, baseR, params) {
+function nucleusTransform(t, audioLevel, baseR, params, minMembraneR) {
   const rawCx = baseR * params.nucleusWander * noise2D(137, t * params.nucleusDrift);
   const rawCy = baseR * params.nucleusWander * noise2D(241, t * params.nucleusDrift);
   const idleBreath = Math.sin(t * 1.3) * params.nucleusPulse * 0.25;
   let r = baseR * (params.nucleusRadius + audioLevel * params.nucleusPulse + idleBreath);
   const MIN_PX_RADIUS = 2.5;
   r = Math.max(MIN_PX_RADIUS, r);
-  const safeInner = baseR * 0.55;
+  const PINCH_MARGIN = 0.15;
+  const safeInner = minMembraneR !== undefined && Number.isFinite(minMembraneR) ? Math.max(0, minMembraneR) * (1 - PINCH_MARGIN) : baseR * 0.55;
+  if (r > safeInner)
+    r = Math.max(MIN_PX_RADIUS, safeInner);
   const offsetMag = Math.sqrt(rawCx * rawCx + rawCy * rawCy);
   const maxOffsetMag = Math.max(0, safeInner - r);
   if (maxOffsetMag <= 0) {
@@ -543,6 +818,9 @@ function restoreSeed(saved, now) {
     driftPhaseOffset: saved.driftPhase - elapsed
   };
 }
+function membraneMaxRadius(width, height) {
+  return Math.min(width, height) * 0.46;
+}
 function resolveBaseRadius(width, height, params, growth) {
   const fallbackR = Math.min(width, height) * params.radiusFraction;
   const rawBaseR = params.baseRadiusPx ?? fallbackR;
@@ -553,32 +831,60 @@ function cellReach(baseR, params) {
   const ciliaGrowthBoost = params.ciliaGrowthBoost ?? 0;
   const startleMaxPx = params.startleMaxPx ?? 0;
   const membraneOuter = baseR * 1.4;
-  const ciliaOuter = baseR + baseR * (ciliaLength + ciliaGrowthBoost) * 1.3;
+  const lenVar = Math.max(0, Math.min(0.95, params.ciliaLengthVar ?? 0));
+  const longestAlong = baseR + baseR * (ciliaLength + ciliaGrowthBoost) * (1 + lenVar);
+  const ciliaCount = params.ciliaCount ?? 0;
+  const gap = ciliaCount > 0 ? TAU / ciliaCount : 0;
+  const ciliaOuter = longestAlong * Math.sqrt(1 + 0.25 * gap * gap);
   return Math.max(membraneOuter, ciliaOuter) + startleMaxPx;
 }
-function driftActivation(prev, recording, rate) {
+function driftActivation(prev, recording, rate, dt) {
   const target = recording ? 1 : 0;
-  const raw = prev + (target - prev) * rate;
+  const r = rate < 0 ? 0 : rate > 1 ? 1 : rate;
+  const alpha = dt === undefined ? r : 1 - Math.pow(1 - r, dt * 60);
+  const raw = prev + (target - prev) * alpha;
   if (raw > 1)
     return 1;
   if (raw < 0)
     return 0;
   return raw;
 }
-function cellDrift(t, width, height, baseR, params) {
+function wanderStep(s, dt, width, height, baseR, params, speedOverride) {
   const reach = cellReach(baseR, params);
   const inset = Math.max(params.driftMargin ?? 4, reach);
-  const speed = params.driftSpeed ?? 0.03;
-  const travelRangeX = width - 2 * inset;
-  const travelRangeY = height - 2 * inset;
-  const phaseX = t * speed + 1000;
-  const phaseY = t * speed + 2000;
-  const noiseX = noise2D(phaseX, 0);
-  const noiseY = noise2D(phaseY, 0);
-  const mapTo = (noise, lo, hi) => lo + (noise * 0.5 + 0.5) * (hi - lo);
-  const cx = travelRangeX > 0 ? mapTo(noiseX, inset, width - inset) : width / 2;
-  const cy = travelRangeY > 0 ? mapTo(noiseY, inset, height - inset) : height / 2;
-  return { cx, cy };
+  const minX = inset, maxX = width - inset;
+  const minY = inset, maxY = height - inset;
+  if (maxX <= minX || maxY <= minY) {
+    return { x: width / 2, y: height / 2, heading: s.heading, vx: 0, vy: 0, clock: (s.clock ?? 0) + dt };
+  }
+  const speed = speedOverride !== undefined ? speedOverride : (params.driftSpeed ?? 0.03) * Math.min(width, height) * 1.2;
+  const turnRate = params.wanderTurnRate ?? 1.1;
+  const wanderFreq = params.wanderFreq ?? 0.6;
+  const clock = (s.clock ?? 0) + dt;
+  const jitter = noise2D(s.heading * 0.5 + 13, clock * wanderFreq);
+  let heading = s.heading + jitter * turnRate * dt;
+  let vx = Math.cos(heading) * speed;
+  let vy = Math.sin(heading) * speed;
+  let x = s.x + vx * dt;
+  let y = s.y + vy * dt;
+  if (x < minX) {
+    x = minX;
+    heading = Math.PI - heading;
+  } else if (x > maxX) {
+    x = maxX;
+    heading = Math.PI - heading;
+  }
+  if (y < minY) {
+    y = minY;
+    heading = -heading;
+  } else if (y > maxY) {
+    y = maxY;
+    heading = -heading;
+  }
+  vx = Math.cos(heading) * speed;
+  vy = Math.sin(heading) * speed;
+  heading = Math.atan2(Math.sin(heading), Math.cos(heading));
+  return { x, y, heading, vx, vy, clock };
 }
 function createCellRenderer(container, opts) {
   const params = { ...CELL_DEFAULTS, ...opts.params ?? {} };
@@ -600,6 +906,9 @@ function createCellRenderer(container, opts) {
   let startle = 0;
   let baseline = 0;
   let drift01 = 0;
+  let wander = null;
+  let bodyHeading = 0;
+  let lastTickMs = performance.now();
   const PERSIST_KEY = "talri.cell.state.v1";
   let driftPhaseOffset = 0;
   let lastPersist = 0;
@@ -617,29 +926,53 @@ function createCellRenderer(container, opts) {
   }
   let rafId = null;
   const tick = () => {
-    const t = (performance.now() - startedAt) / 1000;
+    const nowMs = performance.now();
+    const t = (nowMs - startedAt) / 1000;
+    const dt = Math.min(0.05, Math.max(0.001, (nowMs - lastTickMs) / 1000));
+    lastTickMs = nowMs;
     const s = latestState;
+    const audioLevel = sanitizeUnit(s.audioLevel);
+    const spectrumBins = sanitizeBins(s.spectrumBins);
     if (ctx) {
       ctx.clearRect(0, 0, width, height);
-      const energy = cellEnergy(s.mode, s.audioLevel, t, params.idle, params.levelGain);
-      growth = growthLevel(growth, s.audioLevel, s.mode, params.growthAttack, params.growthRelease);
-      baseline = baseline + (s.audioLevel - baseline) * params.startleBaselineRate;
-      startle = startleOffset(startle, s.audioLevel, baseline, params.startleSensitivity, params.startleDecay);
-      const startleAngle = TAU * noise2D(900.5, t * 0.7);
-      const sdx = Math.cos(startleAngle) * startle * params.startleMaxPx;
-      const sdy = Math.sin(startleAngle) * startle * params.startleMaxPx;
+      const energy = cellEnergy(s.mode, audioLevel, t, params.idle, params.levelGain);
+      growth = sanitizeUnit(growthLevel(sanitizeUnit(growth), audioLevel, s.mode, params.growthAttack, params.growthRelease));
+      const activity = cellActivity(energy, growth, params);
+      baseline = sanitizeFinite(baseline + (audioLevel - sanitizeFinite(baseline, 0)) * params.startleBaselineRate, 0);
+      const prevStartle = startle;
+      startle = sanitizeUnit(startleOffset(sanitizeUnit(startle), audioLevel, baseline, params.startleSensitivity, params.startleDecay));
+      const useKick = params.enableStartleKick !== false;
+      let sdx = 0;
+      let sdy = 0;
+      if (!useKick) {
+        const startleAngle = TAU * noise2D(900.5, t * 0.7);
+        sdx = Math.cos(startleAngle) * startle * params.startleMaxPx;
+        sdy = Math.sin(startleAngle) * startle * params.startleMaxPx;
+      }
       const recordingFade = s.mode === "recording" ? 0.3 : 1;
-      const idleFactor = Math.max(0, 1 - s.audioLevel * 3) * recordingFade;
-      const targetDeform = buildTargetDeformation(width, height, s.spectrumBins, t, s.audioLevel, energy, params, idleFactor);
-      deform = deform ? integrateDeformation(deform, targetDeform, params.attack, params.release) : targetDeform.slice();
-      drift01 = driftActivation(drift01, s.mode === "recording", params.driftActivationRate ?? 0.02);
+      const idleFactor = (1 - smoothstep(activity / 0.33)) * recordingFade;
+      const targetDeform = buildTargetDeformation(width, height, spectrumBins, t, audioLevel, energy, params, idleFactor);
+      const safePrev = deform && deform.every((v) => Number.isFinite(v)) ? deform : null;
+      deform = integrateDeformPipeline(safePrev, targetDeform, params);
+      drift01 = driftActivation(drift01, s.mode === "recording", params.driftActivationRate ?? 0.02, dt);
       const baseR = resolveBaseRadius(width, height, params, growth);
-      const drift = cellDrift(t + driftPhaseOffset, width, height, baseR, params);
-      const driftedX = width / 2 + (drift.cx - width / 2) * drift01;
-      const driftedY = height / 2 + (drift.cy - height / 2) * drift01;
+      if (!wander) {
+        wander = { x: width / 2, y: height / 2, heading: noise2D(7.1, 3.3) * TAU, vx: 0, vy: 0, clock: 0 };
+      }
+      if (useKick) {
+        const kick = startleHeadingKick(startle, prevStartle, t, params);
+        if (kick !== 0)
+          wander = { ...wander, heading: wander.heading + kick };
+      }
+      const baseSwim = params.enableActivity ? swimSpeed(activity, width, height, params) : undefined;
+      const burst = useKick ? startleBurstSpeed(startle, baseR, params) : 0;
+      const swimPx = baseSwim !== undefined ? baseSwim + burst : burst > 0 ? burst : undefined;
+      wander = wanderStep(wander, dt, width, height, baseR, params, swimPx);
+      const driftedX = width / 2 + (wander.x - width / 2) * drift01;
+      const driftedY = height / 2 + (wander.y - height / 2) * drift01;
       const cx = driftedX + sdx;
       const cy = driftedY + sdy;
-      const maxRadius = height * 0.46;
+      const maxRadius = membraneMaxRadius(width, height);
       const floorRadius = baseR * 0.35;
       const sampleCount = deform.length;
       const smoothedPoints = [];
@@ -651,17 +984,38 @@ function createCellRenderer(container, opts) {
         const y = cy + radius * Math.sin(angle);
         smoothedPoints.push([x, y]);
       }
-      const splinePoints = catmullRom(smoothedPoints, 4);
+      const swimPeak = swimSpeed(1, width, height, params);
+      const curSpeed = Math.hypot(wander.vx, wander.vy);
+      const speedNorm = params.enableActivity && swimPeak > 0 ? Math.min(1, curSpeed / swimPeak) : 0;
+      bodyHeading = bodyHeadingStep(bodyHeading, wander.vx, wander.vy, dt, params);
+      const squeezeK = params.enableAffine ? prolateAspect(speedNorm, params) : 1;
+      const squeezePhi = bodyHeading;
+      const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
+      const splinePoints = catmullRom(contourPoints, 4);
       if (splinePoints.length >= 3) {
         {
-          const cilia = ciliaEndpoints(cx, cy, baseR, t, energy, growth, params);
+          const ciliaParams = params.enableActivity ? {
+            ...params,
+            ciliaBeatHz: ciliaBeatHzEff(activity, params),
+            ciliaCurl: params.ciliaCurl * (1 + 0.3 * activity)
+          } : params;
+          const ciliaMotion = {
+            tx: Math.cos(bodyHeading),
+            ty: Math.sin(bodyHeading),
+            speedNorm,
+            axisStrength: params.enableActivity ? strokeAxisStrength(activity, params) : 0
+          };
+          const cilia = ciliaPath(cx, cy, baseR, t, energy, growth, ciliaParams, ciliaMotion);
           ctx.lineCap = "round";
-          ctx.lineWidth = 1;
-          for (const c of cilia) {
+          for (const hair of cilia) {
+            ctx.lineWidth = hair.width;
             ctx.strokeStyle = hsla(baseHue, 0.6, 0.6, 0.35 + 0.35 * energy);
             ctx.beginPath();
-            ctx.moveTo(c.x1, c.y1);
-            ctx.lineTo(c.x2, c.y2);
+            ctx.moveTo(hair.points[0][0], hair.points[0][1]);
+            const spline = catmullRomOpen(hair.points, 4);
+            for (let i = 1;i < spline.length; i++) {
+              ctx.lineTo(spline[i][0], spline[i][1]);
+            }
             ctx.stroke();
           }
         }
@@ -677,10 +1031,12 @@ function createCellRenderer(container, opts) {
         grad.addColorStop(1, hsla(baseHue, 0.7, 0.45, params.fillAlpha));
         ctx.fillStyle = grad;
         ctx.fill();
-        const nucleus = nucleusTransform(t, s.audioLevel, baseR, params);
+        let minMembraneR = Infinity;
+        for (const dv of deform)
+          minMembraneR = Math.min(minMembraneR, baseR * (1 + dv));
+        const nucleus = nucleusTransform(t, audioLevel, baseR, params, minMembraneR);
         if (nucleus.r >= 2.5) {
-          const nx = cx + nucleus.cx;
-          const ny = cy + nucleus.cy;
+          const [nx, ny] = affineSqueezePoints([[cx + nucleus.cx, cy + nucleus.cy]], squeezeK, squeezePhi, cx, cy, params)[0];
           const nr = nucleus.r;
           const nucGrad = ctx.createRadialGradient(nx, ny, 0, nx, ny, nr);
           nucGrad.addColorStop(0, hsla(baseHue - 5, 0.8, 0.48, params.nucleusAlpha));
@@ -700,7 +1056,7 @@ function createCellRenderer(container, opts) {
         ctx.strokeStyle = hsla(baseHue, 0.8, 0.6, 0.9);
         ctx.lineWidth = 1.8;
         ctx.stroke();
-        const segments = smoothedPoints.length;
+        const segments = contourPoints.length;
         const pointsPerSegment = splinePoints.length / segments;
         for (let seg = 0;seg < segments; seg++) {
           const segStart = Math.floor(seg * pointsPerSegment);
@@ -709,7 +1065,7 @@ function createCellRenderer(container, opts) {
             continue;
           const midPt = splinePoints[Math.floor((segStart + segEnd) / 2) % splinePoints.length];
           const midAngle = Math.atan2(midPt[1] - cy, midPt[0] - cx);
-          const hue = iridescentHue(midAngle, t, s.audioLevel, baseHue, params);
+          const hue = iridescentHue(midAngle, t, audioLevel, baseHue, params);
           ctx.strokeStyle = hsla(hue, 0.85, 0.6, 0.85);
           ctx.lineWidth = 2;
           ctx.beginPath();
@@ -781,7 +1137,7 @@ function mount(container, api) {
       ciliaWaveSpeed: 1.6,
       growthAttack: 0.05,
       growthRelease: 0.012,
-      baseRadiusPx: 16,
+      baseRadiusPx: 17,
       driftSpeed: 0.03,
       driftMargin: 30,
       idleMorphAmplitude: 0.16,
