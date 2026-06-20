@@ -89,6 +89,7 @@ import {
   profileCDFInv,
   cyclosisLoopPoint,
   buildProfilePts,
+  applyOralGroove,
 } from "../cell";
 import { deformAt, wrapPi } from "../shared";
 import type { CellParams, CellPersistState, CiliaMotion, InteriorCtx } from "../cell";
@@ -7986,5 +7987,161 @@ describe("Commit v3.7A — CV canal params", () => {
     }).not.toThrow();
     r.destroy();
     restore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3.7B — oral groove contour indent
+// ---------------------------------------------------------------------------
+
+describe("v3.7B — applyOralGroove", () => {
+  const N = 96;
+  const heading = 0; // body facing right (anterior at angle 0)
+
+  it("is a no-op when enableOralGroove is false (default)", () => {
+    const deform = new Array(N).fill(0);
+    const original = [...deform];
+    const params: CellParams = { ...CELL_DEFAULTS, enableOralGroove: false };
+    applyOralGroove(deform, heading, params);
+    expect(deform).toEqual(original);
+  });
+
+  it("is a no-op when enableOralGroove is undefined (default)", () => {
+    const deform = new Array(N).fill(0);
+    const original = [...deform];
+    const params: CellParams = { ...CELL_DEFAULTS };
+    applyOralGroove(deform, heading, params);
+    expect(deform).toEqual(original);
+  });
+
+  it("creates a concavity (negative dip) when enabled", () => {
+    const deform = new Array(N).fill(0);
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableOralGroove: true,
+      oralGrooveDepth: 0.04,
+      oralGrooveAngle: 1.2,
+      oralGrooveWidth: 0.6,
+    };
+    applyOralGroove(deform, heading, params);
+    const minVal = Math.min(...deform);
+    expect(minVal).toBeLessThan(0);
+    // Max dip should be close to -depth at the centre
+    expect(minVal).toBeCloseTo(-0.04, 2);
+    // Most entries should be untouched (0)
+    const untouched = deform.filter(v => v === 0).length;
+    expect(untouched).toBeGreaterThan(N * 0.5);
+  });
+
+  it("dip is centred at oralGrooveAngle in body frame", () => {
+    const deform = new Array(N).fill(0);
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableOralGroove: true,
+      oralGrooveDepth: 0.1,
+      oralGrooveAngle: 1.2,
+      oralGrooveWidth: 0.6,
+    };
+    applyOralGroove(deform, heading, params);
+    let minIdx = 0;
+    for (let i = 1; i < N; i++) {
+      if (deform[i] < deform[minIdx]) minIdx = i;
+    }
+    const deepestAngle = (minIdx / N) * TAU;
+    const sampleStep = TAU / N;
+    expect(Math.abs(deepestAngle - 1.2)).toBeLessThan(sampleStep * 1.5);
+  });
+
+  it("depth scales linearly with oralGrooveDepth", () => {
+    const d1 = new Array(N).fill(0);
+    const d2 = new Array(N).fill(0);
+    const base: CellParams = {
+      ...CELL_DEFAULTS,
+      enableOralGroove: true,
+      oralGrooveAngle: 1.2,
+      oralGrooveWidth: 0.6,
+    };
+    applyOralGroove(d1, heading, { ...base, oralGrooveDepth: 0.04 });
+    applyOralGroove(d2, heading, { ...base, oralGrooveDepth: 0.08 });
+    const min1 = Math.min(...d1);
+    const min2 = Math.min(...d2);
+    expect(min2).toBeLessThan(min1);
+    expect(min2 / min1).toBeCloseTo(2, 1);
+  });
+
+  it("follows bodyHeading rotation", () => {
+    const halfPi = Math.PI / 2;
+    const d1 = new Array(N).fill(0);
+    const d2 = new Array(N).fill(0);
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableOralGroove: true,
+      oralGrooveDepth: 0.1,
+      oralGrooveAngle: 1.2,
+      oralGrooveWidth: 0.6,
+    };
+    applyOralGroove(d1, 0, params);
+    applyOralGroove(d2, halfPi, params);
+    let minIdx1 = 0, minIdx2 = 0;
+    for (let i = 1; i < N; i++) {
+      if (d1[i] < d1[minIdx1]) minIdx1 = i;
+      if (d2[i] < d2[minIdx2]) minIdx2 = i;
+    }
+    const ang1 = (minIdx1 / N) * TAU;
+    const ang2 = (minIdx2 / N) * TAU;
+    const shift = ((ang2 - ang1) % TAU + TAU) % TAU;
+    expect(Math.abs(shift - halfPi)).toBeLessThan(TAU / N * 2);
+  });
+
+  it("cosine bell falloff is smooth (no sharp steps)", () => {
+    const deform = new Array(N).fill(0);
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableOralGroove: true,
+      oralGrooveDepth: 0.1,
+      oralGrooveAngle: 1.2,
+      oralGrooveWidth: 0.6,
+    };
+    applyOralGroove(deform, heading, params);
+    for (let i = 0; i < N; i++) {
+      const next = (i + 1) % N;
+      const diff = Math.abs(deform[next] - deform[i]);
+      expect(diff).toBeLessThan(0.05);
+    }
+  });
+
+  it("returns the same array reference (mutates in place)", () => {
+    const deform = new Array(N).fill(0);
+    const params: CellParams = { ...CELL_DEFAULTS, enableOralGroove: true };
+    const result = applyOralGroove(deform, heading, params);
+    expect(result).toBe(deform);
+  });
+
+  it("works on top of bodyProfileDeform (additive)", () => {
+    const baseR = 17;
+    const profileParams: CellParams = {
+      ...CELL_DEFAULTS,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.27,
+      bodyAspect: 3,
+    };
+    const profileDeform = bodyProfileDeform(N, 0, baseR, profileParams);
+    const before = [...profileDeform];
+    const grooveParams: CellParams = {
+      ...profileParams,
+      enableOralGroove: true,
+      oralGrooveDepth: 0.04,
+    };
+    applyOralGroove(profileDeform, 0, grooveParams);
+    let anyChanged = false;
+    for (let i = 0; i < N; i++) {
+      if (profileDeform[i] !== before[i]) {
+        anyChanged = true;
+        // Each changed entry should be MORE negative (inward dip)
+        expect(profileDeform[i]).toBeLessThan(before[i]);
+      }
+    }
+    expect(anyChanged).toBe(true);
   });
 });

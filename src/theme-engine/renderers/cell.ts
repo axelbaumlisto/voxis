@@ -483,6 +483,20 @@ export interface CellParams {
   bodyAspect?: number;
   /** Commit 31a: optional small ventral oral-groove bend. Default 0 (no-op). */
   bodyVentralBend?: number;
+  /** v3.7B (OPT, default off): ORAL GROOVE CONTOUR INDENT. Adds a visible
+   * concavity on the ventral side at the oral-groove region. The oral groove
+   * (vestibulum/peristome) is Paramecium's defining external feature — a
+   * concavity running from anterior to mid-body. When off, deform[] is
+   * untouched (golden frozen). */
+  enableOralGroove?: boolean;
+  /** v3.7B: depth of the oral groove as a fraction of baseR (inward).
+   * Default 0.04 (4%). */
+  oralGrooveDepth?: number;
+  /** v3.7B: centre of the groove in body-frame angle (rad, 0 = anterior,
+   * positive = ventral). Default 1.2 (matches oralGapCenter for cilia). */
+  oralGrooveAngle?: number;
+  /** v3.7B: angular half-width of the groove in radians. Default 0.6. */
+  oralGrooveWidth?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -608,6 +622,12 @@ export const CELL_DEFAULTS: CellParams = {
   bodyProfileTaper: 0.27,
   bodyAspect: 3,
   bodyVentralBend: 0,
+  // v3.7B: oral groove contour indent. OFF (dark-launch) so deform[] stays
+  // byte-identical to the frozen golden.
+  enableOralGroove: false,
+  oralGrooveDepth: 0.04,
+  oralGrooveAngle: 1.2,
+  oralGrooveWidth: 0.6,
   // Commit 26: PLURAL pair of asynchronous contractile vacuoles. OFF
   // (dark-launch) so contractileVacuolePair returns [] and the gated draw
   // block is skipped -> all goldens stay byte-identical.
@@ -2380,6 +2400,49 @@ export function bodyProfileDeform(
 }
 
 /**
+ * v3.7B — apply a smooth oral-groove concavity to an existing deform[] array.
+ * The groove is a cosine-bell dip centred at `oralGrooveAngle` (body frame,
+ * 0 = anterior, positive = ventral), mapped to canvas angle via `bodyHeading`.
+ * Modifies in-place and returns the same array. When `enableOralGroove` is
+ * false (default), returns immediately — no-op.
+ *
+ * @param deform       The N-sample deform[] array (mutated in place).
+ * @param bodyHeading  Current body long-axis heading (rad).
+ * @param params       Cell params (reads groove depth/angle/width).
+ * @returns The same deform[] array (for chaining convenience).
+ */
+export function applyOralGroove(
+  deform: number[],
+  bodyHeading: number,
+  params: CellParams,
+): number[] {
+  if (!params.enableOralGroove) return deform;
+  const N = deform.length;
+  if (N < 3) return deform;
+
+  const depth = params.oralGrooveDepth ?? 0.04;
+  const center = params.oralGrooveAngle ?? 1.2; // body-frame rad
+  const halfW = params.oralGrooveWidth ?? 0.6;  // half-width in rad
+
+  for (let i = 0; i < N; i++) {
+    const canvasAng = (i / N) * TAU;
+    // Convert canvas angle to body-frame angle.
+    let bodyAng = canvasAng - bodyHeading;
+    // Wrap to [-π, π]
+    bodyAng = ((bodyAng % TAU) + TAU + Math.PI) % TAU - Math.PI;
+
+    const dist = Math.abs(bodyAng - center);
+    if (dist < halfW) {
+      // Cosine bell: 1 at centre → 0 at edge. Smooth C1 falloff.
+      const t = dist / halfW; // 0..1
+      const bell = 0.5 * (1 + Math.cos(Math.PI * t));
+      deform[i] -= depth * bell;
+    }
+  }
+  return deform;
+}
+
+/**
  * Commit 32a — context for `interiorPoint`. Carries the SAME per-frame wall
  * description the membrane + cilia use (`deform`, `squeezeK`, `squeezePhi`) plus
  * the body geometry (`cx`, `cy`, `baseR`, `bodyHeading`, `params`). Bundling it
@@ -3503,6 +3566,10 @@ export function createCellRenderer(
       if (params.enableBodyProfile) {
         deform = bodyProfileDeform(sampleCount, bodyHeading, baseR, params);
       }
+
+      // v3.7B: oral groove — a smooth ventral concavity. Applied AFTER the
+      // profile (additive inward dip). No-op when enableOralGroove is false.
+      applyOralGroove(deform, bodyHeading, params);
 
       const smoothedPoints: Array<[number, number]> = [];
       for (let i = 0; i < sampleCount; i++) {
