@@ -42,6 +42,7 @@ import {
   perimeterCiliaCount,
   bandLimitDeform,
   contractileVacuole,
+  contractileVacuolePair,
   dipoleFlowAt,
   advectMote,
   seedMotes,
@@ -5324,6 +5325,103 @@ describe("contractileVacuole (F11)", () => {
     const a = contractileVacuole(1.3, baseR, P);
     const b = contractileVacuole(1.3 + 6, baseR, P);
     expect(b.r).toBeCloseTo(a.r, 9);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 26 — two asynchronous contractile vacuoles (gate OFF, draw-only)
+// A real Paramecium has a PAIR of CVs (anterior + posterior) pulsing on their
+// OWN clocks (different periods + a posterior phase offset). contractileVacuolePair
+// returns the pair's world bearings + live radii, reusing contractileVacuole
+// for the fill/collapse curve (DRY). Gate OFF by default -> returns [].
+// ---------------------------------------------------------------------------
+describe("Commit 26 — two contractile vacuoles", () => {
+  const baseR = 24;
+  const phi = 0.4;
+
+  it("(a) GATE OFF: returns [] for default params", () => {
+    expect(CELL_DEFAULTS.enableVacuoles).toBe(false);
+    const out = contractileVacuolePair(3.7, baseR, phi, { ...CELL_DEFAULTS });
+    expect(out).toEqual([]);
+    expect(out.length).toBe(0);
+  });
+
+  it("(b) GATE ON: returns exactly 2 entries with finite bearing + r>=0", () => {
+    const P = { ...CELL_DEFAULTS, enableVacuoles: true };
+    const out = contractileVacuolePair(3.7, baseR, phi, P);
+    expect(out.length).toBe(2);
+    for (const e of out) {
+      expect(Number.isFinite(e.bearing)).toBe(true);
+      expect(Number.isFinite(e.r)).toBe(true);
+      expect(e.r).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("(c) ASYNCHRONOUS: the two radii differ at a majority of samples + a near-max divergence exists", () => {
+    const P = { ...CELL_DEFAULTS, enableVacuoles: true };
+    const maxR = (P.vacuolePairMaxFrac ?? 0.16) * baseR;
+    let differ = 0;
+    let total = 0;
+    let foundDivergence = false;
+    for (let t = 0; t <= 30; t += 0.5) {
+      const [a, b] = contractileVacuolePair(t, baseR, phi, P);
+      total++;
+      if (Math.abs(a.r - b.r) > 1e-3) differ++;
+      // one near max while the other clearly is not
+      if (a.r > 0.85 * maxR && b.r < 0.5 * maxR) foundDivergence = true;
+      if (b.r > 0.85 * maxR && a.r < 0.5 * maxR) foundDivergence = true;
+    }
+    expect(differ).toBeGreaterThan(total / 2);
+    expect(foundDivergence).toBe(true);
+  });
+
+  it("(d) FILL/COLLAPSE REUSE: per-vacuole radius matches contractileVacuole exactly (DRY)", () => {
+    const P = { ...CELL_DEFAULTS, enableVacuoles: true };
+    const maxFrac = P.vacuolePairMaxFrac ?? 0.16;
+    const antPeriod = P.vacuoleAnteriorPeriod ?? 9;
+    const postPeriod = P.vacuolePosteriorPeriod ?? 13;
+    const postPhase = P.vacuolePosteriorPhase ?? 0.5;
+    for (const t of [0, 2.3, 7.1, 12.8, 19.4, 26.6]) {
+      const [a, b] = contractileVacuolePair(t, baseR, phi, P);
+      const expectA = contractileVacuole(t, baseR, {
+        ...P, vacuolePeriod: antPeriod, vacuoleMaxFrac: maxFrac,
+      }).r;
+      const expectB = contractileVacuole(t + postPhase * postPeriod, baseR, {
+        ...P, vacuolePeriod: postPeriod, vacuoleMaxFrac: maxFrac,
+      }).r;
+      expect(a.r).toBe(expectA);
+      expect(b.r).toBe(expectB);
+    }
+  });
+
+  it("(e) BEARING ROTATES WITH BODY: +delta on squeezePhi rotates each world bearing by delta", () => {
+    const P = { ...CELL_DEFAULTS, enableVacuoles: true };
+    const delta = 0.37;
+    const base = contractileVacuolePair(5.0, baseR, phi, P);
+    const turned = contractileVacuolePair(5.0, baseR, phi + delta, P);
+    for (let i = 0; i < base.length; i++) {
+      expect(turned[i].bearing - base[i].bearing).toBeCloseTo(delta, 12);
+    }
+    // and the body-frame bearings are the configured ones
+    expect(base[0].bearing).toBeCloseTo(phi + (P.vacuoleAnteriorBearing ?? 1.9), 12);
+    expect(base[1].bearing).toBeCloseTo(phi + (P.vacuolePosteriorBearing ?? -1.9), 12);
+  });
+
+  it("(f) BOUNDED: each r <= vacuolePairMaxFrac*baseR", () => {
+    const P = { ...CELL_DEFAULTS, enableVacuoles: true };
+    const maxR = (P.vacuolePairMaxFrac ?? 0.16) * baseR;
+    for (let t = 0; t <= 40; t += 0.25) {
+      for (const e of contractileVacuolePair(t, baseR, phi, P)) {
+        expect(e.r).toBeLessThanOrEqual(maxR + 1e-9);
+      }
+    }
+  });
+
+  it("(g) DETERMINISM: identical args -> identical output", () => {
+    const P = { ...CELL_DEFAULTS, enableVacuoles: true };
+    expect(contractileVacuolePair(8.8, baseR, phi, P)).toEqual(
+      contractileVacuolePair(8.8, baseR, phi, P),
+    );
   });
 });
 
