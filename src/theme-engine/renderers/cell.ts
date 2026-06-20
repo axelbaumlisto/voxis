@@ -357,6 +357,26 @@ export interface CellParams {
   /** Commit 28: micronucleus centre offset from the macronucleus centre, in
    * units of macronucleus radius (just outside it). Default 1.15. */
   micronucleusOffsetFrac?: number;
+  /** Commit 32e: body-normalised axial anchor of the macronucleus (u in [-1, 1],
+   * +1 anterior). On the interior-field path the macronucleus is placed via
+   * interiorPoint at (macronucleusU, macronucleusS) so it rides the elongated
+   * deforming wall. Default -0.05 (central, slightly posterior). */
+  macronucleusU?: number;
+  /** Commit 32e: body-normalised transverse anchor of the macronucleus (s in
+   * [-1, 1], fraction of the local half-width). Default 0.10 (slightly dorsal). */
+  macronucleusS?: number;
+  /** Commit 32e: body-normalised axial anchor of the anterior contractile
+   * vacuole. Default 0.55. */
+  cvAnteriorU?: number;
+  /** Commit 32e: body-normalised transverse anchor of the anterior contractile
+   * vacuole. Default 0.62. */
+  cvAnteriorS?: number;
+  /** Commit 32e: body-normalised axial anchor of the posterior contractile
+   * vacuole. Default -0.55. */
+  cvPosteriorU?: number;
+  /** Commit 32e: body-normalised transverse anchor of the posterior contractile
+   * vacuole. Default 0.62. */
+  cvPosteriorS?: number;
   /** H4 (OPT, default off): advect ambient motes by the body's dipolar wake so a
    * swimming cell visibly drags the surrounding fluid. */
   enableFlowField?: boolean;
@@ -586,6 +606,16 @@ export const CELL_DEFAULTS: CellParams = {
   foodVacuoleDigestPeriod: 30,
   micronucleusSizeFrac: 0.32,
   micronucleusOffsetFrac: 1.15,
+  // Commit 32e: body-normalised (u, s) anchors for the macronucleus + the two
+  // contractile vacuoles. Used ONLY on the interior-field path so the organelles
+  // ride the elongated deforming wall via interiorPoint; the legacy path ignores
+  // them, so all goldens stay byte-identical.
+  macronucleusU: -0.05,
+  macronucleusS: 0.10,
+  cvAnteriorU: 0.55,
+  cvAnteriorS: 0.62,
+  cvPosteriorU: -0.55,
+  cvPosteriorS: 0.62,
 };
 
 
@@ -3560,14 +3590,32 @@ export function createCellRenderer(
         for (const dv of deform) minMembraneR = Math.min(minMembraneR, baseR * (1 + dv));
         const nucleus = nucleusTransform(t, audioLevel, baseR, params, minMembraneR);
         if (nucleus.r >= 2.5) {
-          // M14: the nucleus rides the same body affine squeeze (k, phi) as the
-          // membrane, so when the body becomes prolate (Commit 8/D4) the nucleus
-          // stays inside on both axes. While enableAffine is off (k=1) this is a
-          // no-op; the squeeze maps the CENTRE (the disk gains an elliptical
-          // draw when D4 lands).
-          const [nx, ny] = affineSqueezePoints(
-            [[cx + nucleus.cx, cy + nucleus.cy]], squeezeK, squeezePhi, cx, cy, params,
-          )[0];
+          // Commit 32e: the macronucleus is a cortically-anchored organelle. On
+          // the interior-field path it is placed via interiorPoint at the FIXED
+          // body-normalised anchor (macronucleusU, macronucleusS) so it rides the
+          // elongated deforming wall (axial spin + ventral bend), reusing the
+          // SAME per-frame profile cache + InteriorCtx that micronucleus reuses.
+          // The radius (+ audio pulse) still comes from nucleusTransform.
+          let nx: number, ny: number;
+          let macroIctx: InteriorCtx | null = null;
+          if (params.enableInteriorField) {
+            const profilePts = buildProfilePts(baseR, params);
+            macroIctx = {
+              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params, profilePts,
+            };
+            const uM = params.macronucleusU ?? -0.05;
+            const sM = params.macronucleusS ?? 0.1;
+            [nx, ny] = interiorPoint(uM, sM, macroIctx);
+          } else {
+            // LEGACY path — VERBATIM (do not tidy). M14: the nucleus rides the
+            // same body affine squeeze (k, phi) as the membrane, so when the body
+            // becomes prolate (Commit 8/D4) the nucleus stays inside on both axes.
+            // While enableAffine is off (k=1) this is a no-op; the squeeze maps
+            // the CENTRE (the disk gains an elliptical draw when D4 lands).
+            [nx, ny] = affineSqueezePoints(
+              [[cx + nucleus.cx, cy + nucleus.cy]], squeezeK, squeezePhi, cx, cy, params,
+            )[0];
+          }
           const nr = nucleus.r;
 
           // Soft radial gradient: denser warmer core → darker rim
@@ -3593,26 +3641,42 @@ export function createCellRenderer(
           // centre and nr its radius, so the micronucleus tracks the prolate
           // body too. Skipped unless enableOrganelles is on -> goldens unchanged.
           if (params.enableOrganelles) {
-            const mn = micronucleusTransform(nx, ny, nr, params);
-            // Containment: pull the micronucleus centre inward along the line from
-            // the body centre so its OUTER edge can't poke past a pinched wall
-            // (the macronucleus is only clamped to minMembraneR*0.85, and the
-            // micronucleus sits ~1.15*nr beyond it). Gated path => goldens unchanged.
-            let mcx = mn.cx;
-            let mcy = mn.cy;
-            const ddx = mcx - cx;
-            const ddy = mcy - cy;
-            const dist = Math.hypot(ddx, ddy);
-            const maxDist = Math.max(0, minMembraneR - mn.r);
-            if (dist > maxDist && dist > 0) {
-              const s = maxDist / dist;
-              mcx = cx + ddx * s;
-              mcy = cy + ddy * s;
+            if (params.enableInteriorField && macroIctx) {
+              // Commit 32e: micronucleus docked beside the macronucleus, anchored
+              // at the macronucleus (u, s) plus a small fixed delta toward the
+              // anterior-dorsal side and placed via interiorPoint (reusing the
+              // macronucleus InteriorCtx). Containment is automatic (|s| <= 1).
+              const uM = params.macronucleusU ?? -0.05;
+              const sM = params.macronucleusS ?? 0.1;
+              const [mcx, mcy] = interiorPoint(uM + 0.12, sM + 0.3, macroIctx);
+              const mr = nr * (params.micronucleusSizeFrac ?? 0.32);
+              ctx.fillStyle = hsla(baseHue - 6, 0.82, 0.42, params.nucleusAlpha);
+              ctx.beginPath();
+              ctx.arc(mcx, mcy, mr, 0, TAU);
+              ctx.fill();
+            } else {
+              // LEGACY path — VERBATIM (do not tidy).
+              const mn = micronucleusTransform(nx, ny, nr, params);
+              // Containment: pull the micronucleus centre inward along the line from
+              // the body centre so its OUTER edge can't poke past a pinched wall
+              // (the macronucleus is only clamped to minMembraneR*0.85, and the
+              // micronucleus sits ~1.15*nr beyond it). Gated path => goldens unchanged.
+              let mcx = mn.cx;
+              let mcy = mn.cy;
+              const ddx = mcx - cx;
+              const ddy = mcy - cy;
+              const dist = Math.hypot(ddx, ddy);
+              const maxDist = Math.max(0, minMembraneR - mn.r);
+              if (dist > maxDist && dist > 0) {
+                const s = maxDist / dist;
+                mcx = cx + ddx * s;
+                mcy = cy + ddy * s;
+              }
+              ctx.fillStyle = hsla(baseHue - 6, 0.82, 0.42, params.nucleusAlpha);
+              ctx.beginPath();
+              ctx.arc(mcx, mcy, mn.r, 0, TAU);
+              ctx.fill();
             }
-            ctx.fillStyle = hsla(baseHue - 6, 0.82, 0.42, params.nucleusAlpha);
-            ctx.beginPath();
-            ctx.arc(mcx, mcy, mn.r, 0, TAU);
-            ctx.fill();
           }
         }
 
@@ -3650,20 +3714,47 @@ export function createCellRenderer(
         // enableVacuoles is on, so all goldens stay byte-identical.
         if (params.enableVacuoles) {
           const pair = contractileVacuolePair(t, baseR, squeezePhi, params);
-          for (const e of pair) {
-            if (e.r < 0.5) continue;
-            // Containment: clamp placeR so the WHOLE vesicle stays inside the
-            // live minimum membrane radius, even when a pinch brings the wall in.
-            const placeR = Math.max(0, Math.min(baseR * 0.6, minMembraneR - e.r));
-            const vcx0 = cx + Math.cos(e.bearing) * placeR;
-            const vcy0 = cy + Math.sin(e.bearing) * placeR;
-            const [vx, vy] = affineSqueezePoints(
-              [[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params,
-            )[0];
-            ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.70, params.nucleusAlpha * 0.45);
-            ctx.beginPath();
-            ctx.arc(vx, vy, e.r, 0, TAU);
-            ctx.fill();
+          if (params.enableInteriorField) {
+            // Commit 32e: the two contractile vacuoles are cortically anchored at
+            // FIXED body-normalised (u, s) (anterior + posterior) and placed via
+            // interiorPoint so they ride the elongated deforming wall. The live
+            // radii still come from contractileVacuolePair (pair[0]=anterior,
+            // pair[1]=posterior); pair[i].bearing is unused on this path.
+            // Containment is automatic (|s| <= 1).
+            const profilePts = buildProfilePts(baseR, params);
+            const ictx: InteriorCtx = {
+              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params, profilePts,
+            };
+            const anchors = [
+              { u: params.cvAnteriorU ?? 0.55, s: params.cvAnteriorS ?? 0.62 },
+              { u: params.cvPosteriorU ?? -0.55, s: params.cvPosteriorS ?? 0.62 },
+            ];
+            for (let i = 0; i < pair.length; i++) {
+              const e = pair[i];
+              if (e.r < 0.5) continue;
+              const [vx, vy] = interiorPoint(anchors[i].u, anchors[i].s, ictx);
+              ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.70, params.nucleusAlpha * 0.45);
+              ctx.beginPath();
+              ctx.arc(vx, vy, e.r, 0, TAU);
+              ctx.fill();
+            }
+          } else {
+            // LEGACY path — VERBATIM (do not tidy).
+            for (const e of pair) {
+              if (e.r < 0.5) continue;
+              // Containment: clamp placeR so the WHOLE vesicle stays inside the
+              // live minimum membrane radius, even when a pinch brings the wall in.
+              const placeR = Math.max(0, Math.min(baseR * 0.6, minMembraneR - e.r));
+              const vcx0 = cx + Math.cos(e.bearing) * placeR;
+              const vcy0 = cy + Math.sin(e.bearing) * placeR;
+              const [vx, vy] = affineSqueezePoints(
+                [[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params,
+              )[0];
+              ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.70, params.nucleusAlpha * 0.45);
+              ctx.beginPath();
+              ctx.arc(vx, vy, e.r, 0, TAU);
+              ctx.fill();
+            }
           }
         }
 

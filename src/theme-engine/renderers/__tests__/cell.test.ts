@@ -7011,3 +7011,230 @@ describe("Commit 32d — food vacuoles on cyclosis loop", () => {
     expect(a).toEqual(b);
   });
 });
+
+describe("Commit 32e — wall-anchored nuclei + CVs via interiorPoint", () => {
+  const TAU = Math.PI * 2;
+  const baseR = 40;
+  const cx = 100;
+  const cy = 100;
+  const bodyHeading = 0.6;
+  const eggParams: CellParams = {
+    ...CELL_DEFAULTS,
+    enableBodyProfile: true,
+    bodyProfileType: "egg",
+    bodyProfileTaper: 0.24,
+    bodyAspect: 3,
+    bodyVentralBend: 0.18,
+  };
+
+  function membranePolygon(
+    deform: number[],
+    squeezeK: number,
+    squeezePhi: number,
+    params: CellParams,
+    ox: number,
+    oy: number,
+  ): Array<[number, number]> {
+    const poly: Array<[number, number]> = [];
+    for (let i = 0; i < deform.length; i++) {
+      const angle = (i / deform.length) * TAU;
+      const r = baseR * (1 + deform[i]);
+      poly.push(
+        affineSqueezePoints(
+          [[ox + r * Math.cos(angle), oy + r * Math.sin(angle)]],
+          squeezeK,
+          squeezePhi,
+          ox,
+          oy,
+          params,
+        )[0],
+      );
+    }
+    return poly;
+  }
+  function pointInPolygon(p: [number, number], poly: Array<[number, number]>): boolean {
+    let inside = false;
+    const n = poly.length;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const xi = poly[i][0], yi = poly[i][1];
+      const xj = poly[j][0], yj = poly[j][1];
+      const intersect =
+        yi > p[1] !== yj > p[1] &&
+        p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+  function minDistToPolyline(p: [number, number], poly: Array<[number, number]>): number {
+    let best = Infinity;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[j], b = poly[i];
+      const dx = b[0] - a[0], dy = b[1] - a[1];
+      const len2 = dx * dx + dy * dy || 1;
+      let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      const qx = a[0] + t * dx, qy = a[1] + t * dy;
+      best = Math.min(best, Math.hypot(p[0] - qx, p[1] - qy));
+    }
+    return best;
+  }
+  // along-body-axis coordinate of a world point (projection onto the heading dir)
+  function axial(pt: [number, number], ox: number, oy: number, heading: number): number {
+    return (pt[0] - ox) * Math.cos(heading) + (pt[1] - oy) * Math.sin(heading);
+  }
+
+  it("(a) ANCHOR PLACEMENT: macronucleus near centre, CVs near opposite poles, all contained", () => {
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, eggParams);
+    const profilePts = buildProfilePts(baseR, eggParams);
+    const ctx: InteriorCtx = {
+      cx, cy, baseR, deform, squeezeK: 1, squeezePhi: bodyHeading, bodyHeading, params: eggParams, profilePts,
+    };
+    const L = baseR * Math.sqrt(eggParams.bodyAspect ?? 3);
+    const poly = membranePolygon(deform, 1, bodyHeading, eggParams, cx, cy);
+
+    const macro = interiorPoint(
+      eggParams.macronucleusU ?? -0.05, eggParams.macronucleusS ?? 0.1, ctx,
+    );
+    expect(Math.hypot(macro[0] - cx, macro[1] - cy)).toBeLessThan(0.5 * baseR);
+    expect(pointInPolygon(macro, poly)).toBe(true);
+
+    const ant = interiorPoint(eggParams.cvAnteriorU ?? 0.55, eggParams.cvAnteriorS ?? 0.62, ctx);
+    const post = interiorPoint(eggParams.cvPosteriorU ?? -0.55, eggParams.cvPosteriorS ?? 0.62, ctx);
+    const antAxial = axial(ant, cx, cy, bodyHeading);
+    const postAxial = axial(post, cx, cy, bodyHeading);
+    // opposite signs along the body axis, each a large fraction of the half-length
+    expect(antAxial).toBeGreaterThan(0);
+    expect(postAxial).toBeLessThan(0);
+    expect(Math.abs(antAxial) / L).toBeGreaterThan(0.45);
+    expect(Math.abs(postAxial) / L).toBeGreaterThan(0.45);
+    expect(pointInPolygon(ant, poly)).toBe(true);
+    expect(pointInPolygon(post, poly)).toBe(true);
+  });
+
+  it("(b) CV ANCHORS DISTINCT + POLAR: anterior +u side, posterior -u side", () => {
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, eggParams);
+    const profilePts = buildProfilePts(baseR, eggParams);
+    const ctx: InteriorCtx = {
+      cx, cy, baseR, deform, squeezeK: 1, squeezePhi: bodyHeading, bodyHeading, params: eggParams, profilePts,
+    };
+    const ant = interiorPoint(eggParams.cvAnteriorU ?? 0.55, eggParams.cvAnteriorS ?? 0.62, ctx);
+    const post = interiorPoint(eggParams.cvPosteriorU ?? -0.55, eggParams.cvPosteriorS ?? 0.62, ctx);
+    // distinct world points
+    expect(Math.hypot(ant[0] - post[0], ant[1] - post[1])).toBeGreaterThan(baseR);
+    // straddle the centre along the body axis
+    expect(axial(ant, cx, cy, bodyHeading)).toBeGreaterThan(0);
+    expect(axial(post, cx, cy, bodyHeading)).toBeLessThan(0);
+  });
+
+  it("(c) RIDE THE WALL: rotating bodyHeading rotates the anchored world points by ~delta", () => {
+    const delta = 0.5;
+    const h0 = bodyHeading;
+    const h1 = bodyHeading + delta;
+    const deform0 = bodyProfileDeform(96, h0, baseR, eggParams);
+    const deform1 = bodyProfileDeform(96, h1, baseR, eggParams);
+    const pts0 = buildProfilePts(baseR, eggParams);
+    const pts1 = buildProfilePts(baseR, eggParams);
+    const ctx0: InteriorCtx = {
+      cx, cy, baseR, deform: deform0, squeezeK: 1, squeezePhi: h0, bodyHeading: h0, params: eggParams, profilePts: pts0,
+    };
+    const ctx1: InteriorCtx = {
+      cx, cy, baseR, deform: deform1, squeezeK: 1, squeezePhi: h1, bodyHeading: h1, params: eggParams, profilePts: pts1,
+    };
+    const anchors: Array<[number, number]> = [
+      [eggParams.macronucleusU ?? -0.05, eggParams.macronucleusS ?? 0.1],
+      [eggParams.cvAnteriorU ?? 0.55, eggParams.cvAnteriorS ?? 0.62],
+      [eggParams.cvPosteriorU ?? -0.55, eggParams.cvPosteriorS ?? 0.62],
+    ];
+    for (const [u, s] of anchors) {
+      const p0 = interiorPoint(u, s, ctx0);
+      const p1 = interiorPoint(u, s, ctx1);
+      const ang0 = Math.atan2(p0[1] - cy, p0[0] - cx);
+      const ang1 = Math.atan2(p1[1] - cy, p1[0] - cx);
+      let d = ang1 - ang0;
+      while (d > Math.PI) d -= TAU;
+      while (d < -Math.PI) d += TAU;
+      expect(d).toBeCloseTo(delta, 1);
+    }
+  });
+
+  it("(d) CONTAINMENT under spin + bend: all anchors inside membrane over a sweep", () => {
+    for (const bend of [0, 0.18]) {
+      const params: CellParams = { ...eggParams, bodyVentralBend: bend };
+      const deform = bodyProfileDeform(96, bodyHeading, baseR, params);
+      const profilePts = buildProfilePts(baseR, params);
+      const anchors: Array<[number, number]> = [
+        [params.macronucleusU ?? -0.05, params.macronucleusS ?? 0.1],
+        [(params.macronucleusU ?? -0.05) + 0.12, (params.macronucleusS ?? 0.1) + 0.3],
+        [params.cvAnteriorU ?? 0.55, params.cvAnteriorS ?? 0.62],
+        [params.cvPosteriorU ?? -0.55, params.cvPosteriorS ?? 0.62],
+      ];
+      for (let k = 0; k <= 24; k++) {
+        const squeezePhi = (k / 24) * TAU;
+        const ctx: InteriorCtx = {
+          cx, cy, baseR, deform, squeezeK: 1, squeezePhi, bodyHeading, params, profilePts,
+        };
+        const poly = membranePolygon(deform, 1, squeezePhi, params, cx, cy);
+        for (const [u, s] of anchors) {
+          const pt = interiorPoint(u, s, ctx);
+          const ok = pointInPolygon(pt, poly) || minDistToPolyline(pt, poly) < 0.5;
+          expect(ok).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("(e) GATE OFF: legacy nucleus + CV placement renders without throwing", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn().mockReturnValue(7));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: 120,
+      height: 60,
+      params: { ...CELL_DEFAULTS, enableInteriorField: false, enableOrganelles: true, enableVacuoles: true },
+    });
+    expect(() => {
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0.3, spectrumBins: new Array(32).fill(0.3) });
+      }
+    }).not.toThrow();
+    r.destroy();
+    vi.unstubAllGlobals();
+  });
+
+  it("(f) RENDER ON: interior-field nuclei + CVs render finite without throwing", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn().mockReturnValue(7));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: 120,
+      height: 60,
+      params: {
+        ...CELL_DEFAULTS,
+        enableInteriorField: true,
+        enableOrganelles: true,
+        enableVacuoles: true,
+        enableBodyProfile: true,
+        bodyProfileType: "egg",
+      },
+    });
+    expect(() => {
+      for (let i = 0; i < 6; i++) {
+        r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.4) });
+      }
+    }).not.toThrow();
+    r.destroy();
+    vi.unstubAllGlobals();
+  });
+
+  it("(g) DETERMINISM: identical args => identical interiorPoint anchor output", () => {
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, eggParams);
+    const profilePts = buildProfilePts(baseR, eggParams);
+    const ctx: InteriorCtx = {
+      cx, cy, baseR, deform, squeezeK: 1, squeezePhi: bodyHeading, bodyHeading, params: eggParams, profilePts,
+    };
+    const a = interiorPoint(eggParams.cvAnteriorU ?? 0.55, eggParams.cvAnteriorS ?? 0.62, ctx);
+    const b = interiorPoint(eggParams.cvAnteriorU ?? 0.55, eggParams.cvAnteriorS ?? 0.62, ctx);
+    expect(a[0]).toBe(b[0]);
+    expect(a[1]).toBe(b[1]);
+  });
+});
