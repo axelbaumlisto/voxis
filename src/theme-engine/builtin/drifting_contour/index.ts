@@ -61,6 +61,16 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       startleDecay: 0.86,
       startleMaxPx: 4,
       startleBaselineRate: 0.08,
+      // === TEMP PREVIEW (v3.2 A/B) — mex + rigid spindle, NOT a default flip. ===
+      // Remove this block to restore the shipped FBM crown look.
+      enableSomaticCilia: true,      // short dense somatic cilia (Commit 22)
+      enableCiliaOnContour: true,    // anchor on the real contour (Commit 21)
+      enableRigidMembrane: true,     // smooth firm contour, no FBM wobble (Commit 29)
+      enableBodyProfile: true,       // authentic asymmetric slipper (Commit 31)
+      bodyProfileType: "egg",        // biology-validated egg (not piriform teardrop)
+      bodyProfileTaper: 0.27,        // widest ~mid-body, rounded blunt poles
+      bodyAspect: 3,                 // ~3:1 aurelia slipper
+      enableAffine: true,            // forced k=1 when profile on (no double-elongate)
       ...userParams,
     },
   });
