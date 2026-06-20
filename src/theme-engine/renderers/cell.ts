@@ -315,6 +315,21 @@ export interface CellParams {
    * into a smooth firm spindle. OFF keeps the deform[] byte-identical to today
    * (frozen GATES_OFF golden). */
   enableRigidMembrane?: boolean;
+  /** Commit 31a (OPT, default off): authentic asymmetric "slipper" body profile.
+   * A real Paramecium is NOT a symmetric ellipse but an asymmetric slipper —
+   * rounded blunt WIDER anterior, tapered narrower posterior. These params drive
+   * the pure body-profile helpers (bodyHalfWidth / bodyProfilePoint / ...). DARK:
+   * no caller in the render loop yet (buildTargetDeformation is untouched). */
+  enableBodyProfile?: boolean;
+  /** Commit 31a: which profile formula. Default "taperedEllipse". */
+  bodyProfileType?: "taperedEllipse" | "egg" | "piriform";
+  /** Commit 31a: fore-aft taper coefficient c (>=0). Anterior (u=+1) wider.
+   * Default 0.3. For "egg" treated as d/a in [0,1). */
+  bodyProfileTaper?: number;
+  /** Commit 31a: length:width aspect of the body. Default 3 (~3:1). */
+  bodyAspect?: number;
+  /** Commit 31a: optional small ventral oral-groove bend. Default 0 (no-op). */
+  bodyVentralBend?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -423,6 +438,13 @@ export const CELL_DEFAULTS: CellParams = {
   // stays byte-identical to the frozen GATES_OFF golden. When on, every vertex
   // deform is a flat 0 -> perfect circle pre-affine -> smooth firm spindle.
   enableRigidMembrane: false,
+  // Commit 31a: authentic asymmetric slipper body profile. OFF (dark-launch);
+  // helpers are pure math with no render-loop caller yet.
+  enableBodyProfile: false,
+  bodyProfileType: "taperedEllipse",
+  bodyProfileTaper: 0.3,
+  bodyAspect: 3,
+  bodyVentralBend: 0,
 };
 
 
@@ -1881,6 +1903,117 @@ export function bandLimitDeform(deform: number[], params: CellParams): number[] 
     out[i] = v < -cap ? -cap : v > cap ? cap : v;
   }
   return out;
+}
+
+/**
+ * Commit 31a — normalised half-width of the asymmetric "slipper" body profile
+ * for axial coordinate u in [-1, 1]. u=+1 is the ANTERIOR (wider blunt end),
+ * u=-1 is the POSTERIOR (tapered end). Returns ~0 at u=+-1 and a max near mid.
+ * For the taper coefficient c (params.bodyProfileTaper) the anterior (+u) is
+ * wider than the posterior (-u) — the "not an oval" asymmetry. At c=0 both
+ * taperedEllipse and egg reduce exactly to the ellipse sqrt(1-u^2). Pure.
+ */
+export function bodyHalfWidth(u: number, params: CellParams): number {
+  const c = params.bodyProfileTaper ?? 0.3;
+  const base = Math.sqrt(Math.max(0, 1 - u * u));
+  const type = params.bodyProfileType ?? "taperedEllipse";
+  switch (type) {
+    case "egg":
+      // Hügelschäffer egg via u=cos t; blunt (wider) at +u anterior, tapered at
+      // -u posterior (c=d/a in [0,1)). The -2cu term makes +u the wider end.
+      return base / Math.sqrt(1 - 2 * c * u + c * c);
+    case "piriform": {
+      // Pointed-posterior variant: tapered ellipse extra-narrowed toward -u by
+      // the (1+u)/2 factor (1 at anterior, 0 at posterior pole). Single-valued,
+      // smooth, w(+-1)=0, w>=0.
+      const w = base * (1 + c * u) * Math.sqrt(Math.max(0, (1 + u) / 2));
+      return w < 0 ? 0 : w;
+    }
+    case "taperedEllipse":
+    default: {
+      // Anterior (+u) wider for c>0; symmetric ellipse at c=0.
+      const w = base * (1 + c * u);
+      return w < 0 ? 0 : w;
+    }
+  }
+}
+
+/**
+ * Commit 31a — body-frame contour point of the slipper profile for parameter
+ * t in [0, 2pi). Anterior is at +x (t=0). Length scale L = baseR*sqrt(aspect),
+ * width scale W = baseR/sqrt(aspect) (so L*W = baseR^2, area-neutral for the
+ * plain ellipse). Optional small ventral bend shifts one flank only. Pure.
+ */
+export function bodyProfilePoint(
+  t: number,
+  baseR: number,
+  params: CellParams,
+): [number, number] {
+  const c = params.bodyProfileTaper ?? 0.3;
+  const aspect = params.bodyAspect ?? 3;
+  const L = baseR * Math.sqrt(aspect);
+  const W = baseR / Math.sqrt(aspect);
+  const ct = Math.cos(t);
+  const st = Math.sin(t);
+  const x = L * ct;
+  let y: number;
+  const type = params.bodyProfileType ?? "taperedEllipse";
+  switch (type) {
+    case "egg":
+      y = (W * st) / Math.sqrt(1 - 2 * c * ct + c * c);
+      break;
+    case "piriform":
+      y = W * st * (1 + c * ct) * Math.sqrt(Math.max(0, (1 + ct) / 2));
+      break;
+    case "taperedEllipse":
+    default:
+      y = W * st * (1 + c * ct);
+      break;
+  }
+  // Optional ventral oral-groove bend: tiny lateral shift on the anterior flank
+  // only (cos t > 0). No-op when bodyVentralBend === 0 (default).
+  const bend = params.bodyVentralBend ?? 0;
+  if (bend !== 0) {
+    y += bend * W * Math.max(0, ct);
+  }
+  return [x, y];
+}
+
+/**
+ * Commit 31a — shoelace (polygon) area of the sampled slipper profile. Samples
+ * bodyProfilePoint at t_k = 2pi*k/samples. Returns the absolute area. Pure.
+ */
+export function bodyProfileArea(
+  baseR: number,
+  params: CellParams,
+  samples = 96,
+): number {
+  const n = Math.max(3, Math.floor(samples));
+  let a = 0;
+  let [px, py] = bodyProfilePoint(0, baseR, params);
+  const [x0, y0] = [px, py];
+  for (let k = 1; k <= n; k++) {
+    const [cx, cy] = k === n ? [x0, y0] : bodyProfilePoint((TAU * k) / n, baseR, params);
+    a += px * cy - cx * py;
+    px = cx;
+    py = cy;
+  }
+  return Math.abs(a) / 2;
+}
+
+/**
+ * Commit 31a — area-neutral scale factor: sqrt(pi*baseR^2 / profileArea) so a
+ * caller can scale the profile to preserve the equivalent circle's area.
+ * Guards divide-by-zero (returns 1 for a degenerate/zero-area profile). Pure.
+ */
+export function bodyProfileAreaScale(
+  baseR: number,
+  params: CellParams,
+  samples = 96,
+): number {
+  const area = bodyProfileArea(baseR, params, samples);
+  if (!(area > 0)) return 1;
+  return Math.sqrt((Math.PI * baseR * baseR) / area);
 }
 
 /**

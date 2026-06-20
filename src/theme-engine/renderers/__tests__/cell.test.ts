@@ -67,6 +67,10 @@ import {
   integrateDeformPipeline,
   affineSqueezePoints,
   somaticCiliaParams,
+  bodyHalfWidth,
+  bodyProfilePoint,
+  bodyProfileArea,
+  bodyProfileAreaScale,
 } from "../cell";
 import { deformAt } from "../shared";
 import type { CellParams, CellPersistState, CiliaMotion } from "../cell";
@@ -5261,5 +5265,151 @@ describe("seedMotes (H4)", () => {
   });
   it("returns an empty array when count is 0", () => {
     expect(seedMotes(160, 160, { ...CELL_DEFAULTS, flowMoteCount: 0 })).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 31a — authentic asymmetric slipper body profile (pure math)
+// ---------------------------------------------------------------------------
+
+describe("Commit 31a — authentic body profile (pure math)", () => {
+  const types: Array<NonNullable<CellParams["bodyProfileType"]>> = [
+    "taperedEllipse",
+    "egg",
+    "piriform",
+  ];
+
+  it("(a) DEFAULTS are dark + slipper", () => {
+    expect(CELL_DEFAULTS.enableBodyProfile).toBe(false);
+    expect(CELL_DEFAULTS.bodyProfileType).toBe("taperedEllipse");
+    expect(CELL_DEFAULTS.bodyProfileTaper).toBe(0.3);
+    expect(CELL_DEFAULTS.bodyAspect).toBe(3);
+    expect(CELL_DEFAULTS.bodyVentralBend).toBe(0);
+  });
+
+  it("(b) ELLIPSE DEGENERACY: c=0 reduces to sqrt(1-u^2)", () => {
+    for (const type of ["taperedEllipse", "egg"] as const) {
+      for (const u of [-0.9, -0.5, -0.2, 0, 0.3, 0.6, 0.95]) {
+        const w = bodyHalfWidth(u, {
+          ...CELL_DEFAULTS,
+          bodyProfileType: type,
+          bodyProfileTaper: 0,
+        });
+        expect(w).toBeCloseTo(Math.sqrt(1 - u * u), 12);
+      }
+    }
+  });
+
+  it("(c) FORE-AFT ASYMMETRY: anterior wider than posterior", () => {
+    for (const type of ["taperedEllipse", "egg"] as const) {
+      const P = { ...CELL_DEFAULTS, bodyProfileType: type, bodyProfileTaper: 0.3 };
+      const ratio = bodyHalfWidth(0.8, P) / bodyHalfWidth(-0.8, P);
+      expect(ratio).toBeGreaterThan(1);
+    }
+    // taperedEllipse explicitly >= 1.3
+    const te = { ...CELL_DEFAULTS, bodyProfileType: "taperedEllipse" as const, bodyProfileTaper: 0.3 };
+    expect(bodyHalfWidth(0.8, te) / bodyHalfWidth(-0.8, te)).toBeGreaterThanOrEqual(1.3);
+  });
+
+  it("(d) NONNEGATIVE + zero at the poles, all three types", () => {
+    for (const type of types) {
+      const P = { ...CELL_DEFAULTS, bodyProfileType: type, bodyProfileTaper: 0.3 };
+      expect(Math.abs(bodyHalfWidth(1, P))).toBeLessThan(1e-9);
+      expect(Math.abs(bodyHalfWidth(-1, P))).toBeLessThan(1e-9);
+      for (let k = 0; k <= 40; k++) {
+        const u = -1 + (2 * k) / 40;
+        expect(bodyHalfWidth(u, P)).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
+  it("(e) WIDEST POINT just anterior of centre, not at u=0", () => {
+    const c = 0.3;
+    const P = { ...CELL_DEFAULTS, bodyProfileType: "taperedEllipse" as const, bodyProfileTaper: c };
+    let bestU = -1;
+    let bestW = -Infinity;
+    for (let k = 0; k <= 2000; k++) {
+      const u = -1 + (2 * k) / 2000;
+      const w = bodyHalfWidth(u, P);
+      if (w > bestW) {
+        bestW = w;
+        bestU = u;
+      }
+    }
+    expect(bestU).toBeGreaterThan(0); // anterior of centre, not at u=0
+    const expected = (-1 + Math.sqrt(1 + 8 * c * c)) / (4 * c);
+    expect(expected).toBeCloseTo(0.259, 2);
+    expect(Math.abs(bestU - expected)).toBeLessThanOrEqual(0.05);
+  });
+
+  it("(f) ASPECT ~3:1 for taperedEllipse default", () => {
+    const baseR = 17;
+    const P = { ...CELL_DEFAULTS, enableBodyProfile: true };
+    let maxX = 0;
+    let maxY = 0;
+    for (let k = 0; k < 720; k++) {
+      const t = (TAU * k) / 720;
+      const [x, y] = bodyProfilePoint(t, baseR, P);
+      maxX = Math.max(maxX, Math.abs(x));
+      maxY = Math.max(maxY, Math.abs(y));
+    }
+    const L = baseR * Math.sqrt(3);
+    expect(maxX).toBeCloseTo(L, 6);
+    const length = 2 * maxX;
+    const width = 2 * maxY;
+    expect(length / width).toBeGreaterThan(2.7);
+    expect(length / width).toBeLessThan(3.3);
+  });
+
+  it("(g) AREA NEUTRAL: scale finite/positive, scaled area ~= pi baseR^2", () => {
+    const baseR = 17;
+    const P = { ...CELL_DEFAULTS, enableBodyProfile: true };
+    const scale = bodyProfileAreaScale(baseR, P);
+    expect(Number.isFinite(scale)).toBe(true);
+    expect(scale).toBeGreaterThan(0);
+    const area = bodyProfileArea(baseR, P);
+    const circle = Math.PI * baseR * baseR;
+    expect(area * scale * scale).toBeCloseTo(circle, 2);
+    // taperedEllipse raw area already ~= pi baseR^2 -> scale ~ 1
+    expect(scale).toBeGreaterThan(0.99);
+    expect(scale).toBeLessThan(1.01);
+  });
+
+  it("(h) STAR-CONVEX: polar angle about centroid is monotonic", () => {
+    const baseR = 17;
+    const P = { ...CELL_DEFAULTS, bodyProfileType: "taperedEllipse" as const, bodyProfileTaper: 0.3 };
+    const N = 256;
+    const pts: Array<[number, number]> = [];
+    for (let k = 0; k < N; k++) {
+      pts.push(bodyProfilePoint((TAU * k) / N, baseR, P));
+    }
+    const cx = pts.reduce((s, p) => s + p[0], 0) / N;
+    const cy = pts.reduce((s, p) => s + p[1], 0) / N;
+    let prev = Math.atan2(pts[0][1] - cy, pts[0][0] - cx);
+    let unwrapped = prev;
+    let total = 0;
+    for (let k = 1; k <= N; k++) {
+      const p = pts[k % N];
+      const ang = Math.atan2(p[1] - cy, p[0] - cx);
+      let d = ang - prev;
+      while (d <= -Math.PI) d += TAU;
+      while (d > Math.PI) d -= TAU;
+      expect(d).toBeGreaterThan(0); // strictly increasing => single-valued
+      unwrapped += d;
+      total += d;
+      prev = ang;
+    }
+    // full loop sweeps exactly 2pi
+    expect(total).toBeCloseTo(TAU, 6);
+    void unwrapped;
+  });
+
+  it("(i) DETERMINISM: same inputs => same outputs", () => {
+    const baseR = 19;
+    const P = { ...CELL_DEFAULTS, enableBodyProfile: true, bodyProfileType: "egg" as const };
+    expect(bodyHalfWidth(0.37, P)).toEqual(bodyHalfWidth(0.37, P));
+    expect(bodyProfilePoint(1.2, baseR, P)).toEqual(bodyProfilePoint(1.2, baseR, P));
+    expect(bodyProfileArea(baseR, P)).toEqual(bodyProfileArea(baseR, P));
+    expect(bodyProfileAreaScale(baseR, P)).toEqual(bodyProfileAreaScale(baseR, P));
   });
 });
