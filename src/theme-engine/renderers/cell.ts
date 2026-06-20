@@ -318,6 +318,28 @@ export interface CellParams {
   /** Commit 22a: resting hair length (fraction of baseR) when enableSomaticCilia
    * is on. Default 0.15 (short stubs). */
   somaticCiliaLength?: number;
+  /** Commit 23 (OPT, default off): CILIATURE STRUCTURE. A real Paramecium's
+   * somatic mex is NOT uniform: a ventral oral-groove region where the cilia
+   * THIN OUT (a density dip, not a bald gap), and a slightly LONGER caudal tuft
+   * at the posterior pole. When on, ciliaStructureMod applies both as body-frame
+   * localised modifiers to the ciliaPath hair loop. OFF keeps the mex/crown
+   * byte-identical to commit 22. */
+  enableCiliaStructure?: boolean;
+  /** Commit 23: body-frame angle (rad) of the oral-groove centre, one ventral
+   * flank, anterior-of-mid (relative to anterior = strokeAxis). Default 1.2. */
+  oralGapCenter?: number;
+  /** Commit 23: half-window (rad) of the oral region; hairs within
+   * |psi - oralGapCenter| < this are in the oral region. Default 0.75. */
+  oralGapWidth?: number;
+  /** Commit 23: fraction of hairs to thin out at the oral-groove centre
+   * (0.3 = 30% density dip, NOT a bald gap). Default 0.3. */
+  oralGapDip?: number;
+  /** Commit 23: half-window (rad) around the posterior pole (psi = ±π) for the
+   * caudal tuft. Default 0.6. */
+  caudalTuftWidth?: number;
+  /** Commit 23: length multiplier for caudal-tuft hairs at the posterior pole
+   * (1.7 = 1.7x longer). Default 1.7. */
+  caudalTuftLength?: number;
   /** Commit 29 (OPT, default off): SMOOTH RIGID membrane. A real Paramecium is a
    * rigid smooth spindle, not a wobbling amoeboid blob. When on,
    * buildTargetDeformation suppresses the per-vertex deform to a flat 0 (no FBM
@@ -447,6 +469,14 @@ export const CELL_DEFAULTS: CellParams = {
   enableSomaticCilia: false,
   somaticCiliaCount: 72,
   somaticCiliaLength: 0.15,
+  // Commit 23: ciliature structure (oral-groove dip + caudal tuft). OFF
+  // (dark-launch) so the default mex/crown stays byte-identical to commit 22.
+  enableCiliaStructure: false,
+  oralGapCenter: 1.2,
+  oralGapWidth: 0.75,
+  oralGapDip: 0.3,
+  caudalTuftWidth: 0.6,
+  caudalTuftLength: 1.7,
   // Commit 29: smooth rigid membrane. OFF (dark-launch) so the default deform[]
   // stays byte-identical to the frozen GATES_OFF golden. When on, every vertex
   // deform is a flat 0 -> perfect circle pre-affine -> smooth firm spindle.
@@ -985,6 +1015,47 @@ export interface CiliumPath {
  *
  * Pure & deterministic given t.
  */
+/**
+ * Commit 23 — ciliature structure modifier. A real Paramecium's somatic mex is
+ * NOT uniform: (1) a ventral ORAL-GROOVE region where the cilia thin out (a
+ * density DIP, not a bald gap), and (2) a slightly LONGER caudal tuft at the
+ * posterior pole. Given a hair's BODY-FRAME angle `psi = wrapPi(baseAngle -
+ * strokeAxis)` (psi=0 at the anterior heading, psi=±π at the posterior pole) and
+ * a stable per-hair [0,1] noise scalar `hairNoise`, returns a length scale and a
+ * keep flag. Pure/deterministic (wrapPi + arithmetic only). When the gate is OFF
+ * it returns {lengthScale:1, keep:true} so the caller stays byte-identical.
+ */
+export function ciliaStructureMod(
+  psi: number,
+  hairNoise: number,
+  params: CellParams,
+): { lengthScale: number; keep: boolean } {
+  if (!params.enableCiliaStructure) return { lengthScale: 1, keep: true };
+  const caudalTuftWidth = params.caudalTuftWidth ?? 0.6;
+  const caudalTuftLength = params.caudalTuftLength ?? 1.7;
+  const oralGapCenter = params.oralGapCenter ?? 1.2;
+  const oralGapWidth = params.oralGapWidth ?? 0.75;
+  const oralGapDip = params.oralGapDip ?? 0.3;
+  // Caudal tuft: near the posterior pole (psi ≈ ±π), lengthen.
+  const dPost = Math.PI - Math.abs(psi); // 0 at the pole, grows away
+  let lengthScale = 1;
+  if (dPost < caudalTuftWidth) {
+    const f = 1 - dPost / caudalTuftWidth; // 1 at pole -> 0 at edge
+    lengthScale = 1 + (caudalTuftLength - 1) * f; // smooth C0 ramp, no step
+  }
+  // Oral-groove density dip: deterministically thin out (drop) a fraction of
+  // hairs in the window, scaled by how central they are (more thinning at the
+  // groove centre). Uses the stable per-hair noise so the same hair is dropped
+  // every frame (no flicker).
+  let keep = true;
+  const dOral = Math.abs(wrapPi(psi - oralGapCenter));
+  if (dOral < oralGapWidth) {
+    const central = 1 - dOral / oralGapWidth; // 1 at centre -> 0 at edge
+    if (hairNoise < oralGapDip * central) keep = false;
+  }
+  return { lengthScale, keep };
+}
+
 export function ciliaPath(
   cx: number,
   cy: number,
@@ -1130,8 +1201,19 @@ export function ciliaPath(
 
     // --- Per-hair size diversity: a stable [0,1] random scalar per hair. ---
     const r01 = noise2D(k * 3.7 + 0.3, 1.3) * 0.5 + 0.5; // [0,1]
-    // Length spans [1-lenVar, 1+lenVar] around the mean.
-    const lenK = lenMean * (1 - lenVar + 2 * lenVar * r01);
+    // Commit 23: ciliature structure (oral-groove dip + caudal tuft). Gated so
+    // the OFF path runs the EXACT original code (no wrapPi, no continue, lenK
+    // unchanged) and stays byte-identical to the commit-22 mex/crown golden.
+    let lengthScale = 1;
+    if (params.enableCiliaStructure) {
+      const psi = wrapPi(baseAngle - strokeAxis);
+      const struct = ciliaStructureMod(psi, r01, params);
+      if (!struct.keep) continue; // oral-groove thinning: drop this hair
+      lengthScale = struct.lengthScale; // caudal-tuft lengthening
+    }
+    // Length spans [1-lenVar, 1+lenVar] around the mean (x*1===x exactly, so the
+    // OFF path keeps lenK bit-identical).
+    const lenK = lenMean * (1 - lenVar + 2 * lenVar * r01) * lengthScale;
     // Thickness correlates loosely with length (longer ~ slightly thicker),
     // plus its own variation so it doesn't look mechanical.
     const r01b = noise2D(k * 5.1 + 2.7, 4.9) * 0.5 + 0.5;

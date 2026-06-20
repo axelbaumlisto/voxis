@@ -67,6 +67,7 @@ import {
   integrateDeformPipeline,
   affineSqueezePoints,
   somaticCiliaParams,
+  ciliaStructureMod,
   bodyHalfWidth,
   bodyProfilePoint,
   bodyProfileArea,
@@ -75,7 +76,7 @@ import {
   interpProfileRadius,
   axialSpin,
 } from "../cell";
-import { deformAt } from "../shared";
+import { deformAt, wrapPi } from "../shared";
 import type { CellParams, CellPersistState, CiliaMotion } from "../cell";
 
 const TAU = Math.PI * 2;
@@ -4802,6 +4803,155 @@ describe("Commit 22b — somatic mex wired into render", () => {
       (h) => Math.abs(Math.hypot(h.points[0][0] - 80, h.points[0][1] - 80) - 24) > 1e-3,
     );
     expect(offCircle).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 23 — ciliature structure: oral-groove density dip + caudal tuft
+// ---------------------------------------------------------------------------
+describe("Commit 23 — ciliature structure", () => {
+  const cx = 100;
+  const cy = 100;
+  const baseR = 30;
+  const t = 1.0;
+  const energy = 0.6;
+  const growth = 0.8;
+  const hairLen = (h: { points: Array<[number, number]> }): number => {
+    const [bx, by] = h.points[0];
+    const [tx, ty] = h.points[h.points.length - 1];
+    return Math.hypot(tx - bx, ty - by);
+  };
+
+  // ---- (a) GATE OFF: pure no-op + byte-identical ciliaPath --------------------
+  it("(a) GATE OFF: ciliaStructureMod returns {lengthScale:1, keep:true}", () => {
+    expect(CELL_DEFAULTS.enableCiliaStructure).toBe(false);
+    const off = { ...CELL_DEFAULTS };
+    for (const psi of [-Math.PI, -1.2, 0, 0.5, 1.2, 2.5, Math.PI]) {
+      for (const noise of [0, 0.15, 0.5, 0.9, 1]) {
+        expect(ciliaStructureMod(psi, noise, off)).toEqual({ lengthScale: 1, keep: true });
+      }
+    }
+  });
+
+  it("(a) GATE OFF: ciliaPath byte-identical with the field absent vs false", () => {
+    const motion: CiliaMotion = { tx: 0.6, ty: 0.8, speedNorm: 0.7, axisStrength: 0.5 };
+    const absent = ciliaPath(cx, cy, baseR, t, energy, growth, { ...CELL_DEFAULTS }, motion);
+    const explicitFalse = ciliaPath(
+      cx, cy, baseR, t, energy, growth,
+      { ...CELL_DEFAULTS, enableCiliaStructure: false }, motion,
+    );
+    expect(explicitFalse).toEqual(absent);
+    // same hair count + identical first/last hair coordinates
+    expect(explicitFalse.length).toBe(absent.length);
+    expect(explicitFalse[0].points).toEqual(absent[0].points);
+    expect(explicitFalse[absent.length - 1].points).toEqual(absent[absent.length - 1].points);
+  });
+
+  // ---- (b) CAUDAL TUFT -------------------------------------------------------
+  it("(b) CAUDAL TUFT: lengthScale ~caudalTuftLength at the pole, 1 at anterior, monotone & continuous", () => {
+    const params: CellParams = { ...CELL_DEFAULTS, enableCiliaStructure: true };
+    const tuftLen = params.caudalTuftLength ?? 1.7;
+    const tuftW = params.caudalTuftWidth ?? 0.6;
+    // at the posterior pole psi=±π => lengthScale ≈ caudalTuftLength
+    expect(ciliaStructureMod(Math.PI, 0.5, params).lengthScale).toBeCloseTo(tuftLen, 10);
+    expect(ciliaStructureMod(-Math.PI, 0.5, params).lengthScale).toBeCloseTo(tuftLen, 10);
+    // at the anterior psi=0 => no lengthening
+    expect(ciliaStructureMod(0, 0.5, params).lengthScale).toBe(1);
+    // monotone decreasing from π inward over the tuft window
+    let prev = Infinity;
+    for (let d = 0; d <= tuftW; d += tuftW / 20) {
+      const ls = ciliaStructureMod(Math.PI - d, 0.5, params).lengthScale;
+      expect(ls).toBeLessThanOrEqual(prev + 1e-12);
+      prev = ls;
+    }
+    // C0-continuous at the window edge: lengthScale → 1
+    const atEdge = ciliaStructureMod(Math.PI - tuftW + 1e-6, 0.5, params).lengthScale;
+    expect(atEdge).toBeCloseTo(1, 4);
+  });
+
+  // ---- (c) ORAL DIP: drops only in window, fraction ~ dip at centre ----------
+  it("(c) ORAL DIP: drops occur ONLY within the oral window, none at poles/anterior", () => {
+    const params: CellParams = { ...CELL_DEFAULTS, enableCiliaStructure: true };
+    const center = params.oralGapCenter ?? 1.2;
+    const width = params.oralGapWidth ?? 0.75;
+    const noiseGrid = Array.from({ length: 20 }, (_, i) => i / 20); // [0,1)
+    for (let psi = -Math.PI; psi <= Math.PI; psi += Math.PI / 90) {
+      const inWindow = Math.abs(wrapPi(psi - center)) < width;
+      for (const noise of noiseGrid) {
+        const dropped = !ciliaStructureMod(psi, noise, params).keep;
+        if (dropped) expect(inWindow).toBe(true);
+      }
+    }
+    // No drops at the posterior pole or the anterior.
+    for (const psi of [Math.PI, -Math.PI, 0]) {
+      for (const noise of noiseGrid) {
+        expect(ciliaStructureMod(psi, noise, params).keep).toBe(true);
+      }
+    }
+    // Drop fraction near the centre ≈ oralGapDip.
+    const dip = params.oralGapDip ?? 0.3;
+    let dropped = 0;
+    const N = 1000;
+    for (let i = 0; i < N; i++) {
+      if (!ciliaStructureMod(center, i / N, params).keep) dropped++;
+    }
+    expect(dropped / N).toBeCloseTo(dip, 1);
+  });
+
+  // ---- (d) DENSITY DIP NOT BALD ---------------------------------------------
+  it("(d) DENSITY DIP NOT BALD: at the oral centre, ≥(1-dip) of hairs are kept", () => {
+    const params: CellParams = { ...CELL_DEFAULTS, enableCiliaStructure: true };
+    const center = params.oralGapCenter ?? 1.2;
+    let kept = 0;
+    for (let i = 0; i < 100; i++) {
+      if (ciliaStructureMod(center, i / 100, params).keep) kept++;
+    }
+    expect(kept).toBeGreaterThanOrEqual(65);
+  });
+
+  // ---- (e) RENDER ON --------------------------------------------------------
+  it("(e) RENDER ON: fewer hairs (oral thinning) + longest near posterior pole + finite", () => {
+    const motion: CiliaMotion = { tx: 1, ty: 0, speedNorm: 0.8, axisStrength: 0.7 };
+    const base = somaticCiliaParams({ ...CELL_DEFAULTS, enableSomaticCilia: true });
+    const off = ciliaPath(cx, cy, baseR, t, energy, growth, base, motion);
+    const on = ciliaPath(
+      cx, cy, baseR, t, energy, growth,
+      { ...base, enableCiliaStructure: true }, motion,
+    );
+    // (i) oral thinning removed some hairs
+    expect(on.length).toBeLessThan(off.length);
+    // (ii) the longest hairs are near the posterior pole (strokeAxis + π).
+    // heading is +x => posterior pole points to -x.
+    let longest = -1;
+    let longestAngle = 0;
+    for (const h of on) {
+      const L = hairLen(h);
+      if (L > longest) {
+        longest = L;
+        const [bx, by] = h.points[0];
+        longestAngle = Math.atan2(by - cy, bx - cx);
+      }
+    }
+    // posterior pole = π (i.e. pointing -x); |angle| should be near π.
+    expect(Math.abs(longestAngle)).toBeGreaterThan(Math.PI - 0.6);
+    // (iii) finite coords, no NaN
+    for (const h of on) {
+      for (const [px, py] of h.points) {
+        expect(Number.isFinite(px)).toBe(true);
+        expect(Number.isFinite(py)).toBe(true);
+      }
+    }
+  });
+
+  // ---- (f) DETERMINISM ------------------------------------------------------
+  it("(f) DETERMINISM: identical args ⇒ identical output", () => {
+    const params: CellParams = { ...CELL_DEFAULTS, enableCiliaStructure: true };
+    expect(ciliaStructureMod(1.0, 0.4, params)).toEqual(ciliaStructureMod(1.0, 0.4, params));
+    const motion: CiliaMotion = { tx: 0.6, ty: 0.8, speedNorm: 0.7, axisStrength: 0.5 };
+    const on = somaticCiliaParams({ ...CELL_DEFAULTS, enableSomaticCilia: true, enableCiliaStructure: true });
+    expect(ciliaPath(cx, cy, baseR, t, energy, growth, on, motion)).toEqual(
+      ciliaPath(cx, cy, baseR, t, energy, growth, on, motion),
+    );
   });
 });
 
