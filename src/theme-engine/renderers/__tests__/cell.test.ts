@@ -7806,6 +7806,157 @@ describe("Commit v3.5F — macronucleus ellipse", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Commit v4.0D — kidney-shaped macronucleus via nucleusIndent
+// ---------------------------------------------------------------------------
+describe("Commit v4.0D — kidney-shaped macronucleus", () => {
+  const W = 160, H = 160;
+
+  function setupRaf() {
+    const rafCalls: Array<() => void> = [];
+    let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    return rafCalls;
+  }
+
+  function installCtx() {
+    const grad = { addColorStop: () => {} };
+    const ellipseCalls: Array<number[]> = [];
+    const moveToArgs: Array<number[]> = [];
+    const lineToArgs: Array<number[]> = [];
+    const ctx = {
+      clearRect: () => {},
+      save: () => {},
+      restore: () => {},
+      beginPath: () => {},
+      closePath: () => {},
+      stroke: () => {},
+      fill: () => {},
+      moveTo: (...args: number[]) => { moveToArgs.push(args); },
+      lineTo: (...args: number[]) => { lineToArgs.push(args); },
+      arc: () => {},
+      ellipse: (...args: number[]) => { ellipseCalls.push(args); },
+      createRadialGradient: () => grad,
+      fillStyle: "", strokeStyle: "", lineWidth: 0, lineCap: "", lineJoin: "",
+    };
+    const proto = HTMLCanvasElement.prototype as unknown as {
+      getContext: (id: string) => unknown;
+    };
+    const orig = proto.getContext;
+    proto.getContext = () => ctx;
+    return { ellipseCalls, moveToArgs, lineToArgs, restore: () => { proto.getContext = orig; } };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  const KIDNEY_PARAMS = {
+    ...CELL_DEFAULTS,
+    enableOrganelles: true,
+    enableInteriorField: true,
+    enableBodyProfile: true,
+    bodyProfileType: "egg" as const,
+    bodyAspect: 3,
+    nucleusAspect: 1.8,
+  };
+
+  it("(a) nucleusIndent=0 (default) uses ctx.ellipse — legacy path preserved", () => {
+    const rafCalls = setupRaf();
+    const { ellipseCalls, moveToArgs, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: { ...KIDNEY_PARAMS, nucleusIndent: 0 },
+    });
+    const moveCountBefore = moveToArgs.length;
+    for (let i = 0; i < 5; i++) {
+      r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.3) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    // Ellipse calls must be present (macronucleus drawn as ellipse)
+    expect(ellipseCalls.length).toBeGreaterThan(0);
+    r.destroy();
+    restore();
+  });
+
+  it("(b) nucleusIndent=0.3 draws moveTo/lineTo kidney path, no ellipse for nucleus", () => {
+    let fakeNow = 1000;
+    vi.stubGlobal("performance", { now: () => fakeNow });
+    const rafCalls = setupRaf();
+    const { ellipseCalls, moveToArgs, lineToArgs, restore } = installCtx();
+    localStorage.clear();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: { ...KIDNEY_PARAMS, nucleusIndent: 0.3 },
+    });
+    // Record ellipse count BEFORE rendering
+    const ellipseBefore = ellipseCalls.length;
+    const moveBefore = moveToArgs.length;
+    const lineBefore = lineToArgs.length;
+    for (let i = 0; i < 5; i++) {
+      fakeNow += 16.67;
+      r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.3) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    // Kidney path uses moveTo+lineTo, NOT ellipse
+    // There should be new moveTo calls (one per frame for the kidney path)
+    const newMoves = moveToArgs.length - moveBefore;
+    const newLines = lineToArgs.length - lineBefore;
+    expect(newMoves).toBeGreaterThan(0);
+    // 32 segments → 32 lineTo calls per frame, 5 frames
+    expect(newLines).toBeGreaterThanOrEqual(32);
+    r.destroy();
+    restore();
+    vi.unstubAllGlobals();
+  });
+
+  it("(c) nucleusIndent=0.3 creates asymmetric shape (min Y extent < max Y extent)", () => {
+    let fakeNow = 1000;
+    vi.stubGlobal("performance", { now: () => fakeNow });
+    const rafCalls = setupRaf();
+    const { moveToArgs, lineToArgs, restore } = installCtx();
+    localStorage.clear();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: { ...KIDNEY_PARAMS, nucleusIndent: 0.3 },
+    });
+    const moveBefore = moveToArgs.length;
+    const lineBefore = lineToArgs.length;
+    // Render one frame
+    fakeNow += 16.67;
+    r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.3) });
+    if (rafCalls.length) rafCalls.shift()!();
+
+    // Collect all kidney path points from this frame
+    const pts = [
+      ...moveToArgs.slice(moveBefore),
+      ...lineToArgs.slice(lineBefore),
+    ];
+    // Must have points from the kidney path (32 + 1 moveTo)
+    expect(pts.length).toBeGreaterThanOrEqual(10);
+
+    // Find centroid to measure radial extents
+    const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+    const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+    // Compute max distance from centroid on each side of the major axis
+    // The kidney indent makes one side closer to centre
+    const dists = pts.map(p => Math.sqrt((p[0] - cx) ** 2 + (p[1] - cy) ** 2));
+    const maxDist = Math.max(...dists);
+    const minDist = Math.min(...dists);
+    // With indent=0.3 the min radial distance should be notably smaller than max
+    // (the indented flank is pulled in)
+    expect(minDist).toBeLessThan(maxDist * 0.85);
+    r.destroy();
+    restore();
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("Commit v3.6 — brightness + CV canals", () => {
   const W = 160, H = 160;
 

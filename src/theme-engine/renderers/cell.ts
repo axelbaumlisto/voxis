@@ -402,6 +402,11 @@ export interface CellParams {
   /** Commit v3.5F: macronucleus major/minor axis ratio. Default 1.8 (bean-shaped).
    * 1.0 = circle. Only applies when enableInteriorField is on. */
   nucleusAspect?: number;
+  /** Commit v4.0D: kidney/bean-shaped macronucleus concavity depth as a fraction
+   * of the minor radius. 0 = pure ellipse (legacy). 0.3 = visible indent on one
+   * flank where the micronucleus nestles. Only applies when enableInteriorField
+   * is on and nucleusAspect > 1. */
+  nucleusIndent?: number;
   /** Commit 28: micronucleus radius as a fraction of the macronucleus radius.
    * Default 0.20. */
   micronucleusSizeFrac?: number;
@@ -3986,7 +3991,30 @@ export function createCellRenderer(
             // Align with bodyHeading (NOT squeezePhi) — the macronucleus is
             // anchored in the cytoplasm and rotates with the body, not with
             // the fast axial spin (which is a surface/cilia phenomenon).
-            ctx.ellipse(nx, ny, nr * nAspect, nr, bodyHeading, 0, TAU);
+            const nIndent = params.nucleusIndent ?? 0;
+            if (nIndent > 0) {
+              // Commit v4.0D: kidney/bean shape — ellipse with cosine indent
+              // on one flank (sin(t) > 0 side) where the micronucleus sits.
+              const kSteps = 32;
+              const ch = Math.cos(bodyHeading);
+              const sh = Math.sin(bodyHeading);
+              for (let ki = 0; ki <= kSteps; ki++) {
+                const t = (ki / kSteps) * TAU;
+                const ct = Math.cos(t);
+                const st = Math.sin(t);
+                // Pull inward on one flank: r(θ) modulated by sin²(θ)
+                const kidFrac = st > 0 ? 1 - nIndent * st * st : 1;
+                const ex = ct * nr * nAspect;
+                const ey = st * nr * kidFrac;
+                const rx = nx + ex * ch - ey * sh;
+                const ry = ny + ex * sh + ey * ch;
+                if (ki === 0) ctx.moveTo(rx, ry);
+                else ctx.lineTo(rx, ry);
+              }
+              ctx.closePath();
+            } else {
+              ctx.ellipse(nx, ny, nr * nAspect, nr, bodyHeading, 0, TAU);
+            }
           } else {
             ctx.arc(nx, ny, nr, 0, TAU);
           }
