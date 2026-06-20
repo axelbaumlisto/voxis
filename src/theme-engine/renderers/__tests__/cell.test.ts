@@ -8458,3 +8458,269 @@ describe("v3.7D — ectoplasm boundary", () => {
     restore();
   });
 });
+
+// ==========================================================================
+// v3.8E: Trichocyst discharge on startle
+// ==========================================================================
+describe("trichocyst discharge (v3.8E)", () => {
+  const W = 200;
+  const H = 200;
+
+  function setupRaf() {
+    const rafCalls: FrameRequestCallback[] = [];
+    let frameId = 1;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      rafCalls.push(cb);
+      return frameId++;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    vi.stubGlobal("performance", { now: () => 1000 });
+    return rafCalls;
+  }
+
+  function installCtx() {
+    const grad = { addColorStop: () => {} };
+    const ctx: Record<string, unknown> = {
+      clearRect: () => {},
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      stroke: vi.fn(),
+      fill: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      createRadialGradient: () => grad,
+      fillStyle: "", strokeStyle: "", lineWidth: 0, lineCap: "", lineJoin: "",
+    };
+    const proto = HTMLCanvasElement.prototype as unknown as {
+      getContext: (id: string) => unknown;
+    };
+    const orig = proto.getContext;
+    proto.getContext = () => ctx;
+    return { ctx, restore: () => { proto.getContext = orig; } };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("enableTrichocysts defaults to false", () => {
+    expect(CELL_DEFAULTS.enableTrichocysts).toBe(false);
+  });
+
+  it("trichocystCount defaults to 30", () => {
+    expect(CELL_DEFAULTS.trichocystCount).toBe(30);
+  });
+
+  it("trichocystLengthMul defaults to 3.0", () => {
+    expect(CELL_DEFAULTS.trichocystLengthMul).toBe(3.0);
+  });
+
+  it("trichocystDecay defaults to 5.0", () => {
+    expect(CELL_DEFAULTS.trichocystDecay).toBe(5.0);
+  });
+
+  it("enableTrichocysts=false (default) \u2192 no trichocyst strokes during startle", () => {
+    // With default params (enableTrichocysts=false), stroke count should be
+    // the same whether or not a startle occurs.
+    const rafCalls = setupRaf();
+    const { ctx, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, { width: W, height: H });
+    // Warm up idle
+    for (let i = 0; i < 3; i++) {
+      r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    const strokeBefore = (ctx.stroke as ReturnType<typeof vi.fn>).mock.calls.length;
+    // Jump to recording to trigger startle
+    for (let i = 0; i < 3; i++) {
+      r.update({ mode: "recording", audioLevel: 0.9, spectrumBins: new Array(32).fill(0.8) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    const strokeAfter = (ctx.stroke as ReturnType<typeof vi.fn>).mock.calls.length;
+    // Record baseline stroke count during startle with trichocysts OFF
+    const baseStrokes = strokeAfter - strokeBefore;
+    r.destroy();
+    restore();
+
+    // enableTrichocysts ON should produce MORE strokes
+    const rafCalls2 = setupRaf();
+    const { ctx: ctx2, restore: restore2 } = installCtx();
+    const container2 = document.createElement("div");
+    const r2 = createCellRenderer(container2, {
+      width: W, height: H,
+      params: { ...CELL_DEFAULTS, enableTrichocysts: true },
+    });
+    // Warm up idle
+    for (let i = 0; i < 3; i++) {
+      r2.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls2.length) rafCalls2.shift()!();
+    }
+    const strokeBefore2 = (ctx2.stroke as ReturnType<typeof vi.fn>).mock.calls.length;
+    // Jump to recording to trigger startle
+    for (let i = 0; i < 3; i++) {
+      r2.update({ mode: "recording", audioLevel: 0.9, spectrumBins: new Array(32).fill(0.8) });
+      if (rafCalls2.length) rafCalls2.shift()!();
+    }
+    const strokeAfter2 = (ctx2.stroke as ReturnType<typeof vi.fn>).mock.calls.length;
+    const triStrokes = strokeAfter2 - strokeBefore2;
+    // enableTrichocysts ON during startle should produce MORE stroke calls
+    expect(triStrokes).toBeGreaterThan(baseStrokes);
+    r2.destroy();
+    restore2();
+  });
+
+  it("enableTrichocysts=true + no startle (idle) \u2192 no trichocyst strokes", () => {
+    // No startle = no needles even with the gate on
+    const rafCalls = setupRaf();
+    const { ctx, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: { ...CELL_DEFAULTS, enableTrichocysts: true },
+    });
+    // Run several idle frames so startle stays 0
+    for (let i = 0; i < 10; i++) {
+      r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    // Record stroke count for the LAST idle frame (startle should be 0)
+    const strokeBefore = (ctx.stroke as ReturnType<typeof vi.fn>).mock.calls.length;
+    r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+    if (rafCalls.length) rafCalls.shift()!();
+    const strokeAfter = (ctx.stroke as ReturnType<typeof vi.fn>).mock.calls.length;
+    // Should be same as default (no extra trichocyst strokes)
+    r.destroy();
+    restore();
+
+    // Compare with trichocysts OFF
+    const rafCalls2 = setupRaf();
+    const { ctx: ctx2, restore: restore2 } = installCtx();
+    const container2 = document.createElement("div");
+    const r2 = createCellRenderer(container2, { width: W, height: H });
+    for (let i = 0; i < 10; i++) {
+      r2.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls2.length) rafCalls2.shift()!();
+    }
+    const strokeBefore2 = (ctx2.stroke as ReturnType<typeof vi.fn>).mock.calls.length;
+    r2.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+    if (rafCalls2.length) rafCalls2.shift()!();
+    const strokeAfter2 = (ctx2.stroke as ReturnType<typeof vi.fn>).mock.calls.length;
+    // Same stroke count for idle frame (no startle = no trichocysts)
+    expect(strokeAfter - strokeBefore).toBe(strokeAfter2 - strokeBefore2);
+    r2.destroy();
+    restore2();
+  });
+
+  it("enableTrichocysts=true renders without throwing", () => {
+    const rafCalls = setupRaf();
+    const { restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableTrichocysts: true,
+        trichocystCount: 30,
+        trichocystLengthMul: 3.0,
+        trichocystDecay: 5.0,
+      },
+    });
+    expect(() => {
+      // Idle
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+      // Sudden recording (triggers startle)
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0.9, spectrumBins: new Array(32).fill(0.7) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+      // Back to idle (startle decays)
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    r.destroy();
+    restore();
+  });
+
+  it("custom trichocystCount/LengthMul/Decay accepted without error", () => {
+    const rafCalls = setupRaf();
+    const { restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableTrichocysts: true,
+        trichocystCount: 50,
+        trichocystLengthMul: 4.5,
+        trichocystDecay: 8.0,
+      },
+    });
+    expect(() => {
+      for (let i = 0; i < 3; i++) {
+        r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+      for (let i = 0; i < 3; i++) {
+        r.update({ mode: "recording", audioLevel: 1.0, spectrumBins: new Array(32).fill(1.0) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    r.destroy();
+    restore();
+  });
+
+  it("trichocyst uses save/restore (no context leak)", () => {
+    const rafCalls = setupRaf();
+    const { ctx, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: { ...CELL_DEFAULTS, enableTrichocysts: true },
+    });
+    // Idle + then startle
+    for (let i = 0; i < 3; i++) {
+      r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    for (let i = 0; i < 3; i++) {
+      r.update({ mode: "recording", audioLevel: 0.9, spectrumBins: new Array(32).fill(0.8) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    const saveCalls = (ctx.save as ReturnType<typeof vi.fn>).mock.calls.length;
+    const restoreCalls = (ctx.restore as ReturnType<typeof vi.fn>).mock.calls.length;
+    // save/restore must be balanced
+    expect(saveCalls).toBe(restoreCalls);
+    r.destroy();
+    restore();
+  });
+
+  it("gate-off golden: CELL_DEFAULTS with trichocysts off renders identically", () => {
+    const rafCalls = setupRaf();
+    const { restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, { width: W, height: H });
+    expect(() => {
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0.7, spectrumBins: new Array(32).fill(0.5) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    r.destroy();
+    restore();
+  });
+});

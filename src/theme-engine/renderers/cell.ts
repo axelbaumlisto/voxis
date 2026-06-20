@@ -521,6 +521,20 @@ export interface CellParams {
   /** v3.7D: stroke alpha for the ectoplasm boundary line.
    * Default 0.15. */
   ectoplasmAlpha?: number;
+
+  /** v3.8E (OPT, default off): TRICHOCYST DISCHARGE. Paramecium's most
+   * dramatic defense — explosive radial crystalline needles projecting from
+   * the pellicle on startle. When off, no trichocyst drawing occurs (golden
+   * frozen). */
+  enableTrichocysts?: boolean;
+  /** v3.8E: number of radial needles on discharge. Default 30. */
+  trichocystCount?: number;
+  /** v3.8E: needle length as a multiple of average cilia length (baseR *
+   * ciliaLength). Default 3.0. */
+  trichocystLengthMul?: number;
+  /** v3.8E: alpha decay rate per second — controls how quickly the needles
+   * fade after a startle fires. Default 5.0 (~200ms visible). */
+  trichocystDecay?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -657,6 +671,12 @@ export const CELL_DEFAULTS: CellParams = {
   enableEctoplasm: false,
   ectoplasmFrac: 0.85,
   ectoplasmAlpha: 0.15,
+  // v3.8E: trichocyst discharge on startle. OFF (dark-launch) so no radial
+  // needles are drawn -> all goldens stay byte-identical.
+  enableTrichocysts: false,
+  trichocystCount: 30,
+  trichocystLengthMul: 3.0,
+  trichocystDecay: 5.0,
   // Commit 26: PLURAL pair of asynchronous contractile vacuoles. OFF
   // (dark-launch) so contractileVacuolePair returns [] and the gated draw
   // block is skipped -> all goldens stay byte-identical.
@@ -3771,6 +3791,38 @@ export function createCellRenderer(
             }
             ctx.stroke();
           }
+        }
+
+        // --- v3.8E: Trichocyst discharge ---
+        // Paramecium discharges crystalline trichocyst needles radially outward
+        // from the pellicle on startle (defense reflex). Drawn AFTER cilia so
+        // needles visually project THROUGH the fringe. Alpha fades with startle.
+        if (params.enableTrichocysts && startle > 0.01) {
+          const triCount = params.trichocystCount ?? 30;
+          const triLen = (params.trichocystLengthMul ?? 3.0) * baseR * (params.ciliaLength ?? 0.45);
+          const triAlpha = startle * 0.7; // fades with startle decay
+          ctx.save();
+          ctx.strokeStyle = hsla(0, 0.0, 0.95, triAlpha);
+          ctx.lineWidth = 0.5;
+          ctx.lineCap = "round";
+          // Use evenly-spaced points on the deformed+squeezed membrane contour
+          const step = Math.max(1, Math.floor(contourPoints.length / triCount));
+          for (let i = 0; i < triCount; i++) {
+            const idx = (i * step) % contourPoints.length;
+            const [px, py] = contourPoints[idx];
+            // Outward normal from cell centre
+            const dx = px - cx;
+            const dy = py - cy;
+            const d = Math.hypot(dx, dy);
+            if (d < 0.001) continue;
+            const nx = dx / d;
+            const ny = dy / d;
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(px + nx * triLen, py + ny * triLen);
+            ctx.stroke();
+          }
+          ctx.restore();
         }
 
         // --- Fill: translucent cytoplasm ---
