@@ -4203,6 +4203,186 @@ describe("Commit 21b — frozen cilia crown golden (regression guard)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Commit 21c — cilia anchored on deformed+squeezed contour (gate default OFF)
+// ---------------------------------------------------------------------------
+describe("Commit 21c — cilia anchored on deformed+squeezed contour", () => {
+  const cx = 80;
+  const cy = 80;
+  const baseR = 24;
+  // A smooth +0.2 cosine bump centred at theta0 over a 96-sample deform array.
+  const bumpDeform = (theta0: number, amp = 0.2, n = 96, halfWidth = 6): number[] => {
+    const arr = new Array<number>(n).fill(0);
+    const i0 = ((Math.round((theta0 / TAU) * n) % n) + n) % n;
+    for (let j = -halfWidth; j <= halfWidth; j++) {
+      const idx = ((i0 + j) % n + n) % n;
+      // raised-cosine window in [0,1], peak at j=0
+      arr[idx] = amp * 0.5 * (1 + Math.cos((Math.PI * j) / (halfWidth + 1)));
+    }
+    return arr;
+  };
+  const baseAngleOf = (k: number, n: number): number => {
+    const gap = TAU / n;
+    const angOff = noise2D(k * 12.9898, 7.2) * Math.max(0, Math.min(0.9, CELL_DEFAULTS.ciliaAngleJitter ?? 0.55)) * gap * 0.5;
+    return k * gap + angOff;
+  };
+
+  // ---- (a) OFF-PATH IDENTITY -------------------------------------------------
+  it("gate OFF with a contour-carrying motion === the no-contour crown", () => {
+    const off = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, { ...CELL_DEFAULTS });
+    const withContour = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, { ...CELL_DEFAULTS }, {
+      tx: 1, ty: 0, speedNorm: 0, axisStrength: 0,
+      contour: { deform: bumpDeform(0.7), squeezeK: 1.5, squeezePhi: 0.3 },
+    });
+    expect(withContour).toEqual(off);
+  });
+
+  it("gate ON but motion.contour undefined === the off crown", () => {
+    const off = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, { ...CELL_DEFAULTS }, { tx: 1, ty: 0, speedNorm: 0, axisStrength: 0 });
+    const on = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, { ...CELL_DEFAULTS, enableCiliaOnContour: true }, { tx: 1, ty: 0, speedNorm: 0, axisStrength: 0 });
+    expect(on).toEqual(off);
+  });
+
+  // ---- (b) DEFORM BULGE ------------------------------------------------------
+  it("a +0.2 deform bump pushes the nearest hair base to ~baseR*1.2; opposite stays ~baseR", () => {
+    const n = CELL_DEFAULTS.ciliaCount;
+    const theta0 = baseAngleOf(3, n); // align the bump to hair #3's base angle
+    const deform = bumpDeform(theta0, 0.2);
+    const P = { ...CELL_DEFAULTS, enableCiliaOnContour: true, enableAffine: false };
+    const crown = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, P, {
+      tx: 1, ty: 0, speedNorm: 0, axisStrength: 0,
+      contour: { deform, squeezeK: 1, squeezePhi: 0 },
+    });
+    const radii = crown.map((h) => Math.hypot(h.points[0][0] - cx, h.points[0][1] - cy));
+    // hair nearest theta0 bulges out to ~1.2*baseR
+    const angles = crown.map((_, k) => baseAngleOf(k, n));
+    let nearest = 0;
+    let best = Infinity;
+    for (let k = 0; k < angles.length; k++) {
+      const d = Math.abs(((angles[k] - theta0 + Math.PI) % TAU + TAU) % TAU - Math.PI);
+      if (d < best) { best = d; nearest = k; }
+    }
+    expect(radii[nearest]).toBeCloseTo(baseR * 1.2, 1);
+    // a hair on the opposite side is undeformed (~baseR)
+    const opp = (nearest + Math.round(angles.length / 2)) % angles.length;
+    expect(radii[opp]).toBeCloseTo(baseR, 4);
+  });
+
+  // ---- (c) PROLATE ASPECT ----------------------------------------------------
+  it("squeezeK=1.5 along phi=0 makes the base-point bbox aspect ~k^2=2.25", () => {
+    const k = 1.5;
+    const P = { ...CELL_DEFAULTS, enableCiliaOnContour: true, enableAffine: true };
+    const crown = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, P, {
+      tx: 1, ty: 0, speedNorm: 0, axisStrength: 0,
+      contour: { deform: new Array<number>(96).fill(0), squeezeK: k, squeezePhi: 0 },
+    });
+    const xs = crown.map((h) => h.points[0][0]);
+    const ys = crown.map((h) => h.points[0][1]);
+    const width = Math.max(...xs) - Math.min(...xs); // along phi=0 (x), stretched by k
+    const height = Math.max(...ys) - Math.min(...ys); // across (y), shrunk by 1/k
+    expect(width / height).toBeCloseTo(k * k, 1);
+  });
+
+  // ---- (d) ORTHOGONALITY (reciprocal-diagonal normal contract) ---------------
+  it("the reciprocal-diagonal normal is contour-perpendicular; the WRONG diagonal is not", () => {
+    const k = 1.5;
+    const phi = 0;
+    const cphi = Math.cos(phi);
+    const sphi = Math.sin(phi);
+    // squeezed contour point of the undeformed circle at angle theta
+    const sqPt = (theta: number): [number, number] => {
+      const x = cx + Math.cos(theta) * baseR;
+      const y = cy + Math.sin(theta) * baseR;
+      const dx = x - cx, dy = y - cy;
+      const xr = dx * cphi + dy * sphi;
+      const yr = -dx * sphi + dy * cphi;
+      const xs = xr * k, ys = yr / k;
+      return [cx + xs * cphi - ys * sphi, cy + xs * sphi + ys * cphi];
+    };
+    const delta = 1e-4;
+    for (const theta of [0.3, 1.1, 2.4, 3.9, 5.2]) {
+      // numeric squeezed-contour tangent
+      const a = sqPt(theta - delta);
+      const b = sqPt(theta + delta);
+      let tx = b[0] - a[0], ty = b[1] - a[1];
+      const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      // unsqueezed outward normal of the (undeformed) circle = radial
+      const n0x = Math.cos(theta), n0y = Math.sin(theta);
+      // CORRECT: reciprocal diagonal diag(1/k,k)
+      const xr = n0x * cphi + n0y * sphi;
+      const yr = -n0x * sphi + n0y * cphi;
+      let xs = xr / k, ys = yr * k;
+      let ncx = xs * cphi - ys * sphi, ncy = xs * sphi + ys * cphi;
+      const ncl = Math.hypot(ncx, ncy) || 1; ncx /= ncl; ncy /= ncl;
+      expect(Math.abs(ncx * tx + ncy * ty)).toBeLessThan(1e-3);
+      // WRONG: same diagonal as the point map diag(k,1/k)
+      xs = xr * k; ys = yr / k;
+      let nwx = xs * cphi - ys * sphi, nwy = xs * sphi + ys * cphi;
+      const nwl = Math.hypot(nwx, nwy) || 1; nwx /= nwl; nwy /= nwl;
+      expect(Math.abs(nwx * tx + nwy * ty)).toBeGreaterThan(1e-2);
+    }
+  });
+
+  it("the shaft (points[1]-points[0]) of the anchored crown leans along the true normal", () => {
+    // With squeezeK=1 (no squeeze) and zero deform the outward direction is radial;
+    // the first shaft step must move strictly outward from the base.
+    const P = { ...CELL_DEFAULTS, enableCiliaOnContour: true, enableAffine: false };
+    const crown = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, P, {
+      tx: 1, ty: 0, speedNorm: 0, axisStrength: 0,
+      contour: { deform: new Array<number>(96).fill(0), squeezeK: 1, squeezePhi: 0 },
+    });
+    for (const h of crown) {
+      const [bx, by] = h.points[0];
+      const r0 = Math.hypot(bx - cx, by - cy);
+      const [x1, y1] = h.points[1];
+      const r1 = Math.hypot(x1 - cx, y1 - cy);
+      expect(r1).toBeGreaterThan(r0);
+      expect(r0).toBeCloseTo(baseR, 6);
+    }
+  });
+
+  // ---- (e) NO CROSSING -------------------------------------------------------
+  it("base points stay monotone in angle and never collide for several deform/squeeze cases", () => {
+    const n = CELL_DEFAULTS.ciliaCount;
+    const cases: Array<{ deform: number[]; squeezeK: number }> = [
+      { deform: bumpDeform(0.5, 0.18), squeezeK: 1 },
+      { deform: bumpDeform(2.3, 0.15), squeezeK: 1.3 },
+      { deform: bumpDeform(4.7, 0.2), squeezeK: 1.3 },
+      { deform: bumpDeform(1.1, 0.1, 96, 10), squeezeK: 1 },
+    ];
+    for (const c of cases) {
+      const P = { ...CELL_DEFAULTS, enableCiliaOnContour: true, enableAffine: true };
+      const crown = ciliaPath(cx, cy, baseR, 1.0, 0.6, 0.8, P, {
+        tx: 1, ty: 0, speedNorm: 0, axisStrength: 0,
+        contour: { deform: c.deform, squeezeK: c.squeezeK, squeezePhi: 0.4 },
+      });
+      // angle (about centre) of each base, in crown order
+      const ang = crown.map((h) => Math.atan2(h.points[0][1] - cy, h.points[0][0] - cx));
+      // monotone after unwrapping (no reordering of neighbours)
+      let prev = ang[0];
+      let acc = ang[0];
+      for (let i = 1; i < ang.length; i++) {
+        let d = ang[i] - prev;
+        while (d <= -Math.PI) d += TAU;
+        while (d > Math.PI) d -= TAU;
+        expect(d).toBeGreaterThan(0); // strictly increasing => no crossing
+        acc += d;
+        prev = ang[i];
+      }
+      // min pairwise base distance > 0
+      let minD = Infinity;
+      for (let i = 0; i < crown.length; i++) {
+        for (let j = i + 1; j < crown.length; j++) {
+          const dx = crown[i].points[0][0] - crown[j].points[0][0];
+          const dy = crown[i].points[0][1] - crown[j].points[0][1];
+          minD = Math.min(minD, Math.hypot(dx, dy));
+        }
+      }
+      expect(minD).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Commit 13 — M4 (persist wander pose) + M5 (fraction storage, resize-safe)
 // ---------------------------------------------------------------------------
 describe("CellPersistState M4/M5 — pose round-trip + back-compat", () => {

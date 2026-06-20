@@ -14,7 +14,7 @@ import type { ThemeState } from "../contract";
 import type { Renderer } from "./types";
 import {
   noise2D, fbm, catmullRom, catmullRomOpen, integrateDeformation, hsla, TAU, growthLevel,
-  lerp, smoothstep, wrapPi,
+  lerp, smoothstep, wrapPi, deformAt, deformDerivAt,
 } from "./shared";
 
 // Backward-compat re-exports: existing imports of these from "./cell" keep working.
@@ -283,6 +283,11 @@ export interface CellParams {
    * speed (px/s) as `strength` and get a px/s field at body-scale distances.
    * Default 300 (~a^2 for baseR~17). */
   flowStrength?: number;
+  /** Commit 21c (OPT, default off): anchor each cilium base on the DEFORMED +
+   * affine-squeezed membrane contour (via motion.contour) instead of the bare
+   * circle, and grow the shaft along the true contour outward normal. OFF keeps
+   * the crown byte-identical to the commit-21b frozen golden. */
+  enableCiliaOnContour?: boolean;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -376,6 +381,9 @@ export const CELL_DEFAULTS: CellParams = {
   enableFlowField: false,
   flowMoteCount: 0,
   flowStrength: 300,
+  // Commit 21c: cilia anchored on the deformed+squeezed contour. OFF (dark-launch)
+  // so the default crown stays byte-identical to the commit-21b frozen golden.
+  enableCiliaOnContour: false,
 };
 
 
@@ -765,6 +773,11 @@ export interface CiliaMotion {
   /** F4/G3: global stroke-axis coherence weight [0,1] (= strokeAxisStrength(a)).
    * 0 => per-hair local azimuth (identity). Optional; defaults to 0. */
   axisStrength?: number;
+  /** Commit 21c: the live membrane contour the cilia should anchor on. When
+   * present AND params.enableCiliaOnContour, each hair base sits on the deformed
+   * (deform[]) + affine-squeezed (squeezeK,squeezePhi) contour and grows along
+   * its true outward normal. Absent => the legacy bare-circle base (identity). */
+  contour?: { deform: number[]; squeezeK: number; squeezePhi: number };
 }
 
 /**
@@ -866,6 +879,10 @@ export function ciliaPath(
   const mTx = motion?.tx ?? 0;
   const mTy = motion?.ty ?? 0;
   const mSpeed = motion ? Math.max(0, Math.min(1, motion.speedNorm)) : 0;
+  // Commit 21c: anchor hair bases on the deformed+squeezed contour. Engaged ONLY
+  // when the gate is on AND a contour is supplied; otherwise the legacy
+  // bare-circle base path runs byte-for-byte (commit-21b frozen golden).
+  const anchored = params.enableCiliaOnContour === true && motion?.contour !== undefined;
   // F4/G3: global stroke-axis coherence weight. Zero (or gate off, or no motion)
   // => per-hair local azimuth + integer metachronal index (identical to commit 11).
   const axisEngaged = (params.enableStrokeAxis ?? true) && motion !== undefined;
@@ -930,6 +947,65 @@ export function ciliaPath(
       pyn = Math.sin(strokeAngle);
     }
 
+    // Commit 21c: per-hair base anchored on the deformed+squeezed contour, plus
+    // its true outward unit normal. Only on the anchored path; the off path keeps
+    // the bare-circle base (cx+ux*baseR) and the (pxn,pyn) above untouched.
+    let bx = 0;
+    let by = 0;
+    let anx = 0; // anchored outward unit normal x
+    let any = 0; // anchored outward unit normal y
+    if (anchored) {
+      const contour = motion!.contour!;
+      const d = deformAt(baseAngle, contour.deform);
+      const dp = deformDerivAt(baseAngle, contour.deform);
+      // Anchor radius on the deformed circle r(theta)=baseR*(1+d).
+      const rTheta = baseR * (1 + d);
+      const bx0 = cx + ux * rTheta;
+      const by0 = cy + uy * rTheta;
+      // One affine squeeze of the single base point (reuses the exact map;
+      // identity when !enableAffine || k===1).
+      const sq = affineSqueezePoints(
+        [[bx0, by0]],
+        contour.squeezeK,
+        contour.squeezePhi,
+        cx,
+        cy,
+        params,
+      )[0];
+      bx = sq[0];
+      by = sq[1];
+      // Outward normal of the polar curve r(theta)=baseR*(1+d) BEFORE squeeze:
+      // n0 = normalize( cosθ*(1+d) + sinθ*d', sinθ*(1+d) - cosθ*d' ).
+      let n0x = ux * (1 + d) + uy * dp;
+      let n0y = uy * (1 + d) - ux * dp;
+      const n0len = Math.hypot(n0x, n0y) || 1;
+      n0x /= n0len;
+      n0y /= n0len;
+      // Transform the normal CONTRAVARIANTLY for the squeeze (reciprocal diagonal):
+      // n' = R(phi) . diag(1/k, k) . R(-phi) . n0. NOT affineSqueezePoints (which
+      // applies diag(k,1/k) and is WRONG for a normal). Same engaged condition as
+      // affineSqueezePoints so base point and normal stay consistent.
+      if (params.enableAffine && contour.squeezeK !== 1) {
+        const cphi = Math.cos(contour.squeezePhi);
+        const sphi = Math.sin(contour.squeezePhi);
+        const xr = n0x * cphi + n0y * sphi;
+        const yr = -n0x * sphi + n0y * cphi;
+        const xs = xr / contour.squeezeK; // diag(1/k, k) — reciprocal of the point map
+        const ys = yr * contour.squeezeK;
+        const nx = xs * cphi - ys * sphi;
+        const ny = xs * sphi + ys * cphi;
+        const nlen = Math.hypot(nx, ny) || 1;
+        anx = nx / nlen;
+        any = ny / nlen;
+      } else {
+        anx = n0x;
+        any = n0y;
+      }
+      // Local bend-plane perpendicular = 90° rotation of the outward normal.
+      pxn = -any;
+      pyn = anx;
+    }
+
     // --- Per-hair size diversity: a stable [0,1] random scalar per hair. ---
     const r01 = noise2D(k * 3.7 + 0.3, 1.3) * 0.5 + 0.5; // [0,1]
     // Length spans [1-lenVar, 1+lenVar] around the mean.
@@ -984,8 +1060,15 @@ export function ciliaPath(
       const lead = ux * mTx + uy * mTy;
       const dragGain = dragCoeff * mSpeed * (0.6 + 0.4 * lead);
       const dragPx = dragGain * lenK * Math.pow(sFrac, 1.3);
-      const x = cx + ux * along + pxn * bend - mTx * dragPx;
-      const y = cy + uy * along + pyn * bend - mTy * dragPx;
+      // Commit 21c: on the anchored path the base is (bx,by) on the real contour
+      // and the shaft grows outward along the true unit normal (anx,any); the
+      // outward extent is (along - baseR) = lenK*sFrac. The off path is unchanged.
+      const x = anchored
+        ? bx + anx * (along - baseR) + pxn * bend - mTx * dragPx
+        : cx + ux * along + pxn * bend - mTx * dragPx;
+      const y = anchored
+        ? by + any * (along - baseR) + pyn * bend - mTy * dragPx
+        : cy + uy * along + pyn * bend - mTy * dragPx;
       pts.push([x, y]);
     }
     out.push({ points: pts, width: hairWidth });
