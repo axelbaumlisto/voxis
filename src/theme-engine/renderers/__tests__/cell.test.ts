@@ -9134,7 +9134,7 @@ describe("metachronal length wave (v3.9D)", () => {
     expect(zeroCrossings(short)).toBeGreaterThan(zeroCrossings(long));
   });
 
-  it("modulation range stays within [0.6, 1.0] multiplier", () => {
+  it("modulation range stays within [0.6, 1.0] multiplier (default depth 0.4)", () => {
     const params: CellParams = {
       ...BASE,
       enableMetachronal: true,
@@ -9153,6 +9153,75 @@ describe("metachronal length wave (v3.9D)", () => {
         expect(d).toBeGreaterThan(minExpected);
         expect(d).toBeLessThan(maxExpected);
       }
+    }
+  });
+
+  it("metachronalDepth=0.4 (default) matches legacy range [0.6, 1.0]", () => {
+    const paramsDefault: CellParams = {
+      ...BASE,
+      enableMetachronal: true,
+      metachronalWavelength: 10,
+      metachronalSpeed: 0,
+    };
+    const paramsExplicit: CellParams = {
+      ...paramsDefault,
+      metachronalDepth: 0.4,
+    };
+    const tipDist = (h: { points: Array<[number, number]> }) =>
+      Math.hypot(h.points[h.points.length - 1][0] - cx, h.points[h.points.length - 1][1] - cy);
+    const d1 = ciliaPath(cx, cy, baseR, 0, 0.5, 0.0, paramsDefault).map(tipDist);
+    const d2 = ciliaPath(cx, cy, baseR, 0, 0.5, 0.0, paramsExplicit).map(tipDist);
+    for (let i = 0; i < d1.length; i++) {
+      expect(d2[i]).toBeCloseTo(d1[i], 10);
+    }
+  });
+
+  it("metachronalDepth=0.6 widens range to [0.4, 1.0]", () => {
+    const params: CellParams = {
+      ...BASE,
+      enableMetachronal: true,
+      metachronalWavelength: 10,
+      metachronalSpeed: 0,
+      metachronalDepth: 0.6,
+    };
+    const lenMean = baseR * 0.45 * (0.55 + 0.45 * 0.5);
+    const allDists: number[] = [];
+    for (let t = 0; t < 10; t += 0.7) {
+      const paths = ciliaPath(cx, cy, baseR, t, 0.5, 0.0, params);
+      const dists = paths.map(h =>
+        Math.hypot(h.points[h.points.length - 1][0] - cx, h.points[h.points.length - 1][1] - cy)
+      );
+      allDists.push(...dists);
+      const minExpected = baseR + lenMean * 0.4 - 2;
+      const maxExpected = baseR + lenMean * 1.0 + 2;
+      for (const d of dists) {
+        expect(d).toBeGreaterThan(minExpected);
+        expect(d).toBeLessThan(maxExpected);
+      }
+    }
+    // With depth=0.6, some values should be shorter than depth=0.4 allows
+    const minDist = Math.min(...allDists);
+    expect(minDist).toBeLessThan(baseR + lenMean * 0.6);
+  });
+
+  it("metachronalDepth=0 => all multipliers 1.0 (no modulation)", () => {
+    const params: CellParams = {
+      ...BASE,
+      enableMetachronal: true,
+      metachronalWavelength: 10,
+      metachronalSpeed: 4.0,
+      metachronalDepth: 0,
+    };
+    const paramsOff: CellParams = {
+      ...BASE,
+      enableMetachronal: false,
+    };
+    const tipDist = (h: { points: Array<[number, number]> }) =>
+      Math.hypot(h.points[h.points.length - 1][0] - cx, h.points[h.points.length - 1][1] - cy);
+    const withDepthZero = ciliaPath(cx, cy, baseR, 3.0, 0.5, 0.0, params).map(tipDist);
+    const withOff = ciliaPath(cx, cy, baseR, 3.0, 0.5, 0.0, paramsOff).map(tipDist);
+    for (let i = 0; i < withDepthZero.length; i++) {
+      expect(withDepthZero[i]).toBeCloseTo(withOff[i], 10);
     }
   });
 });
