@@ -114,6 +114,18 @@ export interface CellParams {
   foodVacuoleHue?: number;
   /** Override hue for contractile vacuoles (degrees). Default baseHue+20. */
   cvHue?: number;
+  /** Cytoplasm fill saturation (0-1). Default 0.70. Lower for DIC look. */
+  cytoplasmSat?: number;
+  /** Cilia stroke saturation (0-1). Default 0.60. Lower for transparent protein. */
+  ciliaSat?: number;
+  /** Membrane stroke lightness (0-1). Default 0.60. Higher for silvery edge. */
+  membraneLightness?: number;
+  /** Granule fill saturation (0-1). Default 0.60. Lower for refractile dots. */
+  granuleSat?: number;
+  /** Minimum swim speed fraction even at activity=0 (0-1). Default 0. Non-zero = cell drifts at idle. */
+  idleSwimFrac?: number;
+  /** Minimum drift activation floor (0-1). Default 0. Non-zero = wander position visible at idle. */
+  idleDriftMin?: number;
   /** Number of cilia (hair-like tentacles) around the membrane. */
   ciliaCount: number;
   /** Resting cilium length as fraction of baseR. */
@@ -3417,6 +3429,9 @@ export function createCellRenderer(
       // setPointerCapture keeps the recording session even if the cell wanders
       // off the finger, so visual drift during recording is fine.
       drift01 = driftActivation(drift01, s.mode === "recording", params.driftActivationRate ?? 0.02, dt);
+      if (params.idleDriftMin) {
+        drift01 = Math.max(params.idleDriftMin, drift01);
+      }
 
       // Hoisted cell centre + radius: includes drift blend, startle jolt (sdx,sdy) and growth swell.
       const baseR = resolveBaseRadius(width, height, params, growth);
@@ -3436,7 +3451,11 @@ export function createCellRenderer(
       // G2: activity-driven swim speed (Stokes-linear, memoryless). When the
       // activity gate is off, pass undefined so wanderStep uses legacy driftSpeed.
       // H1: add the transient startle speed burst on top (fades with startle).
-      const baseSwim = params.enableActivity ? swimSpeed(activity, width, height, params) : undefined;
+      let baseSwim = params.enableActivity ? swimSpeed(activity, width, height, params) : undefined;
+      if (baseSwim !== undefined && params.idleSwimFrac) {
+        const maxSwim = (params.swimSpeedMaxFrac ?? 0.06) * Math.min(width, height);
+        baseSwim = Math.max(params.idleSwimFrac * maxSwim, baseSwim);
+      }
       const burst = useKick ? startleBurstSpeed(startle, baseR, params) : 0;
       const swimPx = baseSwim !== undefined ? baseSwim + burst : burst > 0 ? burst : undefined;
       wander = wanderStep(wander, dt, width, height, baseR, params, swimPx);
@@ -3558,7 +3577,7 @@ export function createCellRenderer(
           ctx.lineCap = "round";
           for (const hair of cilia) {
             ctx.lineWidth = hair.width; // per-hair thickness (diverse)
-            ctx.strokeStyle = hsla(baseHue, 0.6, 0.6, 0.35 + 0.35 * energy);
+            ctx.strokeStyle = hsla(baseHue, params.ciliaSat ?? 0.60, 0.6, 0.35 + 0.35 * energy);
             ctx.beginPath();
             ctx.moveTo(hair.points[0][0], hair.points[0][1]);
             // M12: smooth the spine with an OPEN (non-wrapping) Catmull-Rom so
@@ -3576,7 +3595,7 @@ export function createCellRenderer(
         // Resolved organelle hues (overridable via params, defaults = legacy)
         const cvH = params.cvHue ?? (baseHue + 20);
         const fvH = params.foodVacuoleHue ?? (baseHue - 30);
-        ctx.fillStyle = hsla(baseHue, 0.7, 0.55, params.fillAlpha);
+        ctx.fillStyle = hsla(baseHue, params.cytoplasmSat ?? 0.70, 0.55, params.fillAlpha);
         ctx.beginPath();
         ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
         for (let i = 1; i < splinePoints.length; i++) {
@@ -3589,8 +3608,8 @@ export function createCellRenderer(
           cx, cy, 0,
           cx, cy, Math.max(1, baseR * 0.9),
         );
-        grad.addColorStop(0, hsla(baseHue + 10, 0.5, 0.7, params.fillAlpha * 0.5));
-        grad.addColorStop(1, hsla(baseHue, 0.7, 0.45, params.fillAlpha));
+        grad.addColorStop(0, hsla(baseHue + 10, (params.cytoplasmSat ?? 0.70) * 0.71, 0.7, params.fillAlpha * 0.5));
+        grad.addColorStop(1, hsla(baseHue, params.cytoplasmSat ?? 0.70, 0.45, params.fillAlpha));
         ctx.fillStyle = grad;
         ctx.fill();
 
@@ -3779,7 +3798,7 @@ export function createCellRenderer(
         // enableCyclosis is on, so all goldens stay byte-identical.
         if (params.enableCyclosis && (params.cyclosisGranuleCount ?? 0) > 0) {
           const granuleSizePx = params.granuleSizePx ?? 1.3;
-          ctx.fillStyle = hsla(baseHue + 25, 0.6, 0.6, params.nucleusAlpha * 0.6);
+          ctx.fillStyle = hsla(baseHue + 25, params.granuleSat ?? 0.60, 0.6, params.nucleusAlpha * 0.6);
           if (params.enableInteriorField) {
             // Commit 32c (gate ON): body-coord path. Granules CIRCULATE on a
             // divergence-free streamfunction loop (cyclosisLoopPoint) in (u, s)
@@ -3899,7 +3918,7 @@ export function createCellRenderer(
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
         const mSat = params.membraneSat ?? 0.85;
-        ctx.strokeStyle = hsla(baseHue, mSat * 0.94, 0.6, 0.9);
+        ctx.strokeStyle = hsla(baseHue, mSat * 0.94, params.membraneLightness ?? 0.60, 0.9);
         ctx.lineWidth = 1.8;
         ctx.stroke();
 
@@ -3921,7 +3940,7 @@ export function createCellRenderer(
           const midAngle = Math.atan2(midPt[1] - cy, midPt[0] - cx);
           const hue = iridescentHue(midAngle, t, audioLevel, baseHue, params);
 
-          ctx.strokeStyle = hsla(hue, mSat, 0.6, 0.85);
+          ctx.strokeStyle = hsla(hue, mSat, params.membraneLightness ?? 0.60, 0.85);
           ctx.lineWidth = 2.0;
           ctx.beginPath();
           ctx.moveTo(splinePoints[segStart][0], splinePoints[segStart][1]);
