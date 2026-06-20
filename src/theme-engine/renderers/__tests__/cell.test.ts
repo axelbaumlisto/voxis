@@ -83,9 +83,10 @@ import {
   bodyProfileDeform,
   interpProfileRadius,
   axialSpin,
+  interiorPoint,
 } from "../cell";
 import { deformAt, wrapPi } from "../shared";
-import type { CellParams, CellPersistState, CiliaMotion } from "../cell";
+import type { CellParams, CellPersistState, CiliaMotion, InteriorCtx } from "../cell";
 
 const TAU = Math.PI * 2;
 
@@ -6213,5 +6214,215 @@ describe("Commit 24 — axial spin", () => {
   it("(g) DETERMINISM: identical args => identical value (no Date/random)", () => {
     const p = { ...CELL_DEFAULTS, enableAxialSpin: true };
     expect(axialSpin(3.3, 0.8, p)).toBe(axialSpin(3.3, 0.8, p));
+  });
+});
+
+describe("Commit 32a — interiorPoint (interior coupled to wall)", () => {
+  const TAU = Math.PI * 2;
+  const cx = 100;
+  const cy = 100;
+  const baseR = 40;
+  const bodyHeading = 0.6;
+
+  // Min distance from a point to a closed polyline (segment distances, wrapped).
+  function minDistToPolyline(p: [number, number], poly: Array<[number, number]>): number {
+    let best = Infinity;
+    const n = poly.length;
+    for (let i = 0; i < n; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % n];
+      const dx = b[0] - a[0];
+      const dy = b[1] - a[1];
+      const len2 = dx * dx + dy * dy;
+      let t = len2 > 0 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const qx = a[0] + t * dx;
+      const qy = a[1] + t * dy;
+      const d = Math.hypot(p[0] - qx, p[1] - qy);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  // Build the membrane polyline the renderer would draw for a given deform+affine.
+  function membranePolyline(
+    deform: number[],
+    squeezeK: number,
+    squeezePhi: number,
+    params: CellParams,
+  ): Array<[number, number]> {
+    const n = deform.length;
+    const poly: Array<[number, number]> = [];
+    for (let i = 0; i < n; i++) {
+      const angle = (i / n) * TAU;
+      const r = baseR * (1 + deform[i]);
+      const pt = affineSqueezePoints(
+        [[cx + r * Math.cos(angle), cy + r * Math.sin(angle)]],
+        squeezeK,
+        squeezePhi,
+        cx,
+        cy,
+        params,
+      )[0];
+      poly.push(pt);
+    }
+    return poly;
+  }
+
+  function makeCtx(
+    deform: number[],
+    squeezeK: number,
+    squeezePhi: number,
+    params: CellParams,
+  ): InteriorCtx {
+    return { cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params };
+  }
+
+  it("(a) WALL-LANDING (profile): interiorPoint(u, +-1) lands on the membrane polyline", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.27,
+      bodyAspect: 3,
+    };
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, params);
+    const squeezeK = 1;
+    const squeezePhi = bodyHeading;
+    const ctx = makeCtx(deform, squeezeK, squeezePhi, params);
+    const poly = membranePolyline(deform, squeezeK, squeezePhi, params);
+    let maxD = 0;
+    for (const u of [-0.8, -0.4, 0, 0.4, 0.8]) {
+      for (const s of [1, -1]) {
+        const pt = interiorPoint(u, s, ctx);
+        const d = minDistToPolyline(pt, poly);
+        maxD = Math.max(maxD, d);
+        expect(d).toBeLessThan(0.5);
+      }
+    }
+    expect(maxD).toBeLessThan(0.5);
+  });
+
+  it("(b) WALL-LANDING (synthetic FBM deform + affine): interiorPoint(u, +-1) lands on the squeezed FBM membrane", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAffine: true,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.27,
+      bodyAspect: 3,
+    };
+    const deform: number[] = [];
+    for (let i = 0; i < 96; i++) {
+      const a = (i / 96) * TAU;
+      deform.push(0.15 * Math.sin(3 * a) + 0.05 * Math.cos(5 * a));
+    }
+    const squeezeK = 1.3;
+    const squeezePhi = 0.4;
+    const ctx = makeCtx(deform, squeezeK, squeezePhi, params);
+    const poly = membranePolyline(deform, squeezeK, squeezePhi, params);
+    let maxD = 0;
+    for (const u of [-0.8, -0.4, 0, 0.4, 0.8]) {
+      for (const s of [1, -1]) {
+        const pt = interiorPoint(u, s, ctx);
+        const d = minDistToPolyline(pt, poly);
+        maxD = Math.max(maxD, d);
+        expect(d).toBeLessThan(0.5);
+      }
+    }
+    expect(maxD).toBeLessThan(0.5);
+  });
+
+  it("(c) CENTRE: interiorPoint(0, 0) ~= (cx, cy)", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.27,
+      bodyAspect: 3,
+    };
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, params);
+    const ctx = makeCtx(deform, 1, bodyHeading, params);
+    const [px, py] = interiorPoint(0, 0, ctx);
+    expect(Math.abs(px - cx)).toBeLessThan(1e-6);
+    expect(Math.abs(py - cy)).toBeLessThan(1e-6);
+  });
+
+  it("(d) MONOTONE DEPTH: distance from axis point grows with |s| (0 -> 1)", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.27,
+      bodyAspect: 3,
+    };
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, params);
+    const ctx = makeCtx(deform, 1, bodyHeading, params);
+    const u = 0.3;
+    const axis = interiorPoint(u, 0, ctx);
+    let prev = -1;
+    for (const s of [0, 0.25, 0.5, 0.75, 1]) {
+      const pt = interiorPoint(u, s, ctx);
+      const d = Math.hypot(pt[0] - axis[0], pt[1] - axis[1]);
+      expect(d).toBeGreaterThanOrEqual(prev - 1e-9);
+      prev = d;
+    }
+    expect(prev).toBeGreaterThan(0);
+  });
+
+  it("(e) AFFINE COMPOSITION (k != 1): interiorPoint(u, +1) lands on the squeezed membrane", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAffine: true,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.27,
+      bodyAspect: 3,
+    };
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, params);
+    const squeezeK = 1.5;
+    const squeezePhi = 0.3;
+    const ctx = makeCtx(deform, squeezeK, squeezePhi, params);
+    const poly = membranePolyline(deform, squeezeK, squeezePhi, params);
+    for (const u of [-0.8, -0.4, 0, 0.4, 0.8]) {
+      const pt = interiorPoint(u, 1, ctx);
+      expect(minDistToPolyline(pt, poly)).toBeLessThan(0.5);
+    }
+  });
+
+  it("(f) DETERMINISM: identical args => identical output", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.27,
+      bodyAspect: 3,
+    };
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, params);
+    const ctx = makeCtx(deform, 1, bodyHeading, params);
+    const a = interiorPoint(0.3, 0.4, ctx);
+    const b = interiorPoint(0.3, 0.4, ctx);
+    expect(a[0]).toBe(b[0]);
+    expect(a[1]).toBe(b[1]);
+  });
+
+  it("(g) FINITE/NO-NAN: all (u, s) on the pole + axis grid are finite", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAffine: true,
+      enableBodyProfile: true,
+      bodyProfileType: "egg",
+      bodyProfileTaper: 0.27,
+      bodyAspect: 3,
+    };
+    const deform = bodyProfileDeform(96, bodyHeading, baseR, params);
+    const ctx = makeCtx(deform, 1.5, 0.3, params);
+    for (const u of [-1, -0.99, 0, 0.99, 1]) {
+      for (const s of [-1, 0, 1]) {
+        const [px, py] = interiorPoint(u, s, ctx);
+        expect(Number.isFinite(px)).toBe(true);
+        expect(Number.isFinite(py)).toBe(true);
+      }
+    }
   });
 });
