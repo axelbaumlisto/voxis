@@ -240,6 +240,19 @@ export interface CellParams {
   /** M6: energy EMA time-constant (seconds). Small (~0.08) so it smooths mode
    * flips without flattening the idle breathing sine. Default 0.08. */
   energySmoothTau?: number;
+  /** F7 (OPT, default off): on a wall hit, back up + reorient by ~pi instead of a
+   * specular reflection (an avoidance reaction). */
+  enableWallReorient?: boolean;
+  /** F7: jitter (radians) added to the pi turn so successive reorients differ. */
+  wallReorientJitter?: number;
+  /** H2 (OPT, default off): add rotational Brownian motion to the heading. */
+  enableRotationalBrownian?: boolean;
+  /** H2: rotational diffusion coefficient D_r (rad^2/s). Heading RMS/step = sqrt(2*Dr*dt). */
+  rotationalDiffusion?: number;
+  /** H3 (OPT, default off): small declared downward sedimentation bias at rest. */
+  enableSedimentation?: boolean;
+  /** H3: sedimentation speed as a fraction (<0.15) of the swim speed. Default 0. */
+  sedimentationFrac?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -1779,6 +1792,49 @@ export interface WanderState {
   clock?: number;
 }
 
+/**
+ * F7 (OPT) — wall-avoidance reorientation. Instead of a specular reflection
+ * (which keeps the cell skimming the wall), a startled microswimmer backs up and
+ * turns around: reorient to roughly the REVERSE of the incoming heading plus a
+ * deterministic noise jitter, so it heads back into the tank and successive
+ * contacts differ. Pure. Returns the new heading (radians).
+ */
+export function wallReorientHeading(incoming: number, t: number, params: CellParams): number {
+  const jitter = (params.wallReorientJitter ?? 0.6) * noise2D(517.3, t * 1.9);
+  return incoming + Math.PI + jitter;
+}
+
+/**
+ * H2 (OPT) — rotational Brownian motion. A microswimmer's heading diffuses with
+ * RMS angular step `sqrt(2*D_r*dt)` per frame. We synthesise a deterministic,
+ * approximately-gaussian, zero-mean unit sample from value-noise (sum of a few
+ * decorrelated noise taps → central-limit) and scale it. Returns the heading
+ * delta (radians) for this frame; 0 when D_r=0. Pure.
+ */
+export function rotationalBrownianStep(t: number, dt: number, params: CellParams): number {
+  const Dr = params.rotationalDiffusion ?? 0;
+  if (Dr <= 0) return 0;
+  // Approx N(0,1): a sum of 3 decorrelated value-noise taps. NOTE: noise2D is
+  // SMOOTHED value-noise, not uniform, so a tap's variance is ~0.21 (not 1/3);
+  // the empirical std of this 3-tap SUM is ~0.795 (measured over 4e5 samples).
+  // Divide by that std (NOT sqrt(3)) so `g` truly has ~unit variance and the
+  // realized RMS angular step matches the labelled sqrt(2*Dr*dt) — keeping the
+  // rotationalDiffusion knob physically honest. Zero-mean, deterministic in t.
+  const TAP_SUM_STD = 0.795;
+  const g = (noise2D(211.7, t * 7.3) + noise2D(389.1, t * 11.9 + 5.5) + noise2D(53.9, t * 17.1 + 1.3)) / TAP_SUM_STD;
+  return g * Math.sqrt(2 * Dr * Math.max(0, dt));
+}
+
+/**
+ * H3 (OPT) — sedimentation. A dense cell settles slowly under gravity. Returns a
+ * small DOWNWARD (+y in canvas) velocity bias as a fraction (<0.15) of the swim
+ * speed; 0 by default. Pure.
+ */
+export function sedimentationBias(speed: number, params: CellParams): { dvx: number; dvy: number } {
+  const frac = Math.max(0, Math.min(0.15, params.sedimentationFrac ?? 0));
+  return { dvx: 0, dvy: frac * speed };
+}
+
 export function wanderStep(
   s: WanderState,
   dt: number,
@@ -1823,6 +1879,10 @@ export function wanderStep(
   const clock = (s.clock ?? 0) + dt;
   const jitter = noise2D(s.heading * 0.5 + 13.0, clock * wanderFreq);
   let heading = s.heading + jitter * turnRate * dt;
+  // H2 (opt, default off): add rotational Brownian diffusion to the heading.
+  if (params.enableRotationalBrownian) {
+    heading += rotationalBrownianStep(clock, dt, params);
+  }
 
   // Integrate position.
   let vx = Math.cos(heading) * speed;
@@ -1830,24 +1890,41 @@ export function wanderStep(
   let x = s.x + vx * dt;
   let y = s.y + vy * dt;
 
-  // --- Wall bounce: reflect heading off the wall normal, clamp inside. ---
-  if (x < minX) {
-    x = minX;
-    heading = Math.PI - heading; // reflect about vertical wall
-  } else if (x > maxX) {
-    x = maxX;
-    heading = Math.PI - heading;
-  }
-  if (y < minY) {
-    y = minY;
-    heading = -heading; // reflect about horizontal wall
-  } else if (y > maxY) {
-    y = maxY;
-    heading = -heading;
+  // --- Wall handling. Default: specular reflection off the wall normal. F7
+  // (opt, default off): back-up + reorient (~pi turn) instead, an avoidance
+  // reaction so the cell doesn't skim the wall. ---
+  const hitWall = x < minX || x > maxX || y < minY || y > maxY;
+  if (params.enableWallReorient && hitWall) {
+    x = Math.max(minX, Math.min(maxX, x));
+    y = Math.max(minY, Math.min(maxY, y));
+    heading = wallReorientHeading(heading, clock, params);
+  } else {
+    if (x < minX) {
+      x = minX;
+      heading = Math.PI - heading; // reflect about vertical wall
+    } else if (x > maxX) {
+      x = maxX;
+      heading = Math.PI - heading;
+    }
+    if (y < minY) {
+      y = minY;
+      heading = -heading; // reflect about horizontal wall
+    } else if (y > maxY) {
+      y = maxY;
+      heading = -heading;
+    }
   }
   // Recompute velocity after any reflection so callers see the true heading.
   vx = Math.cos(heading) * speed;
   vy = Math.sin(heading) * speed;
+  // H3 (opt, default off): small downward sedimentation bias on the velocity.
+  if (params.enableSedimentation) {
+    const sed = sedimentationBias(speed, params);
+    vx += sed.dvx;
+    vy += sed.dvy;
+    x = Math.max(minX, Math.min(maxX, x + sed.dvx * dt));
+    y = Math.max(minY, Math.min(maxY, y + sed.dvy * dt));
+  }
 
   // Normalize heading to [-PI, PI] to keep noise sampling well-conditioned.
   heading = Math.atan2(Math.sin(heading), Math.cos(heading));

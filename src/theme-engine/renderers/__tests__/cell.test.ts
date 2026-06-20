@@ -42,6 +42,9 @@ import {
   cellReach,
   cellDrift,
   wanderStep,
+  wallReorientHeading,
+  rotationalBrownianStep,
+  sedimentationBias,
   driftActivation,
   sanitizeUnit,
   sanitizeFinite,
@@ -4089,5 +4092,81 @@ describe("F10 — near-immobile nucleus option", () => {
       maxOff = Math.max(maxOff, Math.hypot(n.cx, n.cy));
     }
     expect(maxOff).toBeGreaterThan(0.02 * baseR);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 16 — F7 wall-reorient + H2 rotational Brownian + H3 sedimentation
+// (all gates OFF by default; wanderStep byte-identical unless explicitly enabled)
+// ---------------------------------------------------------------------------
+describe("Commit 16 — optional flourishes default OFF (byte-identical wander)", () => {
+  it("the three gates default to off/undefined", () => {
+    expect(CELL_DEFAULTS.enableWallReorient ?? false).toBe(false);
+    expect(CELL_DEFAULTS.enableRotationalBrownian ?? false).toBe(false);
+    expect(CELL_DEFAULTS.enableSedimentation ?? false).toBe(false);
+  });
+  it("wanderStep with defaults is unaffected by the new helpers (identity path)", () => {
+    const P = { ...CELL_DEFAULTS };
+    let a: WanderState = { x: 80, y: 80, heading: 0.5, vx: 0, vy: 0, clock: 0 };
+    let b: WanderState = { x: 80, y: 80, heading: 0.5, vx: 0, vy: 0, clock: 0 };
+    for (let i = 0; i < 200; i++) {
+      a = wanderStep(a, 1 / 60, 160, 160, 17, P);
+      b = wanderStep(b, 1 / 60, 160, 160, 17, { ...P }); // explicit-undefined gates
+    }
+    expect(b).toEqual(a);
+  });
+});
+
+describe("wallReorientHeading (F7)", () => {
+  it("turns the cell back into the tank (>90 deg from the incoming heading)", () => {
+    // moving right into the +x wall (heading ~0): reorient should face back (~pi).
+    for (const t of [0, 1.3, 5.0, 9.9]) {
+      const h = wallReorientHeading(0.05, t, CELL_DEFAULTS);
+      const delta = Math.abs(Math.atan2(Math.sin(h - 0.05), Math.cos(h - 0.05)));
+      expect(delta).toBeGreaterThan(Math.PI / 2);
+    }
+  });
+  it("is deterministic and bounded around the back direction", () => {
+    expect(wallReorientHeading(0.05, 3.3, CELL_DEFAULTS)).toBe(wallReorientHeading(0.05, 3.3, CELL_DEFAULTS));
+  });
+});
+
+describe("rotationalBrownianStep (H2)", () => {
+  const P = { ...CELL_DEFAULTS, rotationalDiffusion: 0.5 };
+  it("is zero-mean (deterministic gaussian sums to ~0 over many samples)", () => {
+    let sum = 0;
+    const N = 2000;
+    for (let i = 0; i < N; i++) sum += rotationalBrownianStep(i * 0.5 + 0.1, 1 / 60, P);
+    expect(Math.abs(sum / N)).toBeLessThan(0.01);
+  });
+  it("RMS per step matches sqrt(2*Dr*dt) within ~25% (honest unit-variance calibration)", () => {
+    const dt = 1 / 60;
+    let sq = 0;
+    const N = 20000;
+    for (let i = 0; i < N; i++) { const d = rotationalBrownianStep(i * 0.5 + 0.1, dt, P); sq += d * d; }
+    const rms = Math.sqrt(sq / N);
+    const expected = Math.sqrt(2 * 0.5 * dt);
+    // After dividing by the measured 3-tap std (0.795), g has ~unit variance, so
+    // the realized RMS should be CLOSE to the labelled coefficient, not ~0.46x.
+    expect(rms).toBeGreaterThan(expected * 0.75);
+    expect(rms).toBeLessThan(expected * 1.25);
+  });
+  it("is zero when rotationalDiffusion is 0", () => {
+    expect(rotationalBrownianStep(1.0, 1 / 60, { ...CELL_DEFAULTS, rotationalDiffusion: 0 })).toBe(0);
+  });
+});
+
+describe("sedimentationBias (H3)", () => {
+  it("adds a small downward (+y) velocity bias bounded to <15% of swim speed", () => {
+    const speed = 100;
+    const P = { ...CELL_DEFAULTS, sedimentationFrac: 0.1 };
+    const { dvx, dvy } = sedimentationBias(speed, P);
+    expect(dvx).toBe(0);
+    expect(dvy).toBeGreaterThan(0); // downward (+y is down in canvas)
+    expect(dvy).toBeLessThanOrEqual(0.15 * speed + 1e-9);
+  });
+  it("is zero by default (sedimentationFrac defaults 0)", () => {
+    const { dvy } = sedimentationBias(100, CELL_DEFAULTS);
+    expect(dvy).toBe(0);
   });
 });
