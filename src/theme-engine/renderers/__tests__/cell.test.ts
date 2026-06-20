@@ -19,6 +19,8 @@ import {
   cellRadius,
   pseudopodOffset,
   startleOffset,
+  startleHeadingKick,
+  startleBurstSpeed,
   iridescentHue,
   lowpassRadii,
   catmullRom,
@@ -2479,6 +2481,46 @@ describe("M15: NaN-poison guard through update()", () => {
 
     r.destroy();
   });
+
+  it("M8: a startle onset does NOT shove the idle/centred cell (kick perturbs heading, not centre)", () => {
+    const rec = installRecordingContext();
+    restoreCtx = rec.restore;
+    const rafCalls: Array<() => void> = [];
+    let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const container = document.createElement("div");
+    // IDLE mode + kick on (default): drift01 stays ~0 so the centre is width/2.
+    const r = createCellRenderer(container, { width: 160, height: 160 });
+    const step = (k: number) => { for (let i = 0; i < k; i++) { if (rafCalls.length) rafCalls.shift()!(); } };
+
+    // The nucleus is drawn via arc(nx, ny, nr): the LAST arc per frame is the
+    // nucleolus at the cell centre. Capture its position across a sharp onset.
+    const lastArcXY = () => {
+      // coords from arc are pushed as (x,y,r) triples; the nucleus arcs are the
+      // final ones in the frame. Grab the last triple's x,y.
+      const c = rec.coords;
+      return [c[c.length - 3], c[c.length - 2]] as [number, number];
+    };
+
+    r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+    step(4);
+    rec.coords.length = 0; step(1);
+    const before = lastArcXY();
+
+    // Sharp onset (would trigger a startle edge), but still IDLE mode.
+    r.update({ mode: "idle", audioLevel: 1.0, spectrumBins: new Array(32).fill(0.9) });
+    rec.coords.length = 0; step(1);
+    const after = lastArcXY();
+
+    // With the kick model, an idle cell's centre must NOT jump from startle.
+    // (Legacy positional shove would move it by up to startleMaxPx=5 px.)
+    expect(Math.abs(after[0] - before[0])).toBeLessThan(2);
+    expect(Math.abs(after[1] - before[1])).toBeLessThan(2);
+
+    r.destroy();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -3552,5 +3594,64 @@ describe("M9 idle de-flicker (smoothstep on activity)", () => {
     const eps = 0.005;
     const dAtZero = Math.abs(idleFactorOf(eps) - idleFactorOf(0));
     expect(dAtZero).toBeLessThan(0.01); // gentle, not the old ~3*eps*... jump
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 10 — H1/M8 startle as a low-Re escape dart (heading kick + speed burst)
+// ---------------------------------------------------------------------------
+describe("startleHeadingKick (H1/M8)", () => {
+  const P = { ...CELL_DEFAULTS, startleKickThreshold: 0.12, startleKickMax: 1.2 };
+
+  it("kicks the heading on a rising startle edge (perturbs direction, not position)", () => {
+    // big jump 0 -> 0.8 exceeds threshold => nonzero kick
+    const k = startleHeadingKick(0.8, 0.0, 1.0, P);
+    expect(k).not.toBe(0);
+    expect(Math.abs(k)).toBeLessThanOrEqual(1.2);
+  });
+
+  it("does NOT kick when startle is steady or decaying (no edge)", () => {
+    expect(startleHeadingKick(0.5, 0.5, 1.0, P)).toBe(0); // steady
+    expect(startleHeadingKick(0.3, 0.6, 1.0, P)).toBe(0); // decaying
+    expect(startleHeadingKick(0.05, 0.0, 1.0, P)).toBe(0); // rise below threshold
+  });
+
+  it("is bounded by startleKickMax and deterministic", () => {
+    for (let t = 0; t < 20; t += 0.3) {
+      const k = startleHeadingKick(1.0, 0.0, t, P);
+      expect(Math.abs(k)).toBeLessThanOrEqual(1.2 + 1e-12);
+    }
+    expect(startleHeadingKick(1, 0, 3.3, P)).toBe(startleHeadingKick(1, 0, 3.3, P));
+  });
+});
+
+describe("startleBurstSpeed (H1)", () => {
+  const P = { ...CELL_DEFAULTS, startleBurstFrac: 0.5 };
+  const baseR = 17;
+
+  it("is zero with no startle and scales linearly with startle (memoryless)", () => {
+    expect(startleBurstSpeed(0, baseR, P)).toBe(0);
+    expect(startleBurstSpeed(1, baseR, P)).toBeCloseTo(0.5 * baseR, 9);
+    expect(startleBurstSpeed(0.5, baseR, P)).toBeCloseTo(0.25 * baseR, 9);
+  });
+
+  it("clamps startle to [0,1]", () => {
+    expect(startleBurstSpeed(5, baseR, P)).toBe(startleBurstSpeed(1, baseR, P));
+    expect(startleBurstSpeed(-5, baseR, P)).toBe(0);
+  });
+
+  it("fades as startle decays (no coasting): smaller startle => smaller burst", () => {
+    let prev = Infinity;
+    for (const s of [1.0, 0.7, 0.4, 0.1, 0.0]) {
+      const b = startleBurstSpeed(s, baseR, P);
+      expect(b).toBeLessThan(prev);
+      prev = b;
+    }
+  });
+});
+
+describe("Commit 10 — startle kick gate", () => {
+  it("enableStartleKick defaults ON (M8: no idle centre shove)", () => {
+    expect(CELL_DEFAULTS.enableStartleKick).toBe(true);
   });
 });

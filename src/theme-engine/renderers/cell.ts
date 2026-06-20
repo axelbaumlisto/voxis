@@ -157,10 +157,20 @@ export interface CellParams {
   startleSensitivity: number;
   /** Startle decay per-frame [0,1]. */
   startleDecay: number;
-  /** Startle max displacement in px. */
+  /** Startle max displacement in px. (Legacy positional shove; only used when
+   * `enableStartleKick` is false.) */
   startleMaxPx: number;
   /** Baseline tracking rate for startle edge detection. */
   startleBaselineRate: number;
+  /** H1/M8: model startle as a low-Re escape dart (heading kick + speed burst)
+   * instead of the legacy positional centre shove. Default true. */
+  enableStartleKick?: boolean;
+  /** H1: minimum rising edge in startle magnitude to trigger a heading kick. */
+  startleKickThreshold?: number;
+  /** H1: max heading kick magnitude (radians) on a startle onset. */
+  startleKickMax?: number;
+  /** H1: transient swim-speed burst while startled, as a fraction of baseR/sec. */
+  startleBurstFrac?: number;
   /** Idle resting morph amplitude (deformation fraction of baseR). */
   idleMorphAmplitude: number;
   /** Idle morph traveling speed (how fast bumps move around the membrane). */
@@ -265,6 +275,10 @@ export const CELL_DEFAULTS: CellParams = {
   startleDecay: 0.86,
   startleMaxPx: 5,
   startleBaselineRate: 0.08,
+  enableStartleKick: true,
+  startleKickThreshold: 0.12,
+  startleKickMax: 1.2,
+  startleBurstFrac: 0.5,
   idleMorphAmplitude: 0.18,
   idleMorphSpeed: 0.25,
   idleMorphPeriod: 7,
@@ -806,6 +820,45 @@ export function startleOffset(
   const edge = Math.max(0, (level - baseline) * sensitivity);
   const decayed = prevMag * Math.max(0, Math.min(1, decay));
   return Math.max(0, Math.min(1, Math.max(decayed, edge)));
+}
+
+/**
+ * H1/M8 — startle as a low-Reynolds ESCAPE DART, not a mass-spring shove.
+ * A real ciliate startled by a stimulus performs an avoidance reaction: it
+ * changes direction and darts away. We model that as (1) a HEADING KICK on the
+ * fresh onset of startle (a rising edge), and (2) a transient SPEED BURST while
+ * startled (see `startleBurstSpeed`). This replaces the old positional (dx,dy)
+ * centre offset, which implied inertia (dart-and-spring-back) and wrongly shoved
+ * the cell even when idle/centred (M8).
+ *
+ * Returns the heading delta (radians) to apply THIS frame: a noise-chosen escape
+ * angle on a rising edge (`startle - prevStartle > threshold`), else 0. Pure.
+ */
+export function startleHeadingKick(
+  startle: number,
+  prevStartle: number,
+  t: number,
+  params: CellParams,
+): number {
+  const rising = startle - prevStartle;
+  if (rising <= (params.startleKickThreshold ?? 0.12)) return 0;
+  // Escape angle in [-kickMax, +kickMax], chosen by slow noise so successive
+  // darts pick different but deterministic directions.
+  return noise2D(811.3, t * 1.7) * (params.startleKickMax ?? 1.2);
+}
+
+/**
+ * H1 — transient swim-speed burst while startled (px/sec). Memoryless: it scales
+ * with the current startle magnitude, so as startle decays the burst fades with
+ * it (no coasting). Added on top of the activity-driven swim speed. Pure.
+ */
+export function startleBurstSpeed(
+  startle: number,
+  baseR: number,
+  params: CellParams,
+): number {
+  const s = startle < 0 ? 0 : startle > 1 ? 1 : startle;
+  return s * (params.startleBurstFrac ?? 0.5) * baseR;
 }
 
 /**
@@ -1702,11 +1755,19 @@ export function createCellRenderer(
       // back to the legacy driftSpeed path (byte-identical to pre-8a).
       const activity = cellActivity(energy, growth, params);
       baseline = sanitizeFinite(baseline + (audioLevel - sanitizeFinite(baseline, 0)) * params.startleBaselineRate, 0);
+      const prevStartle = startle;
       startle = sanitizeUnit(startleOffset(sanitizeUnit(startle), audioLevel, baseline, params.startleSensitivity, params.startleDecay));
-      // Startle direction: a noise-chosen angle that drifts slowly.
-      const startleAngle = TAU * noise2D(900.5, t * 0.7);
-      const sdx = Math.cos(startleAngle) * startle * params.startleMaxPx;
-      const sdy = Math.sin(startleAngle) * startle * params.startleMaxPx;
+      // H1/M8: startle is a low-Re ESCAPE DART (heading kick + speed burst on the
+      // wander), not a positional centre shove. The legacy (sdx,sdy) offset is
+      // only used when the kick is disabled (back-compat).
+      const useKick = params.enableStartleKick !== false;
+      let sdx = 0;
+      let sdy = 0;
+      if (!useKick) {
+        const startleAngle = TAU * noise2D(900.5, t * 0.7);
+        sdx = Math.cos(startleAngle) * startle * params.startleMaxPx;
+        sdy = Math.sin(startleAngle) * startle * params.startleMaxPx;
+      }
 
       // Idle morphing only when at rest: full at idle/silence, fades as the cell
       // becomes active. M9: drive the fade from the SMOOTHED activity scalar
@@ -1749,9 +1810,18 @@ export function createCellRenderer(
       if (!wander) {
         wander = { x: width / 2, y: height / 2, heading: noise2D(7.1, 3.3) * TAU, vx: 0, vy: 0, clock: 0 };
       }
+      // H1: apply the startle heading kick to the wander BEFORE integrating, so
+      // the cell darts off in a new direction on a sharp onset.
+      if (useKick) {
+        const kick = startleHeadingKick(startle, prevStartle, t, params);
+        if (kick !== 0) wander = { ...wander, heading: wander.heading + kick };
+      }
       // G2: activity-driven swim speed (Stokes-linear, memoryless). When the
       // activity gate is off, pass undefined so wanderStep uses legacy driftSpeed.
-      const swimPx = params.enableActivity ? swimSpeed(activity, width, height, params) : undefined;
+      // H1: add the transient startle speed burst on top (fades with startle).
+      const baseSwim = params.enableActivity ? swimSpeed(activity, width, height, params) : undefined;
+      const burst = useKick ? startleBurstSpeed(startle, baseR, params) : 0;
+      const swimPx = baseSwim !== undefined ? baseSwim + burst : burst > 0 ? burst : undefined;
       wander = wanderStep(wander, dt, width, height, baseR, params, swimPx);
       // Blend between rest center (width/2, height/2) and full-wander position
       const driftedX = width / 2 + (wander.x - width / 2) * drift01;
