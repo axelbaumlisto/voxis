@@ -517,8 +517,10 @@ var CELL_DEFAULTS = {
   vacuolePairMaxFrac: 0.16,
   vacuolePosteriorPhase: 0.5,
   enableCyclosis: false,
+  enableInteriorField: false,
   cyclosisGranuleCount: 14,
   cyclosisPeriod: 45,
+  cyclosisSense: 1,
   granuleMaxRadiusFrac: 0.75,
   granuleSizePx: 1.3,
   enableOrganelles: false,
@@ -528,7 +530,13 @@ var CELL_DEFAULTS = {
   foodVacuoleSizePx: 3,
   foodVacuoleDigestPeriod: 30,
   micronucleusSizeFrac: 0.32,
-  micronucleusOffsetFrac: 1.15
+  micronucleusOffsetFrac: 1.15,
+  macronucleusU: -0.05,
+  macronucleusS: 0.1,
+  cvAnteriorU: 0.55,
+  cvAnteriorS: 0.62,
+  cvPosteriorU: -0.55,
+  cvPosteriorS: 0.62
 };
 function sanitizeUnit(x) {
   if (!Number.isFinite(x))
@@ -1067,6 +1075,24 @@ function bandLimitDeform(deform, params) {
   }
   return out;
 }
+function bodyHalfWidth(u, params) {
+  const c = params.bodyProfileTaper ?? 0.3;
+  const base = Math.sqrt(Math.max(0, 1 - u * u));
+  const type = params.bodyProfileType ?? "taperedEllipse";
+  switch (type) {
+    case "egg":
+      return base / Math.sqrt(1 - 2 * c * u + c * c);
+    case "piriform": {
+      const w = base * (1 + c * u) * Math.sqrt(Math.max(0, (1 + u) / 2));
+      return w < 0 ? 0 : w;
+    }
+    case "taperedEllipse":
+    default: {
+      const w = base * (1 + c * u);
+      return w < 0 ? 0 : w;
+    }
+  }
+}
 function bodyProfilePoint(t, baseR, params) {
   const c = params.bodyProfileTaper ?? 0.3;
   const aspect = params.bodyAspect ?? 3;
@@ -1158,6 +1184,95 @@ function bodyProfileDeform(sampleCount, bodyHeading, baseR, params) {
     out.push(r / baseR - 1);
   }
   return out;
+}
+function buildProfilePts(baseR, params, samples = 96) {
+  const N = Math.max(3, Math.floor(samples));
+  const pts = [];
+  for (let k = 0;k < N; k++) {
+    const t = k / N * TAU;
+    const [px, py] = bodyProfilePoint(t, baseR, params);
+    pts.push({ ang: Math.atan2(py, px), rad: Math.hypot(px, py) });
+  }
+  return pts;
+}
+function interiorPoint(u, s, ctx) {
+  const { cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params } = ctx;
+  const aspect = params.bodyAspect ?? 3;
+  const L = baseR * Math.sqrt(aspect);
+  const W = baseR / Math.sqrt(aspect);
+  const what = bodyHalfWidth(u, params);
+  const xb = L * u;
+  const bend = params.bodyVentralBend ?? 0;
+  const yb = s * W * what + bend * W * Math.max(0, u);
+  const rho = Math.hypot(xb, yb);
+  const thetaBody = Math.atan2(yb, xb);
+  const pts = ctx.profilePts ?? buildProfilePts(baseR, params);
+  const profileR = interpProfileRadius(thetaBody, pts);
+  const f = profileR > 0.000000001 ? rho / profileR : 0;
+  const thetaCanvas = thetaBody + bodyHeading;
+  const wallR = baseR * (1 + deformAt(thetaCanvas, deform));
+  const px0 = cx + Math.cos(thetaCanvas) * f * wallR;
+  const py0 = cy + Math.sin(thetaCanvas) * f * wallR;
+  return affineSqueezePoints([[px0, py0]], squeezeK, squeezePhi, cx, cy, params)[0];
+}
+function profileCDFInv(xi, params) {
+  const M = 128;
+  const us = [];
+  const cdf = [];
+  let acc = 0;
+  let prevW = bodyHalfWidth(-1, params);
+  us.push(-1);
+  cdf.push(0);
+  for (let k = 1;k <= M; k++) {
+    const u2 = -1 + 2 * k / M;
+    const w = bodyHalfWidth(u2, params);
+    acc += (prevW + w) * 0.5 * (2 / M);
+    prevW = w;
+    us.push(u2);
+    cdf.push(acc);
+  }
+  const Z = acc || 1;
+  const target = Math.max(0, Math.min(1, xi)) * Z;
+  let lo = 0;
+  let hi = cdf.length - 1;
+  while (lo < hi) {
+    const mid = lo + hi >> 1;
+    if (cdf[mid] < target)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  if (lo === 0)
+    return us[0];
+  const c0 = cdf[lo - 1];
+  const c1 = cdf[lo];
+  const span = c1 - c0;
+  const frac = span > 0 ? (target - c0) / span : 0;
+  const u = us[lo - 1] + frac * (us[lo] - us[lo - 1]);
+  return u < -1 ? -1 : u > 1 ? 1 : u;
+}
+function seedInteriorGranules(count, seedBase, params) {
+  const n = Math.max(0, Math.floor(count));
+  const out = [];
+  for (let i = 0;i < n; i++) {
+    const xiU = (noise2D(i * 12.9898 + seedBase + 1.7, 78.233) + 1) * 0.5;
+    const xiS = (noise2D(i * 39.346 + seedBase + 5.3, 11.135) + 1) * 0.5;
+    const xiQ = (noise2D(i * 17.13 + seedBase + 2.9, 51.07) + 1) * 0.5;
+    const xiP = (noise2D(i * 7.77 + seedBase + 9.1, 23.31) + 1) * 0.5;
+    const s = 2 * xiS - 1;
+    const u = profileCDFInv(xiU, params);
+    out.push({ u, s, q: xiQ, phi0: xiP * TAU });
+  }
+  return out;
+}
+function cyclosisLoopPoint(g, simTime, params) {
+  const T = Math.max(0.1, params.cyclosisPeriod ?? 45);
+  const sense = (params.cyclosisSense ?? 1) >= 0 ? 1 : -1;
+  const phi = g.phi0 + sense * (TAU / T) * simTime;
+  const amp = 0.3 + 0.68 * Math.sqrt(Math.max(0, Math.min(1, g.q)));
+  const u = amp * Math.sin(phi);
+  const s = amp * Math.sin(phi + Math.PI / 2);
+  return { u, s };
 }
 function contractileVacuole(t, baseR, params) {
   const period = Math.max(0.1, params.vacuolePeriod ?? 7);
@@ -1279,6 +1394,17 @@ function seedFoodVacuoles(baseR, params) {
     const rad = Math.sqrt((noise2D(i * 44.197 + 9.7, 23.671) + 1) * 0.5) * maxRad;
     const phase = (noise2D(i * 61.829 + 2.3, 88.541) + 1) * 0.5;
     out.push({ x: rad * Math.cos(ang), y: rad * Math.sin(ang), phase });
+  }
+  return out;
+}
+function seedInteriorFoodVacuoles(count, params) {
+  const n = Math.max(0, Math.floor(count));
+  const out = [];
+  for (let i = 0;i < n; i++) {
+    const xi_q = (noise2D(i * 17.413 + 3.1, 52.917) + 1) * 0.5;
+    const xi_p = (noise2D(i * 44.197 + 9.7, 23.671) + 1) * 0.5;
+    const xi_d = (noise2D(i * 61.829 + 2.3, 88.541) + 1) * 0.5;
+    out.push({ q: xi_q, phi0: xi_p * TAU, digestPhase: xi_d });
   }
   return out;
 }
@@ -1421,7 +1547,9 @@ function createCellRenderer(container, opts) {
   let bodyHeading = 0;
   let motes = null;
   let granules = null;
+  let interiorGranules = null;
   let foodVacuoles = null;
+  let interiorFoodVacuoles = null;
   let flowCx = width / 2, flowCy = height / 2, flowHeading = 0, flowSpeed = 0;
   let lastTickMs = performance.now();
   let simTime = 0;
@@ -1587,7 +1715,27 @@ function createCellRenderer(container, opts) {
           minMembraneR = Math.min(minMembraneR, baseR * (1 + dv));
         const nucleus = nucleusTransform(t, audioLevel, baseR, params, minMembraneR);
         if (nucleus.r >= 2.5) {
-          const [nx, ny] = affineSqueezePoints([[cx + nucleus.cx, cy + nucleus.cy]], squeezeK, squeezePhi, cx, cy, params)[0];
+          let nx, ny;
+          let macroIctx = null;
+          if (params.enableInteriorField) {
+            const profilePts = buildProfilePts(baseR, params);
+            macroIctx = {
+              cx,
+              cy,
+              baseR,
+              deform,
+              squeezeK,
+              squeezePhi,
+              bodyHeading,
+              params,
+              profilePts
+            };
+            const uM = params.macronucleusU ?? -0.05;
+            const sM = params.macronucleusS ?? 0.1;
+            [nx, ny] = interiorPoint(uM, sM, macroIctx);
+          } else {
+            [nx, ny] = affineSqueezePoints([[cx + nucleus.cx, cy + nucleus.cy]], squeezeK, squeezePhi, cx, cy, params)[0];
+          }
           const nr = nucleus.r;
           const nucGrad = ctx.createRadialGradient(nx, ny, 0, nx, ny, nr);
           nucGrad.addColorStop(0, hsla(baseHue - 5, 0.8, 0.48, params.nucleusAlpha));
@@ -1602,22 +1750,33 @@ function createCellRenderer(container, opts) {
           ctx.arc(nx, ny, nr * 0.22, 0, TAU);
           ctx.fill();
           if (params.enableOrganelles) {
-            const mn = micronucleusTransform(nx, ny, nr, params);
-            let mcx = mn.cx;
-            let mcy = mn.cy;
-            const ddx = mcx - cx;
-            const ddy = mcy - cy;
-            const dist = Math.hypot(ddx, ddy);
-            const maxDist = Math.max(0, minMembraneR - mn.r);
-            if (dist > maxDist && dist > 0) {
-              const s2 = maxDist / dist;
-              mcx = cx + ddx * s2;
-              mcy = cy + ddy * s2;
+            if (params.enableInteriorField && macroIctx) {
+              const uM = params.macronucleusU ?? -0.05;
+              const sM = params.macronucleusS ?? 0.1;
+              const [mcx, mcy] = interiorPoint(uM + 0.12, sM + 0.3, macroIctx);
+              const mr = nr * (params.micronucleusSizeFrac ?? 0.32);
+              ctx.fillStyle = hsla(baseHue - 6, 0.82, 0.42, params.nucleusAlpha);
+              ctx.beginPath();
+              ctx.arc(mcx, mcy, mr, 0, TAU);
+              ctx.fill();
+            } else {
+              const mn = micronucleusTransform(nx, ny, nr, params);
+              let mcx = mn.cx;
+              let mcy = mn.cy;
+              const ddx = mcx - cx;
+              const ddy = mcy - cy;
+              const dist = Math.hypot(ddx, ddy);
+              const maxDist = Math.max(0, minMembraneR - mn.r);
+              if (dist > maxDist && dist > 0) {
+                const s2 = maxDist / dist;
+                mcx = cx + ddx * s2;
+                mcy = cy + ddy * s2;
+              }
+              ctx.fillStyle = hsla(baseHue - 6, 0.82, 0.42, params.nucleusAlpha);
+              ctx.beginPath();
+              ctx.arc(mcx, mcy, mn.r, 0, TAU);
+              ctx.fill();
             }
-            ctx.fillStyle = hsla(baseHue - 6, 0.82, 0.42, params.nucleusAlpha);
-            ctx.beginPath();
-            ctx.arc(mcx, mcy, mn.r, 0, TAU);
-            ctx.fill();
           }
         }
         if (params.enableVacuole) {
@@ -1636,56 +1795,143 @@ function createCellRenderer(container, opts) {
         }
         if (params.enableVacuoles) {
           const pair = contractileVacuolePair(t, baseR, squeezePhi, params);
-          for (const e of pair) {
-            if (e.r < 0.5)
-              continue;
-            const placeR = Math.max(0, Math.min(baseR * 0.6, minMembraneR - e.r));
-            const vcx0 = cx + Math.cos(e.bearing) * placeR;
-            const vcy0 = cy + Math.sin(e.bearing) * placeR;
-            const [vx, vy] = affineSqueezePoints([[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params)[0];
-            ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.7, params.nucleusAlpha * 0.45);
-            ctx.beginPath();
-            ctx.arc(vx, vy, e.r, 0, TAU);
-            ctx.fill();
+          if (params.enableInteriorField) {
+            const profilePts = buildProfilePts(baseR, params);
+            const ictx = {
+              cx,
+              cy,
+              baseR,
+              deform,
+              squeezeK,
+              squeezePhi,
+              bodyHeading,
+              params,
+              profilePts
+            };
+            const anchors = [
+              { u: params.cvAnteriorU ?? 0.55, s: params.cvAnteriorS ?? 0.62 },
+              { u: params.cvPosteriorU ?? -0.55, s: params.cvPosteriorS ?? 0.62 }
+            ];
+            for (let i = 0;i < pair.length; i++) {
+              const e = pair[i];
+              if (e.r < 0.5)
+                continue;
+              const [vx, vy] = interiorPoint(anchors[i].u, anchors[i].s, ictx);
+              ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.7, params.nucleusAlpha * 0.45);
+              ctx.beginPath();
+              ctx.arc(vx, vy, e.r, 0, TAU);
+              ctx.fill();
+            }
+          } else {
+            for (const e of pair) {
+              if (e.r < 0.5)
+                continue;
+              const placeR = Math.max(0, Math.min(baseR * 0.6, minMembraneR - e.r));
+              const vcx0 = cx + Math.cos(e.bearing) * placeR;
+              const vcy0 = cy + Math.sin(e.bearing) * placeR;
+              const [vx, vy] = affineSqueezePoints([[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params)[0];
+              ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.7, params.nucleusAlpha * 0.45);
+              ctx.beginPath();
+              ctx.arc(vx, vy, e.r, 0, TAU);
+              ctx.fill();
+            }
           }
         }
         if (params.enableCyclosis && (params.cyclosisGranuleCount ?? 0) > 0) {
-          if (!granules)
-            granules = seedGranules(baseR, params);
           const granuleSizePx = params.granuleSizePx ?? 1.3;
           ctx.fillStyle = hsla(baseHue + 25, 0.6, 0.6, params.nucleusAlpha * 0.6);
-          for (let i = 0;i < granules.length; i++) {
-            granules[i] = advectGranule(granules[i], baseR, dt, params);
-            const off = granules[i];
-            const maxRad = Math.min((params.granuleMaxRadiusFrac ?? 0.75) * baseR, Math.max(0, minMembraneR - granuleSizePx));
-            const rad = Math.hypot(off.x, off.y);
-            const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
-            const [gx, gy] = affineSqueezePoints([[cx + off.x * scale, cy + off.y * scale]], squeezeK, squeezePhi, cx, cy, params)[0];
-            ctx.beginPath();
-            ctx.arc(gx, gy, granuleSizePx, 0, TAU);
-            ctx.fill();
+          if (params.enableInteriorField) {
+            if (!interiorGranules) {
+              interiorGranules = seedInteriorGranules(params.cyclosisGranuleCount ?? 0, 0, params);
+            }
+            const profilePts = buildProfilePts(baseR, params);
+            const ictx = {
+              cx,
+              cy,
+              baseR,
+              deform,
+              squeezeK,
+              squeezePhi,
+              bodyHeading,
+              params,
+              profilePts
+            };
+            for (let i = 0;i < interiorGranules.length; i++) {
+              const g = interiorGranules[i];
+              const loop = cyclosisLoopPoint(g, t, params);
+              const [gx, gy] = interiorPoint(loop.u, loop.s, ictx);
+              ctx.beginPath();
+              ctx.arc(gx, gy, granuleSizePx, 0, TAU);
+              ctx.fill();
+            }
+          } else {
+            if (!granules)
+              granules = seedGranules(baseR, params);
+            for (let i = 0;i < granules.length; i++) {
+              granules[i] = advectGranule(granules[i], baseR, dt, params);
+              const off = granules[i];
+              const maxRad = Math.min((params.granuleMaxRadiusFrac ?? 0.75) * baseR, Math.max(0, minMembraneR - granuleSizePx));
+              const rad = Math.hypot(off.x, off.y);
+              const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
+              const [gx, gy] = affineSqueezePoints([[cx + off.x * scale, cy + off.y * scale]], squeezeK, squeezePhi, cx, cy, params)[0];
+              ctx.beginPath();
+              ctx.arc(gx, gy, granuleSizePx, 0, TAU);
+              ctx.fill();
+            }
           }
         }
         if (params.enableOrganelles && (params.foodVacuoleCount ?? 0) > 0) {
-          if (!foodVacuoles)
-            foodVacuoles = seedFoodVacuoles(baseR, params);
           const fvSizePx = params.foodVacuoleSizePx ?? 3;
-          for (let i = 0;i < foodVacuoles.length; i++) {
-            foodVacuoles[i] = advectFoodVacuole(foodVacuoles[i], baseR, dt, params);
-            const v = foodVacuoles[i];
-            const size = foodVacuoleSize(t, v.phase, params);
-            const drawR = fvSizePx * (0.4 + 0.6 * size);
-            const maxRad = Math.min((params.foodVacuoleMaxRadiusFrac ?? 0.62) * baseR, Math.max(0, minMembraneR - drawR));
-            const rad = Math.hypot(v.x, v.y);
-            const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
-            const [fx, fy] = affineSqueezePoints([[cx + v.x * scale, cy + v.y * scale]], squeezeK, squeezePhi, cx, cy, params)[0];
-            ctx.fillStyle = hsla(baseHue - 30, 0.4, 0.5, params.nucleusAlpha * 0.4);
-            ctx.beginPath();
-            ctx.arc(fx, fy, drawR, 0, TAU);
-            ctx.fill();
-            ctx.strokeStyle = hsla(baseHue - 30, 0.45, 0.35, params.nucleusAlpha * 0.5);
-            ctx.lineWidth = 0.8;
-            ctx.stroke();
+          if (params.enableInteriorField) {
+            if (!interiorFoodVacuoles) {
+              interiorFoodVacuoles = seedInteriorFoodVacuoles(params.foodVacuoleCount ?? 0, params);
+            }
+            const profilePts = buildProfilePts(baseR, params);
+            const ictx = {
+              cx,
+              cy,
+              baseR,
+              deform,
+              squeezeK,
+              squeezePhi,
+              bodyHeading,
+              params,
+              profilePts
+            };
+            for (let i = 0;i < interiorFoodVacuoles.length; i++) {
+              const fv = interiorFoodVacuoles[i];
+              const loop = cyclosisLoopPoint(fv, t, params);
+              const size = foodVacuoleSize(t, fv.digestPhase, params);
+              const drawR = fvSizePx * (0.4 + 0.6 * size);
+              const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);
+              ctx.fillStyle = hsla(baseHue - 30, 0.4, 0.5, params.nucleusAlpha * 0.4);
+              ctx.beginPath();
+              ctx.arc(fx, fy, drawR, 0, TAU);
+              ctx.fill();
+              ctx.strokeStyle = hsla(baseHue - 30, 0.45, 0.35, params.nucleusAlpha * 0.5);
+              ctx.lineWidth = 0.8;
+              ctx.stroke();
+            }
+          } else {
+            if (!foodVacuoles)
+              foodVacuoles = seedFoodVacuoles(baseR, params);
+            for (let i = 0;i < foodVacuoles.length; i++) {
+              foodVacuoles[i] = advectFoodVacuole(foodVacuoles[i], baseR, dt, params);
+              const v = foodVacuoles[i];
+              const size = foodVacuoleSize(t, v.phase, params);
+              const drawR = fvSizePx * (0.4 + 0.6 * size);
+              const maxRad = Math.min((params.foodVacuoleMaxRadiusFrac ?? 0.62) * baseR, Math.max(0, minMembraneR - drawR));
+              const rad = Math.hypot(v.x, v.y);
+              const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
+              const [fx, fy] = affineSqueezePoints([[cx + v.x * scale, cy + v.y * scale]], squeezeK, squeezePhi, cx, cy, params)[0];
+              ctx.fillStyle = hsla(baseHue - 30, 0.4, 0.5, params.nucleusAlpha * 0.4);
+              ctx.beginPath();
+              ctx.arc(fx, fy, drawR, 0, TAU);
+              ctx.fill();
+              ctx.strokeStyle = hsla(baseHue - 30, 0.45, 0.35, params.nucleusAlpha * 0.5);
+              ctx.lineWidth = 0.8;
+              ctx.stroke();
+            }
           }
         }
         ctx.lineJoin = "round";
@@ -1804,12 +2050,12 @@ function mount(container, api) {
       axialSpinMax: 7,
       enableVacuoles: true,
       enableCyclosis: true,
-      cyclosisGranuleCount: 34,
-      granuleMaxRadiusFrac: 0.9,
+      cyclosisGranuleCount: 52,
       granuleSizePx: 1.6,
       enableOrganelles: true,
-      foodVacuoleCount: 7,
-      foodVacuoleMaxRadiusFrac: 0.72,
+      foodVacuoleCount: 10,
+      enableInteriorField: true,
+      cyclosisPeriod: 38,
       ...userParams
     }
   });

@@ -83,12 +83,17 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       axialSpinMax: 7,               // ~1.1 rev/s — livelier than the calm 3.5 default
       enableVacuoles: true,          // two asynchronous contractile vacuoles (Commit 26)
       enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)
-      cyclosisGranuleCount: 34,      // pack the cytoplasm (biology: crammed interior)
-      granuleMaxRadiusFrac: 0.9,     // granules spread to the poles (biologist polish)
+      cyclosisGranuleCount: 52,      // pack the cytoplasm (biologist polish: crammed)
       granuleSizePx: 1.6,            // a touch brighter/bigger so they read
       enableOrganelles: true,        // food vacuoles + micronucleus (Commit 28)
-      foodVacuoleCount: 7,           // more food vacuoles filling the body
-      foodVacuoleMaxRadiusFrac: 0.72, // spread them wider, not just near the nucleus
+      foodVacuoleCount: 10,          // more food vacuoles filling the body
+      // === v3.3 INTERIOR FIELD (Commit 32a-e) — organelles in body coords,
+      // distributed through the elongated body + circulating on the cyclosis
+      // loop to the poles, coupled to the deforming wall. Fixes "органеллы все
+      // в центре". interiorPoint distributes via the profile, so the legacy
+      // disc granuleMaxRadiusFrac/foodVacuoleMaxRadiusFrac no longer apply.
+      enableInteriorField: true,     // body-coord interior (not the central disc)
+      cyclosisPeriod: 38,            // ~38s circuit (biology 30-60s)
       ...userParams,
     },
   });
