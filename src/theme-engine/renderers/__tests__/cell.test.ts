@@ -8536,12 +8536,12 @@ describe("trichocyst discharge (v3.8E)", () => {
     expect(CELL_DEFAULTS.trichocystLengthMul).toBe(3.0);
   });
 
-  it("trichocystDecay defaults to 2.0 (v3.9B: slower fade for visibility)", () => {
-    expect(CELL_DEFAULTS.trichocystDecay).toBe(2.0);
+  it("trichocystDecay defaults to 1.0 (v4.0B: slow fade for ~3.5s visibility)", () => {
+    expect(CELL_DEFAULTS.trichocystDecay).toBe(1.0);
   });
 
-  it("trichocystLineWidth defaults to 1.0", () => {
-    expect(CELL_DEFAULTS.trichocystLineWidth).toBe(1.0);
+  it("trichocystLineWidth defaults to 1.5 (v4.0B: thicker for visibility)", () => {
+    expect(CELL_DEFAULTS.trichocystLineWidth).toBe(1.5);
   });
 
   it("enableTrichocysts=false (default) \u2192 no trichocyst strokes during startle", () => {
@@ -8974,6 +8974,55 @@ describe("trichocyst discharge (v3.8E)", () => {
     r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
     if (rafCalls.length) rafCalls.shift()!();
     // With trichocystDecay=0.3 and ~1s elapsed, trichocystAlpha ≈ 0.74 >> 0.005
+    expect(strokeCount).toBeGreaterThan(0);
+    r.destroy();
+    restore();
+  });
+
+  it("v4.0B: rising-edge threshold 0.02 allows small startle bumps to re-trigger", () => {
+    // With threshold lowered from 0.05 to 0.02, a startle increase of 0.03
+    // should re-fire trichocystAlpha to 1.0.
+    let clock = 1000;
+    const rafCalls = setupRaf();
+    vi.stubGlobal("performance", { now: () => clock });
+    const { ctx, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableTrichocysts: true,
+        trichocystCount: 10,
+        trichocystDecay: 0.5,    // slow decay so needles persist
+        startleDecay: 0.96,
+      },
+    });
+    // Warmup idle
+    for (let i = 0; i < 5; i++) {
+      clock += 16.67;
+      r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    // First startle trigger
+    clock += 16.67;
+    r.update({ mode: "recording", audioLevel: 0.8, spectrumBins: new Array(32).fill(0.8) });
+    if (rafCalls.length) rafCalls.shift()!();
+    // Let it decay a bit (30 frames)
+    for (let i = 0; i < 30; i++) {
+      clock += 16.67;
+      r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.5) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    // Bump audio slightly — should re-fire because threshold is 0.02
+    clock += 16.67;
+    r.update({ mode: "recording", audioLevel: 0.7, spectrumBins: new Array(32).fill(0.7) });
+    if (rafCalls.length) rafCalls.shift()!();
+    // Check trichocysts are being drawn on next frame
+    let strokeCount = 0;
+    (ctx.stroke as ReturnType<typeof vi.fn>).mockImplementation(() => { strokeCount++; });
+    clock += 16.67;
+    r.update({ mode: "recording", audioLevel: 0.7, spectrumBins: new Array(32).fill(0.7) });
+    if (rafCalls.length) rafCalls.shift()!();
     expect(strokeCount).toBeGreaterThan(0);
     r.destroy();
     restore();
