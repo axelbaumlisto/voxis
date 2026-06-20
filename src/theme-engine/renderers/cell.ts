@@ -288,6 +288,17 @@ export interface CellParams {
    * circle, and grow the shaft along the true contour outward normal. OFF keeps
    * the crown byte-identical to the commit-21b frozen golden. */
   enableCiliaOnContour?: boolean;
+  /** Commit 22a (OPT, default off): "somatic mex" — when on, the crown becomes
+   * MANY SHORT hairs (a dense fringe over the whole perimeter) instead of the
+   * few long flagella, by overriding ciliaCount -> somaticCiliaCount and
+   * ciliaLength -> somaticCiliaLength (see somaticCiliaParams). OFF keeps the
+   * legacy 18-hair crown byte-identical. */
+  enableSomaticCilia?: boolean;
+  /** Commit 22a: hair count when enableSomaticCilia is on. Default 72. */
+  somaticCiliaCount?: number;
+  /** Commit 22a: resting hair length (fraction of baseR) when enableSomaticCilia
+   * is on. Default 0.15 (short stubs). */
+  somaticCiliaLength?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -384,6 +395,12 @@ export const CELL_DEFAULTS: CellParams = {
   // Commit 21c: cilia anchored on the deformed+squeezed contour. OFF (dark-launch)
   // so the default crown stays byte-identical to the commit-21b frozen golden.
   enableCiliaOnContour: false,
+  // Commit 22a: somatic mex (many short hairs). OFF (dark-launch) so the default
+  // crown stays the legacy 18 long flagella; somaticCiliaParams swaps the count
+  // and length only when the gate is on.
+  enableSomaticCilia: false,
+  somaticCiliaCount: 72,
+  somaticCiliaLength: 0.15,
 };
 
 
@@ -837,6 +854,22 @@ export function ciliaStrokeAngle(
   // Nearest axis orientation to `local` modulo π (beat plane is a line).
   const delta = wrapPi(2 * (axis - local)) / 2; // in (-π/2, π/2]
   return local + s * delta;
+}
+
+/**
+ * Commit 22a — somatic ciliature ("mex") parameter override. When
+ * `enableSomaticCilia` is on, the crown becomes MANY SHORT hairs (a dense
+ * fringe) instead of the few long flagella: ciliaCount -> somaticCiliaCount and
+ * ciliaLength -> somaticCiliaLength. Off (default) returns `params` unchanged
+ * (referential identity), so the legacy crown is byte-identical. Pure.
+ */
+export function somaticCiliaParams(params: CellParams): CellParams {
+  if (!params.enableSomaticCilia) return params;
+  return {
+    ...params,
+    ciliaCount: params.somaticCiliaCount ?? 72,
+    ciliaLength: params.somaticCiliaLength ?? 0.15,
+  };
 }
 
 /** A cilium rendered as a multi-point spine plus its stroke width. */
