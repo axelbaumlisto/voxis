@@ -22,7 +22,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   const renderer = createCellRenderer(container, {
     width: api.size.width,
     height: api.size.height,
-    baseHue: 55, // warm olive (DIC darkfield) — colour biologist (was 34 amber, 95 too neon)
+    baseHue: 50, // warm neutral (DIC darkfield) — bio panel r3 (was 55/34)
     params: {
       noiseScale: 0.9,
       octaves: 4,
@@ -36,14 +36,19 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       intentDrift: 0.08,
       idle: 0.10,
       levelGain: 0.7,
-      hueSpread: 20,                 // subtler iridescence (was 40)
-      shimmerSpeed: 0.08,              // very slow shimmer — stay near olive, not cycle to purple (was 0.5)
-      hueBoost: 8,                     // less extreme hue boost (was 20)
-      fillAlpha: 0.28,               // translucent living envelope
-      membraneSat: 0.55,             // DIC-like subdued membrane (was hardcoded 0.85)
-      nucleusSatMul: 0.35,           // gray nucleus = dense chromatin (was 1.0 = vivid)
-      foodVacuoleHue: 38,            // amber-brown digested bacteria (only warm element)
-      cvHue: 160,                    // pale cyan — clear water vesicle
+      hueSpread: 8,                  // minimal iridescence — pellicle is NOT a soap bubble (was 40)
+      shimmerSpeed: 0.04,              // barely perceptible hue drift (was 0.5)
+      hueBoost: 4,                     // less audio hue shift (was 20)
+      fillAlpha: 0.18,               // very translucent — nearly clear cytoplasm
+      // === DIC-authentic colour palette (bio panel r3) ===
+      membraneSat: 0.12,             // silvery refractile edge (was 0.85/0.55)
+      membraneLightness: 0.75,       // bright silver, not dim (was hardcoded 0.60)
+      cytoplasmSat: 0.10,            // nearly colourless cytoplasm wash
+      ciliaSat: 0.08,                // transparent protein — barely visible
+      granuleSat: 0.10,              // refractile silver dots
+      nucleusSatMul: 0.25,           // gray chromatin mass (was 0.35)
+      foodVacuoleHue: 38,            // amber-brown — the ONLY warm element (ingested food)
+      cvHue: 170,                    // pale cyan — clear water vesicle
       tension: 0.15,
       // cilia ("усы"), startle ("шарахается"), growth ("растёт как живая")
       ciliaCount: 18,
@@ -54,15 +59,17 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       growthRelease: 0.012,
       baseRadiusPx: 17,
       driftSpeed: 0.08,              // resting cell still glides visibly (was 0.03)
+      idleSwimFrac: 0.30,            // 30% of peak swim even at idle — cell always drifts
+      idleDriftMin: 0.70,            // wander position 70% visible even in idle
       driftMargin: 30,
       idleMorphAmplitude: 0.16,
       idleMorphSpeed: 0.22,
       idleMorphPeriod: 7,
       idleMorphFloor: 0.3,
       growthSwell: 0.0,               // Paramecium does NOT inflate on activation (was 0.2)
-      swimSpeedMaxFrac: 0.10,         // faster swimming on activation (was 0.06; 0.15 too fast for 160px overlay)
+      swimSpeedMaxFrac: 0.07,         // prevent canvas escape (was 0.10/0.06)
       startleSensitivity: 2.8,        // trigger startle more easily (was 2.2)
-      startleDecay: 0.86,
+      startleDecay: 0.96,             // ~0.5s avoidance reaction (was 0.86 = 0.08s)
       startleMaxPx: 5,                // sharper avoid reaction (was 4)
       startleBaselineRate: 0.08,
       // === Authentic Paramecium (v3.2-final) — BIOLOGY-APPROVED default look. ===
@@ -85,7 +92,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableAffine: true,            // forced k=1 when profile on (no double-elongate)
       enableCiliaStructure: true,    // oral-groove dip + caudal tuft (Commit 23)
       enableAxialSpin: true,         // spin about long axis while swimming (Commit 24)
-      axialSpinMax: 10,              // ~1.6 rev/s — more visible tumbling at peak (was 7)
+      axialSpinMax: 7,               // ~1.1 rev/s — calmer, closer to bio ~1 rev/s (was 10)
       enableVacuoles: true,          // two asynchronous contractile vacuoles (Commit 26)
       enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)
       cyclosisGranuleCount: 52,      // pack the cytoplasm (biologist polish: crammed)
@@ -98,7 +105,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // в центре". interiorPoint distributes via the profile, so the legacy
       // disc granuleMaxRadiusFrac/foodVacuoleMaxRadiusFrac no longer apply.
       enableInteriorField: true,     // body-coord interior (not the central disc)
-      cyclosisPeriod: 26,            // ~26s circuit — visible flow between frames (physics biologist)
+      cyclosisPeriod: 38,            // back to bio range 30-60s (was 26)
       ...userParams,
     },
   });

@@ -1622,6 +1622,9 @@ function createCellRenderer(container, opts) {
         deform = bandLimitDeform(deform, params);
       }
       drift01 = driftActivation(drift01, s.mode === "recording", params.driftActivationRate ?? 0.02, dt);
+      if (params.idleDriftMin) {
+        drift01 = Math.max(params.idleDriftMin, drift01);
+      }
       const baseR = resolveBaseRadius(width, height, params, growth);
       if (!wander) {
         wander = restoredPose ? { x: restoredPose.x, y: restoredPose.y, heading: restoredPose.heading, vx: 0, vy: 0, clock: 0 } : { x: width / 2, y: height / 2, heading: noise2D(7.1, 3.3) * TAU, vx: 0, vy: 0, clock: 0 };
@@ -1631,7 +1634,11 @@ function createCellRenderer(container, opts) {
         if (kick !== 0)
           wander = { ...wander, heading: wander.heading + kick };
       }
-      const baseSwim = params.enableActivity ? swimSpeed(activity, width, height, params) : undefined;
+      let baseSwim = params.enableActivity ? swimSpeed(activity, width, height, params) : undefined;
+      if (baseSwim !== undefined && params.idleSwimFrac) {
+        const maxSwim = (params.swimSpeedMaxFrac ?? 0.06) * Math.min(width, height);
+        baseSwim = Math.max(params.idleSwimFrac * maxSwim, baseSwim);
+      }
       const burst = useKick ? startleBurstSpeed(startle, baseR, params) : 0;
       const swimPx = baseSwim !== undefined ? baseSwim + burst : burst > 0 ? burst : undefined;
       wander = wanderStep(wander, dt, width, height, baseR, params, swimPx);
@@ -1688,7 +1695,7 @@ function createCellRenderer(container, opts) {
           ctx.lineCap = "round";
           for (const hair of cilia) {
             ctx.lineWidth = hair.width;
-            ctx.strokeStyle = hsla(baseHue, 0.6, 0.6, 0.35 + 0.35 * energy);
+            ctx.strokeStyle = hsla(baseHue, params.ciliaSat ?? 0.6, 0.6, 0.35 + 0.35 * energy);
             ctx.beginPath();
             ctx.moveTo(hair.points[0][0], hair.points[0][1]);
             const spline = catmullRomOpen(hair.points, 4);
@@ -1700,7 +1707,7 @@ function createCellRenderer(container, opts) {
         }
         const cvH = params.cvHue ?? baseHue + 20;
         const fvH = params.foodVacuoleHue ?? baseHue - 30;
-        ctx.fillStyle = hsla(baseHue, 0.7, 0.55, params.fillAlpha);
+        ctx.fillStyle = hsla(baseHue, params.cytoplasmSat ?? 0.7, 0.55, params.fillAlpha);
         ctx.beginPath();
         ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
         for (let i = 1;i < splinePoints.length; i++) {
@@ -1708,8 +1715,8 @@ function createCellRenderer(container, opts) {
         }
         ctx.closePath();
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, baseR * 0.9));
-        grad.addColorStop(0, hsla(baseHue + 10, 0.5, 0.7, params.fillAlpha * 0.5));
-        grad.addColorStop(1, hsla(baseHue, 0.7, 0.45, params.fillAlpha));
+        grad.addColorStop(0, hsla(baseHue + 10, (params.cytoplasmSat ?? 0.7) * 0.71, 0.7, params.fillAlpha * 0.5));
+        grad.addColorStop(1, hsla(baseHue, params.cytoplasmSat ?? 0.7, 0.45, params.fillAlpha));
         ctx.fillStyle = grad;
         ctx.fill();
         let minMembraneR = Infinity;
@@ -1842,7 +1849,7 @@ function createCellRenderer(container, opts) {
         }
         if (params.enableCyclosis && (params.cyclosisGranuleCount ?? 0) > 0) {
           const granuleSizePx = params.granuleSizePx ?? 1.3;
-          ctx.fillStyle = hsla(baseHue + 25, 0.6, 0.6, params.nucleusAlpha * 0.6);
+          ctx.fillStyle = hsla(baseHue + 25, params.granuleSat ?? 0.6, 0.6, params.nucleusAlpha * 0.6);
           if (params.enableInteriorField) {
             if (!interiorGranules) {
               interiorGranules = seedInteriorGranules(params.cyclosisGranuleCount ?? 0, 0, params);
@@ -1940,7 +1947,7 @@ function createCellRenderer(container, opts) {
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
         const mSat = params.membraneSat ?? 0.85;
-        ctx.strokeStyle = hsla(baseHue, mSat * 0.94, 0.6, 0.9);
+        ctx.strokeStyle = hsla(baseHue, mSat * 0.94, params.membraneLightness ?? 0.6, 0.9);
         ctx.lineWidth = 1.8;
         ctx.stroke();
         const segments = contourPoints.length;
@@ -1953,7 +1960,7 @@ function createCellRenderer(container, opts) {
           const midPt = splinePoints[Math.floor((segStart + segEnd) / 2) % splinePoints.length];
           const midAngle = Math.atan2(midPt[1] - cy, midPt[0] - cx);
           const hue = iridescentHue(midAngle, t, audioLevel, baseHue, params);
-          ctx.strokeStyle = hsla(hue, mSat, 0.6, 0.85);
+          ctx.strokeStyle = hsla(hue, mSat, params.membraneLightness ?? 0.6, 0.85);
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.moveTo(splinePoints[segStart][0], splinePoints[segStart][1]);
@@ -1999,7 +2006,7 @@ function mount(container, api) {
   const renderer = createCellRenderer(container, {
     width: api.size.width,
     height: api.size.height,
-    baseHue: 55,
+    baseHue: 50,
     params: {
       noiseScale: 0.9,
       octaves: 4,
@@ -2013,14 +2020,18 @@ function mount(container, api) {
       intentDrift: 0.08,
       idle: 0.1,
       levelGain: 0.7,
-      hueSpread: 20,
-      shimmerSpeed: 0.08,
-      hueBoost: 8,
-      fillAlpha: 0.28,
-      membraneSat: 0.55,
-      nucleusSatMul: 0.35,
+      hueSpread: 8,
+      shimmerSpeed: 0.04,
+      hueBoost: 4,
+      fillAlpha: 0.18,
+      membraneSat: 0.12,
+      membraneLightness: 0.75,
+      cytoplasmSat: 0.1,
+      ciliaSat: 0.08,
+      granuleSat: 0.1,
+      nucleusSatMul: 0.25,
       foodVacuoleHue: 38,
-      cvHue: 160,
+      cvHue: 170,
       tension: 0.15,
       ciliaCount: 18,
       ciliaLength: 0.4,
@@ -2030,15 +2041,17 @@ function mount(container, api) {
       growthRelease: 0.012,
       baseRadiusPx: 17,
       driftSpeed: 0.08,
+      idleSwimFrac: 0.3,
+      idleDriftMin: 0.7,
       driftMargin: 30,
       idleMorphAmplitude: 0.16,
       idleMorphSpeed: 0.22,
       idleMorphPeriod: 7,
       idleMorphFloor: 0.3,
       growthSwell: 0,
-      swimSpeedMaxFrac: 0.1,
+      swimSpeedMaxFrac: 0.07,
       startleSensitivity: 2.8,
-      startleDecay: 0.86,
+      startleDecay: 0.96,
       startleMaxPx: 5,
       startleBaselineRate: 0.08,
       enableSomaticCilia: true,
@@ -2056,7 +2069,7 @@ function mount(container, api) {
       enableAffine: true,
       enableCiliaStructure: true,
       enableAxialSpin: true,
-      axialSpinMax: 10,
+      axialSpinMax: 7,
       enableVacuoles: true,
       enableCyclosis: true,
       cyclosisGranuleCount: 52,
@@ -2064,7 +2077,7 @@ function mount(container, api) {
       enableOrganelles: true,
       foodVacuoleCount: 10,
       enableInteriorField: true,
-      cyclosisPeriod: 26,
+      cyclosisPeriod: 38,
       ...userParams
     }
   });
