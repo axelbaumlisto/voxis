@@ -22,7 +22,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   const renderer = createCellRenderer(container, {
     width: api.size.width,
     height: api.size.height,
-    baseHue: 95, // olive-green (DIC microscopy) — colour biologist (was 34 amber)
+    baseHue: 55, // warm olive (DIC darkfield) — colour biologist (was 34 amber, 95 too neon)
     params: {
       noiseScale: 0.9,
       octaves: 4,
@@ -36,10 +36,14 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       intentDrift: 0.08,
       idle: 0.10,
       levelGain: 0.7,
-      hueSpread: 25,                 // subtler iridescence (was 40)
-      shimmerSpeed: 0.5,
-      hueBoost: 15,                    // less extreme hue boost (was 20)
+      hueSpread: 20,                 // subtler iridescence (was 40)
+      shimmerSpeed: 0.08,              // very slow shimmer — stay near olive, not cycle to purple (was 0.5)
+      hueBoost: 8,                     // less extreme hue boost (was 20)
       fillAlpha: 0.28,               // translucent living envelope
+      membraneSat: 0.55,             // DIC-like subdued membrane (was hardcoded 0.85)
+      nucleusSatMul: 0.35,           // gray nucleus = dense chromatin (was 1.0 = vivid)
+      foodVacuoleHue: 38,            // amber-brown digested bacteria (only warm element)
+      cvHue: 160,                    // pale cyan — clear water vesicle
       tension: 0.15,
       // cilia ("усы"), startle ("шарахается"), growth ("растёт как живая")
       ciliaCount: 18,
@@ -56,7 +60,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       idleMorphPeriod: 7,
       idleMorphFloor: 0.3,
       growthSwell: 0.0,               // Paramecium does NOT inflate on activation (was 0.2)
-      swimSpeedMaxFrac: 0.15,         // the REAL activation signal: faster swimming (was 0.06)
+      swimSpeedMaxFrac: 0.10,         // faster swimming on activation (was 0.06; 0.15 too fast for 160px overlay)
       startleSensitivity: 2.8,        // trigger startle more easily (was 2.2)
       startleDecay: 0.86,
       startleMaxPx: 5,                // sharper avoid reaction (was 4)

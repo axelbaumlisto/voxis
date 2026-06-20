@@ -106,6 +106,14 @@ export interface CellParams {
   /** Nucleus fill opacity — deliberately higher than `fillAlpha` so the
    * organelle reads as a *denser* body inside the translucent cytoplasm. */
   nucleusAlpha: number;
+  /** Membrane stroke saturation (0-1). Default 0.85 (vivid). Lower for DIC look. */
+  membraneSat?: number;
+  /** Nucleus saturation multiplier (0-1). Default 1.0. Set <1 for gray nucleus. */
+  nucleusSatMul?: number;
+  /** Override hue for food vacuoles (degrees). Default baseHue-30. */
+  foodVacuoleHue?: number;
+  /** Override hue for contractile vacuoles (degrees). Default baseHue+20. */
+  cvHue?: number;
   /** Number of cilia (hair-like tentacles) around the membrane. */
   ciliaCount: number;
   /** Resting cilium length as fraction of baseR. */
@@ -3565,6 +3573,9 @@ export function createCellRenderer(
         }
 
         // --- Fill: translucent cytoplasm ---
+        // Resolved organelle hues (overridable via params, defaults = legacy)
+        const cvH = params.cvHue ?? (baseHue + 20);
+        const fvH = params.foodVacuoleHue ?? (baseHue - 30);
         ctx.fillStyle = hsla(baseHue, 0.7, 0.55, params.fillAlpha);
         ctx.beginPath();
         ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
@@ -3621,9 +3632,10 @@ export function createCellRenderer(
           // Soft radial gradient: denser warmer core → darker rim
           const nucGrad = ctx.createRadialGradient(nx, ny, 0, nx, ny, nr);
           // Hue shifted slightly warmer/darker vs the amber cytoplasm base
-          nucGrad.addColorStop(0, hsla(baseHue - 5, 0.80, 0.48, params.nucleusAlpha));
-          nucGrad.addColorStop(0.4, hsla(baseHue - 8, 0.75, 0.40, params.nucleusAlpha));
-          nucGrad.addColorStop(1, hsla(baseHue - 10, 0.65, 0.30, params.nucleusAlpha * 0.7));
+          const nSm = params.nucleusSatMul ?? 1.0;
+          nucGrad.addColorStop(0, hsla(baseHue - 5, 0.80 * nSm, 0.48, params.nucleusAlpha));
+          nucGrad.addColorStop(0.4, hsla(baseHue - 8, 0.75 * nSm, 0.40, params.nucleusAlpha));
+          nucGrad.addColorStop(1, hsla(baseHue - 10, 0.65 * nSm, 0.30, params.nucleusAlpha * 0.7));
 
           ctx.fillStyle = nucGrad;
           ctx.beginPath();
@@ -3699,7 +3711,7 @@ export function createCellRenderer(
             const [vx, vy] = affineSqueezePoints(
               [[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params,
             )[0];
-            ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.70, params.nucleusAlpha * 0.45);
+            ctx.fillStyle = hsla(cvH, 0.45, 0.70, params.nucleusAlpha * 0.45);
             ctx.beginPath();
             ctx.arc(vx, vy, vac.r, 0, TAU);
             ctx.fill();
@@ -3733,7 +3745,7 @@ export function createCellRenderer(
               const e = pair[i];
               if (e.r < 0.5) continue;
               const [vx, vy] = interiorPoint(anchors[i].u, anchors[i].s, ictx);
-              ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.70, params.nucleusAlpha * 0.45);
+              ctx.fillStyle = hsla(cvH, 0.45, 0.70, params.nucleusAlpha * 0.45);
               ctx.beginPath();
               ctx.arc(vx, vy, e.r, 0, TAU);
               ctx.fill();
@@ -3750,7 +3762,7 @@ export function createCellRenderer(
               const [vx, vy] = affineSqueezePoints(
                 [[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params,
               )[0];
-              ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.70, params.nucleusAlpha * 0.45);
+              ctx.fillStyle = hsla(cvH, 0.45, 0.70, params.nucleusAlpha * 0.45);
               ctx.beginPath();
               ctx.arc(vx, vy, e.r, 0, TAU);
               ctx.fill();
@@ -3843,11 +3855,11 @@ export function createCellRenderer(
               const size = foodVacuoleSize(t, fv.digestPhase, params); // digest shrink (reuse)
               const drawR = fvSizePx * (0.4 + 0.6 * size);
               const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);
-              ctx.fillStyle = hsla(baseHue - 30, 0.4, 0.5, params.nucleusAlpha * 0.4);
+              ctx.fillStyle = hsla(fvH, 0.4, 0.5, params.nucleusAlpha * 0.4);
               ctx.beginPath();
               ctx.arc(fx, fy, drawR, 0, TAU);
               ctx.fill();
-              ctx.strokeStyle = hsla(baseHue - 30, 0.45, 0.35, params.nucleusAlpha * 0.5);
+              ctx.strokeStyle = hsla(fvH, 0.45, 0.35, params.nucleusAlpha * 0.5);
               ctx.lineWidth = 0.8;
               ctx.stroke();
             }
@@ -3872,11 +3884,11 @@ export function createCellRenderer(
                 [[cx + v.x * scale, cy + v.y * scale]], squeezeK, squeezePhi, cx, cy, params,
               )[0];
               // Translucent olive/greenish fill with a slightly darker rim.
-              ctx.fillStyle = hsla(baseHue - 30, 0.4, 0.5, params.nucleusAlpha * 0.4);
+              ctx.fillStyle = hsla(fvH, 0.4, 0.5, params.nucleusAlpha * 0.4);
               ctx.beginPath();
               ctx.arc(fx, fy, drawR, 0, TAU);
               ctx.fill();
-              ctx.strokeStyle = hsla(baseHue - 30, 0.45, 0.35, params.nucleusAlpha * 0.5);
+              ctx.strokeStyle = hsla(fvH, 0.45, 0.35, params.nucleusAlpha * 0.5);
               ctx.lineWidth = 0.8;
               ctx.stroke();
             }
@@ -3886,7 +3898,8 @@ export function createCellRenderer(
         // --- Stroke: iridescent outline ---
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
-        ctx.strokeStyle = hsla(baseHue, 0.8, 0.6, 0.9);
+        const mSat = params.membraneSat ?? 0.85;
+        ctx.strokeStyle = hsla(baseHue, mSat * 0.94, 0.6, 0.9);
         ctx.lineWidth = 1.8;
         ctx.stroke();
 
@@ -3908,7 +3921,7 @@ export function createCellRenderer(
           const midAngle = Math.atan2(midPt[1] - cy, midPt[0] - cx);
           const hue = iridescentHue(midAngle, t, audioLevel, baseHue, params);
 
-          ctx.strokeStyle = hsla(hue, 0.85, 0.6, 0.85);
+          ctx.strokeStyle = hsla(hue, mSat, 0.6, 0.85);
           ctx.lineWidth = 2.0;
           ctx.beginPath();
           ctx.moveTo(splinePoints[segStart][0], splinePoints[segStart][1]);

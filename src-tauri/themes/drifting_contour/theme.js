@@ -1698,6 +1698,8 @@ function createCellRenderer(container, opts) {
             ctx.stroke();
           }
         }
+        const cvH = params.cvHue ?? baseHue + 20;
+        const fvH = params.foodVacuoleHue ?? baseHue - 30;
         ctx.fillStyle = hsla(baseHue, 0.7, 0.55, params.fillAlpha);
         ctx.beginPath();
         ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
@@ -1738,9 +1740,10 @@ function createCellRenderer(container, opts) {
           }
           const nr = nucleus.r;
           const nucGrad = ctx.createRadialGradient(nx, ny, 0, nx, ny, nr);
-          nucGrad.addColorStop(0, hsla(baseHue - 5, 0.8, 0.48, params.nucleusAlpha));
-          nucGrad.addColorStop(0.4, hsla(baseHue - 8, 0.75, 0.4, params.nucleusAlpha));
-          nucGrad.addColorStop(1, hsla(baseHue - 10, 0.65, 0.3, params.nucleusAlpha * 0.7));
+          const nSm = params.nucleusSatMul ?? 1;
+          nucGrad.addColorStop(0, hsla(baseHue - 5, 0.8 * nSm, 0.48, params.nucleusAlpha));
+          nucGrad.addColorStop(0.4, hsla(baseHue - 8, 0.75 * nSm, 0.4, params.nucleusAlpha));
+          nucGrad.addColorStop(1, hsla(baseHue - 10, 0.65 * nSm, 0.3, params.nucleusAlpha * 0.7));
           ctx.fillStyle = nucGrad;
           ctx.beginPath();
           ctx.arc(nx, ny, nr, 0, TAU);
@@ -1787,7 +1790,7 @@ function createCellRenderer(container, opts) {
             const vcx0 = cx + Math.cos(bearing) * placeR;
             const vcy0 = cy + Math.sin(bearing) * placeR;
             const [vx, vy] = affineSqueezePoints([[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params)[0];
-            ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.7, params.nucleusAlpha * 0.45);
+            ctx.fillStyle = hsla(cvH, 0.45, 0.7, params.nucleusAlpha * 0.45);
             ctx.beginPath();
             ctx.arc(vx, vy, vac.r, 0, TAU);
             ctx.fill();
@@ -1817,7 +1820,7 @@ function createCellRenderer(container, opts) {
               if (e.r < 0.5)
                 continue;
               const [vx, vy] = interiorPoint(anchors[i].u, anchors[i].s, ictx);
-              ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.7, params.nucleusAlpha * 0.45);
+              ctx.fillStyle = hsla(cvH, 0.45, 0.7, params.nucleusAlpha * 0.45);
               ctx.beginPath();
               ctx.arc(vx, vy, e.r, 0, TAU);
               ctx.fill();
@@ -1830,7 +1833,7 @@ function createCellRenderer(container, opts) {
               const vcx0 = cx + Math.cos(e.bearing) * placeR;
               const vcy0 = cy + Math.sin(e.bearing) * placeR;
               const [vx, vy] = affineSqueezePoints([[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params)[0];
-              ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.7, params.nucleusAlpha * 0.45);
+              ctx.fillStyle = hsla(cvH, 0.45, 0.7, params.nucleusAlpha * 0.45);
               ctx.beginPath();
               ctx.arc(vx, vy, e.r, 0, TAU);
               ctx.fill();
@@ -1904,11 +1907,11 @@ function createCellRenderer(container, opts) {
               const size = foodVacuoleSize(t, fv.digestPhase, params);
               const drawR = fvSizePx * (0.4 + 0.6 * size);
               const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);
-              ctx.fillStyle = hsla(baseHue - 30, 0.4, 0.5, params.nucleusAlpha * 0.4);
+              ctx.fillStyle = hsla(fvH, 0.4, 0.5, params.nucleusAlpha * 0.4);
               ctx.beginPath();
               ctx.arc(fx, fy, drawR, 0, TAU);
               ctx.fill();
-              ctx.strokeStyle = hsla(baseHue - 30, 0.45, 0.35, params.nucleusAlpha * 0.5);
+              ctx.strokeStyle = hsla(fvH, 0.45, 0.35, params.nucleusAlpha * 0.5);
               ctx.lineWidth = 0.8;
               ctx.stroke();
             }
@@ -1924,11 +1927,11 @@ function createCellRenderer(container, opts) {
               const rad = Math.hypot(v.x, v.y);
               const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
               const [fx, fy] = affineSqueezePoints([[cx + v.x * scale, cy + v.y * scale]], squeezeK, squeezePhi, cx, cy, params)[0];
-              ctx.fillStyle = hsla(baseHue - 30, 0.4, 0.5, params.nucleusAlpha * 0.4);
+              ctx.fillStyle = hsla(fvH, 0.4, 0.5, params.nucleusAlpha * 0.4);
               ctx.beginPath();
               ctx.arc(fx, fy, drawR, 0, TAU);
               ctx.fill();
-              ctx.strokeStyle = hsla(baseHue - 30, 0.45, 0.35, params.nucleusAlpha * 0.5);
+              ctx.strokeStyle = hsla(fvH, 0.45, 0.35, params.nucleusAlpha * 0.5);
               ctx.lineWidth = 0.8;
               ctx.stroke();
             }
@@ -1936,7 +1939,8 @@ function createCellRenderer(container, opts) {
         }
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
-        ctx.strokeStyle = hsla(baseHue, 0.8, 0.6, 0.9);
+        const mSat = params.membraneSat ?? 0.85;
+        ctx.strokeStyle = hsla(baseHue, mSat * 0.94, 0.6, 0.9);
         ctx.lineWidth = 1.8;
         ctx.stroke();
         const segments = contourPoints.length;
@@ -1949,7 +1953,7 @@ function createCellRenderer(container, opts) {
           const midPt = splinePoints[Math.floor((segStart + segEnd) / 2) % splinePoints.length];
           const midAngle = Math.atan2(midPt[1] - cy, midPt[0] - cx);
           const hue = iridescentHue(midAngle, t, audioLevel, baseHue, params);
-          ctx.strokeStyle = hsla(hue, 0.85, 0.6, 0.85);
+          ctx.strokeStyle = hsla(hue, mSat, 0.6, 0.85);
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.moveTo(splinePoints[segStart][0], splinePoints[segStart][1]);
@@ -1995,7 +1999,7 @@ function mount(container, api) {
   const renderer = createCellRenderer(container, {
     width: api.size.width,
     height: api.size.height,
-    baseHue: 95,
+    baseHue: 55,
     params: {
       noiseScale: 0.9,
       octaves: 4,
@@ -2009,10 +2013,14 @@ function mount(container, api) {
       intentDrift: 0.08,
       idle: 0.1,
       levelGain: 0.7,
-      hueSpread: 25,
-      shimmerSpeed: 0.5,
-      hueBoost: 15,
+      hueSpread: 20,
+      shimmerSpeed: 0.08,
+      hueBoost: 8,
       fillAlpha: 0.28,
+      membraneSat: 0.55,
+      nucleusSatMul: 0.35,
+      foodVacuoleHue: 38,
+      cvHue: 160,
       tension: 0.15,
       ciliaCount: 18,
       ciliaLength: 0.4,
@@ -2028,7 +2036,7 @@ function mount(container, api) {
       idleMorphPeriod: 7,
       idleMorphFloor: 0.3,
       growthSwell: 0,
-      swimSpeedMaxFrac: 0.15,
+      swimSpeedMaxFrac: 0.1,
       startleSensitivity: 2.8,
       startleDecay: 0.86,
       startleMaxPx: 5,
