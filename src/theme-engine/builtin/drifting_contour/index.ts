@@ -39,8 +39,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       hueSpread: 8,                  // minimal iridescence — pellicle is NOT a soap bubble (was 40)
       shimmerSpeed: 0.04,              // barely perceptible hue drift (was 0.5)
       hueBoost: 4,                     // less audio hue shift (was 20)
-      fillAlpha: 0.18,               // idle — nearly clear cytoplasm
-      fillAlphaActive: 0.35,         // recording — brightens with voice (DIC contrast)
+      fillAlpha: 0.12,               // idle — ghost-dim (was 0.18)
+      fillAlphaActive: 0.45,         // recording — clearly present (was 0.35)
       // === DIC-authentic colour palette (bio panel r3) ===
       membraneSat: 0.12,             // silvery refractile edge (was 0.85/0.55)
       membraneLightness: 0.75,       // idle — silver
@@ -95,7 +95,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableCiliaStructure: true,    // oral-groove dip + caudal tuft (Commit 23)
       enableAxialSpin: true,         // spin about long axis while swimming (Commit 24)
       axialSpinMax: 7,               // ~1.1 rev/s — calmer, closer to bio ~1 rev/s (was 10)
-      nucleusAlpha: 0.72,            // denser nucleus visible as anchor (was 0.55)
+      nucleusAlpha: 0.85,            // nucleus must be visible interior anchor (was 0.72)
       enableVacuoles: true,          // two asynchronous contractile vacuoles (Commit 26)
       enableCVCanals: true,          // radial canal star shape on CVs (v3.6)
       enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)

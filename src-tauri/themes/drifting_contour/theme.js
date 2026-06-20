@@ -1758,7 +1758,7 @@ function createCellRenderer(container, opts) {
           ctx.beginPath();
           const nAspect = params.nucleusAspect ?? 1.8;
           if (params.enableInteriorField && nAspect !== 1) {
-            ctx.ellipse(nx, ny, nr * nAspect, nr, squeezePhi, 0, TAU);
+            ctx.ellipse(nx, ny, nr * nAspect, nr, bodyHeading, 0, TAU);
           } else {
             ctx.arc(nx, ny, nr, 0, TAU);
           }
@@ -2059,8 +2059,8 @@ function mount(container, api) {
       hueSpread: 8,
       shimmerSpeed: 0.04,
       hueBoost: 4,
-      fillAlpha: 0.18,
-      fillAlphaActive: 0.35,
+      fillAlpha: 0.12,
+      fillAlphaActive: 0.45,
       membraneSat: 0.12,
       membraneLightness: 0.75,
       membraneLightnessActive: 0.88,
@@ -2108,7 +2108,7 @@ function mount(container, api) {
       enableCiliaStructure: true,
       enableAxialSpin: true,
       axialSpinMax: 7,
-      nucleusAlpha: 0.72,
+      nucleusAlpha: 0.85,
       enableVacuoles: true,
       enableCVCanals: true,
       enableCyclosis: true,
