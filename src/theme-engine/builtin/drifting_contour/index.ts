@@ -102,7 +102,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       canalLineWidth: 1.0,           // thicker canal lines (was 0.5px)
       canalAlphaMul: 0.5,            // more visible canals (was 0.3)
       enableOralGroove: true,         // ventral concavity — Paramecium's defining feature
-      oralGrooveDepth: 0.04,          // 4% inward indent
+      oralGrooveDepth: 0.08,          // 8% inward — visible slipper indent (was 4%)
+      oralGrooveWidth: 0.8,            // wider angular extent (was 0.5)
       cyclosisActivityBoost: 0.4,     // cyclosis 40% faster at full activity
       enableEctoplasm: true,          // cortex/endoplasm boundary line
       ectoplasmFrac: 0.93,            // thin cortex at 93% radius (real: 92-96%)
@@ -119,8 +120,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       metachronalSpeed: 4.0,            // wave propagation speed rad/s
       foodVacuoleSat: 0.25,             // warmer amber food vacuoles (was 0.10)
       enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)
-      cyclosisGranuleCount: 52,      // pack the cytoplasm (biologist polish: crammed)
-      granuleSizePx: 1.6,            // a touch brighter/bigger so they read
+      cyclosisGranuleCount: 80,      // denser flow field (was 52)
+      granuleSizePx: 2.0,            // larger for visible streaming (was 1.6)
       enableOrganelles: true,        // food vacuoles + micronucleus (Commit 28)
       foodVacuoleCount: 10,          // more food vacuoles filling the body
       // === v3.3 INTERIOR FIELD (Commit 32a-e) — organelles in body coords,
