@@ -371,8 +371,11 @@ export interface CellParams {
   /** Commit 28: seconds over which a vacuole shrinks from full to small then
    * resets (digest cycle). Default 30. */
   foodVacuoleDigestPeriod?: number;
+  /** Commit v3.5F: macronucleus major/minor axis ratio. Default 1.8 (bean-shaped).
+   * 1.0 = circle. Only applies when enableInteriorField is on. */
+  nucleusAspect?: number;
   /** Commit 28: micronucleus radius as a fraction of the macronucleus radius.
-   * Default 0.32. */
+   * Default 0.20. */
   micronucleusSizeFrac?: number;
   /** Commit 28: micronucleus centre offset from the macronucleus centre, in
    * units of macronucleus radius (just outside it). Default 1.15. */
@@ -624,7 +627,7 @@ export const CELL_DEFAULTS: CellParams = {
   foodVacuoleMaxRadiusFrac: 0.62,
   foodVacuoleSizePx: 3.0,
   foodVacuoleDigestPeriod: 30,
-  micronucleusSizeFrac: 0.32,
+  micronucleusSizeFrac: 0.20,
   micronucleusOffsetFrac: 1.15,
   // Commit 32e: body-normalised (u, s) anchors for the macronucleus + the two
   // contractile vacuoles. Used ONLY on the interior-field path so the organelles
@@ -3658,7 +3661,13 @@ export function createCellRenderer(
 
           ctx.fillStyle = nucGrad;
           ctx.beginPath();
-          ctx.arc(nx, ny, nr, 0, TAU);
+          // Commit v3.5F: ellipse aligned with the body axis when interior field is on
+          const nAspect = params.nucleusAspect ?? 1.8;
+          if (params.enableInteriorField && nAspect !== 1) {
+            ctx.ellipse(nx, ny, nr * nAspect, nr, squeezePhi, 0, TAU);
+          } else {
+            ctx.arc(nx, ny, nr, 0, TAU);
+          }
           ctx.fill();
 
           // Nucleolus — tiny brighter dot at the centre for organelle detail
