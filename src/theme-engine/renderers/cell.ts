@@ -395,6 +395,10 @@ export interface CellParams {
    * Makes food vacuoles visually distinct from granules at overlay scale.
    * Default 1.0 = legacy (same size). */
   foodVacuoleSizeMul?: number;
+  /** v3.9E: saturation override for food vacuole fill/stroke.
+   * Default 0.4 = legacy hardcoded value. Higher values (e.g. 0.25 from theme)
+   * help food vacuoles stand out from grey granules. */
+  foodVacuoleSat?: number;
   /** Commit v3.5F: macronucleus major/minor axis ratio. Default 1.8 (bean-shaped).
    * 1.0 = circle. Only applies when enableInteriorField is on. */
   nucleusAspect?: number;
@@ -3882,6 +3886,7 @@ export function createCellRenderer(
         // Resolved organelle hues (overridable via params, defaults = legacy)
         const cvH = params.cvHue ?? (baseHue + 20);
         const fvH = params.foodVacuoleHue ?? (baseHue - 30);
+        const fvSat = params.foodVacuoleSat ?? 0.4;
         ctx.fillStyle = hsla(baseHue, params.cytoplasmSat ?? 0.70, 0.55, effectiveFillAlpha);
         ctx.beginPath();
         ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
@@ -4225,11 +4230,11 @@ export function createCellRenderer(
               const size = foodVacuoleSize(t, fv.digestPhase, params); // digest shrink (reuse)
               const drawR = fvSizePx * (0.4 + 0.6 * size);
               const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);
-              ctx.fillStyle = hsla(fvH, 0.4, 0.5, params.nucleusAlpha * 0.4);
+              ctx.fillStyle = hsla(fvH, fvSat, 0.5, params.nucleusAlpha * 0.4);
               ctx.beginPath();
               ctx.arc(fx, fy, drawR, 0, TAU);
               ctx.fill();
-              ctx.strokeStyle = hsla(fvH, 0.45, 0.35, params.nucleusAlpha * 0.5);
+              ctx.strokeStyle = hsla(fvH, fvSat * 1.125, 0.35, params.nucleusAlpha * 0.5);
               ctx.lineWidth = 0.8;
               ctx.stroke();
             }
@@ -4254,11 +4259,11 @@ export function createCellRenderer(
                 [[cx + v.x * scale, cy + v.y * scale]], squeezeK, squeezePhi, cx, cy, params,
               )[0];
               // Translucent olive/greenish fill with a slightly darker rim.
-              ctx.fillStyle = hsla(fvH, 0.4, 0.5, params.nucleusAlpha * 0.4);
+              ctx.fillStyle = hsla(fvH, fvSat, 0.5, params.nucleusAlpha * 0.4);
               ctx.beginPath();
               ctx.arc(fx, fy, drawR, 0, TAU);
               ctx.fill();
-              ctx.strokeStyle = hsla(fvH, 0.45, 0.35, params.nucleusAlpha * 0.5);
+              ctx.strokeStyle = hsla(fvH, fvSat * 1.125, 0.35, params.nucleusAlpha * 0.5);
               ctx.lineWidth = 0.8;
               ctx.stroke();
             }
