@@ -8982,3 +8982,112 @@ describe("trichocyst discharge (v3.8E)", () => {
     restore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Metachronal length wave (v3.9D)
+// ---------------------------------------------------------------------------
+describe("metachronal length wave (v3.9D)", () => {
+  const cx = 80, cy = 80, baseR = 16;
+  const BASE: CellParams = {
+    ...CELL_DEFAULTS,
+    ciliaCount: 40,
+    ciliaLength: 0.45,
+    ciliaLengthVar: 0,
+    ciliaGrowthBoost: 0,
+    ciliaCurl: 0,
+    ciliaAngleJitter: 0,
+    ciliaWaveSpeed: 0,
+    ciliaWave: 0,
+  };
+
+  it("enableMetachronal=false (default) => all cilia same length (golden frozen)", () => {
+    const off = ciliaPath(cx, cy, baseR, 1.0, 0.5, 0.0, { ...BASE, enableMetachronal: false });
+    const dists = off.map(h => {
+      const tip = h.points[h.points.length - 1];
+      return Math.hypot(tip[0] - cx, tip[1] - cy);
+    });
+    const minD = Math.min(...dists);
+    const maxD = Math.max(...dists);
+    expect(maxD - minD).toBeLessThan(2);
+  });
+
+  it("enableMetachronal=true => cilia lengths vary along the contour", () => {
+    const on = ciliaPath(cx, cy, baseR, 1.0, 0.5, 0.0, {
+      ...BASE,
+      enableMetachronal: true,
+      metachronalWavelength: 10,
+      metachronalSpeed: 4.0,
+    });
+    const dists = on.map(h => {
+      const tip = h.points[h.points.length - 1];
+      return Math.hypot(tip[0] - cx, tip[1] - cy);
+    });
+    const minD = Math.min(...dists);
+    const maxD = Math.max(...dists);
+    expect(maxD - minD).toBeGreaterThan(1.5);
+  });
+
+  it("wave propagates: different simTime => different length pattern", () => {
+    const params: CellParams = {
+      ...BASE,
+      enableMetachronal: true,
+      metachronalWavelength: 10,
+      metachronalSpeed: 4.0,
+    };
+    const t1 = ciliaPath(cx, cy, baseR, 1.0, 0.5, 0.0, params);
+    const t2 = ciliaPath(cx, cy, baseR, 2.0, 0.5, 0.0, params);
+    const tipDist = (h: { points: Array<[number, number]> }) =>
+      Math.hypot(h.points[h.points.length - 1][0] - cx, h.points[h.points.length - 1][1] - cy);
+    const dists1 = t1.map(tipDist);
+    const dists2 = t2.map(tipDist);
+    let changed = 0;
+    for (let i = 0; i < dists1.length; i++) {
+      if (Math.abs(dists1[i] - dists2[i]) > 0.1) changed++;
+    }
+    expect(changed).toBeGreaterThan(dists1.length * 0.3);
+  });
+
+  it("wavelength controls spatial frequency", () => {
+    const mkParams = (wl: number): CellParams => ({
+      ...BASE,
+      enableMetachronal: true,
+      metachronalWavelength: wl,
+      metachronalSpeed: 0,
+    });
+    const tipDist = (h: { points: Array<[number, number]> }) =>
+      Math.hypot(h.points[h.points.length - 1][0] - cx, h.points[h.points.length - 1][1] - cy);
+    const short = ciliaPath(cx, cy, baseR, 0, 0.5, 0.0, mkParams(5)).map(tipDist);
+    const long = ciliaPath(cx, cy, baseR, 0, 0.5, 0.0, mkParams(20)).map(tipDist);
+    function zeroCrossings(d: number[]): number {
+      const mean = d.reduce((s, v) => s + v, 0) / d.length;
+      let crossings = 0;
+      for (let i = 1; i < d.length; i++) {
+        if ((d[i] - mean) * (d[i - 1] - mean) < 0) crossings++;
+      }
+      return crossings;
+    }
+    expect(zeroCrossings(short)).toBeGreaterThan(zeroCrossings(long));
+  });
+
+  it("modulation range stays within [0.6, 1.0] multiplier", () => {
+    const params: CellParams = {
+      ...BASE,
+      enableMetachronal: true,
+      metachronalWavelength: 10,
+      metachronalSpeed: 0,
+    };
+    const lenMean = baseR * 0.45 * (0.55 + 0.45 * 0.5);
+    for (let t = 0; t < 10; t += 0.7) {
+      const paths = ciliaPath(cx, cy, baseR, t, 0.5, 0.0, params);
+      const dists = paths.map(h =>
+        Math.hypot(h.points[h.points.length - 1][0] - cx, h.points[h.points.length - 1][1] - cy)
+      );
+      const minExpected = baseR + lenMean * 0.6 - 2;
+      const maxExpected = baseR + lenMean * 1.0 + 2;
+      for (const d of dists) {
+        expect(d).toBeGreaterThan(minExpected);
+        expect(d).toBeLessThan(maxExpected);
+      }
+    }
+  });
+});
