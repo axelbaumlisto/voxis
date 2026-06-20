@@ -311,6 +311,20 @@ export interface CellParams {
   /** Commit 26: posterior phase offset (fraction of a cycle) so the two CVs
    * do not start together. Default 0.5. */
   vacuolePosteriorPhase?: number;
+  /** Commit 27 (OPT, default off): cytoplasmic streaming (cyclosis) — a field of
+   * small granules circulates on a divergence-free closed loop inside the body.
+   * Draw-only; when off nothing is seeded/advected/drawn. */
+  enableCyclosis?: boolean;
+  /** Commit 27: number of granules that circulate. Default 14. */
+  cyclosisGranuleCount?: number;
+  /** Commit 27: seconds for a granule near mid-radius to complete the loop
+   * (~30-60s). Default 45. */
+  cyclosisPeriod?: number;
+  /** Commit 27: granules live within this fraction of baseR (inside the wall).
+   * Default 0.75. */
+  granuleMaxRadiusFrac?: number;
+  /** Commit 27: draw radius (px) of a granule dot. Default 1.3. */
+  granuleSizePx?: number;
   /** H4 (OPT, default off): advect ambient motes by the body's dipolar wake so a
    * swimming cell visibly drags the surrounding fluid. */
   enableFlowField?: boolean;
@@ -517,6 +531,14 @@ export const CELL_DEFAULTS: CellParams = {
   vacuolePosteriorPeriod: 13,
   vacuolePairMaxFrac: 0.16,
   vacuolePosteriorPhase: 0.5,
+  // Commit 27: cytoplasmic streaming (cyclosis) granules. OFF (dark-launch) so
+  // seedGranules returns [] / the gated draw block is skipped -> all goldens
+  // stay byte-identical.
+  enableCyclosis: false,
+  cyclosisGranuleCount: 14,
+  cyclosisPeriod: 45,
+  granuleMaxRadiusFrac: 0.75,
+  granuleSizePx: 1.3,
 };
 
 
@@ -2390,6 +2412,66 @@ export function seedMotes(width: number, height: number, params: CellParams): { 
   return out;
 }
 
+/**
+ * Commit 27 — cytoplasmic streaming (cyclosis) velocity field. A rigid-rotation
+ * field `u(dx,dy) = omega*(-dy, dx)` is EXACTLY divergence-free
+ * (∂(-omega·dy)/∂dx + ∂(omega·dx)/∂dy = 0) and tangent to circles about the
+ * centre, so `u·r = 0` (no radial flux) and `u·n = 0` at a circular wall. A
+ * granule advected by this field stays on its circle, giving a stable closed
+ * cyclosis loop. omega>0 is counterclockwise. Pure & deterministic.
+ */
+export function cyclosisField(dx: number, dy: number, omega: number): { vx: number; vy: number } {
+  return { vx: -omega * dy, vy: omega * dx };
+}
+
+/**
+ * Commit 27 — deterministic scatter of `cyclosisGranuleCount` granules as
+ * BODY-FRAME offsets (relative to the centre) within
+ * `granuleMaxRadiusFrac*baseR`. Two decorrelated value-noise seeds per granule
+ * (→ angle + radius); the radius uses a sqrt for an area-uniform disc fill.
+ * Returns [] when the gate is off or the count is 0. Pure & deterministic.
+ */
+export function seedGranules(baseR: number, params: CellParams): Array<{ x: number; y: number }> {
+  if (!params.enableCyclosis) return [];
+  const n = Math.max(0, Math.floor(params.cyclosisGranuleCount ?? 0));
+  if (n === 0) return [];
+  const maxRad = Math.max(0, params.granuleMaxRadiusFrac ?? 0.75) * Math.max(0, baseR);
+  const out: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < n; i++) {
+    const ang = (noise2D(i * 12.9898 + 1.7, 78.233) + 1) * Math.PI; // [0, 2PI]
+    // sqrt of a [0,1] sample -> area-uniform fill of the disc.
+    const rad = Math.sqrt((noise2D(i * 39.346 + 5.3, 11.135) + 1) * 0.5) * maxRad;
+    out.push({ x: rad * Math.cos(ang), y: rad * Math.sin(ang) });
+  }
+  return out;
+}
+
+/**
+ * Commit 27 — advance one granule's BODY-FRAME offset by the cyclosis rotation
+ * field for `dt`. omega = TAU / max(0.1, cyclosisPeriod). Explicit Euler on a
+ * rotation drifts outward by O(dt²); we renormalise the radius back to its prior
+ * magnitude so the granule stays exactly on its circle (no spiral-out/collapse).
+ * The body-frame radius is clamped to granuleMaxRadiusFrac*baseR. Pure &
+ * deterministic; angular speed is fixed by cyclosisPeriod (frame-rate
+ * independent in the sense that the same simTime path yields the same loop).
+ */
+export function advectGranule(
+  g: { x: number; y: number },
+  baseR: number,
+  dt: number,
+  params: CellParams,
+): { x: number; y: number } {
+  const omega = TAU / Math.max(0.1, params.cyclosisPeriod ?? 45);
+  const v = cyclosisField(g.x, g.y, omega);
+  const nx = g.x + v.vx * dt;
+  const ny = g.y + v.vy * dt;
+  const maxRad = Math.max(0, params.granuleMaxRadiusFrac ?? 0.75) * Math.max(0, baseR);
+  const r0 = Math.min(Math.hypot(g.x, g.y), maxRad);
+  const r1 = Math.hypot(nx, ny) || 1;
+  const s = r0 / r1;
+  return { x: nx * s, y: ny * s };
+}
+
 // ---------------------------------------------------------------------------
 // Cell containment — full organism reach (membrane + cilia + startle)
 // ---------------------------------------------------------------------------
@@ -2743,6 +2825,11 @@ export function createCellRenderer(
   // Lazily seeded on first tick when enableFlowField is on; [] otherwise so the
   // default path allocates nothing and the shipped look is unchanged.
   let motes: { x: number; y: number }[] | null = null;
+  // Commit 27 (gate OFF): cytoplasmic-streaming granules, body-frame offsets that
+  // circulate on a divergence-free closed loop. Lazily seeded on first tick when
+  // enableCyclosis is on; stays null otherwise so the default path allocates
+  // nothing and the shipped look is byte-unchanged.
+  let granules: Array<{ x: number; y: number }> | null = null;
   // H4: previous-frame flow source (centre, heading, swim speed) so motes can be
   // advected + drawn BEHIND the cell at the top of the tick without a forward
   // dependency on this frame's not-yet-computed centre.
@@ -3155,6 +3242,37 @@ export function createCellRenderer(
             ctx.fillStyle = hsla(baseHue + 20, 0.45, 0.70, params.nucleusAlpha * 0.45);
             ctx.beginPath();
             ctx.arc(vx, vy, e.r, 0, TAU);
+            ctx.fill();
+          }
+        }
+
+        // Commit 27 (gate OFF): cytoplasmic streaming (cyclosis) granules. A
+        // field of small warm dots circulates on a divergence-free closed loop
+        // inside the body, filling the otherwise near-empty interior. Draw-only:
+        // seeded lazily once, advected in body-frame, clamped inside the live
+        // minimum membrane radius, then squeezed with the same body affine so
+        // they ride the prolate/spin. Skipped (granules stays null) unless
+        // enableCyclosis is on, so all goldens stay byte-identical.
+        if (params.enableCyclosis && (params.cyclosisGranuleCount ?? 0) > 0) {
+          if (!granules) granules = seedGranules(baseR, params);
+          const granuleSizePx = params.granuleSizePx ?? 1.3;
+          ctx.fillStyle = hsla(baseHue + 25, 0.6, 0.6, params.nucleusAlpha * 0.6);
+          for (let i = 0; i < granules.length; i++) {
+            granules[i] = advectGranule(granules[i], baseR, dt, params);
+            const off = granules[i];
+            // Containment: clamp the body-frame radius so granule + draw size
+            // stays inside the live minimum membrane radius (like the vacuoles).
+            const maxRad = Math.min(
+              (params.granuleMaxRadiusFrac ?? 0.75) * baseR,
+              Math.max(0, minMembraneR - granuleSizePx),
+            );
+            const rad = Math.hypot(off.x, off.y);
+            const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
+            const [gx, gy] = affineSqueezePoints(
+              [[cx + off.x * scale, cy + off.y * scale]], squeezeK, squeezePhi, cx, cy, params,
+            )[0];
+            ctx.beginPath();
+            ctx.arc(gx, gy, granuleSizePx, 0, TAU);
             ctx.fill();
           }
         }

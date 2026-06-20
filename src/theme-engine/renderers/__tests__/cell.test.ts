@@ -46,6 +46,9 @@ import {
   dipoleFlowAt,
   advectMote,
   seedMotes,
+  cyclosisField,
+  seedGranules,
+  advectGranule,
   cellReach,
   cellDrift,
   wanderStep,
@@ -5422,6 +5425,111 @@ describe("Commit 26 — two contractile vacuoles", () => {
     expect(contractileVacuolePair(8.8, baseR, phi, P)).toEqual(
       contractileVacuolePair(8.8, baseR, phi, P),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 27 — cytoplasmic streaming (cyclosis) + granules. The interior reads
+// near-empty ("only the nucleus"); a divergence-free rigid-rotation field
+// circulates a field of granules on closed loops tangent to the wall. All
+// pure/deterministic; render wiring is gated behind enableCyclosis (OFF).
+// ---------------------------------------------------------------------------
+describe("Commit 27 — cyclosis + granules", () => {
+  const baseR = 24;
+
+  it("(a) cyclosisField is DIVERGENCE-FREE and TANGENT to circles", () => {
+    const omega = 0.3;
+    const h = 1e-4;
+    for (const [dx, dy] of [[0, 0], [3, 0], [0, 5], [-4, 7], [11, -2]]) {
+      // finite-difference divergence: dvx/ddx + dvy/ddy
+      const vxp = cyclosisField(dx + h, dy, omega).vx;
+      const vxm = cyclosisField(dx - h, dy, omega).vx;
+      const vyp = cyclosisField(dx, dy + h, omega).vy;
+      const vym = cyclosisField(dx, dy - h, omega).vy;
+      const div = (vxp - vxm) / (2 * h) + (vyp - vym) / (2 * h);
+      expect(Math.abs(div)).toBeLessThan(1e-6);
+      // tangent: u . r == 0 exactly
+      const u = cyclosisField(dx, dy, omega);
+      expect(u.vx * dx + u.vy * dy).toBeCloseTo(0, 12);
+    }
+  });
+
+  it("(b) cyclosisField ROTATION SENSE: omega>0 is CCW and linear in omega", () => {
+    // at (1,0): v = (-omega*0, omega*1) = (0, omega) -> +y (CCW in math frame)
+    const v = cyclosisField(1, 0, 0.7);
+    expect(v.vx).toBeCloseTo(0, 12);
+    expect(v.vy).toBeCloseTo(0.7, 12);
+    // linear in omega
+    const a = cyclosisField(3, -2, 1);
+    const b = cyclosisField(3, -2, 2.5);
+    expect(b.vx).toBeCloseTo(2.5 * a.vx, 12);
+    expect(b.vy).toBeCloseTo(2.5 * a.vy, 12);
+    // zero omega -> zero field
+    expect(cyclosisField(3, -2, 0)).toEqual({ vx: 0, vy: 0 });
+  });
+
+  it("(c) seedGranules: gate off -> []; gate on -> count entries within maxRad; deterministic", () => {
+    expect(seedGranules(baseR, { ...CELL_DEFAULTS })).toEqual([]);
+    const P = { ...CELL_DEFAULTS, enableCyclosis: true };
+    const g = seedGranules(baseR, P);
+    expect(g.length).toBe(P.cyclosisGranuleCount);
+    const maxRad = (P.granuleMaxRadiusFrac ?? 0.75) * baseR;
+    for (const o of g) {
+      expect(Math.hypot(o.x, o.y)).toBeLessThanOrEqual(maxRad + 1e-9);
+    }
+    // deterministic (same seeds twice)
+    expect(seedGranules(baseR, P)).toEqual(g);
+    // count 0 -> []
+    expect(seedGranules(baseR, { ...P, cyclosisGranuleCount: 0 })).toEqual([]);
+  });
+
+  it("(d) advectGranule STAYS ON CIRCLE over 200 steps (no spiral-out/collapse)", () => {
+    const P = { ...CELL_DEFAULTS, enableCyclosis: true };
+    let g = { x: 10, y: 0 };
+    const r0 = Math.hypot(g.x, g.y);
+    const dt = 1 / 60;
+    for (let i = 0; i < 200; i++) g = advectGranule(g, baseR, dt, P);
+    const r = Math.hypot(g.x, g.y);
+    expect(Math.abs(r - r0) / r0).toBeLessThan(0.01);
+  });
+
+  it("(e) advectGranule MOVES: angle advances by ~omega*dt for small dt", () => {
+    const P = { ...CELL_DEFAULTS, enableCyclosis: true, cyclosisPeriod: 45 };
+    const omega = (Math.PI * 2) / 45;
+    const g0 = { x: 8, y: 0 };
+    const dt = 1 / 60;
+    const g1 = advectGranule(g0, baseR, dt, P);
+    const a0 = Math.atan2(g0.y, g0.x);
+    const a1 = Math.atan2(g1.y, g1.x);
+    const dAng = wrapPi(a1 - a0);
+    expect(dAng).toBeGreaterThan(0); // circulates (CCW for omega>0)
+    expect(dAng).toBeCloseTo(omega * dt, 4);
+  });
+
+  it("(f) DETERMINISM: identical args -> identical output for all three helpers", () => {
+    const P = { ...CELL_DEFAULTS, enableCyclosis: true };
+    expect(cyclosisField(3, -2, 0.5)).toEqual(cyclosisField(3, -2, 0.5));
+    expect(seedGranules(baseR, P)).toEqual(seedGranules(baseR, P));
+    const g = { x: 7, y: 3 };
+    expect(advectGranule(g, baseR, 1 / 60, P)).toEqual(advectGranule(g, baseR, 1 / 60, P));
+  });
+
+  it("(g) RENDER SMOKE: enableCyclosis:true renders a few frames without throwing", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn().mockReturnValue(7));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: 120,
+      height: 60,
+      params: { enableCyclosis: true },
+    });
+    expect(() => {
+      for (let i = 0; i < 4; i++) {
+        r.update({ mode: "recording", audioLevel: 0.5, spectrumBins: new Array(32).fill(0.3) });
+      }
+    }).not.toThrow();
+    r.destroy();
+    vi.unstubAllGlobals();
   });
 });
 
