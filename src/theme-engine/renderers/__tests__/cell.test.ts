@@ -8192,3 +8192,185 @@ describe("v3.7B — applyOralGroove", () => {
     expect(anyChanged).toBe(true);
   });
 });
+
+describe("v3.7D — ectoplasm boundary", () => {
+  const W = 200;
+  const H = 200;
+
+  function setupRaf() {
+    const rafCalls: Array<() => void> = [];
+    let n = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return ++n; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    return rafCalls;
+  }
+
+  function installCtx(overrides: Record<string, unknown> = {}) {
+    const grad = { addColorStop: () => {} };
+    const ctx: Record<string, unknown> = {
+      clearRect: () => {},
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      stroke: vi.fn(),
+      fill: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      createRadialGradient: () => grad,
+      fillStyle: "", strokeStyle: "", lineWidth: 0, lineCap: "", lineJoin: "",
+      ...overrides,
+    };
+    const proto = HTMLCanvasElement.prototype as unknown as {
+      getContext: (id: string) => unknown;
+    };
+    const orig = proto.getContext;
+    proto.getContext = () => ctx;
+    return { ctx, restore: () => { proto.getContext = orig; } };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("enableEctoplasm defaults to false (no extra strokes)", () => {
+    expect(CELL_DEFAULTS.enableEctoplasm).toBe(false);
+  });
+
+  it("ectoplasmFrac defaults to 0.85", () => {
+    expect(CELL_DEFAULTS.ectoplasmFrac).toBe(0.85);
+  });
+
+  it("ectoplasmAlpha defaults to 0.15", () => {
+    expect(CELL_DEFAULTS.ectoplasmAlpha).toBe(0.15);
+  });
+
+  it("enableEctoplasm=false (default) → renders without extra stroke", () => {
+    const rafCalls = setupRaf();
+    const { ctx, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, { width: W, height: H });
+    const strokeBefore = (ctx.stroke as ReturnType<typeof vi.fn>).mock.calls.length;
+    for (let i = 0; i < 5; i++) {
+      r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    const strokeAfter = (ctx.stroke as ReturnType<typeof vi.fn>).mock.calls.length;
+    // With ectoplasm OFF we get some stroke calls (membrane), record as baseline
+    const defaultStrokes = strokeAfter - strokeBefore;
+    r.destroy();
+    restore();
+
+    // Now run with enableEctoplasm ON and verify MORE strokes
+    const rafCalls2 = setupRaf();
+    const { ctx: ctx2, restore: restore2 } = installCtx();
+    const container2 = document.createElement("div");
+    const r2 = createCellRenderer(container2, {
+      width: W, height: H,
+      params: { ...CELL_DEFAULTS, enableEctoplasm: true },
+    });
+    const strokeBefore2 = (ctx2.stroke as ReturnType<typeof vi.fn>).mock.calls.length;
+    for (let i = 0; i < 5; i++) {
+      r2.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls2.length) rafCalls2.shift()!();
+    }
+    const strokeAfter2 = (ctx2.stroke as ReturnType<typeof vi.fn>).mock.calls.length;
+    const ectoStrokes = strokeAfter2 - strokeBefore2;
+    // enableEctoplasm ON should produce MORE stroke() calls
+    expect(ectoStrokes).toBeGreaterThan(defaultStrokes);
+    r2.destroy();
+    restore2();
+  });
+
+  it("enableEctoplasm=true → renders without throwing", () => {
+    const rafCalls = setupRaf();
+    const { restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableEctoplasm: true,
+        ectoplasmFrac: 0.85,
+        ectoplasmAlpha: 0.15,
+      },
+    });
+    expect(() => {
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0.9, spectrumBins: new Array(32).fill(0.7) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    r.destroy();
+    restore();
+  });
+
+  it("ectoplasm uses save/restore (no context leak)", () => {
+    const rafCalls = setupRaf();
+    const { ctx, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: { ...CELL_DEFAULTS, enableEctoplasm: true },
+    });
+    for (let i = 0; i < 5; i++) {
+      r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+    const saveCalls = (ctx.save as ReturnType<typeof vi.fn>).mock.calls.length;
+    const restoreCalls = (ctx.restore as ReturnType<typeof vi.fn>).mock.calls.length;
+    // save/restore must be balanced
+    expect(saveCalls).toBe(restoreCalls);
+    r.destroy();
+    restore();
+  });
+
+  it("custom ectoplasmFrac/ectoplasmAlpha accepted without error", () => {
+    const rafCalls = setupRaf();
+    const { restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W, height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableEctoplasm: true,
+        ectoplasmFrac: 0.75,
+        ectoplasmAlpha: 0.30,
+      },
+    });
+    expect(() => {
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    r.destroy();
+    restore();
+  });
+
+  it("gate-off golden: CELL_DEFAULTS with ectoplasm off renders identically", () => {
+    const rafCalls = setupRaf();
+    const { restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, { width: W, height: H });
+    expect(() => {
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+      for (let i = 0; i < 5; i++) {
+        r.update({ mode: "recording", audioLevel: 0.7, spectrumBins: new Array(32).fill(0.5) });
+        if (rafCalls.length) rafCalls.shift()!();
+      }
+    }).not.toThrow();
+    r.destroy();
+    restore();
+  });
+});

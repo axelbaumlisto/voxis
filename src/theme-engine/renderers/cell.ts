@@ -501,6 +501,18 @@ export interface CellParams {
   oralGrooveAngle?: number;
   /** v3.7B: angular half-width of the groove in radians. Default 0.6. */
   oralGrooveWidth?: number;
+
+  /** v3.7D (OPT, default off): ECTOPLASM BOUNDARY. Draws a thin inner contour
+   * representing the cortex/endoplasm boundary visible in DIC micrographs as a
+   * clear rim between the membrane and the granular interior. When off, no
+   * extra stroke is drawn (golden frozen). */
+  enableEctoplasm?: boolean;
+  /** v3.7D: inner contour radius as fraction of membrane radius.
+   * Default 0.85 (ectoplasm ~15% of cell radius). */
+  ectoplasmFrac?: number;
+  /** v3.7D: stroke alpha for the ectoplasm boundary line.
+   * Default 0.15. */
+  ectoplasmAlpha?: number;
 }
 
 /** Sensible defaults — lively amber cell with visible pseudopods + iridescence. */
@@ -632,6 +644,11 @@ export const CELL_DEFAULTS: CellParams = {
   oralGrooveDepth: 0.04,
   oralGrooveAngle: 1.2,
   oralGrooveWidth: 0.6,
+  // v3.7D: ectoplasm boundary. OFF (dark-launch) so no extra stroke
+  // is drawn -> all goldens stay byte-identical.
+  enableEctoplasm: false,
+  ectoplasmFrac: 0.85,
+  ectoplasmAlpha: 0.15,
   // Commit 26: PLURAL pair of asynchronous contractile vacuoles. OFF
   // (dark-launch) so contractileVacuolePair returns [] and the gated draw
   // block is skipped -> all goldens stay byte-identical.
@@ -3733,6 +3750,31 @@ export function createCellRenderer(
         grad.addColorStop(1, hsla(baseHue, params.cytoplasmSat ?? 0.70, 0.45, effectiveFillAlpha));
         ctx.fillStyle = grad;
         ctx.fill();
+
+        // --- v3.7D: Ectoplasm/endoplasm boundary ---
+        // In DIC micrographs there is a clear cortical rim between the
+        // membrane and the granular endoplasm. We draw it as a thin,
+        // low-alpha inner contour scaled toward the centroid.
+        if (params.enableEctoplasm) {
+          const ectoFrac = params.ectoplasmFrac ?? 0.85;
+          const ectoAlpha = params.ectoplasmAlpha ?? 0.15;
+          ctx.save();
+          ctx.beginPath();
+          const ex0 = cx + (splinePoints[0][0] - cx) * ectoFrac;
+          const ey0 = cy + (splinePoints[0][1] - cy) * ectoFrac;
+          ctx.moveTo(ex0, ey0);
+          for (let i = 1; i < splinePoints.length; i++) {
+            ctx.lineTo(
+              cx + (splinePoints[i][0] - cx) * ectoFrac,
+              cy + (splinePoints[i][1] - cy) * ectoFrac,
+            );
+          }
+          ctx.closePath();
+          ctx.strokeStyle = hsla(baseHue, (params.membraneSat ?? 0.85) * 0.5, effectiveMembraneLightness, ectoAlpha);
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+          ctx.restore();
+        }
 
         // --- Nucleus: denser organelle drifting/pulsing inside the cell ---
         // F9: thread the LIVE minimum membrane radius so a deep inward pinch
