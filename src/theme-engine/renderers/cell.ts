@@ -326,6 +326,8 @@ export interface CellParams {
   /** Commit 27: seconds for a granule near mid-radius to complete the loop
    * (~30-60s). Default 45. */
   cyclosisPeriod?: number;
+  /** Commit 32c: direction of cyclosis circulation (+1 or -1). Default +1. */
+  cyclosisSense?: number;
   /** Commit 27: granules live within this fraction of baseR (inside the wall).
    * Default 0.75. */
   granuleMaxRadiusFrac?: number;
@@ -570,6 +572,7 @@ export const CELL_DEFAULTS: CellParams = {
   enableInteriorField: false,
   cyclosisGranuleCount: 14,
   cyclosisPeriod: 45,
+  cyclosisSense: 1,
   granuleMaxRadiusFrac: 0.75,
   granuleSizePx: 1.3,
   // Commit 28: food vacuoles + micronucleus. OFF (dark-launch) so
@@ -2329,6 +2332,34 @@ export interface InteriorCtx {
   /** Body long-axis heading (rad). */
   bodyHeading: number;
   params: CellParams;
+  /** Commit 32c (OPT): precomputed 96-sample {ang, rad} profile polar table
+   * (from `buildProfilePts`). When supplied the caller builds it ONCE per frame
+   * so `interiorPoint` skips its per-call profile loop. When omitted, behaviour
+   * is byte-identical to before (the same table is rebuilt internally). */
+  profilePts?: Array<{ ang: number; rad: number }>;
+}
+
+/**
+ * Commit 32c — build the 96-sample {ang, rad} polar profile table that
+ * `interiorPoint` uses to look up the wall radius at a body angle. EXACTLY the
+ * array `interiorPoint` builds inline (sample bodyProfilePoint at t=(k/N)*TAU ->
+ * {ang: atan2(py,px), rad: hypot(px,py)}). Pulled out so the caller can build it
+ * once per frame instead of once per granule (perf), and so there is ONE
+ * definition shared by the cache path and the fallback (DRY). Pure.
+ */
+export function buildProfilePts(
+  baseR: number,
+  params: CellParams,
+  samples = 96,
+): Array<{ ang: number; rad: number }> {
+  const N = Math.max(3, Math.floor(samples));
+  const pts: Array<{ ang: number; rad: number }> = [];
+  for (let k = 0; k < N; k++) {
+    const t = (k / N) * TAU;
+    const [px, py] = bodyProfilePoint(t, baseR, params);
+    pts.push({ ang: Math.atan2(py, px), rad: Math.hypot(px, py) });
+  }
+  return pts;
 }
 
 /**
@@ -2369,14 +2400,10 @@ export function interiorPoint(u: number, s: number, ctx: InteriorCtx): [number, 
   const rho = Math.hypot(xb, yb);
   const thetaBody = Math.atan2(yb, xb);
   // 3. The UN-scaled profile wall radius at this body angle (same sampling as
-  //    bodyProfileDeform / bodyProfileAreaScale use).
-  const N = 96;
-  const pts: Array<{ ang: number; rad: number }> = [];
-  for (let k = 0; k < N; k++) {
-    const t = (k / N) * TAU;
-    const [px, py] = bodyProfilePoint(t, baseR, params);
-    pts.push({ ang: Math.atan2(py, px), rad: Math.hypot(px, py) });
-  }
+  //    bodyProfileDeform / bodyProfileAreaScale use). Use the caller's per-frame
+  //    cache when supplied (32c perf); else rebuild the SAME 96-sample table via
+  //    buildProfilePts so the fallback is byte-identical to before.
+  const pts = ctx.profilePts ?? buildProfilePts(baseR, params);
   const profileR = interpProfileRadius(thetaBody, pts);
   // 4. Radial fraction f in [0, 1]: at |s|=1, rho === profileR so f === 1 (on
   //    the wall); at the centre (rho=0) f === 0. Pole guard: profileR -> 0 at
@@ -2463,6 +2490,42 @@ export function seedInteriorGranules(
     out.push({ u, s, q: xiQ, phi0: xiP * TAU });
   }
   return out;
+}
+
+/**
+ * Commit 32c — advance one interior granule along a divergence-free closed
+ * cyclosis loop in BODY coords (u, s). In the unit square [-1,1]^2 the
+ * streamfunction psi(u, s) = (1-u^2)(1-s^2) vanishes on all edges, so its level
+ * sets are nested closed loops tangent to the wall (u . n = 0). We use the
+ * phase parametrisation (option A in aplan-organelles-math.md): NO
+ * renormalisation, exactly on the loop, frame-rate independent (reads simTime,
+ * not dt):
+ *
+ *   u(phi) = amp * sin(phi)
+ *   s(phi) = amp * sin(phi + pi/2) = amp * cos(phi)    (delta = pi/2 => clean loop)
+ *
+ * `amp` (which nested loop this granule rides) comes from the seeded loop label
+ * q in [0, 1], biased outward by sqrt so a fraction of granules ride the OUTER
+ * cortical loop near the poles. Because (u, s) maps through the ELONGATED body
+ * via interiorPoint, this body-coord circle becomes an elongated world loop that
+ * follows the body and reaches the poles. Divergence-free + wall-tangent by
+ * construction (|u|,|s| < 1 for amp < 1). Pure & deterministic — depends only on
+ * (q, phi0, simTime, params); decoupled from speedNorm (uses cyclosisPeriod).
+ */
+export function cyclosisLoopPoint(
+  g: { q: number; phi0: number },
+  simTime: number,
+  params: CellParams,
+): { u: number; s: number } {
+  const T = Math.max(0.1, params.cyclosisPeriod ?? 45);
+  const sense = (params.cyclosisSense ?? 1) >= 0 ? 1 : -1;
+  const phi = g.phi0 + sense * (TAU / T) * simTime; // frame-rate independent (simTime)
+  // nested loop amplitude from the loop label q in [0, 1]; sqrt biases outward
+  // so some granules ride the OUTER loop near the cortex/poles.
+  const amp = 0.3 + 0.68 * Math.sqrt(Math.max(0, Math.min(1, g.q))); // [0.30, 0.98]
+  const u = amp * Math.sin(phi);
+  const s = amp * Math.sin(phi + Math.PI / 2); // = amp*cos(phi); delta=pi/2 -> elliptical loop
+  return { u, s };
 }
 
 /**
@@ -3580,17 +3643,23 @@ export function createCellRenderer(
           const granuleSizePx = params.granuleSizePx ?? 1.3;
           ctx.fillStyle = hsla(baseHue + 25, 0.6, 0.6, params.nucleusAlpha * 0.6);
           if (params.enableInteriorField) {
-            // Commit 32b (gate ON): body-coord path. Granules sit area-uniformly
-            // in (u, s) and are drawn via interiorPoint, so they fill the whole
-            // slipper and deform WITH the live wall. (Cyclosis MOTION lands in
-            // 32c; here they are drawn at their static seeded (u, s).)
+            // Commit 32c (gate ON): body-coord path. Granules CIRCULATE on a
+            // divergence-free streamfunction loop (cyclosisLoopPoint) in (u, s)
+            // and are drawn via interiorPoint, so they fill the whole slipper,
+            // reach the poles, and deform WITH the live wall. The 96-sample
+            // profile table is built ONCE per frame (buildProfilePts) and shared
+            // via ictx.profilePts so interiorPoint skips its per-call loop.
             if (!interiorGranules) {
               interiorGranules = seedInteriorGranules(params.cyclosisGranuleCount ?? 0, 0, params);
             }
-            const ictx: InteriorCtx = { cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params };
+            const profilePts = buildProfilePts(baseR, params);
+            const ictx: InteriorCtx = {
+              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params, profilePts,
+            };
             for (let i = 0; i < interiorGranules.length; i++) {
               const g = interiorGranules[i];
-              const [gx, gy] = interiorPoint(g.u, g.s, ictx);
+              const loop = cyclosisLoopPoint(g, t, params);
+              const [gx, gy] = interiorPoint(loop.u, loop.s, ictx);
               ctx.beginPath();
               ctx.arc(gx, gy, granuleSizePx, 0, TAU);
               ctx.fill();
