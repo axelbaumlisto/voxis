@@ -882,6 +882,176 @@ function cellPersistKey(width, height) {
   return `talri.cell.state.v2.${Math.round(width)}x${Math.round(height)}`;
 }
 
+// src/theme-engine/renderers/cell/contour.ts
+function cellRadius(angle, t, energy, params) {
+  const dx = Math.cos(angle);
+  const dy = Math.sin(angle);
+  const noiseVal = fbm(dx * params.noiseScale + t * params.timeScale * 0.3, dy * params.noiseScale + t * params.timeScale * 0.2, params.octaves, params.lacunarity, params.gain);
+  const amp = params.idle + energy * params.energyDrive;
+  return 1 + noiseVal * params.membraneAmplitude * amp;
+}
+function pseudopodOffset(angle, t, audioLevel, energy, params) {
+  let total = 0;
+  const numLobes = 2;
+  for (let i = 0;i < numLobes; i++) {
+    const seed = (i + 1) * 1000;
+    const theta = TAU * noise2D(seed, t * params.intentDrift);
+    let delta = angle - theta;
+    delta = ((delta + Math.PI) % TAU + TAU) % TAU - Math.PI;
+    const sharp = Math.max(2, params.sharpness);
+    const lobe = Math.pow(Math.max(0, Math.cos(delta)), sharp);
+    const audioDrive = params.idle + audioLevel * params.levelGain;
+    const amp = params.push * audioDrive * energy;
+    total += lobe * amp;
+  }
+  return total;
+}
+function idleMorph(sampleCount, t, params) {
+  const out = [];
+  const phase = (Math.cos(TAU * t / Math.max(0.01, params.idleMorphPeriod)) + 1) / 2;
+  const env = params.idleMorphFloor + (1 - params.idleMorphFloor) * phase;
+  const travel = t * params.idleMorphSpeed;
+  for (let i = 0;i < sampleCount; i++) {
+    const a = i / sampleCount * TAU;
+    const n1 = noise2D(Math.cos(a) * 1.6 + travel, Math.sin(a) * 1.6 - travel * 0.7);
+    const n2 = noise2D(Math.cos(a) * 3.1 - travel * 0.5, Math.sin(a) * 3.1 + travel * 0.9);
+    const raw = n1 * 0.65 + n2 * 0.35;
+    let d = raw * params.idleMorphAmplitude * env;
+    const cap = params.idleMorphAmplitude;
+    if (d > cap)
+      d = cap;
+    else if (d < -cap)
+      d = -cap;
+    out.push(d);
+  }
+  return out;
+}
+function sampleBinLevel(bins, normalized) {
+  const nBins = bins.length;
+  if (nBins === 0)
+    return 0;
+  if (nBins === 1)
+    return bins[0];
+  const u = (normalized % 1 + 1) % 1 * nBins - 0.5;
+  const i0 = Math.floor(u);
+  const frac = u - i0;
+  const a = bins[(i0 % nBins + nBins) % nBins];
+  const b = bins[((i0 + 1) % nBins + nBins) % nBins];
+  return lerp(a, b, smoothstep(frac));
+}
+function saturateTargetDeform(target, params) {
+  if (!params.enableSaturation)
+    return target;
+  const Dmax = params.deformMax ?? 0.6;
+  if (!(Dmax > 0))
+    return target;
+  return target.map((d) => Dmax * Math.tanh(d / Dmax));
+}
+function normalizeAreaDeform(integrated, params) {
+  if (!params.enableAreaNorm)
+    return integrated;
+  const n = integrated.length;
+  if (n === 0)
+    return integrated;
+  let sum = 0;
+  let sumSq = 0;
+  let minE = Infinity;
+  for (const d of integrated) {
+    const e = 1 + d;
+    sum += e;
+    sumSq += e * e;
+    if (e < minE)
+      minE = e;
+  }
+  const m1 = sum / n;
+  const m2 = sumSq / n;
+  const variance = m2 - m1 * m1;
+  if (variance > 1 || !(m2 > 0)) {
+    const s = m2 > 0 ? 1 / Math.sqrt(m2) : 1;
+    return integrated.map((d) => (1 + d) * s - 1);
+  }
+  let c = m1 - Math.sqrt(1 - variance);
+  const EPS = 0.0001;
+  const cMax = minE - EPS;
+  if (c > cMax)
+    c = cMax;
+  return integrated.map((d) => d - c);
+}
+function integrateDeformPipeline(prev, target, params) {
+  const satTarget = saturateTargetDeform(target, params);
+  const integrated = prev ? integrateDeformation(prev, satTarget, params.attack, params.release) : satTarget.slice();
+  return normalizeAreaDeform(integrated, params);
+}
+function affineSqueezePoints(points, k, phi, cx, cy, params) {
+  if (!params.enableAffine || k === 1)
+    return points;
+  const cos = Math.cos(phi);
+  const sin = Math.sin(phi);
+  const invK = 1 / k;
+  return points.map(([x, y]) => {
+    const dx = x - cx;
+    const dy = y - cy;
+    const xr = dx * cos + dy * sin;
+    const yr = -dx * sin + dy * cos;
+    const xs = xr * k;
+    const ys = yr * invK;
+    return [cx + xs * cos - ys * sin, cy + xs * sin + ys * cos];
+  });
+}
+function buildTargetDeformation(width, height, bins, t, audioLevel, energy, params, idleFactor = 0) {
+  const sampleCount = 96;
+  const baseR = resolveBaseRadius(width, height, params, 0);
+  const invBaseR = baseR > 0 ? 1 / baseR : 1;
+  const morph = idleFactor > 0 ? idleMorph(sampleCount, t, params) : null;
+  const out = [];
+  for (let i = 0;i < sampleCount; i++) {
+    if (params.enableRigidMembrane) {
+      out.push(0);
+      continue;
+    }
+    const angle = i / sampleCount * TAU;
+    const normalized = (angle % TAU + TAU) % TAU / TAU;
+    const binLevel = sampleBinLevel(bins, normalized);
+    const rFbm = cellRadius(angle, t, energy, params);
+    const fbmDeform = rFbm - 1;
+    const rPseudo = pseudopodOffset(angle, t, audioLevel, energy, params);
+    const pseudoDeform = rPseudo * invBaseR;
+    const binDeform = binLevel * 0.15 * energy;
+    const idle = morph ? morph[i] * idleFactor : 0;
+    out.push(fbmDeform + pseudoDeform + binDeform + idle);
+  }
+  return out;
+}
+function bandLimitDeform(deform, params) {
+  const N = deform.length;
+  if (N === 0)
+    return [];
+  const K = Math.max(0, Math.floor(params.bandLimitMode ?? 4));
+  const cap = params.bandLimitAmp ?? 0.08;
+  const a = new Array(K + 1).fill(0);
+  const b = new Array(K + 1).fill(0);
+  for (let k = 0;k <= K; k++) {
+    let re = 0, im = 0;
+    for (let i = 0;i < N; i++) {
+      const ang = k * i / N * TAU;
+      re += deform[i] * Math.cos(ang);
+      im += deform[i] * Math.sin(ang);
+    }
+    a[k] = re / N;
+    b[k] = im / N;
+  }
+  const out = new Array(N);
+  for (let i = 0;i < N; i++) {
+    let v = a[0];
+    for (let k = 1;k <= K; k++) {
+      const ang = k * i / N * TAU;
+      v += 2 * (a[k] * Math.cos(ang) + b[k] * Math.sin(ang));
+    }
+    out[i] = v < -cap ? -cap : v > cap ? cap : v;
+  }
+  return out;
+}
+
 // src/theme-engine/renderers/cell/defaults.ts
 var CELL_DEFAULTS = {
   noiseScale: 0.9,
@@ -1030,29 +1200,6 @@ function ciliaBeatHzEff(activity, params) {
   const f0 = params.ciliaBeatHz ?? 0.9;
   const f1 = params.ciliaBeatHzActive ?? 1.6;
   return f0 + (f1 - f0) * a;
-}
-function cellRadius(angle, t, energy, params) {
-  const dx = Math.cos(angle);
-  const dy = Math.sin(angle);
-  const noiseVal = fbm(dx * params.noiseScale + t * params.timeScale * 0.3, dy * params.noiseScale + t * params.timeScale * 0.2, params.octaves, params.lacunarity, params.gain);
-  const amp = params.idle + energy * params.energyDrive;
-  return 1 + noiseVal * params.membraneAmplitude * amp;
-}
-function pseudopodOffset(angle, t, audioLevel, energy, params) {
-  let total = 0;
-  const numLobes = 2;
-  for (let i = 0;i < numLobes; i++) {
-    const seed = (i + 1) * 1000;
-    const theta = TAU * noise2D(seed, t * params.intentDrift);
-    let delta = angle - theta;
-    delta = ((delta + Math.PI) % TAU + TAU) % TAU - Math.PI;
-    const sharp = Math.max(2, params.sharpness);
-    const lobe = Math.pow(Math.max(0, Math.cos(delta)), sharp);
-    const audioDrive = params.idle + audioLevel * params.levelGain;
-    const amp = params.push * audioDrive * energy;
-    total += lobe * amp;
-  }
-  return total;
 }
 function ciliaBeatPhase(t, index, params) {
   const hz = params.ciliaBeatHz ?? 0.9;
@@ -1238,127 +1385,11 @@ function ciliaPath(cx, cy, baseR, t, energy, growth, params, motion) {
   }
   return out;
 }
-function idleMorph(sampleCount, t, params) {
-  const out = [];
-  const phase = (Math.cos(TAU * t / Math.max(0.01, params.idleMorphPeriod)) + 1) / 2;
-  const env = params.idleMorphFloor + (1 - params.idleMorphFloor) * phase;
-  const travel = t * params.idleMorphSpeed;
-  for (let i = 0;i < sampleCount; i++) {
-    const a = i / sampleCount * TAU;
-    const n1 = noise2D(Math.cos(a) * 1.6 + travel, Math.sin(a) * 1.6 - travel * 0.7);
-    const n2 = noise2D(Math.cos(a) * 3.1 - travel * 0.5, Math.sin(a) * 3.1 + travel * 0.9);
-    const raw = n1 * 0.65 + n2 * 0.35;
-    let d = raw * params.idleMorphAmplitude * env;
-    const cap = params.idleMorphAmplitude;
-    if (d > cap)
-      d = cap;
-    else if (d < -cap)
-      d = -cap;
-    out.push(d);
-  }
-  return out;
-}
 function iridescentHue(angle, t, audioLevel, baseHue, params) {
   const norm = (angle % TAU + TAU) % TAU / TAU;
   let hue = baseHue + norm * params.hueSpread + t * params.shimmerSpeed + audioLevel * params.hueBoost;
   hue = (hue % 360 + 360) % 360;
   return hue;
-}
-function sampleBinLevel(bins, normalized) {
-  const nBins = bins.length;
-  if (nBins === 0)
-    return 0;
-  if (nBins === 1)
-    return bins[0];
-  const u = (normalized % 1 + 1) % 1 * nBins - 0.5;
-  const i0 = Math.floor(u);
-  const frac = u - i0;
-  const a = bins[(i0 % nBins + nBins) % nBins];
-  const b = bins[((i0 + 1) % nBins + nBins) % nBins];
-  return lerp(a, b, smoothstep(frac));
-}
-function saturateTargetDeform(target, params) {
-  if (!params.enableSaturation)
-    return target;
-  const Dmax = params.deformMax ?? 0.6;
-  if (!(Dmax > 0))
-    return target;
-  return target.map((d) => Dmax * Math.tanh(d / Dmax));
-}
-function normalizeAreaDeform(integrated, params) {
-  if (!params.enableAreaNorm)
-    return integrated;
-  const n = integrated.length;
-  if (n === 0)
-    return integrated;
-  let sum = 0;
-  let sumSq = 0;
-  let minE = Infinity;
-  for (const d of integrated) {
-    const e = 1 + d;
-    sum += e;
-    sumSq += e * e;
-    if (e < minE)
-      minE = e;
-  }
-  const m1 = sum / n;
-  const m2 = sumSq / n;
-  const variance = m2 - m1 * m1;
-  if (variance > 1 || !(m2 > 0)) {
-    const s = m2 > 0 ? 1 / Math.sqrt(m2) : 1;
-    return integrated.map((d) => (1 + d) * s - 1);
-  }
-  let c = m1 - Math.sqrt(1 - variance);
-  const EPS = 0.0001;
-  const cMax = minE - EPS;
-  if (c > cMax)
-    c = cMax;
-  return integrated.map((d) => d - c);
-}
-function integrateDeformPipeline(prev, target, params) {
-  const satTarget = saturateTargetDeform(target, params);
-  const integrated = prev ? integrateDeformation(prev, satTarget, params.attack, params.release) : satTarget.slice();
-  return normalizeAreaDeform(integrated, params);
-}
-function affineSqueezePoints(points, k, phi, cx, cy, params) {
-  if (!params.enableAffine || k === 1)
-    return points;
-  const cos = Math.cos(phi);
-  const sin = Math.sin(phi);
-  const invK = 1 / k;
-  return points.map(([x, y]) => {
-    const dx = x - cx;
-    const dy = y - cy;
-    const xr = dx * cos + dy * sin;
-    const yr = -dx * sin + dy * cos;
-    const xs = xr * k;
-    const ys = yr * invK;
-    return [cx + xs * cos - ys * sin, cy + xs * sin + ys * cos];
-  });
-}
-function buildTargetDeformation(width, height, bins, t, audioLevel, energy, params, idleFactor = 0) {
-  const sampleCount = 96;
-  const baseR = resolveBaseRadius(width, height, params, 0);
-  const invBaseR = baseR > 0 ? 1 / baseR : 1;
-  const morph = idleFactor > 0 ? idleMorph(sampleCount, t, params) : null;
-  const out = [];
-  for (let i = 0;i < sampleCount; i++) {
-    if (params.enableRigidMembrane) {
-      out.push(0);
-      continue;
-    }
-    const angle = i / sampleCount * TAU;
-    const normalized = (angle % TAU + TAU) % TAU / TAU;
-    const binLevel = sampleBinLevel(bins, normalized);
-    const rFbm = cellRadius(angle, t, energy, params);
-    const fbmDeform = rFbm - 1;
-    const rPseudo = pseudopodOffset(angle, t, audioLevel, energy, params);
-    const pseudoDeform = rPseudo * invBaseR;
-    const binDeform = binLevel * 0.15 * energy;
-    const idle = morph ? morph[i] * idleFactor : 0;
-    out.push(fbmDeform + pseudoDeform + binDeform + idle);
-  }
-  return out;
 }
 function nucleusTransform(t, audioLevel, baseR, params, minMembraneR) {
   const rawCx = baseR * params.nucleusWander * noise2D(137, t * params.nucleusDrift);
@@ -1387,35 +1418,6 @@ function nucleusTransform(t, audioLevel, baseR, params, minMembraneR) {
     cy = rawCy * scale;
   }
   return { cx, cy, r };
-}
-function bandLimitDeform(deform, params) {
-  const N = deform.length;
-  if (N === 0)
-    return [];
-  const K = Math.max(0, Math.floor(params.bandLimitMode ?? 4));
-  const cap = params.bandLimitAmp ?? 0.08;
-  const a = new Array(K + 1).fill(0);
-  const b = new Array(K + 1).fill(0);
-  for (let k = 0;k <= K; k++) {
-    let re = 0, im = 0;
-    for (let i = 0;i < N; i++) {
-      const ang = k * i / N * TAU;
-      re += deform[i] * Math.cos(ang);
-      im += deform[i] * Math.sin(ang);
-    }
-    a[k] = re / N;
-    b[k] = im / N;
-  }
-  const out = new Array(N);
-  for (let i = 0;i < N; i++) {
-    let v = a[0];
-    for (let k = 1;k <= K; k++) {
-      const ang = k * i / N * TAU;
-      v += 2 * (a[k] * Math.cos(ang) + b[k] * Math.sin(ang));
-    }
-    out[i] = v < -cap ? -cap : v > cap ? cap : v;
-  }
-  return out;
 }
 function interiorPoint(u, s, ctx) {
   const { cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params } = ctx;
