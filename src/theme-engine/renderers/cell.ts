@@ -400,6 +400,9 @@ export interface CellParams {
    * Makes food vacuoles visually distinct from granules at overlay scale.
    * Default 1.0 = legacy (same size). */
   foodVacuoleSizeMul?: number;
+  /** Max cyclosis loop amplitude for food vacuole centres. Large vacuoles should
+   * stay in endoplasm, not ride exactly on the pellicle. Default 0.82. */
+  foodVacuoleLoopMaxAmp?: number;
   /** v3.9E: saturation override for food vacuole fill/stroke.
    * Default 0.4 = legacy hardcoded value. Higher values (e.g. 0.25 from theme)
    * help food vacuoles stand out from grey granules. */
@@ -4358,7 +4361,13 @@ export function createCellRenderer(
             };
             for (let i = 0; i < interiorFoodVacuoles.length; i++) {
               const fv = interiorFoodVacuoles[i];
-              const loop = cyclosisLoopPointAtPhase(fv, cyclosisPhase); // rides the SAME loop as granules
+              const loopRaw = cyclosisLoopPointAtPhase(fv, cyclosisPhase); // same phase as granules
+              // Food vacuoles are large endoplasmic bodies: keep their centres
+              // off the pellicle so their radius doesn't read as membrane-stuck.
+              const fvMaxAmp = params.foodVacuoleLoopMaxAmp ?? 0.82;
+              const fvAmp = Math.hypot(loopRaw.u, loopRaw.s);
+              const fvScale = fvAmp > fvMaxAmp && fvAmp > 0 ? fvMaxAmp / fvAmp : 1;
+              const loop = { u: loopRaw.u * fvScale, s: loopRaw.s * fvScale };
               const size = foodVacuoleSize(t, fv.digestPhase, params); // digest shrink (reuse)
               const drawR = fvSizePx * (0.4 + 0.6 * size);
               const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);

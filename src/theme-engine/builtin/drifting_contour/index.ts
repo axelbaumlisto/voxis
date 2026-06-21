@@ -114,7 +114,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableWallReorient: true,         // ciliate avoidance reaction at walls (not specular)
       enableRotationalBrownian: true,    // subtle heading jitter at rest (D_r ≈ 0.02 rad²/s)
       rotationalDiffusion: 0.02,         // measured for P. caudatum ~20°C
-      foodVacuoleSizeMul: 1.8,         // food vacuoles visibly larger than granules
+      foodVacuoleSizeMul: 1.4,         // food vacuoles distinct but not wall-stuck (was 1.8)
+      foodVacuoleLoopMaxAmp: 0.78,      // keep large vacuoles off the pellicle
       enableTrichocysts: false,        // dormant: avoid long radial "whiskers" during recording
       trichocystCount: 30,             // number of crystalline needles
       trichocystLengthMul: 3.0,        // needle length = 3× cilia length
@@ -133,7 +134,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       cyclosisGranuleCount: 40,      // fewer = less visible reshuffling on rotation
       granuleSizePx: 1.6,            // smaller = subtler interior
       enableOrganelles: true,        // food vacuoles + micronucleus (Commit 28)
-      foodVacuoleCount: 10,          // more food vacuoles filling the body
+      foodVacuoleCount: 8,           // fewer large vacuoles (was 10)
       // === v3.3 INTERIOR FIELD (Commit 32a-e) — organelles in body coords,
       // distributed through the elongated body + circulating on the cyclosis
       // loop to the poles, coupled to the deforming wall. Fixes "органеллы все
