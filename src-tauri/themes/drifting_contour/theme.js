@@ -1423,6 +1423,74 @@ function cyclosisLoopPointAtPhase(g, phase) {
   return { u, s };
 }
 
+// src/theme-engine/renderers/cell/flow.ts
+function dipoleFlowAt(dx, dy, heading, strength) {
+  if (strength === 0)
+    return { vx: 0, vy: 0 };
+  const CORE2 = 4;
+  const r2 = Math.max(CORE2, dx * dx + dy * dy);
+  const r = Math.sqrt(r2);
+  const rxh = dx / r, ryh = dy / r;
+  const ex = Math.cos(heading), ey = Math.sin(heading);
+  const edotr = ex * rxh + ey * ryh;
+  const k = strength / r2;
+  return {
+    vx: k * (2 * edotr * rxh - ex),
+    vy: k * (2 * edotr * ryh - ey)
+  };
+}
+function advectMote(mote, cx, cy, heading, strength, dt, width, height, params) {
+  const v = dipoleFlowAt(mote.x - cx, mote.y - cy, heading, strength * (params.flowStrength ?? 1));
+  const wrap = (val, span) => {
+    if (span <= 0)
+      return 0;
+    return (val % span + span) % span;
+  };
+  return {
+    x: wrap(mote.x + v.vx * dt, width),
+    y: wrap(mote.y + v.vy * dt, height)
+  };
+}
+function seedMotes(width, height, params) {
+  const n = Math.max(0, Math.floor(params.flowMoteCount ?? 0));
+  const out = [];
+  for (let i = 0;i < n; i++) {
+    const ux = (noise2D(i * 12.9898 + 3.1, 78.233) + 1) * 0.5;
+    const uy = (noise2D(i * 39.346 + 7.7, 11.135) + 1) * 0.5;
+    out.push({ x: ux * width, y: uy * height });
+  }
+  return out;
+}
+function cyclosisField(dx, dy, omega) {
+  return { vx: -omega * dy, vy: omega * dx };
+}
+function seedGranules(baseR, params) {
+  if (!params.enableCyclosis)
+    return [];
+  const n = Math.max(0, Math.floor(params.cyclosisGranuleCount ?? 0));
+  if (n === 0)
+    return [];
+  const maxRad = Math.max(0, params.granuleMaxRadiusFrac ?? 0.75) * Math.max(0, baseR);
+  const out = [];
+  for (let i = 0;i < n; i++) {
+    const ang = (noise2D(i * 12.9898 + 1.7, 78.233) + 1) * Math.PI;
+    const rad = Math.sqrt((noise2D(i * 39.346 + 5.3, 11.135) + 1) * 0.5) * maxRad;
+    out.push({ x: rad * Math.cos(ang), y: rad * Math.sin(ang) });
+  }
+  return out;
+}
+function advectGranule(g, baseR, dt, params) {
+  const omega = TAU / Math.max(0.1, params.cyclosisPeriod ?? 45);
+  const v = cyclosisField(g.x, g.y, omega);
+  const nx = g.x + v.vx * dt;
+  const ny = g.y + v.vy * dt;
+  const maxRad = Math.max(0, params.granuleMaxRadiusFrac ?? 0.75) * Math.max(0, baseR);
+  const r0 = Math.min(Math.hypot(g.x, g.y), maxRad);
+  const r1 = Math.hypot(nx, ny) || 1;
+  const s = r0 / r1;
+  return { x: nx * s, y: ny * s };
+}
+
 // src/theme-engine/renderers/cell/organelles.ts
 function nucleusTransform(t, audioLevel, baseR, params, minMembraneR) {
   const rawCx = baseR * params.nucleusWander * noise2D(137, t * params.nucleusDrift);
@@ -1522,8 +1590,9 @@ function seedInteriorFoodVacuoles(count, params) {
 }
 function advectFoodVacuole(v, baseR, dt, params) {
   const omega = TAU / Math.max(0.1, params.foodVacuolePeriod ?? 55);
-  const nx = v.x - omega * v.y * dt;
-  const ny = v.y + omega * v.x * dt;
+  const field = cyclosisField(v.x, v.y, omega);
+  const nx = v.x + field.vx * dt;
+  const ny = v.y + field.vy * dt;
   const maxRad = Math.max(0, params.foodVacuoleMaxRadiusFrac ?? 0.62) * Math.max(0, baseR);
   const r0 = Math.min(Math.hypot(v.x, v.y), maxRad);
   const r1 = Math.hypot(nx, ny) || 1;
@@ -1553,72 +1622,6 @@ function iridescentHue(angle, t, audioLevel, baseHue, params) {
   let hue = baseHue + norm * params.hueSpread + t * params.shimmerSpeed + audioLevel * params.hueBoost;
   hue = (hue % 360 + 360) % 360;
   return hue;
-}
-function dipoleFlowAt(dx, dy, heading, strength) {
-  if (strength === 0)
-    return { vx: 0, vy: 0 };
-  const CORE2 = 4;
-  const r2 = Math.max(CORE2, dx * dx + dy * dy);
-  const r = Math.sqrt(r2);
-  const rxh = dx / r, ryh = dy / r;
-  const ex = Math.cos(heading), ey = Math.sin(heading);
-  const edotr = ex * rxh + ey * ryh;
-  const k = strength / r2;
-  return {
-    vx: k * (2 * edotr * rxh - ex),
-    vy: k * (2 * edotr * ryh - ey)
-  };
-}
-function advectMote(mote, cx, cy, heading, strength, dt, width, height, params) {
-  const v = dipoleFlowAt(mote.x - cx, mote.y - cy, heading, strength * (params.flowStrength ?? 1));
-  const wrap = (val, span) => {
-    if (span <= 0)
-      return 0;
-    return (val % span + span) % span;
-  };
-  return {
-    x: wrap(mote.x + v.vx * dt, width),
-    y: wrap(mote.y + v.vy * dt, height)
-  };
-}
-function seedMotes(width, height, params) {
-  const n = Math.max(0, Math.floor(params.flowMoteCount ?? 0));
-  const out = [];
-  for (let i = 0;i < n; i++) {
-    const ux = (noise2D(i * 12.9898 + 3.1, 78.233) + 1) * 0.5;
-    const uy = (noise2D(i * 39.346 + 7.7, 11.135) + 1) * 0.5;
-    out.push({ x: ux * width, y: uy * height });
-  }
-  return out;
-}
-function cyclosisField(dx, dy, omega) {
-  return { vx: -omega * dy, vy: omega * dx };
-}
-function seedGranules(baseR, params) {
-  if (!params.enableCyclosis)
-    return [];
-  const n = Math.max(0, Math.floor(params.cyclosisGranuleCount ?? 0));
-  if (n === 0)
-    return [];
-  const maxRad = Math.max(0, params.granuleMaxRadiusFrac ?? 0.75) * Math.max(0, baseR);
-  const out = [];
-  for (let i = 0;i < n; i++) {
-    const ang = (noise2D(i * 12.9898 + 1.7, 78.233) + 1) * Math.PI;
-    const rad = Math.sqrt((noise2D(i * 39.346 + 5.3, 11.135) + 1) * 0.5) * maxRad;
-    out.push({ x: rad * Math.cos(ang), y: rad * Math.sin(ang) });
-  }
-  return out;
-}
-function advectGranule(g, baseR, dt, params) {
-  const omega = TAU / Math.max(0.1, params.cyclosisPeriod ?? 45);
-  const v = cyclosisField(g.x, g.y, omega);
-  const nx = g.x + v.vx * dt;
-  const ny = g.y + v.vy * dt;
-  const maxRad = Math.max(0, params.granuleMaxRadiusFrac ?? 0.75) * Math.max(0, baseR);
-  const r0 = Math.min(Math.hypot(g.x, g.y), maxRad);
-  const r1 = Math.hypot(nx, ny) || 1;
-  const s = r0 / r1;
-  return { x: nx * s, y: ny * s };
 }
 function createCellRenderer(container, opts) {
   const params = { ...CELL_DEFAULTS, ...opts.params ?? {} };

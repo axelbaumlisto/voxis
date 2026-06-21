@@ -1,4 +1,5 @@
 import { noise2D, smoothstep, TAU } from "../shared";
+import { cyclosisField } from "./flow";
 import type { CellParams } from "./types";
 
 /**
@@ -237,8 +238,9 @@ export function advectFoodVacuole(
   params: CellParams,
 ): { x: number; y: number; phase: number } {
   const omega = TAU / Math.max(0.1, params.foodVacuolePeriod ?? 55);
-  const nx = v.x - omega * v.y * dt;
-  const ny = v.y + omega * v.x * dt;
+  const field = cyclosisField(v.x, v.y, omega);
+  const nx = v.x + field.vx * dt;
+  const ny = v.y + field.vy * dt;
   const maxRad = Math.max(0, params.foodVacuoleMaxRadiusFrac ?? 0.62) * Math.max(0, baseR);
   const r0 = Math.min(Math.hypot(v.x, v.y), maxRad);
   const r1 = Math.hypot(nx, ny) || 1;
