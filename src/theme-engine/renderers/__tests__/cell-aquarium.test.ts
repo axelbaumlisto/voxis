@@ -735,11 +735,11 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(calls.some((call) => call.startsWith("moveTo:"))).toBe(true);
     expect(calls.some((call) => call.startsWith("lineTo:"))).toBe(true);
     expect(calls.some((call) => call.includes("hsla(92"))).toBe(true);
-    expect(calls.some((call) => call.includes("hsla(14"))).toBe(true);
+    expect(calls.some((call) => call.includes("hsla(8,"))).toBe(true);
     expect(calls.some((call) => call.includes("hsla(186"))).toBe(true);
 
     const reservoirIndex = calls.findIndex((call) => call.includes("hsla(186"));
-    const eyespotIndex = calls.findIndex((call) => call.includes("hsla(14"));
+    const eyespotIndex = calls.findIndex((call) => call.includes("hsla(8,"));
     expect(reservoirIndex).toBeGreaterThan(-1);
     expect(eyespotIndex).toBeGreaterThan(reservoirIndex);
   });
