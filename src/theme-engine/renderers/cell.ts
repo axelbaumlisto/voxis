@@ -3874,7 +3874,11 @@ export function createCellRenderer(
         }
         if (params.enableTrichocysts && trichocystAlpha > 0.005) {
           const triCount = params.trichocystCount ?? 30;
-          const triLen = (params.trichocystLengthMul ?? 3.0) * baseR * (params.ciliaLength ?? 0.45);
+          // Use somatic cilia length (0.15) not legacy ciliaLength (0.4)
+          const effectiveCiliaLen = params.enableSomaticCilia
+            ? (params.somaticCiliaLength ?? 0.15)
+            : (params.ciliaLength ?? 0.45);
+          const triLen = (params.trichocystLengthMul ?? 3.0) * baseR * effectiveCiliaLen;
           const triAlpha = trichocystAlpha * 0.7;
           ctx.save();
           ctx.strokeStyle = hsla(0, 0.0, 0.95, triAlpha);

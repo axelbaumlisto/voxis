@@ -1805,7 +1805,8 @@ function createCellRenderer(container, opts) {
         }
         if (params.enableTrichocysts && trichocystAlpha > 0.005) {
           const triCount = params.trichocystCount ?? 30;
-          const triLen = (params.trichocystLengthMul ?? 3) * baseR * (params.ciliaLength ?? 0.45);
+          const effectiveCiliaLen = params.enableSomaticCilia ? params.somaticCiliaLength ?? 0.15 : params.ciliaLength ?? 0.45;
+          const triLen = (params.trichocystLengthMul ?? 3) * baseR * effectiveCiliaLen;
           const triAlpha = trichocystAlpha * 0.7;
           ctx.save();
           ctx.strokeStyle = hsla(0, 0, 0.95, triAlpha);
@@ -2258,7 +2259,7 @@ function mount(container, api) {
       idleMorphPeriod: 7,
       idleMorphFloor: 0.3,
       growthSwell: 0,
-      swimSpeedMaxFrac: 0.07,
+      swimSpeedMaxFrac: 0.045,
       startleSensitivity: 2.8,
       startleDecay: 0.96,
       startleMaxPx: 5,
@@ -2300,7 +2301,7 @@ function mount(container, api) {
       enableTrichocysts: true,
       trichocystCount: 30,
       trichocystLengthMul: 3,
-      trichocystDecay: 1,
+      trichocystDecay: 3,
       trichocystLineWidth: 1.5,
       enableMetachronal: true,
       metachronalWavelength: 20,

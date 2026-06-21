@@ -71,7 +71,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       idleMorphPeriod: 7,
       idleMorphFloor: 0.3,
       growthSwell: 0.0,               // Paramecium does NOT inflate on activation (was 0.2)
-      swimSpeedMaxFrac: 0.07,         // prevent canvas escape (was 0.10/0.06)
+      swimSpeedMaxFrac: 0.045,         // calmer recording swim (was 0.07)         // prevent canvas escape (was 0.10/0.06)
       startleSensitivity: 2.8,        // trigger startle more easily (was 2.2)
       startleDecay: 0.96,             // ~0.5s avoidance reaction (was 0.86 = 0.08s)
       startleMaxPx: 5,                // sharper avoid reaction (was 4)
@@ -118,7 +118,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableTrichocysts: true,         // radial needle discharge on startle
       trichocystCount: 30,             // number of crystalline needles
       trichocystLengthMul: 3.0,        // needle length = 3× cilia length
-      trichocystDecay: 1.0,            // ~700ms visible (was 2.0)
+      trichocystDecay: 3.0,            // ~1.8s visible (was 1.0 = 5.3s permanent whiskers)
       trichocystLineWidth: 1.5,        // thick needles (was 1.0px)
       enableMetachronal: true,          // traveling metachronal wave on cilia
       metachronalWavelength: 20,        // wavelength in cilia count
