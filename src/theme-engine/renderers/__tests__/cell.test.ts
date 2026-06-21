@@ -2223,7 +2223,22 @@ describe("Commit 22a — somatic ciliature params (mex)", () => {
     expect(mexMean).toBeLessThan(0.6 * baseMean);
   });
 
-  it("(d) POINT-ON-CONTOUR: every mex base lies on the deformed+squeezed contour", () => {
+  it("(d) RECORDING SHORT FUR: mex cilia do not grow into long whiskers", () => {
+    const params = somaticCiliaParams({
+      ...CELL_DEFAULTS,
+      enableSomaticCilia: true,
+      somaticCiliaCount: 104,
+      ciliaGrowthBoost: 0,
+      ciliaLengthVar: 0.35,
+    });
+    const crown = ciliaPath(cx, cy, baseR, t, 1.0, 1.0, params);
+    const lengths = crown.map(hairLen);
+
+    expect(crown.length).toBe(104);
+    expect(Math.max(...lengths)).toBeLessThanOrEqual(baseR * 0.15 * 1.35 + 1e-9);
+  });
+
+  it("(e) POINT-ON-CONTOUR: every mex base lies on the deformed+squeezed contour", () => {
     const N = 96;
     const deform = Array.from(
       { length: N },
@@ -8693,6 +8708,62 @@ describe("trichocyst discharge (v3.8E)", () => {
 
   it("trichocystLineWidth defaults to 1.5 (v4.0B: thicker for visibility)", () => {
     expect(CELL_DEFAULTS.trichocystLineWidth).toBe(1.5);
+  });
+
+  it("drifting_contour-like recording config keeps trichocysts dormant during startle", () => {
+    const rafCalls = setupRaf();
+    const { ctx, restore } = installCtx();
+    const container = document.createElement("div");
+    const r = createCellRenderer(container, {
+      width: W,
+      height: H,
+      params: {
+        ...CELL_DEFAULTS,
+        enableSomaticCilia: true,
+        somaticCiliaCount: 104,
+        ciliaGrowthBoost: 0,
+        enableCiliaOnContour: true,
+        enableTrichocysts: false,
+        trichocystCount: 30,
+        trichocystLengthMul: 3.0,
+        trichocystLineWidth: 1.5,
+      },
+    });
+
+    for (let i = 0; i < 5; i++) {
+      r.update({ mode: "idle", audioLevel: 0, spectrumBins: new Array(32).fill(0) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+
+    type CallEntry = { kind: "bp" | "mt" | "lt" | "st"; args: number[] };
+    const callLog: CallEntry[] = [];
+    (ctx.beginPath as ReturnType<typeof vi.fn>).mockImplementation(() => callLog.push({ kind: "bp", args: [] }));
+    (ctx.moveTo as ReturnType<typeof vi.fn>).mockImplementation((...a: number[]) => callLog.push({ kind: "mt", args: a }));
+    (ctx.lineTo as ReturnType<typeof vi.fn>).mockImplementation((...a: number[]) => callLog.push({ kind: "lt", args: a }));
+    (ctx.stroke as ReturnType<typeof vi.fn>).mockImplementation(() => callLog.push({ kind: "st", args: [] }));
+
+    for (let i = 0; i < 3; i++) {
+      r.update({ mode: "recording", audioLevel: 0.95, spectrumBins: new Array(32).fill(0.9) });
+      if (rafCalls.length) rafCalls.shift()!();
+    }
+
+    let longSingleSegmentNeedles = 0;
+    for (let i = 0; i < callLog.length - 3; i++) {
+      if (
+        callLog[i].kind === "bp" &&
+        callLog[i + 1].kind === "mt" &&
+        callLog[i + 2].kind === "lt" &&
+        callLog[i + 3].kind === "st"
+      ) {
+        const dx = callLog[i + 2].args[0] - callLog[i + 1].args[0];
+        const dy = callLog[i + 2].args[1] - callLog[i + 1].args[1];
+        if (Math.hypot(dx, dy) > 10) longSingleSegmentNeedles++;
+      }
+    }
+
+    expect(longSingleSegmentNeedles).toBe(0);
+    r.destroy();
+    restore();
   });
 
   it("enableTrichocysts=false (default) \u2192 no trichocyst strokes during startle", () => {

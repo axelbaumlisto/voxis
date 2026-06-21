@@ -115,7 +115,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableRotationalBrownian: true,    // subtle heading jitter at rest (D_r ≈ 0.02 rad²/s)
       rotationalDiffusion: 0.02,         // measured for P. caudatum ~20°C
       foodVacuoleSizeMul: 1.8,         // food vacuoles visibly larger than granules
-      enableTrichocysts: true,         // radial needle discharge on startle
+      enableTrichocysts: false,        // dormant: avoid long radial "whiskers" during recording
       trichocystCount: 30,             // number of crystalline needles
       trichocystLengthMul: 3.0,        // needle length = 3× cilia length
       trichocystDecay: 3.0,            // ~1.8s visible (was 1.0 = 5.3s permanent whiskers)
