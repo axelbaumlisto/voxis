@@ -538,7 +538,7 @@ describe("aquarium layer Phase 3 euglena", () => {
     }
   });
 
-  it("updateEuglena keeps euglena outside the hero exclusion zone", () => {
+  it("updateEuglena smoothly moves away from the hero instead of teleporting", () => {
     const view = aquariumParamsView({
       ...CELL_DEFAULTS,
       enableAquarium: true,
@@ -546,17 +546,20 @@ describe("aquarium layer Phase 3 euglena", () => {
       euglenaSpeed: 0,
       euglenaSpeedActive: 0,
     });
+    const hero = { x: 86, y: 18, radius: 17 };
     const initial = [testEuglena({ x: 92, y: 18, heading: 0 })];
-    const updated = updateEuglena(initial, frame({
-      width: 172,
-      height: 36,
-      dt: 0.016,
-      hero: { x: 86, y: 18, radius: 17 },
-    }), view)[0];
+    const once = updateEuglena(initial, frame({ width: 172, height: 36, dt: 0.016, hero }), view)[0];
+    const twice = updateEuglena([once], frame({ width: 172, height: 36, dt: 0.016, hero }), view)[0];
 
-    expect(Math.hypot(updated.x - 86, updated.y - 18)).toBeGreaterThanOrEqual(17 * 3.8 - 1e-6);
-    expect(updated.y).toBeGreaterThanOrEqual(0);
-    expect(updated.y).toBeLessThanOrEqual(36);
+    const d0 = Math.hypot(initial[0].x - hero.x, initial[0].y - hero.y);
+    const d1 = Math.hypot(once.x - hero.x, once.y - hero.y);
+    const d2 = Math.hypot(twice.x - hero.x, twice.y - hero.y);
+
+    expect(d1).toBeGreaterThan(d0);
+    expect(d2).toBeGreaterThan(d1);
+    expect(d1 - d0).toBeLessThan(1);
+    expect(once.y).toBeGreaterThanOrEqual(0);
+    expect(once.y).toBeLessThanOrEqual(36);
   });
 
   it("updateEuglena applies mode multipliers only through dt-integrated phase deltas", () => {

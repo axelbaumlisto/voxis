@@ -220,14 +220,17 @@ export function updateEuglena(
     if (frame.hero) {
       const hx = finite(frame.hero.x, safeWidth / 2);
       const hy = finite(frame.hero.y, safeHeight / 2);
-      const exclusion = Math.max(0, finite(frame.hero.radius, 0)) * 3.8;
+      const exclusion = Math.max(0, finite(frame.hero.radius, 0)) * 2.2;
       const dx = nextX - hx;
       const dy = nextY - hy;
       const dist = Math.hypot(dx, dy);
       if (dist < exclusion && exclusion > 0) {
         const angle = dist > 1e-6 ? Math.atan2(dy, dx) : heading;
-        nextX = hx + Math.cos(angle) * exclusion;
-        nextY = hy + Math.sin(angle) * exclusion;
+        const penetration = exclusion - dist;
+        const repelSpeed = Math.max(10, finite(frame.hero.radius, 0) * 2.4);
+        const step = Math.min(penetration, repelSpeed * dt);
+        nextX += Math.cos(angle) * step;
+        nextY += Math.sin(angle) * step;
       }
     }
 

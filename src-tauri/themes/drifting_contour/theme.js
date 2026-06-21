@@ -1993,14 +1993,17 @@ function updateEuglena(euglena, frame, view) {
     if (frame.hero) {
       const hx = finite2(frame.hero.x, safeWidth / 2);
       const hy = finite2(frame.hero.y, safeHeight / 2);
-      const exclusion = Math.max(0, finite2(frame.hero.radius, 0)) * 3.8;
+      const exclusion = Math.max(0, finite2(frame.hero.radius, 0)) * 2.2;
       const dx = nextX - hx;
       const dy = nextY - hy;
       const dist = Math.hypot(dx, dy);
       if (dist < exclusion && exclusion > 0) {
         const angle = dist > 0.000001 ? Math.atan2(dy, dx) : heading;
-        nextX = hx + Math.cos(angle) * exclusion;
-        nextY = hy + Math.sin(angle) * exclusion;
+        const penetration = exclusion - dist;
+        const repelSpeed = Math.max(10, finite2(frame.hero.radius, 0) * 2.4);
+        const step = Math.min(penetration, repelSpeed * dt);
+        nextX += Math.cos(angle) * step;
+        nextY += Math.sin(angle) * step;
       }
     }
     return {
@@ -3135,7 +3138,7 @@ function mount(container, api) {
       cyclosisPeriod: 65,
       enableAquarium: true,
       aquariumSeed: 5,
-      aquariumAlpha: 0.75,
+      aquariumAlpha: 0.68,
       aquariumActivityBoost: 0.25,
       diatomCount: 0,
       diatomAlpha: 0.16,
@@ -3143,7 +3146,7 @@ function mount(container, api) {
       euglenaCount: 1,
       euglenaSpeed: 0.75,
       euglenaSpeedActive: 1,
-      euglenaScale: 2.6,
+      euglenaScale: 2.05,
       vorticellaCount: 0,
       ...userParams
     }
