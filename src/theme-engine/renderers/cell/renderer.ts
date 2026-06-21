@@ -36,7 +36,7 @@ import {
   advectFoodVacuole, micronucleusTransform,
 } from "./organelles";
 import { advectMote, seedMotes, seedGranules, advectGranule } from "./flow";
-import { pathFromPoints, clipToCellPath, drawCVCanals } from "./draw";
+import { pathFromPoints, clipToCellPath, drawCVVesicle, drawCVCanals } from "./draw";
 
 // ---------------------------------------------------------------------------
 // Cell geometry functions
@@ -801,10 +801,7 @@ export function createCellRenderer(
             const [vx, vy] = affineSqueezePoints(
               [[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params,
             )[0];
-            ctx.fillStyle = hsla(cvH, 0.45, 0.70, params.nucleusAlpha * 0.45);
-            ctx.beginPath();
-            ctx.arc(vx, vy, vac.r, 0, TAU);
-            ctx.fill();
+            drawCVVesicle(ctx, vx, vy, vac.r, cvH, params);
           }
         }
 
@@ -832,10 +829,7 @@ export function createCellRenderer(
               const e = pair[i];
               if (e.r < 0.5) continue;
               const [vx, vy] = interiorPoint(anchors[i].u, anchors[i].s, ictx);
-              ctx.fillStyle = hsla(cvH, 0.45, 0.70, params.nucleusAlpha * 0.45);
-              ctx.beginPath();
-              ctx.arc(vx, vy, e.r, 0, TAU);
-              ctx.fill();
+              drawCVVesicle(ctx, vx, vy, e.r, cvH, params);
               drawCVCanals(ctx, vx, vy, e.r, cvH, params);
             }
           } else {
@@ -850,10 +844,7 @@ export function createCellRenderer(
               const [vx, vy] = affineSqueezePoints(
                 [[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params,
               )[0];
-              ctx.fillStyle = hsla(cvH, 0.45, 0.70, params.nucleusAlpha * 0.45);
-              ctx.beginPath();
-              ctx.arc(vx, vy, e.r, 0, TAU);
-              ctx.fill();
+              drawCVVesicle(ctx, vx, vy, e.r, cvH, params);
               drawCVCanals(ctx, vx, vy, e.r, cvH, params);
             }
           }

@@ -1609,6 +1609,12 @@ function clipToCellPath(ctx, splinePoints) {
   if (typeof ctx.clip === "function")
     ctx.clip();
 }
+function drawCVVesicle(ctx, vx, vy, r, cvH, params) {
+  ctx.fillStyle = hsla(cvH, 0.45, 0.7, params.nucleusAlpha * 0.45);
+  ctx.beginPath();
+  ctx.arc(vx, vy, r, 0, TAU);
+  ctx.fill();
+}
 function drawCVCanals(ctx, vx, vy, r, cvH, params) {
   if (!params.enableCVCanals || r <= 1)
     return;
@@ -2045,10 +2051,7 @@ function createCellRenderer(container, opts) {
             const vcx0 = cx + Math.cos(bearing) * placeR;
             const vcy0 = cy + Math.sin(bearing) * placeR;
             const [vx, vy] = affineSqueezePoints([[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params)[0];
-            ctx.fillStyle = hsla(cvH, 0.45, 0.7, params.nucleusAlpha * 0.45);
-            ctx.beginPath();
-            ctx.arc(vx, vy, vac.r, 0, TAU);
-            ctx.fill();
+            drawCVVesicle(ctx, vx, vy, vac.r, cvH, params);
           }
         }
         if (params.enableVacuoles) {
@@ -2064,10 +2067,7 @@ function createCellRenderer(container, opts) {
               if (e.r < 0.5)
                 continue;
               const [vx, vy] = interiorPoint(anchors[i].u, anchors[i].s, ictx);
-              ctx.fillStyle = hsla(cvH, 0.45, 0.7, params.nucleusAlpha * 0.45);
-              ctx.beginPath();
-              ctx.arc(vx, vy, e.r, 0, TAU);
-              ctx.fill();
+              drawCVVesicle(ctx, vx, vy, e.r, cvH, params);
               drawCVCanals(ctx, vx, vy, e.r, cvH, params);
             }
           } else {
@@ -2078,10 +2078,7 @@ function createCellRenderer(container, opts) {
               const vcx0 = cx + Math.cos(e.bearing) * placeR;
               const vcy0 = cy + Math.sin(e.bearing) * placeR;
               const [vx, vy] = affineSqueezePoints([[vcx0, vcy0]], squeezeK, squeezePhi, cx, cy, params)[0];
-              ctx.fillStyle = hsla(cvH, 0.45, 0.7, params.nucleusAlpha * 0.45);
-              ctx.beginPath();
-              ctx.arc(vx, vy, e.r, 0, TAU);
-              ctx.fill();
+              drawCVVesicle(ctx, vx, vy, e.r, cvH, params);
               drawCVCanals(ctx, vx, vy, e.r, cvH, params);
             }
           }

@@ -20,6 +20,20 @@ export function clipToCellPath(ctx: ClipContext, splinePoints: CellPathPoint[]):
   if (typeof ctx.clip === "function") ctx.clip();
 }
 
+export function drawCVVesicle(
+  ctx: CanvasRenderingContext2D,
+  vx: number,
+  vy: number,
+  r: number,
+  cvH: number,
+  params: CellParams,
+): void {
+  ctx.fillStyle = hsla(cvH, 0.45, 0.70, params.nucleusAlpha * 0.45);
+  ctx.beginPath();
+  ctx.arc(vx, vy, r, 0, TAU);
+  ctx.fill();
+}
+
 export function drawCVCanals(
   ctx: CanvasRenderingContext2D,
   vx: number,
