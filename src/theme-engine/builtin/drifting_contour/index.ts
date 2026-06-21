@@ -136,7 +136,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // в центре". interiorPoint distributes via the profile, so the legacy
       // disc granuleMaxRadiusFrac/foodVacuoleMaxRadiusFrac no longer apply.
       enableInteriorField: true,     // body-coord interior (not the central disc)
-      cyclosisPeriod: 38,            // bio range 30-60s
+      cyclosisPeriod: 65,            // slower cyclosis — equatorial granules <3px/0.5s (was 38)
       ...userParams,
     },
   });

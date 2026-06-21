@@ -2300,7 +2300,7 @@ function mount(container, api) {
       enableOrganelles: true,
       foodVacuoleCount: 10,
       enableInteriorField: true,
-      cyclosisPeriod: 38,
+      cyclosisPeriod: 65,
       ...userParams
     }
   });
