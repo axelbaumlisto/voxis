@@ -30,7 +30,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableAquarium: true,
       aquariumSeed: 17,
       aquariumAlpha: 0.92,
-      aquariumActivityBoost: 0.35,
+      aquariumActivityBoost: 0.9,  // strong active:idle speed contrast (~2:1)
       diatomCount: 0,
       euglenaCount: 1,
       euglenaSpeed: 0.19,        // body-lengths/sec (idle) — crosses field in ~12s

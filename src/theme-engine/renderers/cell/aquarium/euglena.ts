@@ -165,7 +165,9 @@ export function euglenaDisplayLength(size: number, scale: number): number {
 function bodyShape(u: number): number {
   const us = u - 0.28 * (1 - u * u); // belly skew → widest ~u+0.26
   const a = Math.max(0, 1 - us * us);
-  const p = u >= 0 ? 0.40 : 0.95;
+  // switch the exponent where the profile is symmetric (us=0) so the seam stays
+  // C0/C1 continuous after the belly skew; blunt anterior, pointed posterior.
+  const p = us >= 0 ? 0.40 : 0.90;
   let w = Math.pow(a, p);
   const d = (u - 0.9) / 0.11; // wider notch so it survives sampling
   w *= 1 - 0.32 * Math.exp(-d * d);
@@ -257,7 +259,7 @@ export function euglenaPose(
   for (let i = 1; i <= segs; i++) {
     const q = i / segs;
     const along = halfLength + flagellumLength * q;
-    const env = Math.pow(q, 1.2); // amplitude grows toward the tip (a whip)
+    const env = 0.25 + 0.75 * Math.pow(q, 1.2); // proximal floor + tip-amplified whip
     const lateral = clamp(
       ampTip * env * Math.sin(TAU * flagellum - waves * TAU * q),
       -maxLat,
@@ -301,7 +303,7 @@ export function euglenaPose(
         ry: length * 0.05,
         angle: heading,
         hueShift: (seededUnit(seed, j, 0x2cd9a14b) - 0.5) * 8,
-        lightShift: (seededUnit(seed, j, 0x7e3a5d91) - 0.5) * 6,
+        lightShift: (seededUnit(seed, j, 0x7e3a5d91) - 0.5) * 5,
         front: proj.front,
       });
     }
@@ -315,13 +317,13 @@ export function euglenaPose(
     if (pmCount >= 1) {
       // ring paramylon, posterior (sheaths around the pyrenoid)
       const proj = rollProject(0.30);
-      const a = bodyPoint(-0.30, proj.sEff);
-      paramylon.push({ x: a.x, y: a.y, rx: length * 0.045, ry: length * 0.045, angle: heading, hueShift: 0, lightShift: 0, front: proj.front });
+      const a = bodyPoint(-0.45, proj.sEff);
+      paramylon.push({ x: a.x, y: a.y, rx: length * 0.038, ry: length * 0.038, angle: heading, hueShift: 0, lightShift: 0, front: proj.front });
     }
     if (pmCount >= 2) {
       const proj = rollProject(-0.30);
-      const b = bodyPoint(0.20, proj.sEff);
-      paramylon.push({ x: b.x, y: b.y, rx: length * 0.04, ry: length * 0.04, angle: heading, hueShift: 0, lightShift: 0, front: proj.front });
+      const b = bodyPoint(-0.22, proj.sEff);
+      paramylon.push({ x: b.x, y: b.y, rx: length * 0.034, ry: length * 0.034, angle: heading, hueShift: 0, lightShift: 0, front: proj.front });
     }
 
     if (options.includeReservoir) {
@@ -564,7 +566,7 @@ export function drawEuglena(
     const cxr = finite(cell.x, 0) + nx * lateral;
     const cyr = finite(cell.y, 0) + ny * lateral;
 
-    const ampTip = clamp(length * 0.22, 2, 0.30 * H);
+    const ampTip = clamp(length * 0.22, 2, 0.40 * H);
     const env = metabolyEnvelope(finiteOr(cell.burstPhase, 0));
 
     const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {
@@ -578,7 +580,7 @@ export function drawEuglena(
       flagellumAmp: ampTip,
       maxFlagellumLateral: 0.40 * H,
       flagellumSegments: flagSegs,
-      flagellumWaves: 1.7,
+      flagellumWaves: 1.5,
       metabolyEnvelope: env,
       organelleSeed: (view.seed ^ ((idx + 1) * 0x9e3779b1)) >>> 0,
       chloroplastCount: chCount,
@@ -598,10 +600,10 @@ export function drawEuglena(
     ctx.fill();
     ctx.stroke();
 
-    // pellicle striae (light sheen lines, helical)
+    // pellicle striae (cool sheen lines, helical)
     if (pose.pellicleStrips.length > 0) {
-      ctx.strokeStyle = `hsla(${hue + 4}, 26%, 72%, ${alpha * 0.30})`;
-      ctx.lineWidth = Math.max(0.25, Math.min(0.5, width * 0.06));
+      ctx.strokeStyle = `hsla(${hue - 6}, 22%, 76%, ${alpha * 0.40})`;
+      ctx.lineWidth = Math.max(0.35, Math.min(0.55, width * 0.06));
       for (const strip of pose.pellicleStrips) {
         drawPolyline(ctx, strip, false);
         ctx.stroke();
@@ -610,16 +612,16 @@ export function drawEuglena(
 
     // chloroplasts (the dense green mass; roll fades the far face)
     for (const c of pose.chloroplasts) {
-      const fa = alpha * 0.74 * (0.55 + 0.45 * c.front);
+      const fa = alpha * 0.74 * (0.65 + 0.35 * c.front);
       ctx.fillStyle = `hsla(${hue + c.hueShift}, 64%, ${40 + c.lightShift}%, ${fa})`;
       ctx.beginPath();
       ctx.ellipse(c.x, c.y, c.rx, c.ry, c.angle, 0, TAU);
       ctx.fill();
     }
 
-    // nucleus (bounded grey-green clearing with a faint rim)
+    // nucleus (dim olive clearing with a faint rim — not a bright bubble)
     if (pose.nucleus) {
-      ctx.fillStyle = `hsla(${hue - 2}, 14%, 50%, ${alpha * 0.42})`;
+      ctx.fillStyle = `hsla(${hue - 2}, 20%, 44%, ${alpha * 0.34})`;
       ctx.beginPath();
       ctx.ellipse(pose.nucleus.x, pose.nucleus.y, pose.nucleus.rx, pose.nucleus.ry, pose.nucleus.angle, 0, TAU);
       ctx.fill();
@@ -632,8 +634,8 @@ export function drawEuglena(
 
     // paramylon (small refractile bodies; first is a ring)
     pose.paramylon.forEach((p, j) => {
-      const fa = alpha * 0.52 * (0.6 + 0.4 * p.front);
-      ctx.fillStyle = `hsla(50, 12%, 80%, ${fa})`;
+      const fa = alpha * 0.42 * (0.55 + 0.45 * p.front);
+      ctx.fillStyle = `hsla(50, 12%, 74%, ${fa})`;
       ctx.beginPath();
       ctx.ellipse(p.x, p.y, p.rx, p.ry, p.angle, 0, TAU);
       ctx.fill();
@@ -648,7 +650,7 @@ export function drawEuglena(
 
     // reservoir (small pale anterior pocket)
     if (pose.reservoir) {
-      ctx.fillStyle = `hsla(186, 18%, 84%, ${alpha * 0.38})`;
+      ctx.fillStyle = `hsla(186, 18%, 78%, ${alpha * 0.30})`;
       ctx.beginPath();
       ctx.arc(pose.reservoir.x, pose.reservoir.y, Math.max(0.4, width * 0.14), 0, TAU);
       ctx.fill();
@@ -668,15 +670,25 @@ export function drawEuglena(
     ctx.arc(pose.eyespot.x, pose.eyespot.y, Math.max(0.45, length * 0.03), 0, TAU);
     ctx.fill();
 
-    // flagellum (anterior whip, bright, base→tip stroke taper, on top)
+    // flagellum (anterior whip): ONE fused continuous path, base→tip taper via
+    // three overlaid passes (underglow → thin full-length tip → thick proximal),
+    // so there are no per-segment round-cap "bead" seams.
     const fp = pose.flagellumPoints;
-    for (let i = 1; i < fp.length; i++) {
-      const q = i / (fp.length - 1);
-      ctx.strokeStyle = `hsla(${hue + 8}, 34%, 66%, ${alpha * 0.88})`;
-      ctx.lineWidth = Math.max(0.6, (1.6 - 1.1 * q) * Math.max(0.8, width * 0.14));
-      ctx.beginPath();
-      ctx.moveTo(fp[i - 1].x, fp[i - 1].y);
-      ctx.lineTo(fp[i].x, fp[i].y);
+    if (fp.length >= 2) {
+      // soft underglow so the thin whip separates from the dark field
+      ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.30})`;
+      ctx.lineWidth = Math.max(0.9, width * 0.18);
+      drawPolyline(ctx, fp, false);
+      ctx.stroke();
+      // full-length thin tip stroke
+      ctx.strokeStyle = `hsla(${hue + 8}, 34%, 70%, ${alpha * 0.90})`;
+      ctx.lineWidth = Math.max(0.5, width * 0.10);
+      drawPolyline(ctx, fp, false);
+      ctx.stroke();
+      // thicker proximal ~60% on top → continuous base-to-tip taper
+      const nprox = Math.max(2, Math.round(fp.length * 0.6));
+      ctx.lineWidth = Math.max(0.8, width * 0.16);
+      drawPolyline(ctx, fp.slice(0, nprox), false);
       ctx.stroke();
     }
   });
