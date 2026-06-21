@@ -60,10 +60,11 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       growthAttack: 0.05,
       growthRelease: 0.012,
       baseRadiusPx: 17,
-      driftSpeed: 0.03,              // gentle glide (was 0.08)
-      idleSwimFrac: 0.12,            // 12% of peak swim at idle — slow drift (was 0.30)
+      driftSpeed: 0.08,              // visible glide (v3.5 approved)
+      idleSwimFrac: 0.30,            // 30% of peak swim at idle (v3.5 approved)
       bodyHeadingTau: 1.5,             // slow heading response
-      idleDriftMin: 0.40,            // subtle wander (was 0.70)
+      interiorHeadingTau: 5.0,          // interior organelles lag behind body turns
+      idleDriftMin: 0.70,            // visible wander (v3.5 approved)
       driftMargin: 30,
       idleMorphAmplitude: 0.16,
       idleMorphSpeed: 0.22,

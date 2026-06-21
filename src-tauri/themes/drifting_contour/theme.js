@@ -1606,6 +1606,7 @@ function createCellRenderer(container, opts) {
   let drift01 = 0;
   let wander = null;
   let bodyHeading = 0;
+  let interiorHeading = 0;
   let motes = null;
   let granules = null;
   let interiorGranules = null;
@@ -1732,6 +1733,18 @@ function createCellRenderer(container, opts) {
       const curSpeed = Math.hypot(wander.vx, wander.vy);
       const speedNorm = params.enableActivity && swimPeak > 0 ? Math.min(1, curSpeed / swimPeak) : 0;
       bodyHeading = bodyHeadingStep(bodyHeading, wander.vx, wander.vy, dt, params);
+      const iTau = params.interiorHeadingTau ?? 0;
+      if (iTau > 0) {
+        const iAlpha = 1 - Math.exp(-dt / iTau);
+        let iDelta = bodyHeading - interiorHeading;
+        if (iDelta > Math.PI)
+          iDelta -= TAU;
+        if (iDelta < -Math.PI)
+          iDelta += TAU;
+        interiorHeading += iAlpha * iDelta;
+      } else {
+        interiorHeading = bodyHeading;
+      }
       flowCx = cx;
       flowCy = cy;
       flowHeading = bodyHeading;
@@ -1872,7 +1885,7 @@ function createCellRenderer(container, opts) {
               deform,
               squeezeK,
               squeezePhi,
-              bodyHeading,
+              bodyHeading: interiorHeading,
               params,
               profilePts
             };
@@ -1978,7 +1991,7 @@ function createCellRenderer(container, opts) {
               deform,
               squeezeK,
               squeezePhi,
-              bodyHeading,
+              bodyHeading: interiorHeading,
               params,
               profilePts
             };
@@ -2054,7 +2067,7 @@ function createCellRenderer(container, opts) {
               deform,
               squeezeK,
               squeezePhi,
-              bodyHeading,
+              bodyHeading: interiorHeading,
               params,
               profilePts
             };
@@ -2096,7 +2109,7 @@ function createCellRenderer(container, opts) {
               deform,
               squeezeK,
               squeezePhi,
-              bodyHeading,
+              bodyHeading: interiorHeading,
               params,
               profilePts
             };
@@ -2234,10 +2247,11 @@ function mount(container, api) {
       growthAttack: 0.05,
       growthRelease: 0.012,
       baseRadiusPx: 17,
-      driftSpeed: 0.03,
-      idleSwimFrac: 0.12,
+      driftSpeed: 0.08,
+      idleSwimFrac: 0.3,
       bodyHeadingTau: 1.5,
-      idleDriftMin: 0.4,
+      interiorHeadingTau: 5,
+      idleDriftMin: 0.7,
       driftMargin: 30,
       idleMorphAmplitude: 0.16,
       idleMorphSpeed: 0.22,

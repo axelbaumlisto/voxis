@@ -245,6 +245,11 @@ export interface CellParams {
   /** G4: EMA time-constant (seconds) for the body heading chasing the velocity
    * heading. Larger = lazier turning of the long axis. Default 0.4. */
   bodyHeadingTau?: number;
+  /** Interior heading tau — slower EMA for interior organelle projection.
+   * When set, interiorPoint uses a separate heading that lags bodyHeading,
+   * so organelles don't jitter when the body turns quickly.
+   * Default 0 = use bodyHeading directly (legacy). */
+  interiorHeadingTau?: number;
   /** D4: prolate elongation gain. Aspect k = 1 + bodyElongation*max(floor,speedNorm).
    * ~0.12-0.15 is a mild, biological ciliate prolate. Default 0.13. */
   bodyElongation?: number;
@@ -3458,6 +3463,7 @@ export function createCellRenderer(
   // the tank centre on the first tick (width/height are stable per renderer).
   let wander: WanderState | null = null;
   let bodyHeading = 0; // G4: smoothed body long-axis heading (radians)
+  let interiorHeading = 0; // slow-following heading for interior organelle projection
   // H4 (gate OFF): ambient tracer motes advected by the body's dipolar wake.
   // Lazily seeded on first tick when enableFlowField is on; [] otherwise so the
   // default path allocates nothing and the shipped look is unchanged.
@@ -3731,6 +3737,18 @@ export function createCellRenderer(
       const curSpeed = Math.hypot(wander.vx, wander.vy);
       const speedNorm = params.enableActivity && swimPeak > 0 ? Math.min(1, curSpeed / swimPeak) : 0;
       bodyHeading = bodyHeadingStep(bodyHeading, wander.vx, wander.vy, dt, params);
+      // Interior heading: slow EMA chasing bodyHeading so organelles don't jitter.
+      const iTau = params.interiorHeadingTau ?? 0;
+      if (iTau > 0) {
+        const iAlpha = 1 - Math.exp(-dt / iTau);
+        // Chase bodyHeading with angle wrapping
+        let iDelta = bodyHeading - interiorHeading;
+        if (iDelta > Math.PI) iDelta -= TAU;
+        if (iDelta < -Math.PI) iDelta += TAU;
+        interiorHeading += iAlpha * iDelta;
+      } else {
+        interiorHeading = bodyHeading; // legacy: same as body
+      }
       // H4: record this frame's flow source for the NEXT frame's mote advection.
       flowCx = cx; flowCy = cy; flowHeading = bodyHeading; flowSpeed = curSpeed;
       // Step 8: D4 area-preserving affine squeeze on the contour POINTS in the
@@ -3958,7 +3976,7 @@ export function createCellRenderer(
           if (params.enableInteriorField) {
             const profilePts = buildProfilePts(baseR, params);
             macroIctx = {
-              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params, profilePts,
+              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading: interiorHeading, params, profilePts,
             };
             const uM = params.macronucleusU ?? -0.05;
             const sM = params.macronucleusS ?? 0.1;
@@ -4113,7 +4131,7 @@ export function createCellRenderer(
             // Containment is automatic (|s| <= 1).
             const profilePts = buildProfilePts(baseR, params);
             const ictx: InteriorCtx = {
-              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params, profilePts,
+              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading: interiorHeading, params, profilePts,
             };
             const anchors = [
               { u: params.cvAnteriorU ?? 0.55, s: params.cvAnteriorS ?? 0.62 },
@@ -4200,7 +4218,7 @@ export function createCellRenderer(
             }
             const profilePts = buildProfilePts(baseR, params);
             const ictx: InteriorCtx = {
-              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params, profilePts,
+              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading: interiorHeading, params, profilePts,
             };
             for (let i = 0; i < interiorGranules.length; i++) {
               const g = interiorGranules[i];
@@ -4255,7 +4273,7 @@ export function createCellRenderer(
             }
             const profilePts = buildProfilePts(baseR, params);
             const ictx: InteriorCtx = {
-              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params, profilePts,
+              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading: interiorHeading, params, profilePts,
             };
             for (let i = 0; i < interiorFoodVacuoles.length; i++) {
               const fv = interiorFoodVacuoles[i];
