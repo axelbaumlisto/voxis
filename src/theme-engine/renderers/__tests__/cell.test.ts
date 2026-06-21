@@ -97,10 +97,10 @@ import {
   buildProfilePts,
   applyOralGroove,
   effectiveCyclosisPeriod,
-} from "../cell";
+} from "../cell/testing";
 import { deformAt, wrapPi } from "../shared";
 import { membranePolyline, minDistToPolyline, pointInPolygon } from "./helpers/cell-geometry";
-import type { CellParams, CellPersistState, CiliaMotion, InteriorCtx } from "../cell";
+import type { CellParams, CellPersistState, CiliaMotion, InteriorCtx } from "../cell/testing";
 
 const TAU = Math.PI * 2;
 

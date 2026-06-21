@@ -4,7 +4,7 @@ import {
   seedInteriorGranules,
   CELL_DEFAULTS,
   type CellParams,
-} from "../cell";
+} from "../cell/testing";
 
 // Theme config values
 const THEME: Partial<CellParams> = {
