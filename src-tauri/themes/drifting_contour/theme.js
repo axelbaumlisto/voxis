@@ -1610,6 +1610,21 @@ function micronucleusTransform(macroCx, macroCy, macroR, params) {
   };
 }
 
+// src/theme-engine/renderers/cell/draw.ts
+function pathFromPoints(ctx, points) {
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], points[0][1]);
+  for (let i = 1;i < points.length; i++) {
+    ctx.lineTo(points[i][0], points[i][1]);
+  }
+  ctx.closePath();
+}
+function clipToCellPath(ctx, splinePoints) {
+  pathFromPoints(ctx, splinePoints);
+  if (typeof ctx.clip === "function")
+    ctx.clip();
+}
+
 // src/theme-engine/renderers/cell.ts
 function ciliaBeatHzEff(activity, params) {
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
@@ -1891,12 +1906,7 @@ function createCellRenderer(container, opts) {
         const fvH = params.foodVacuoleHue ?? baseHue - 30;
         const fvSat = params.foodVacuoleSat ?? 0.4;
         ctx.fillStyle = hsla(baseHue, params.cytoplasmSat ?? 0.7, 0.55, effectiveFillAlpha);
-        ctx.beginPath();
-        ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
-        for (let i = 1;i < splinePoints.length; i++) {
-          ctx.lineTo(splinePoints[i][0], splinePoints[i][1]);
-        }
-        ctx.closePath();
+        pathFromPoints(ctx, splinePoints);
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, baseR * 0.9));
         grad.addColorStop(0, hsla(baseHue + 10, (params.cytoplasmSat ?? 0.7) * 0.71, 0.7, effectiveFillAlpha * 0.5));
         grad.addColorStop(1, hsla(baseHue, params.cytoplasmSat ?? 0.7, 0.45, effectiveFillAlpha));
@@ -1920,14 +1930,7 @@ function createCellRenderer(container, opts) {
           ctx.restore();
         }
         ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
-        for (let i = 1;i < splinePoints.length; i++) {
-          ctx.lineTo(splinePoints[i][0], splinePoints[i][1]);
-        }
-        ctx.closePath();
-        if (typeof ctx.clip === "function")
-          ctx.clip();
+        clipToCellPath(ctx, splinePoints);
         let minMembraneR = Infinity;
         for (const dv of deform)
           minMembraneR = Math.min(minMembraneR, baseR * (1 + dv));

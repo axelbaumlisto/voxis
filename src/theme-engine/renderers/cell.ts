@@ -47,6 +47,7 @@ import {
   advectFoodVacuole, micronucleusTransform,
 } from "./cell/organelles";
 import { advectMote, seedMotes, seedGranules, advectGranule } from "./cell/flow";
+import { pathFromPoints, clipToCellPath } from "./cell/draw";
 
 // Backward-compat re-exports: existing imports of these from "./cell" keep working.
 export { noise2D, fbm, catmullRom, catmullRomOpen, lowpassRadii, integrateDeformation, TAU, smoothstep } from "./shared";
@@ -663,12 +664,7 @@ export function createCellRenderer(
         const fvH = params.foodVacuoleHue ?? (baseHue - 30);
         const fvSat = params.foodVacuoleSat ?? 0.4;
         ctx.fillStyle = hsla(baseHue, params.cytoplasmSat ?? 0.70, 0.55, effectiveFillAlpha);
-        ctx.beginPath();
-        ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
-        for (let i = 1; i < splinePoints.length; i++) {
-          ctx.lineTo(splinePoints[i][0], splinePoints[i][1]);
-        }
-        ctx.closePath();
+        pathFromPoints(ctx, splinePoints);
 
         // Soft radial gradient fill — overlay lighter center
         const grad = ctx.createRadialGradient(
@@ -709,13 +705,7 @@ export function createCellRenderer(
         // guarantees centers are inside, but rendered radii (food vacuoles/CVs)
         // can otherwise protrude beyond the membrane near the cortex.
         ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
-        for (let i = 1; i < splinePoints.length; i++) {
-          ctx.lineTo(splinePoints[i][0], splinePoints[i][1]);
-        }
-        ctx.closePath();
-        if (typeof ctx.clip === "function") ctx.clip();
+        clipToCellPath(ctx, splinePoints);
 
         // --- Nucleus: denser organelle drifting/pulsing inside the cell ---
         // F9: thread the LIVE minimum membrane radius so a deep inward pinch
