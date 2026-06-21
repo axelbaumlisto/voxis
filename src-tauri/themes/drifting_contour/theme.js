@@ -3117,8 +3117,8 @@ function mount(container, api) {
       enableInteriorField: true,
       cyclosisPeriod: 65,
       enableAquarium: true,
-      aquariumSeed: 17,
-      aquariumAlpha: 0.4,
+      aquariumSeed: 5,
+      aquariumAlpha: 0.55,
       aquariumActivityBoost: 0.25,
       diatomCount: 0,
       diatomAlpha: 0.16,
@@ -3126,7 +3126,7 @@ function mount(container, api) {
       euglenaCount: 1,
       euglenaSpeed: 0.75,
       euglenaSpeedActive: 1,
-      euglenaScale: 1.35,
+      euglenaScale: 1.6,
       vorticellaCount: 0,
       ...userParams
     }

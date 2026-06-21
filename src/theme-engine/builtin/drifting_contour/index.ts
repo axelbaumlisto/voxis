@@ -147,8 +147,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       cyclosisPeriod: 65,            // slower cyclosis — equatorial granules <3px/0.5s (was 38)
       // === Micro-aquarium Phase 5B visibility boost — one readable Euglena, behind hero. ===
       enableAquarium: true,
-      aquariumSeed: 17,
-      aquariumAlpha: 0.40,
+      aquariumSeed: 5,
+      aquariumAlpha: 0.55,
       aquariumActivityBoost: 0.25,
       diatomCount: 0,
       diatomAlpha: 0.16,
@@ -156,7 +156,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       euglenaCount: 1,
       euglenaSpeed: 0.75,
       euglenaSpeedActive: 1.0,
-      euglenaScale: 1.35,
+      euglenaScale: 1.60,
       vorticellaCount: 0,
       ...userParams,
     },
