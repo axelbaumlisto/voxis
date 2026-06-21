@@ -1,5 +1,6 @@
 import { describe, expect, it, expectTypeOf } from "vitest";
 import * as cell from "../cell";
+import * as supportedCell from "../cell/public";
 import type {
   CellOptions,
   CellParams,
@@ -9,6 +10,11 @@ import type {
   InteriorCtx,
   WanderState,
 } from "../cell";
+import type {
+  CellOptions as SupportedCellOptions,
+  CellParams as SupportedCellParams,
+  CellPreset as SupportedCellPreset,
+} from "../cell/public";
 
 type PublicTypeManifest = {
   params: CellParams;
@@ -19,6 +25,18 @@ type PublicTypeManifest = {
   preset: CellPreset;
   wanderState: WanderState;
 };
+
+type SupportedPublicTypeManifest = {
+  params: SupportedCellParams;
+  options: SupportedCellOptions;
+  preset: SupportedCellPreset;
+};
+
+const SUPPORTED_RUNTIME_EXPORT_KEYS = [
+  "CELL_DEFAULTS",
+  "createCellRenderer",
+  "resolveCellPreset",
+] as const;
 
 const RUNTIME_EXPORT_KEYS = [
   "CELL_DEFAULTS",
@@ -135,6 +153,24 @@ describe("cell public API", () => {
       persistState: CellPersistState;
       preset: CellPreset;
       wanderState: WanderState;
+    }>();
+  });
+
+  it("exposes a narrow supported runtime entrypoint", () => {
+    expect(Object.keys(supportedCell).sort()).toEqual(SUPPORTED_RUNTIME_EXPORT_KEYS);
+    expect(supportedCell.createCellRenderer).toBe(cell.createCellRenderer);
+    expect(supportedCell.CELL_DEFAULTS).toBe(cell.CELL_DEFAULTS);
+    expect(supportedCell.resolveCellPreset).toBe(cell.resolveCellPreset);
+    expect("ciliaBeatHzEff" in supportedCell).toBe(false);
+    expect("iridescentHue" in supportedCell).toBe(false);
+    expect("testing" in supportedCell).toBe(false);
+  });
+
+  it("keeps key supported entrypoint types exported", () => {
+    expectTypeOf<SupportedPublicTypeManifest>().toMatchTypeOf<{
+      params: CellParams;
+      options: CellOptions;
+      preset: CellPreset;
     }>();
   });
 });
