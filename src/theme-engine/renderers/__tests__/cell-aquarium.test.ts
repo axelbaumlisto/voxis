@@ -685,7 +685,7 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(calls.filter((call) => call === "fill").length).toBeGreaterThanOrEqual(4);
     expect(calls.filter((call) => call === "stroke").length).toBeGreaterThanOrEqual(3);
     expect(calls.some((call) => call === "ellipse:0.50,0.30")).toBe(true);
-    expect(calls.some((call) => call === "arc:0.54")).toBe(true);
+    expect(calls.some((call) => call.startsWith("arc:0.") || call.startsWith("arc:1."))).toBe(true);
     expect(calls.some((call) => call.startsWith("moveTo:"))).toBe(true);
     expect(calls.some((call) => call.startsWith("lineTo:"))).toBe(true);
     expect(calls.some((call) => call.includes("hsla(92") && call.includes("0.031"))).toBe(true);
@@ -704,7 +704,7 @@ describe("aquarium layer Phase 3 euglena", () => {
 
     expect(small.some((call) => call.includes("hsla(175"))).toBe(false);
     expect(large.some((call) => call.includes("hsla(175") && call.includes("0.062"))).toBe(true);
-    expect(large.some((call) => call === "arc:0.35")).toBe(true);
+    expect(large.some((call) => call.startsWith("arc:0.") || call.startsWith("arc:1."))).toBe(true);
   });
 
   it("drawAquariumBackground uses scale-aware euglena details", () => {

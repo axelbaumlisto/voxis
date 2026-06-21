@@ -266,9 +266,9 @@ export function drawEuglena(
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   for (const cell of euglena) {
-    const length = Math.max(5, Math.min(10, (7.2 + finite(cell.size, 1) * 1.6) * scale));
-    const width = Math.max(1.4, Math.min(3.2, length * 0.28));
-    const flagellumLength = Math.max(2.2, Math.min(5.0, length * 0.46));
+    const length = Math.max(5, Math.min(10 * scale, (7.2 + finite(cell.size, 1) * 1.6) * scale));
+    const width = Math.max(1.4, Math.min(3.2 * scale, length * 0.30));
+    const flagellumLength = Math.max(2.2, Math.min(5.0 * scale, length * 0.50));
     const heading = finite(cell.heading, 0);
     const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {
       centerX: finite(cell.x, 0),
