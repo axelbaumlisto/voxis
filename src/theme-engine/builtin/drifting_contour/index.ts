@@ -51,6 +51,9 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       nucleusSatMul: 0.25,           // gray chromatin mass (was 0.35)
       foodVacuoleHue: 38,            // amber-brown — the ONLY warm element (ingested food)
       cvHue: 170,                    // pale cyan — clear water vesicle
+      vacuoleMaxFrac: 0.13,           // smaller CVs (was default 0.18)
+      cvAnteriorS: 0.52,              // slightly inward from cortex (was 0.62)
+      cvPosteriorS: 0.52,             // slightly inward from cortex (was 0.62)
       tension: 0.15,
       // cilia ("усы"), startle ("шарахается"), growth ("растёт как живая")
       ciliaCount: 18,
@@ -102,7 +105,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableCVCanals: true,          // radial canal star shape on CVs (v3.6)
       canalLenMul: 2.5,              // longer canals into cytoplasm (was 2.0)
       canalLineWidth: 1.0,           // thicker canal lines (was 0.5px)
-      canalAlphaMul: 0.5,            // more visible canals (was 0.3)
+      canalAlphaMul: 0.25,           // subtle canals (was 0.5)
       enableOralGroove: true,         // ventral concavity — Paramecium's defining feature
       oralGrooveDepth: 0.08,          // 8% inward — visible slipper indent (was 4%)
       oralGrooveWidth: 0.8,            // wider angular extent (was 0.5)
