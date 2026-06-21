@@ -3084,6 +3084,14 @@ function mount(container, api) {
       foodVacuoleCount: 8,
       enableInteriorField: true,
       cyclosisPeriod: 65,
+      enableAquarium: true,
+      aquariumAlpha: 0.22,
+      aquariumActivityBoost: 0.25,
+      diatomCount: 3,
+      diatomAlpha: 0.24,
+      diatomDriftSpeed: 0.55,
+      euglenaCount: 0,
+      vorticellaCount: 0,
       ...userParams
     }
   });
