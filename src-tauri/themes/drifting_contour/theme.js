@@ -513,6 +513,57 @@ function cellReach(baseR, params) {
   return Math.max(membraneOuter, ciliaOuter) + startleMaxPx;
 }
 
+// src/theme-engine/renderers/cell/persistence.ts
+function serializeCellState(s) {
+  return JSON.stringify(s);
+}
+function parseCellState(raw) {
+  if (raw === null)
+    return null;
+  try {
+    const obj = JSON.parse(raw);
+    if (typeof obj !== "object" || obj === null || typeof obj.driftPhase !== "number" || !Number.isFinite(obj.driftPhase) || typeof obj.growth !== "number" || !Number.isFinite(obj.growth) || typeof obj.elapsed !== "number" || !Number.isFinite(obj.elapsed)) {
+      return null;
+    }
+    if (obj.elapsed < 0 || obj.elapsed >= 1e7)
+      return null;
+    if (obj.driftPhase < -1e7 || obj.driftPhase > 1e7)
+      return null;
+    const base = { driftPhase: obj.driftPhase, growth: obj.growth, elapsed: obj.elapsed };
+    if (typeof obj.fx === "number" && Number.isFinite(obj.fx) && obj.fx >= 0 && obj.fx <= 1 && typeof obj.fy === "number" && Number.isFinite(obj.fy) && obj.fy >= 0 && obj.fy <= 1 && typeof obj.heading === "number" && Number.isFinite(obj.heading) && obj.heading > -1e4 && obj.heading < 1e4) {
+      base.fx = obj.fx;
+      base.fy = obj.fy;
+      base.heading = obj.heading;
+    }
+    return base;
+  } catch {
+    return null;
+  }
+}
+function restoreSeed(saved, now) {
+  const elapsed = saved.elapsed > 0 ? saved.elapsed : 0;
+  return {
+    startedAt: now - elapsed * 1000,
+    driftPhaseOffset: saved.driftPhase - elapsed
+  };
+}
+function wanderPoseFromState(saved, width, height, baseR, params) {
+  if (saved.fx === undefined || saved.fy === undefined || saved.heading === undefined) {
+    return null;
+  }
+  const reach = cellReach(baseR, params);
+  const inset = Math.max(params.driftMargin ?? 4, reach);
+  const clamp = (v, lo, hi) => lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v));
+  return {
+    x: clamp(saved.fx * width, inset, width - inset),
+    y: clamp(saved.fy * height, inset, height - inset),
+    heading: saved.heading
+  };
+}
+function cellPersistKey(width, height) {
+  return `talri.cell.state.v2.${Math.round(width)}x${Math.round(height)}`;
+}
+
 // src/theme-engine/renderers/cell/defaults.ts
 var CELL_DEFAULTS = {
   noiseScale: 0.9,
@@ -1069,55 +1120,6 @@ function nucleusTransform(t, audioLevel, baseR, params, minMembraneR) {
     cy = rawCy * scale;
   }
   return { cx, cy, r };
-}
-function serializeCellState(s) {
-  return JSON.stringify(s);
-}
-function parseCellState(raw) {
-  if (raw === null)
-    return null;
-  try {
-    const obj = JSON.parse(raw);
-    if (typeof obj !== "object" || obj === null || typeof obj.driftPhase !== "number" || !Number.isFinite(obj.driftPhase) || typeof obj.growth !== "number" || !Number.isFinite(obj.growth) || typeof obj.elapsed !== "number" || !Number.isFinite(obj.elapsed)) {
-      return null;
-    }
-    if (obj.elapsed < 0 || obj.elapsed >= 1e7)
-      return null;
-    if (obj.driftPhase < -1e7 || obj.driftPhase > 1e7)
-      return null;
-    const base = { driftPhase: obj.driftPhase, growth: obj.growth, elapsed: obj.elapsed };
-    if (typeof obj.fx === "number" && Number.isFinite(obj.fx) && obj.fx >= 0 && obj.fx <= 1 && typeof obj.fy === "number" && Number.isFinite(obj.fy) && obj.fy >= 0 && obj.fy <= 1 && typeof obj.heading === "number" && Number.isFinite(obj.heading) && obj.heading > -1e4 && obj.heading < 1e4) {
-      base.fx = obj.fx;
-      base.fy = obj.fy;
-      base.heading = obj.heading;
-    }
-    return base;
-  } catch {
-    return null;
-  }
-}
-function restoreSeed(saved, now) {
-  const elapsed = saved.elapsed > 0 ? saved.elapsed : 0;
-  return {
-    startedAt: now - elapsed * 1000,
-    driftPhaseOffset: saved.driftPhase - elapsed
-  };
-}
-function wanderPoseFromState(saved, width, height, baseR, params) {
-  if (saved.fx === undefined || saved.fy === undefined || saved.heading === undefined) {
-    return null;
-  }
-  const reach = cellReach(baseR, params);
-  const inset = Math.max(params.driftMargin ?? 4, reach);
-  const clamp = (v, lo, hi) => lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v));
-  return {
-    x: clamp(saved.fx * width, inset, width - inset),
-    y: clamp(saved.fy * height, inset, height - inset),
-    heading: saved.heading
-  };
-}
-function cellPersistKey(width, height) {
-  return `talri.cell.state.v2.${Math.round(width)}x${Math.round(height)}`;
 }
 function bandLimitDeform(deform, params) {
   const N = deform.length;
