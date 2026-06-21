@@ -164,7 +164,11 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
   const safeWidth = Math.max(0, finite(frame.width, 0));
   const safeHeight = Math.max(0, finite(frame.height, 0));
   for (let i = 0; i < count; i++) {
-    const heading = seededUnit(seed, i, salt ^ 0x68bc21eb) * TAU;
+    // Bias heading near-horizontal so a large euglena swims along the wide
+    // aquarium (lots of room in x) instead of clipping the short 36px height.
+    const dir = seededUnit(seed, i, salt ^ 0x68bc21eb) < 0.5 ? 0 : Math.PI;
+    const tilt = (seededUnit(seed, i, salt ^ 0x1b9c4e3d) - 0.5) * 0.7;
+    const heading = dir + tilt;
     euglena.push({
       x: seededUnit(seed, i, salt) * safeWidth,
       y: seededUnit(seed, i, salt ^ 0x51ed270b) * safeHeight,
