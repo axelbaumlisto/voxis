@@ -1,6 +1,7 @@
 import type { CellParams } from "../types";
 import { aquariumParamsView } from "./params";
 import { seedDiatoms, updateDiatoms, drawDiatoms } from "./diatoms";
+import { seedEuglena, updateEuglena, drawEuglena } from "./euglena";
 import { seedPoints } from "./seeds";
 import type { AquariumFrame, AquariumLayerState } from "./types";
 
@@ -10,7 +11,7 @@ export function seedAquarium(frame: AquariumFrame, params: CellParams): Aquarium
   return {
     seed,
     diatoms: seedDiatoms(view.diatoms.count, seed, frame),
-    euglena: seedPoints(view.euglena.count, seed, frame, 0x0e091eaa),
+    euglena: seedEuglena(view.euglena.count, seed, frame),
     vorticella: seedPoints(view.vorticella.count, seed, frame, 0x070271ca),
   };
 }
@@ -21,9 +22,10 @@ export function updateAquarium(
   params: CellParams,
 ): AquariumLayerState {
   const view = aquariumParamsView(params);
-  if (!view.enabled || aquarium.diatoms.length === 0 || view.diatoms.count <= 0) return aquarium;
-  const diatoms = updateDiatoms(aquarium.diatoms, frame, view);
-  return diatoms === aquarium.diatoms ? aquarium : { ...aquarium, diatoms };
+  if (!view.enabled) return aquarium;
+  const diatoms = view.diatoms.count > 0 ? updateDiatoms(aquarium.diatoms, frame, view) : aquarium.diatoms;
+  const euglena = view.euglena.count > 0 ? updateEuglena(aquarium.euglena, frame, view) : aquarium.euglena;
+  return diatoms === aquarium.diatoms && euglena === aquarium.euglena ? aquarium : { ...aquarium, diatoms, euglena };
 }
 
 export function drawAquariumBackground(
@@ -33,6 +35,7 @@ export function drawAquariumBackground(
   params: CellParams,
 ): void {
   const view = aquariumParamsView(params);
-  if (!view.enabled || aquarium.diatoms.length === 0 || view.diatoms.count <= 0) return;
+  if (!view.enabled) return;
   drawDiatoms(ctx, aquarium.diatoms, frame, view);
+  drawEuglena(ctx, aquarium.euglena, frame, view);
 }
