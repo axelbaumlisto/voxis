@@ -2224,8 +2224,10 @@ function drawEuglena(ctx, euglena, frame, view) {
   euglena.forEach((cell, idx) => {
     const tp = finiteOr3(cell.turnProgress, 2);
     const turnShrink = tp < 1 ? 0.5 + 0.5 * Math.abs(Math.cos(tp * Math.PI)) : 1;
-    const length = euglenaDisplayLength(finite2(cell.size, 1), scale) * turnShrink;
-    const width = length * 0.22;
+    const fullLength = euglenaDisplayLength(finite2(cell.size, 1), scale);
+    const length = fullLength * turnShrink;
+    const turnWiden = 1 + 0.9 * (1 - turnShrink);
+    const width = fullLength * 0.22 * turnWiden;
     const flagellumLength = length * 1.1;
     const heading = finite2(cell.heading, 0);
     const chCount = length < 7 ? 0 : length < 14 ? 3 : length < 40 ? clamp(Math.round(length / 5), 6, 10) : clamp(Math.round(length / 4.5), 12, 20);

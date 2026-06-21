@@ -552,8 +552,12 @@ export function drawEuglena(
     // toward the viewer). Full length is still used for speed/margin in update.
     const tp = finiteOr(cell.turnProgress, 2);
     const turnShrink = tp < 1 ? 0.5 + 0.5 * Math.abs(Math.cos(tp * Math.PI)) : 1;
-    const length = euglenaDisplayLength(finite(cell.size, 1), scale) * turnShrink;
-    const width = length * 0.22;
+    const fullLength = euglenaDisplayLength(finite(cell.size, 1), scale);
+    const length = fullLength * turnShrink;
+    // as the body foreshortens through the turn it also widens — reads as a cell
+    // pivoting toward the viewer, not a thin edge-on blade.
+    const turnWiden = 1 + 0.9 * (1 - turnShrink);
+    const width = fullLength * 0.22 * turnWiden;
     const flagellumLength = length * 1.1;
     const heading = finite(cell.heading, 0);
 
