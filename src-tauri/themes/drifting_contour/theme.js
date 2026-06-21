@@ -1855,6 +1855,240 @@ function drawDiatoms(ctx, diatoms, frame, view) {
   ctx.restore();
 }
 
+// src/theme-engine/renderers/cell/aquarium/euglena.ts
+function finiteOr3(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+function finite2(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+function positive2(value, fallback) {
+  return Math.max(0.001, finiteOr3(value, fallback));
+}
+var TAU3 = Math.PI * 2;
+function wrapUnit(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  return (value % 1 + 1) % 1;
+}
+function wrap2(value, max) {
+  if (!(max > 0))
+    return 0;
+  const wrapped = value % max;
+  return wrapped < 0 ? wrapped + max : wrapped;
+}
+function clamp01(value) {
+  return Math.max(0, Math.min(1, finite2(value, 0)));
+}
+function point(cx, cy, ux, uy, along) {
+  return { x: cx + ux * along, y: cy + uy * along };
+}
+function transform2(cx, cy, ux, uy, along, lateral) {
+  const nx = -uy;
+  const ny = ux;
+  return { x: cx + ux * along + nx * lateral, y: cy + uy * along + ny * lateral };
+}
+function euglenaPose(rollPhase, metabolyPhase, options = {}) {
+  const cx = finiteOr3(options.centerX, 0);
+  const cy = finiteOr3(options.centerY, 0);
+  const length = positive2(options.length, 8);
+  const baseWidth = positive2(options.baseWidth, length * 0.28);
+  const heading = finiteOr3(options.heading, 0);
+  const flagellumLength = positive2(options.flagellumLength, length * 0.45);
+  const stripeCount = Math.max(1, Math.floor(finiteOr3(options.stripeCount, 6)));
+  const roll = wrapUnit(rollPhase);
+  const metaboly = wrapUnit(metabolyPhase);
+  const flagellum = wrapUnit(options.flagellumPhase ?? roll * 1.7);
+  const ux = Math.cos(heading);
+  const uy = Math.sin(heading);
+  const metabolyStretch = 1 + 0.06 * Math.sin(metaboly * TAU3);
+  const halfLength = length * metabolyStretch / 2;
+  const rollCos = Math.cos(roll * TAU3);
+  const apparentWidth = baseWidth * (0.72 + 0.28 * Math.abs(rollCos));
+  const stripePhase = wrapUnit(roll * stripeCount + metaboly * 0.18);
+  const anterior = point(cx, cy, ux, uy, halfLength);
+  const posterior = point(cx, cy, ux, uy, -halfLength);
+  const eyespot = point(cx, cy, ux, uy, halfLength - length * 0.08);
+  const flagellumPoints = [eyespot];
+  const waveAmp = Math.min(1.25, Math.max(0.35, apparentWidth * 0.34));
+  for (let i = 1;i <= 4; i++) {
+    const q = i / 4;
+    const along = halfLength - length * 0.08 + flagellumLength * q;
+    const taper = 1 - q * 0.35;
+    const lateral = Math.sin(flagellum * TAU3 + q * Math.PI * 1.35) * waveAmp * taper;
+    flagellumPoints.push(transform2(cx, cy, ux, uy, along, lateral));
+  }
+  const flagellumEnd = flagellumPoints[flagellumPoints.length - 1];
+  const bodySamples = [-1, -0.5, 0, 0.5, 1].map((u) => {
+    const taper = Math.max(0, 1 - u * u);
+    const anteriorTaper = 1 - 0.12 * Math.max(0, u);
+    return { u, halfWidth: apparentWidth / 2 * Math.sqrt(taper) * anteriorTaper };
+  });
+  return {
+    center: { x: cx, y: cy },
+    anterior,
+    posterior,
+    eyespot,
+    flagellumEnd,
+    flagellumPoints,
+    apparentWidth,
+    stripePhase,
+    bodySamples
+  };
+}
+function seedEuglena(count, seed, frame, salt = 235478698) {
+  if (count <= 0)
+    return [];
+  const euglena = [];
+  const safeWidth = Math.max(0, finite2(frame.width, 0));
+  const safeHeight = Math.max(0, finite2(frame.height, 0));
+  for (let i = 0;i < count; i++) {
+    const heading = seededUnit(seed, i, salt ^ 1757159915) * TAU3;
+    euglena.push({
+      x: seededUnit(seed, i, salt) * safeWidth,
+      y: seededUnit(seed, i, salt ^ 1374496523) * safeHeight,
+      phase: heading,
+      size: 0.5 + seededUnit(seed, i, salt ^ 48610963),
+      heading,
+      swimSpeed: 0.55 + seededUnit(seed, i, salt ^ 802853537) * 0.75,
+      rollPhase: seededUnit(seed, i, salt ^ 1107813911),
+      metabolyPhase: seededUnit(seed, i, salt ^ 972076277),
+      flagellumPhase: seededUnit(seed, i, salt ^ 668265263),
+      rollRate: 0.18 + seededUnit(seed, i, salt ^ 348696353) * 0.12,
+      metabolyRate: 0.028 + seededUnit(seed, i, salt ^ 1002986003) * 0.024,
+      flagellumRate: 1.05 + seededUnit(seed, i, salt ^ 1966046297) * 0.55,
+      spiralAmplitude: 0.28 + seededUnit(seed, i, salt ^ 1638598935) * 0.34
+    });
+  }
+  return euglena;
+}
+function updateEuglena(euglena, frame, view) {
+  if (euglena.length === 0)
+    return euglena;
+  const dt = Math.max(0, finite2(frame.dt, 0));
+  const safeWidth = Math.max(0, finite2(frame.width, 0));
+  const safeHeight = Math.max(0, finite2(frame.height, 0));
+  const activityMix = clamp01(finite2(frame.activity, 0) * finite2(view.activityBoost, 0));
+  const idleRate = Math.max(0, finite2(view.euglena.speed, 0));
+  const activeRate = Math.max(0, finite2(view.euglena.speedActive, idleRate));
+  const rate = idleRate + (activeRate - idleRate) * activityMix;
+  return euglena.map((cell) => {
+    const rollRate = Math.max(0, finite2(cell.rollRate, 0)) * rate;
+    const rollDelta = rollRate * dt;
+    const oldRoll = wrapUnit(cell.rollPhase);
+    const nextRoll = wrapUnit(oldRoll + rollDelta);
+    const heading = finite2(cell.heading, 0);
+    const ux = Math.cos(heading);
+    const uy = Math.sin(heading);
+    const nx = -uy;
+    const ny = ux;
+    const swim = Math.max(0, finite2(cell.swimSpeed, 0)) * rate;
+    const lateralDelta = rollDelta === 0 ? 0 : finite2(cell.spiralAmplitude, 0) * (Math.cos(oldRoll * TAU3) - Math.cos((oldRoll + rollDelta) * TAU3)) / TAU3;
+    const nextX = finite2(cell.x, 0) + ux * swim * dt + nx * lateralDelta;
+    const nextY = finite2(cell.y, 0) + uy * swim * dt + ny * lateralDelta;
+    return {
+      ...cell,
+      x: wrap2(nextX, safeWidth),
+      y: wrap2(nextY, safeHeight),
+      phase: heading,
+      rollPhase: nextRoll,
+      metabolyPhase: wrapUnit(cell.metabolyPhase + Math.max(0, finite2(cell.metabolyRate, 0)) * rate * dt),
+      flagellumPhase: wrapUnit(cell.flagellumPhase + Math.max(0, finite2(cell.flagellumRate, 0)) * rate * dt)
+    };
+  });
+}
+function drawPolyline2(ctx, points, close) {
+  if (points.length === 0)
+    return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1;i < points.length; i++)
+    ctx.lineTo(points[i].x, points[i].y);
+  if (close)
+    ctx.closePath();
+}
+function euglenaBodyOutline(pose, heading) {
+  const ux = Math.cos(heading);
+  const uy = Math.sin(heading);
+  const halfLength = Math.hypot(pose.anterior.x - pose.center.x, pose.anterior.y - pose.center.y);
+  const upper = [];
+  const lower = [];
+  for (let i = 0;i <= 10; i++) {
+    const u = -1 + i / 10 * 2;
+    const sampleTaper = Math.max(0, 1 - u * u);
+    const anteriorTaper = 1 - 0.12 * Math.max(0, u);
+    const halfWidth = pose.apparentWidth / 2 * Math.sqrt(sampleTaper) * anteriorTaper;
+    upper.push(transform2(pose.center.x, pose.center.y, ux, uy, halfLength * u, halfWidth));
+    lower.push(transform2(pose.center.x, pose.center.y, ux, uy, halfLength * u, -halfWidth));
+  }
+  return [...upper, ...lower.reverse()];
+}
+function drawEuglena(ctx, euglena, frame, view) {
+  if (!view.enabled || euglena.length === 0 || view.euglena.count <= 0)
+    return;
+  const alpha = Math.max(0, Math.min(1, view.alpha * 0.72));
+  if (alpha <= 0)
+    return;
+  const scale = Math.max(0.1, finite2(view.euglena.scale, 1));
+  const hue = finite2(frame.baseHue, 50) + 42;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const cell of euglena) {
+    const length = Math.max(5, Math.min(10, (7.2 + finite2(cell.size, 1) * 1.6) * scale));
+    const width = Math.max(1.4, Math.min(3.2, length * 0.28));
+    const flagellumLength = Math.max(2.2, Math.min(5, length * 0.46));
+    const heading = finite2(cell.heading, 0);
+    const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {
+      centerX: finite2(cell.x, 0),
+      centerY: finite2(cell.y, 0),
+      length,
+      baseWidth: width,
+      heading,
+      flagellumLength,
+      flagellumPhase: cell.flagellumPhase,
+      stripeCount: 5
+    });
+    const outline = euglenaBodyOutline(pose, heading);
+    drawPolyline2(ctx, outline, true);
+    ctx.fillStyle = `hsla(${hue}, 18%, 47%, ${alpha * 0.18})`;
+    ctx.strokeStyle = `hsla(${hue + 8}, 16%, 63%, ${alpha * 0.35})`;
+    ctx.lineWidth = 0.48;
+    ctx.fill();
+    ctx.stroke();
+    const ux = Math.cos(heading);
+    const uy = Math.sin(heading);
+    const stripeAlpha = alpha * 0.18;
+    ctx.strokeStyle = `hsla(${hue - 8}, 20%, 38%, ${stripeAlpha})`;
+    ctx.lineWidth = 0.24;
+    for (let i = -1;i <= 1; i++) {
+      const along = length * (i * 0.16 + (pose.stripePhase - 0.5) * 0.08);
+      const band = [
+        transform2(pose.center.x, pose.center.y, ux, uy, along - length * 0.16, -width * 0.18),
+        transform2(pose.center.x, pose.center.y, ux, uy, along + length * 0.16, width * 0.18)
+      ];
+      drawPolyline2(ctx, band, false);
+      ctx.stroke();
+    }
+    ctx.fillStyle = `hsla(${hue - 12}, 24%, 42%, ${alpha * 0.2})`;
+    for (let i = -1;i <= 1; i++) {
+      const p = transform2(pose.center.x, pose.center.y, ux, uy, length * i * 0.17, width * 0.14 * (i === 0 ? -1 : 1));
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, 0.55, 0.34, heading, 0, TAU3);
+      ctx.fill();
+    }
+    ctx.strokeStyle = `hsla(${hue + 10}, 16%, 66%, ${alpha * 0.34})`;
+    ctx.lineWidth = 0.34;
+    drawPolyline2(ctx, pose.flagellumPoints, false);
+    ctx.stroke();
+    ctx.fillStyle = `hsla(20, 40%, 48%, ${alpha * 0.62})`;
+    ctx.beginPath();
+    ctx.arc(pose.eyespot.x, pose.eyespot.y, Math.min(1, Math.max(0.45, width * 0.22)), 0, TAU3);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 // src/theme-engine/renderers/cell/aquarium/layer.ts
 function seedAquarium(frame, params) {
   const view = aquariumParamsView(params);
@@ -1862,22 +2096,24 @@ function seedAquarium(frame, params) {
   return {
     seed,
     diatoms: seedDiatoms(view.diatoms.count, seed, frame),
-    euglena: seedPoints(view.euglena.count, seed, frame, 235478698),
+    euglena: seedEuglena(view.euglena.count, seed, frame),
     vorticella: seedPoints(view.vorticella.count, seed, frame, 117600714)
   };
 }
 function updateAquarium(aquarium, frame, params) {
   const view = aquariumParamsView(params);
-  if (!view.enabled || aquarium.diatoms.length === 0 || view.diatoms.count <= 0)
+  if (!view.enabled)
     return aquarium;
-  const diatoms = updateDiatoms(aquarium.diatoms, frame, view);
-  return diatoms === aquarium.diatoms ? aquarium : { ...aquarium, diatoms };
+  const diatoms = view.diatoms.count > 0 ? updateDiatoms(aquarium.diatoms, frame, view) : aquarium.diatoms;
+  const euglena = view.euglena.count > 0 ? updateEuglena(aquarium.euglena, frame, view) : aquarium.euglena;
+  return diatoms === aquarium.diatoms && euglena === aquarium.euglena ? aquarium : { ...aquarium, diatoms, euglena };
 }
 function drawAquariumBackground(ctx, aquarium, frame, params) {
   const view = aquariumParamsView(params);
-  if (!view.enabled || aquarium.diatoms.length === 0 || view.diatoms.count <= 0)
+  if (!view.enabled)
     return;
   drawDiatoms(ctx, aquarium.diatoms, frame, view);
+  drawEuglena(ctx, aquarium.euglena, frame, view);
 }
 
 // src/theme-engine/renderers/cell/draw.ts

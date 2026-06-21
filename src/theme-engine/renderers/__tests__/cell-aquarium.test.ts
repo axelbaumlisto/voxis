@@ -3,7 +3,7 @@ import { CELL_DEFAULTS } from "../cell/defaults";
 import { aquariumParamsView } from "../cell/aquarium/params";
 import { seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aquarium/layer";
 import { diatomGeometry } from "../cell/aquarium/diatoms";
-import { euglenaPose } from "../cell/aquarium/euglena";
+import { euglenaPose, updateEuglena } from "../cell/aquarium/euglena";
 import { vorticellaGeometry } from "../cell/aquarium/vorticella";
 import type { AquariumFrame, AquariumLayerState } from "../cell/aquarium/types";
 import type { CellParams } from "../cell/types";
@@ -47,7 +47,7 @@ function installCountingCanvasContext(): { readonly ops: string[] } {
   return { ops };
 }
 
-async function renderAquariumOpCount(enableAquarium: boolean): Promise<number> {
+async function renderAquariumOpCount(enableAquarium: boolean, euglenaCount = 0): Promise<number> {
   vi.resetModules();
   vi.doUnmock("../cell/aquarium/layer");
   const { ops } = installCountingCanvasContext();
@@ -71,7 +71,7 @@ async function renderAquariumOpCount(enableAquarium: boolean): Promise<number> {
       aquariumAlpha: 0.28,
       diatomCount: 6,
       diatomAlpha: 0.35,
-      euglenaCount: 0,
+      euglenaCount,
       vorticellaCount: 0,
     },
   });
@@ -231,6 +231,7 @@ describe("aquarium biology geometry contracts", () => {
     expect(anteriorTip?.halfWidth).toBeCloseTo(0, 6);
     expect(posteriorTip?.halfWidth).toBeCloseTo(0, 6);
     expect(pose.eyespot.x).toBeGreaterThan(pose.center.x);
+    expect(pose.flagellumPoints[0]).toEqual(pose.eyespot);
     expect(pose.flagellumEnd.x).toBeGreaterThan(pose.eyespot.x);
     expect(pose.flagellumEnd.x - pose.eyespot.x).toBeLessThan(5);
   });
@@ -292,7 +293,7 @@ describe("aquarium layer Phase 2 diatoms", () => {
       aquariumSeed: 11,
       diatomCount: 3,
       diatomDriftSpeed: 1.25,
-      euglenaCount: 1,
+      euglenaCount: 0,
       vorticellaCount: 1,
     };
     const initial = seedAquarium(frame({ width: 172, height: 36 }), params);
@@ -426,6 +427,154 @@ describe("aquarium layer Phase 2 diatoms", () => {
   });
 });
 
+describe("aquarium layer Phase 3 euglena", () => {
+  it("updateAquarium moves euglena deterministically with dt-integrated phases", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 41,
+      diatomCount: 0,
+      euglenaCount: 2,
+      euglenaSpeed: 0.9,
+      euglenaSpeedActive: 1.3,
+      aquariumActivityBoost: 0.5,
+    };
+    const initial = seedAquarium(frame({ width: 172, height: 36 }), params);
+    const updated = updateAquarium(initial, frame({ dt: 0.5, width: 172, height: 36, activity: 0.8 }), params);
+    const repeat = updateAquarium(initial, frame({ dt: 0.5, width: 172, height: 36, activity: 0.8 }), params);
+
+    expect(updated).toEqual(repeat);
+    expect(updated).not.toBe(initial);
+    expect(updated.diatoms).toBe(initial.diatoms);
+    expect(updated.vorticella).toBe(initial.vorticella);
+    for (const cell of updated.euglena) {
+      for (const value of [cell.x, cell.y, cell.heading, cell.rollPhase, cell.metabolyPhase, cell.flagellumPhase]) {
+        expect(Number.isFinite(value)).toBe(true);
+      }
+      expect(cell.x).toBeGreaterThanOrEqual(0);
+      expect(cell.x).toBeLessThan(172);
+      expect(cell.y).toBeGreaterThanOrEqual(0);
+      expect(cell.y).toBeLessThan(36);
+      expect(cell.rollPhase).toBeGreaterThanOrEqual(0);
+      expect(cell.rollPhase).toBeLessThan(1);
+      expect(cell.metabolyPhase).toBeGreaterThanOrEqual(0);
+      expect(cell.metabolyPhase).toBeLessThan(1);
+      expect(cell.flagellumPhase).toBeGreaterThanOrEqual(0);
+      expect(cell.flagellumPhase).toBeLessThan(1);
+    }
+  });
+
+  it("updateEuglena is dt-partition invariant within numeric tolerance", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 43,
+      euglenaCount: 2,
+      euglenaSpeed: 0.8,
+      euglenaSpeedActive: 1.2,
+      aquariumActivityBoost: 0.5,
+    };
+    const view = aquariumParamsView(params);
+    const initial = seedAquarium(frame({ width: 172, height: 36 }), params).euglena;
+    const oneStep = updateEuglena(initial, frame({ dt: 0.12, width: 172, height: 36, activity: 0.4 }), view);
+    const halfStep = updateEuglena(initial, frame({ dt: 0.06, width: 172, height: 36, activity: 0.4 }), view);
+    const twoSteps = updateEuglena(halfStep, frame({ dt: 0.06, width: 172, height: 36, activity: 0.4 }), view);
+
+    for (let i = 0; i < oneStep.length; i++) {
+      expect(twoSteps[i].x).toBeCloseTo(oneStep[i].x, 10);
+      expect(twoSteps[i].y).toBeCloseTo(oneStep[i].y, 10);
+      expect(twoSteps[i].rollPhase).toBeCloseTo(oneStep[i].rollPhase, 10);
+      expect(twoSteps[i].metabolyPhase).toBeCloseTo(oneStep[i].metabolyPhase, 10);
+      expect(twoSteps[i].flagellumPhase).toBeCloseTo(oneStep[i].flagellumPhase, 10);
+    }
+  });
+
+  it("keeps euglena finite, bounded, and wrapped over long runtime", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1.2,
+    };
+    const initial = seedAquarium(frame({ width: 172, height: 36 }), params);
+    const updated = updateAquarium(initial, frame({ dt: 100_000, width: 172, height: 36, activity: 1 }), params);
+    const cell = updated.euglena[0];
+
+    for (const value of [cell.x, cell.y, cell.heading, cell.rollPhase, cell.metabolyPhase, cell.flagellumPhase]) {
+      expect(Number.isFinite(value)).toBe(true);
+    }
+    expect(cell.x).toBeGreaterThanOrEqual(0);
+    expect(cell.x).toBeLessThan(172);
+    expect(cell.y).toBeGreaterThanOrEqual(0);
+    expect(cell.y).toBeLessThan(36);
+    expect(cell.rollPhase).toBeGreaterThanOrEqual(0);
+    expect(cell.rollPhase).toBeLessThan(1);
+    expect(cell.metabolyPhase).toBeGreaterThanOrEqual(0);
+    expect(cell.metabolyPhase).toBeLessThan(1);
+    expect(cell.flagellumPhase).toBeGreaterThanOrEqual(0);
+    expect(cell.flagellumPhase).toBeLessThan(1);
+  });
+
+  it("euglenaPose keeps eyespot and flagellum at the anterior end for rotated cells", () => {
+    const pose = euglenaPose(0.3, 0.6, {
+      centerX: 20,
+      centerY: 10,
+      length: 8,
+      baseWidth: 2,
+      heading: Math.PI / 2,
+      flagellumLength: 3,
+      flagellumPhase: 0.1,
+    });
+
+    expect(pose.eyespot.y).toBeGreaterThan(pose.center.y);
+    expect(pose.flagellumEnd.y).toBeGreaterThan(pose.eyespot.y);
+    expect(Math.abs(pose.eyespot.x - pose.center.x)).toBeLessThan(1);
+    expect(Math.hypot(pose.flagellumPoints[0].x - pose.eyespot.x, pose.flagellumPoints[0].y - pose.eyespot.y)).toBeLessThan(1e-9);
+  });
+
+  it("drawAquariumBackground draws a low-alpha euglena smoke at 172×36", () => {
+    const calls: string[] = [];
+    const ctx = {
+      save: vi.fn(() => calls.push("save")),
+      restore: vi.fn(() => calls.push("restore")),
+      beginPath: vi.fn(() => calls.push("beginPath")),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      closePath: vi.fn(),
+      fill: vi.fn(() => calls.push("fill")),
+      stroke: vi.fn(() => calls.push("stroke")),
+      ellipse: vi.fn(() => calls.push("ellipse")),
+      arc: vi.fn(() => calls.push("arc")),
+      set lineCap(_value: CanvasLineCap) {},
+      set lineJoin(_value: CanvasLineJoin) {},
+      set fillStyle(value: string | CanvasGradient | CanvasPattern) { calls.push(String(value)); },
+      set strokeStyle(value: string | CanvasGradient | CanvasPattern) { calls.push(String(value)); },
+      set lineWidth(_value: number) {},
+    } as unknown as CanvasRenderingContext2D;
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 47,
+      aquariumAlpha: 0.24,
+      diatomCount: 0,
+      euglenaCount: 1,
+    };
+    const state = seedAquarium(frame({ width: 172, height: 36 }), params);
+
+    drawAquariumBackground(ctx, state, frame({ width: 172, height: 36 }), params);
+
+    expect(ctx.save).toHaveBeenCalledTimes(1);
+    expect(ctx.restore).toHaveBeenCalledTimes(1);
+    expect(ctx.fill).toHaveBeenCalled();
+    expect(ctx.stroke).toHaveBeenCalled();
+    expect(ctx.ellipse).toHaveBeenCalled();
+    expect(ctx.arc).toHaveBeenCalled();
+    expect(calls.some((call) => call.includes("hsla(92") && call.includes("0.031"))).toBe(true);
+    expect(calls.some((call) => call.includes("hsla(20") && call.includes("0.107"))).toBe(true);
+  });
+});
+
 describe("aquarium layer gate-off no-ops", () => {
   it("updateAquarium returns the same state object when disabled", () => {
     const state = seedAquarium(frame(), {
@@ -546,6 +695,17 @@ describe("createCellRenderer aquarium gate", () => {
     vi.unstubAllGlobals();
     vi.resetModules();
     const onOps = await renderAquariumOpCount(true);
+
+    expect(onOps - offOps).toBeGreaterThan(0);
+    expect(onOps - offOps).toBeLessThan(1200);
+  });
+
+  it("keeps combined diatom/euglena gate-on draw overhead under 1200 ops at 172x36", async () => {
+    const offOps = await renderAquariumOpCount(false, 1);
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.resetModules();
+    const onOps = await renderAquariumOpCount(true, 1);
 
     expect(onOps - offOps).toBeGreaterThan(0);
     expect(onOps - offOps).toBeLessThan(1200);

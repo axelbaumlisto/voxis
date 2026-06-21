@@ -51,9 +51,21 @@ export interface DiatomState extends AquariumSeedPoint {
   readonly rotationRate: number;
 }
 
+export interface EuglenaState extends AquariumSeedPoint {
+  readonly heading: number;
+  readonly swimSpeed: number;
+  readonly rollPhase: number;
+  readonly metabolyPhase: number;
+  readonly flagellumPhase: number;
+  readonly rollRate: number;
+  readonly metabolyRate: number;
+  readonly flagellumRate: number;
+  readonly spiralAmplitude: number;
+}
+
 export interface AquariumLayerState {
   readonly seed: number;
   readonly diatoms: readonly DiatomState[];
-  readonly euglena: readonly AquariumSeedPoint[];
+  readonly euglena: readonly EuglenaState[];
   readonly vorticella: readonly AquariumSeedPoint[];
 }
