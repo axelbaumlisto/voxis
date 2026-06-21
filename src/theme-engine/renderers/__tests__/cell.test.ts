@@ -84,11 +84,16 @@ import {
   bodyProfileDeform,
   interpProfileRadius,
   axialSpin,
+  advanceAxialSpinPhase,
+  advanceCiliaBeatCycles,
+  ciliaBeatPhaseAtCycle,
   helicalOffset,
   interiorPoint,
   seedInteriorGranules,
   profileCDFInv,
   cyclosisLoopPoint,
+  cyclosisLoopPointAtPhase,
+  advanceCyclosisPhase,
   buildProfilePts,
   applyOralGroove,
   effectiveCyclosisPeriod,
@@ -6275,6 +6280,72 @@ describe("Commit 24 — axial spin", () => {
   it("(g) DETERMINISM: identical args => identical value (no Date/random)", () => {
     const p = { ...CELL_DEFAULTS, enableAxialSpin: true };
     expect(axialSpin(3.3, 0.8, p)).toBe(axialSpin(3.3, 0.8, p));
+  });
+});
+
+describe("Step A+B — activity-dependent phases are dt-integrated", () => {
+  it("axial/helical spin does not spike when speedNorm changes after long elapsed time", () => {
+    const p = { ...CELL_DEFAULTS, enableAxialSpin: true, axialSpinMax: 7 };
+    const elapsed = 120;
+    const dt = 0.5;
+    const s0 = 0.1;
+    const s1 = 0.8;
+    let phase = 0;
+    phase = advanceAxialSpinPhase(phase, elapsed, s0, p);
+    const before = phase;
+    phase = advanceAxialSpinPhase(phase, dt, s1, p);
+    const increment = Math.abs(phase - before);
+    expect(increment).toBeLessThanOrEqual((p.axialSpinMax ?? 0) * s1 * dt + 1e-12);
+    const oldFormulaJump = Math.abs(axialSpin(elapsed + dt, s1, p) - axialSpin(elapsed, s0, p));
+    expect(oldFormulaJump).toBeGreaterThan(increment * 10);
+  });
+
+  it("cyclosis phase does not spike when effective period/activity changes after long elapsed time", () => {
+    const p = { ...CELL_DEFAULTS, cyclosisPeriod: 65, cyclosisActivityBoost: 0.4 };
+    const elapsed = 120;
+    const dt = 0.5;
+    const idle = { ...p, cyclosisPeriod: effectiveCyclosisPeriod(0.06, p) };
+    const active = { ...p, cyclosisPeriod: effectiveCyclosisPeriod(1, p) };
+    let phase = 0;
+    phase = advanceCyclosisPhase(phase, elapsed, idle);
+    const before = phase;
+    phase = advanceCyclosisPhase(phase, dt, active);
+    const increment = Math.abs(phase - before);
+    const minPeriod = Math.min(idle.cyclosisPeriod ?? 65, active.cyclosisPeriod ?? 65);
+    expect(increment).toBeLessThanOrEqual((TAU / minPeriod) * dt + 1e-12);
+
+    const g = { q: 0.7, phi0: 0.4 };
+    const p0 = cyclosisLoopPointAtPhase(g, before);
+    const p1 = cyclosisLoopPointAtPhase(g, phase);
+    expect(Math.hypot(p1.u - p0.u, p1.s - p0.s)).toBeLessThan(0.08);
+
+    const oldPhi0 = (TAU / (idle.cyclosisPeriod ?? 65)) * elapsed;
+    const oldPhi1 = (TAU / (active.cyclosisPeriod ?? 65)) * (elapsed + dt);
+    expect(Math.abs(oldPhi1 - oldPhi0)).toBeGreaterThan(increment * 10);
+  });
+
+  it("cilia beat phase does not spike when Hz changes after long elapsed time", () => {
+    const p = { ...CELL_DEFAULTS, ciliaBeatHz: 0.5, ciliaBeatHzActive: 0.9, ciliaAsymmetry: 0 };
+    const elapsed = 120;
+    const dt = 0.5;
+    let cycles = 0;
+    cycles = advanceCiliaBeatCycles(cycles, elapsed, 0.5);
+    const before = cycles;
+    cycles = advanceCiliaBeatCycles(cycles, dt, 0.9);
+    let increment = cycles - before;
+    if (increment < -0.5) increment += 1;
+    if (increment > 0.5) increment -= 1;
+    expect(Math.abs(increment)).toBeLessThanOrEqual(0.9 * dt + 1e-12);
+
+    const ph0 = ciliaBeatPhaseAtCycle(before, 3, p);
+    const ph1 = ciliaBeatPhaseAtCycle(cycles, 3, p);
+    let phaseDelta = ph1 - ph0;
+    if (phaseDelta < -0.5) phaseDelta += 1;
+    if (phaseDelta > 0.5) phaseDelta -= 1;
+    expect(Math.abs(phaseDelta)).toBeLessThanOrEqual(0.9 * dt + 1e-12);
+
+    const oldUnwrappedDelta = (elapsed + dt) * 0.9 - elapsed * 0.5;
+    expect(oldUnwrappedDelta).toBeGreaterThan(Math.abs(increment) * 10);
   });
 });
 
