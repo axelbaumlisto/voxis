@@ -1641,6 +1641,15 @@ function drawCVCanals(ctx, vx, vy, r, cvH, params) {
   }
 }
 
+// src/theme-engine/renderers/cell/views.ts
+function cellPaletteView(params, baseHue) {
+  return {
+    cvHue: params.cvHue ?? baseHue + 20,
+    foodVacuoleHue: params.foodVacuoleHue ?? baseHue - 30,
+    foodVacuoleSat: params.foodVacuoleSat ?? 0.4
+  };
+}
+
 // src/theme-engine/renderers/cell/renderer.ts
 function ciliaBeatHzEff(activity, params) {
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
@@ -1918,9 +1927,10 @@ function createCellRenderer(container, opts) {
           }
           ctx.restore();
         }
-        const cvH = params.cvHue ?? baseHue + 20;
-        const fvH = params.foodVacuoleHue ?? baseHue - 30;
-        const fvSat = params.foodVacuoleSat ?? 0.4;
+        const palette = cellPaletteView(params, baseHue);
+        const cvH = palette.cvHue;
+        const fvH = palette.foodVacuoleHue;
+        const fvSat = palette.foodVacuoleSat;
         ctx.fillStyle = hsla(baseHue, params.cytoplasmSat ?? 0.7, 0.55, effectiveFillAlpha);
         pathFromPoints(ctx, splinePoints);
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, baseR * 0.9));

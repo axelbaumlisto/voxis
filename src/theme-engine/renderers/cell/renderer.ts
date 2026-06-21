@@ -37,6 +37,7 @@ import {
 } from "./organelles";
 import { advectMote, seedMotes, seedGranules, advectGranule } from "./flow";
 import { pathFromPoints, clipToCellPath, drawCVVesicle, drawCVCanals, drawFoodVacuole } from "./draw";
+import { cellPaletteView } from "./views";
 
 // ---------------------------------------------------------------------------
 // Cell geometry functions
@@ -590,9 +591,10 @@ export function createCellRenderer(
 
         // --- Fill: translucent cytoplasm ---
         // Resolved organelle hues (overridable via params, defaults = legacy)
-        const cvH = params.cvHue ?? (baseHue + 20);
-        const fvH = params.foodVacuoleHue ?? (baseHue - 30);
-        const fvSat = params.foodVacuoleSat ?? 0.4;
+        const palette = cellPaletteView(params, baseHue);
+        const cvH = palette.cvHue;
+        const fvH = palette.foodVacuoleHue;
+        const fvSat = palette.foodVacuoleSat;
         ctx.fillStyle = hsla(baseHue, params.cytoplasmSat ?? 0.70, 0.55, effectiveFillAlpha);
         pathFromPoints(ctx, splinePoints);
 
