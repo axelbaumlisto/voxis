@@ -413,6 +413,10 @@ export interface CellParams {
   /** Commit 32e: body-normalised transverse anchor of the posterior contractile
    * vacuole. Default 0.62. */
   cvPosteriorS?: number;
+  /** Draws the paramecium hero. Default true (undefined = true) so existing
+   * themes and goldens are unchanged. Set false for themes where an aquarium
+   * companion (e.g. euglena) is the sole organism. */
+  enableHero?: boolean;
   /** Micro-aquarium companions master gate. Default false; Phase 0 API only,
    * with no renderer wiring/drawing until the A/B-approved aquarium phase. */
   enableAquarium?: boolean;

@@ -1173,3 +1173,47 @@ describe("createCellRenderer aquarium gate", () => {
     expect(onOps - offOps).toBeLessThan(1200);
   });
 });
+
+describe("enableHero gate", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  async function renderHeroOpCount(enableHero: boolean): Promise<number> {
+    vi.resetModules();
+    vi.doUnmock("../cell/aquarium/layer");
+    const { ops } = installCountingCanvasContext();
+    const rafCalls: Array<() => void> = [];
+    let now = 1000;
+    vi.stubGlobal("performance", { ["now"]: () => now });
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      rafCalls.push(cb);
+      return rafCalls.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const { createCellRenderer } = await import("../cell/renderer");
+    const renderer = createCellRenderer(document.createElement("div"), {
+      width: 172,
+      height: 36,
+      baseHue: 50,
+      params: { enableHero, enableAquarium: true, euglenaCount: 1, euglenaScale: 6.45 },
+    });
+    now += 1000 / 60;
+    rafCalls.shift()?.();
+    renderer.destroy();
+    return ops.length;
+  }
+
+  it("draws far fewer ops with the paramecium hero hidden than shown", async () => {
+    const hidden = await renderHeroOpCount(false);
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.resetModules();
+    const shown = await renderHeroOpCount(true);
+
+    expect(hidden).toBeGreaterThan(0); // the euglena still draws
+    expect(hidden).toBeLessThan(shown); // but the heavy paramecium is gone
+  });
+});

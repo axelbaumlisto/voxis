@@ -471,7 +471,7 @@ export function createCellRenderer(
           audioLevel,
           startle,
           baseHue,
-          hero: { x: cx, y: cy, radius: baseR },
+          hero: params.enableHero === false ? undefined : { x: cx, y: cy, radius: baseR },
         };
         aquarium = aquarium ?? seedAquarium(aquariumFrame, params);
         aquarium = updateAquarium(aquarium, aquariumFrame, params);
@@ -483,7 +483,7 @@ export function createCellRenderer(
       // Smooth via Catmull-Rom (4 segments per span for smoothness)
       const splinePoints = catmullRom(contourPoints, 4);
 
-      if (splinePoints.length >= 3) {
+      if (params.enableHero !== false && splinePoints.length >= 3) {
         // --- Cilia (under the membrane) ---
         // Multi-segment flagella with an asymmetric power/recovery beat and a
         // metachronal wave travelling round the crown (biologically motivated).
