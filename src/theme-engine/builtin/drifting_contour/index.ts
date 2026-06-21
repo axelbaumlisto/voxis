@@ -145,17 +145,18 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // disc granuleMaxRadiusFrac/foodVacuoleMaxRadiusFrac no longer apply.
       enableInteriorField: true,     // body-coord interior (not the central disc)
       cyclosisPeriod: 65,            // slower cyclosis — equatorial granules <3px/0.5s (was 38)
-      // === Micro-aquarium Phase 5B preview — one muted Euglena, behind hero. ===
+      // === Micro-aquarium Phase 5B visibility boost — one readable Euglena, behind hero. ===
       enableAquarium: true,
-      aquariumAlpha: 0.22,
+      aquariumSeed: 17,
+      aquariumAlpha: 0.40,
       aquariumActivityBoost: 0.25,
-      diatomCount: 2,
-      diatomAlpha: 0.20,
-      diatomDriftSpeed: 0.45,
+      diatomCount: 0,
+      diatomAlpha: 0.16,
+      diatomDriftSpeed: 0.35,
       euglenaCount: 1,
       euglenaSpeed: 0.75,
       euglenaSpeedActive: 1.0,
-      euglenaScale: 0.85,
+      euglenaScale: 1.35,
       vorticellaCount: 0,
       ...userParams,
     },
