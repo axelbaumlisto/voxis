@@ -10,7 +10,7 @@ function mix32(n: number): number {
   return x >>> 0;
 }
 
-function unit(seed: number, index: number, salt: number): number {
+export function seededUnit(seed: number, index: number, salt: number): number {
   return mix32(seed ^ Math.imul(index + 1, 0x9e3779b1) ^ salt) / 0x100000000;
 }
 
@@ -26,10 +26,10 @@ export function seedPoints(
   const safeHeight = Math.max(0, frame.height);
   for (let i = 0; i < count; i++) {
     points.push({
-      x: unit(seed, i, salt) * safeWidth,
-      y: unit(seed, i, salt ^ 0x51ed270b) * safeHeight,
-      phase: unit(seed, i, salt ^ 0x68bc21eb) * Math.PI * 2,
-      size: 0.5 + unit(seed, i, salt ^ 0x02e5be93),
+      x: seededUnit(seed, i, salt) * safeWidth,
+      y: seededUnit(seed, i, salt ^ 0x51ed270b) * safeHeight,
+      phase: seededUnit(seed, i, salt ^ 0x68bc21eb) * Math.PI * 2,
+      size: 0.5 + seededUnit(seed, i, salt ^ 0x02e5be93),
     });
   }
   return points;

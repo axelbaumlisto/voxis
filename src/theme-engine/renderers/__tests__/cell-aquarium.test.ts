@@ -226,8 +226,114 @@ describe("aquarium biology geometry contracts", () => {
   });
 });
 
-describe("aquarium layer Phase 1 no-ops", () => {
-  it("updateAquarium returns the same state object", () => {
+describe("aquarium layer Phase 2 diatoms", () => {
+  it("updateAquarium drifts diatoms deterministically, finitely, and keeps them in bounds", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 11,
+      diatomCount: 3,
+      diatomDriftSpeed: 1.25,
+      euglenaCount: 1,
+      vorticellaCount: 1,
+    };
+    const initial = seedAquarium(frame({ width: 172, height: 36 }), params);
+    const updated = updateAquarium(initial, frame({ dt: 0.5, width: 172, height: 36 }), params);
+    const repeat = updateAquarium(initial, frame({ dt: 0.5, width: 172, height: 36 }), params);
+
+    expect(updated).toEqual(repeat);
+    expect(updated).not.toBe(initial);
+    expect(updated.euglena).toBe(initial.euglena);
+    expect(updated.vorticella).toBe(initial.vorticella);
+    for (const diatom of updated.diatoms) {
+      expect(Number.isFinite(diatom.x)).toBe(true);
+      expect(Number.isFinite(diatom.y)).toBe(true);
+      expect(Number.isFinite(diatom.heading)).toBe(true);
+      expect(diatom.x).toBeGreaterThanOrEqual(0);
+      expect(diatom.x).toBeLessThan(172);
+      expect(diatom.y).toBeGreaterThanOrEqual(0);
+      expect(diatom.y).toBeLessThan(36);
+    }
+  });
+
+  it("updateAquarium is dt-partition invariant within numeric tolerance", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 21,
+      diatomCount: 4,
+      diatomDriftSpeed: 0.8,
+    };
+    const initial = seedAquarium(frame({ width: 172, height: 36 }), params);
+    const oneStep = updateAquarium(initial, frame({ dt: 0.12, width: 172, height: 36 }), params);
+    const halfStep = updateAquarium(initial, frame({ dt: 0.06, width: 172, height: 36 }), params);
+    const twoSteps = updateAquarium(halfStep, frame({ dt: 0.06, width: 172, height: 36 }), params);
+
+    for (let i = 0; i < oneStep.diatoms.length; i++) {
+      expect(twoSteps.diatoms[i].x).toBeCloseTo(oneStep.diatoms[i].x, 10);
+      expect(twoSteps.diatoms[i].y).toBeCloseTo(oneStep.diatoms[i].y, 10);
+      expect(twoSteps.diatoms[i].heading).toBeCloseTo(oneStep.diatoms[i].heading, 10);
+    }
+  });
+
+  it("drawAquariumBackground draws low-alpha diatoms when enabled and counted", () => {
+    const calls: string[] = [];
+    const ctx = {
+      save: vi.fn(() => calls.push("save")),
+      restore: vi.fn(() => calls.push("restore")),
+      beginPath: vi.fn(() => calls.push("beginPath")),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      closePath: vi.fn(),
+      fill: vi.fn(() => calls.push("fill")),
+      stroke: vi.fn(() => calls.push("stroke")),
+      set lineCap(_value: CanvasLineCap) {},
+      set lineJoin(_value: CanvasLineJoin) {},
+      set fillStyle(value: string | CanvasGradient | CanvasPattern) { calls.push(String(value)); },
+      set strokeStyle(value: string | CanvasGradient | CanvasPattern) { calls.push(String(value)); },
+      set lineWidth(_value: number) {},
+    } as unknown as CanvasRenderingContext2D;
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 31,
+      aquariumAlpha: 0.2,
+      diatomCount: 2,
+      diatomAlpha: 0.3,
+    };
+    const state = seedAquarium(frame({ width: 172, height: 36 }), params);
+
+    drawAquariumBackground(ctx, state, frame({ width: 172, height: 36 }), params);
+
+    expect(ctx.save).toHaveBeenCalledTimes(1);
+    expect(ctx.restore).toHaveBeenCalledTimes(1);
+    expect(ctx.fill).toHaveBeenCalled();
+    expect(ctx.stroke).toHaveBeenCalled();
+    expect(calls.some((call) => call.includes("hsla(42") && call.includes("0.010"))).toBe(true);
+  });
+
+  it("drawAquariumBackground stays a no-op when enabled but diatom count is zero", () => {
+    const ctx = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    const state: AquariumLayerState = { seed: 1, diatoms: [], euglena: [], vorticella: [] };
+
+    drawAquariumBackground(ctx, state, frame(), { ...CELL_DEFAULTS, enableAquarium: true, diatomCount: 0 });
+
+    expect(ctx.save).not.toHaveBeenCalled();
+    expect(ctx.restore).not.toHaveBeenCalled();
+    expect(ctx.beginPath).not.toHaveBeenCalled();
+    expect(ctx.fill).not.toHaveBeenCalled();
+    expect(ctx.stroke).not.toHaveBeenCalled();
+  });
+});
+
+describe("aquarium layer gate-off no-ops", () => {
+  it("updateAquarium returns the same state object when disabled", () => {
     const state = seedAquarium(frame(), {
       ...CELL_DEFAULTS,
       enableAquarium: true,

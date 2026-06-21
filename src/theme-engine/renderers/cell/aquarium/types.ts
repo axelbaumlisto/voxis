@@ -43,9 +43,17 @@ export interface AquariumSeedPoint {
   readonly size: number;
 }
 
+export interface DiatomState extends AquariumSeedPoint {
+  readonly shape: "navicula" | "ovalCentric";
+  readonly heading: number;
+  readonly driftX: number;
+  readonly driftY: number;
+  readonly rotationRate: number;
+}
+
 export interface AquariumLayerState {
   readonly seed: number;
-  readonly diatoms: readonly AquariumSeedPoint[];
+  readonly diatoms: readonly DiatomState[];
   readonly euglena: readonly AquariumSeedPoint[];
   readonly vorticella: readonly AquariumSeedPoint[];
 }

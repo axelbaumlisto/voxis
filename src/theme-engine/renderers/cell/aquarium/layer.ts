@@ -1,5 +1,6 @@
 import type { CellParams } from "../types";
 import { aquariumParamsView } from "./params";
+import { seedDiatoms, updateDiatoms, drawDiatoms } from "./diatoms";
 import { seedPoints } from "./seeds";
 import type { AquariumFrame, AquariumLayerState } from "./types";
 
@@ -8,7 +9,7 @@ export function seedAquarium(frame: AquariumFrame, params: CellParams): Aquarium
   const seed = view.seed | 0;
   return {
     seed,
-    diatoms: seedPoints(view.diatoms.count, seed, frame, 0x0d1a70cd),
+    diatoms: seedDiatoms(view.diatoms.count, seed, frame),
     euglena: seedPoints(view.euglena.count, seed, frame, 0x0e091eaa),
     vorticella: seedPoints(view.vorticella.count, seed, frame, 0x070271ca),
   };
@@ -16,17 +17,22 @@ export function seedAquarium(frame: AquariumFrame, params: CellParams): Aquarium
 
 export function updateAquarium(
   aquarium: AquariumLayerState,
-  _frame: AquariumFrame,
-  _params: CellParams,
+  frame: AquariumFrame,
+  params: CellParams,
 ): AquariumLayerState {
-  return aquarium;
+  const view = aquariumParamsView(params);
+  if (!view.enabled || aquarium.diatoms.length === 0 || view.diatoms.count <= 0) return aquarium;
+  const diatoms = updateDiatoms(aquarium.diatoms, frame, view);
+  return diatoms === aquarium.diatoms ? aquarium : { ...aquarium, diatoms };
 }
 
 export function drawAquariumBackground(
-  _ctx: CanvasRenderingContext2D,
-  _aquarium: AquariumLayerState,
-  _frame: AquariumFrame,
-  _params: CellParams,
+  ctx: CanvasRenderingContext2D,
+  aquarium: AquariumLayerState,
+  frame: AquariumFrame,
+  params: CellParams,
 ): void {
-  // Phase 1 seam only: no visible companion drawing yet.
+  const view = aquariumParamsView(params);
+  if (!view.enabled || aquarium.diatoms.length === 0 || view.diatoms.count <= 0) return;
+  drawDiatoms(ctx, aquarium.diatoms, frame, view);
 }
