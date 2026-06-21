@@ -5,7 +5,7 @@ import { seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aq
 import { diatomGeometry } from "../cell/aquarium/diatoms";
 import { euglenaPose, updateEuglena } from "../cell/aquarium/euglena";
 import { updateVorticella, vorticellaContractPhase, vorticellaGeometry } from "../cell/aquarium/vorticella";
-import type { AquariumFrame, AquariumLayerState } from "../cell/aquarium/types";
+import type { AquariumFrame, AquariumLayerState, EuglenaState } from "../cell/aquarium/types";
 import type { CellParams } from "../cell/types";
 
 function installNoopCanvasContext(): void {
@@ -433,6 +433,36 @@ describe("aquarium layer Phase 2 diatoms", () => {
 });
 
 describe("aquarium layer Phase 3 euglena", () => {
+  function testEuglena(overrides: Partial<EuglenaState> = {}): EuglenaState {
+    return {
+      x: 20,
+      y: 10,
+      phase: 0,
+      size: 1,
+      heading: 0,
+      swimSpeed: 1,
+      rollPhase: 0.25,
+      metabolyPhase: 0.3,
+      flagellumPhase: 0.4,
+      rollRate: 0.2,
+      metabolyRate: 0.05,
+      flagellumRate: 1.2,
+      spiralAmplitude: 0.4,
+      ...overrides,
+    };
+  }
+
+  function unitDelta(next: number, previous: number): number {
+    return ((next - previous) % 1 + 1) % 1;
+  }
+
+  function euglenaAreaProxy(metabolyPhase: number): number {
+    const pose = euglenaPose(0.1, metabolyPhase, { length: 9, baseWidth: 2.4, heading: 0 });
+    const length = Math.hypot(pose.anterior.x - pose.posterior.x, pose.anterior.y - pose.posterior.y);
+    const centerSample = pose.bodySamples.find((sample) => sample.u === 0);
+    return length * (centerSample?.halfWidth ?? 0) * 2;
+  }
+
   it("updateAquarium moves euglena deterministically with dt-integrated phases", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,
@@ -469,29 +499,99 @@ describe("aquarium layer Phase 3 euglena", () => {
     }
   });
 
-  it("updateEuglena is dt-partition invariant within numeric tolerance", () => {
-    const params: CellParams = {
+  it("updateEuglena applies mode multipliers only through dt-integrated phase deltas", () => {
+    const view = aquariumParamsView({
       ...CELL_DEFAULTS,
       enableAquarium: true,
-      aquariumSeed: 43,
-      euglenaCount: 2,
-      euglenaSpeed: 0.8,
-      euglenaSpeedActive: 1.2,
-      aquariumActivityBoost: 0.5,
-    };
-    const view = aquariumParamsView(params);
-    const initial = seedAquarium(frame({ width: 172, height: 36 }), params).euglena;
-    const oneStep = updateEuglena(initial, frame({ dt: 0.12, width: 172, height: 36, activity: 0.4 }), view);
-    const halfStep = updateEuglena(initial, frame({ dt: 0.06, width: 172, height: 36, activity: 0.4 }), view);
-    const twoSteps = updateEuglena(halfStep, frame({ dt: 0.06, width: 172, height: 36, activity: 0.4 }), view);
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      aquariumActivityBoost: 1,
+    });
+    const initial = [testEuglena({ rollPhase: 0.2, metabolyPhase: 0.3, flagellumPhase: 0.4 })];
+    const idle = updateEuglena(initial, frame({ mode: "idle", dt: 0.5, activity: 0 }), view)[0];
+    const recording = updateEuglena(initial, frame({ mode: "recording", dt: 0.5, activity: 0 }), view)[0];
+    const transcribing = updateEuglena(initial, frame({ mode: "transcribing", dt: 0.5, activity: 0 }), view)[0];
+    const error = updateEuglena(initial, frame({ mode: "error", dt: 0.5, activity: 0 }), view)[0];
 
-    for (let i = 0; i < oneStep.length; i++) {
-      expect(twoSteps[i].x).toBeCloseTo(oneStep[i].x, 10);
-      expect(twoSteps[i].y).toBeCloseTo(oneStep[i].y, 10);
-      expect(twoSteps[i].rollPhase).toBeCloseTo(oneStep[i].rollPhase, 10);
-      expect(twoSteps[i].metabolyPhase).toBeCloseTo(oneStep[i].metabolyPhase, 10);
-      expect(twoSteps[i].flagellumPhase).toBeCloseTo(oneStep[i].flagellumPhase, 10);
+    expect(unitDelta(recording.rollPhase, initial[0].rollPhase)).toBeGreaterThan(unitDelta(idle.rollPhase, initial[0].rollPhase));
+    expect(unitDelta(transcribing.rollPhase, initial[0].rollPhase)).toBeLessThan(unitDelta(idle.rollPhase, initial[0].rollPhase));
+    expect(unitDelta(error.rollPhase, initial[0].rollPhase)).toBeLessThan(unitDelta(idle.rollPhase, initial[0].rollPhase));
+    expect(unitDelta(recording.metabolyPhase, initial[0].metabolyPhase)).toBeGreaterThan(unitDelta(idle.metabolyPhase, initial[0].metabolyPhase));
+    expect(unitDelta(transcribing.flagellumPhase, initial[0].flagellumPhase)).toBeLessThan(unitDelta(idle.flagellumPhase, initial[0].flagellumPhase));
+    expect(recording.size).toBe(initial[0].size);
+    expect(recording.swimSpeed).toBe(initial[0].swimSpeed);
+  });
+
+  it("euglenaPose keeps metaboly area proxy stable without scale inflation", () => {
+    const proxies = [0, 0.25, 0.5, 0.75].map(euglenaAreaProxy);
+    const mean = proxies.reduce((sum, value) => sum + value, 0) / proxies.length;
+
+    for (const proxy of proxies) {
+      expect(proxy / mean).toBeGreaterThan(0.985);
+      expect(proxy / mean).toBeLessThan(1.015);
     }
+  });
+
+  it("updateEuglena is dt-partition invariant across phase wrap", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      aquariumActivityBoost: 1,
+    });
+    const initial = [testEuglena({ rollPhase: 0.98, metabolyPhase: 0.99, flagellumPhase: 0.97 })];
+    const oneStep = updateEuglena(initial, frame({ dt: 0.4, width: 172, height: 36, activity: 0 }), view);
+    const halfStep = updateEuglena(initial, frame({ dt: 0.2, width: 172, height: 36, activity: 0 }), view);
+    const twoSteps = updateEuglena(halfStep, frame({ dt: 0.2, width: 172, height: 36, activity: 0 }), view);
+
+    expect(twoSteps[0].x).toBeCloseTo(oneStep[0].x, 10);
+    expect(twoSteps[0].y).toBeCloseTo(oneStep[0].y, 10);
+    expect(twoSteps[0].rollPhase).toBeCloseTo(oneStep[0].rollPhase, 10);
+    expect(twoSteps[0].metabolyPhase).toBeCloseTo(oneStep[0].metabolyPhase, 10);
+    expect(twoSteps[0].flagellumPhase).toBeCloseTo(oneStep[0].flagellumPhase, 10);
+  });
+
+  it("updateEuglena edge wrapping is dt-partition invariant near overlay bounds", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      aquariumActivityBoost: 1,
+    });
+    const initial = [testEuglena({ x: 171.95, y: 35.95, heading: Math.PI / 4, rollPhase: 0.9 })];
+    const oneStep = updateEuglena(initial, frame({ dt: 0.16, width: 172, height: 36, activity: 0 }), view);
+    const halfStep = updateEuglena(initial, frame({ dt: 0.08, width: 172, height: 36, activity: 0 }), view);
+    const twoSteps = updateEuglena(halfStep, frame({ dt: 0.08, width: 172, height: 36, activity: 0 }), view);
+
+    expect(twoSteps[0].x).toBeCloseTo(oneStep[0].x, 10);
+    expect(twoSteps[0].y).toBeCloseTo(oneStep[0].y, 10);
+    expect(oneStep[0].x).toBeGreaterThanOrEqual(0);
+    expect(oneStep[0].x).toBeLessThan(172);
+    expect(oneStep[0].y).toBeGreaterThanOrEqual(0);
+    expect(oneStep[0].y).toBeLessThan(36);
+  });
+
+  it("abrupt activity onset after long idle uses current dt instead of elapsed frame time", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 0.8,
+      euglenaSpeedActive: 1.6,
+      aquariumActivityBoost: 1,
+    });
+    const initial = [testEuglena({ rollPhase: 0.2 })];
+    const onset = updateEuglena(initial, frame({ t: 10_000, dt: 1 / 60, activity: 1, mode: "recording" }), view)[0];
+    const shortClock = updateEuglena(initial, frame({ t: 1, dt: 1 / 60, activity: 1, mode: "recording" }), view)[0];
+    const longDt = updateEuglena(initial, frame({ t: 10_000, dt: 0.5, activity: 1, mode: "recording" }), view)[0];
+
+    expect(onset.rollPhase).toBeCloseTo(shortClock.rollPhase, 12);
+    expect(unitDelta(onset.rollPhase, initial[0].rollPhase)).toBeLessThan(unitDelta(longDt.rollPhase, initial[0].rollPhase));
   });
 
   it("keeps euglena finite, bounded, and wrapped over long runtime", () => {

@@ -1,3 +1,4 @@
+import type { ThemeState } from "../../../contract";
 import type { AquariumFrame, AquariumParamsView, EuglenaState } from "./types";
 import { seededUnit } from "./seeds";
 
@@ -42,6 +43,26 @@ function positive(value: number | undefined, fallback: number): number {
 }
 
 const TAU = Math.PI * 2;
+const METABOLY_AMP = 0.045;
+
+interface EuglenaModeView {
+  readonly motionMul: number;
+  readonly alphaMul: number;
+}
+
+function euglenaModeView(mode: ThemeState["mode"]): EuglenaModeView {
+  switch (mode) {
+    case "recording":
+      return { motionMul: 1.15, alphaMul: 1.08 };
+    case "transcribing":
+      return { motionMul: 0.35, alphaMul: 0.80 };
+    case "error":
+      return { motionMul: 0.15, alphaMul: 0.55 };
+    case "idle":
+    default:
+      return { motionMul: 1.00, alphaMul: 1.00 };
+  }
+}
 
 function wrapUnit(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -93,10 +114,11 @@ export function euglenaPose(
 
   const ux = Math.cos(heading);
   const uy = Math.sin(heading);
-  const metabolyStretch = 1 + 0.06 * Math.sin(metaboly * TAU);
-  const halfLength = (length * metabolyStretch) / 2;
+  const lengthScale = 1 + METABOLY_AMP * Math.sin(metaboly * TAU);
+  const widthScale = 1 / lengthScale;
+  const halfLength = (length * lengthScale) / 2;
   const rollCos = Math.cos(roll * TAU);
-  const apparentWidth = baseWidth * (0.72 + 0.28 * Math.abs(rollCos));
+  const apparentWidth = baseWidth * widthScale * (0.72 + 0.28 * Math.abs(rollCos));
   const stripePhase = wrapUnit(roll * stripeCount + metaboly * 0.18);
   const anterior = point(cx, cy, ux, uy, halfLength);
   const posterior = point(cx, cy, ux, uy, -halfLength);
@@ -170,7 +192,9 @@ export function updateEuglena(
   const activityMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
   const idleRate = Math.max(0, finite(view.euglena.speed, 0));
   const activeRate = Math.max(0, finite(view.euglena.speedActive, idleRate));
-  const rate = idleRate + (activeRate - idleRate) * activityMix;
+  const activityRate = idleRate + (activeRate - idleRate) * activityMix;
+  const modeView = euglenaModeView(frame.mode);
+  const rate = activityRate * modeView.motionMul;
 
   return euglena.map((cell) => {
     const rollRate = Math.max(0, finite(cell.rollRate, 0)) * rate;
@@ -233,7 +257,7 @@ export function drawEuglena(
   view: AquariumParamsView,
 ): void {
   if (!view.enabled || euglena.length === 0 || view.euglena.count <= 0) return;
-  const alpha = Math.max(0, Math.min(1, view.alpha * 0.72));
+  const alpha = Math.max(0, Math.min(1, view.alpha * 0.72 * euglenaModeView(frame.mode).alphaMul));
   if (alpha <= 0) return;
   const scale = Math.max(0.1, finite(view.euglena.scale, 1));
   const hue = finite(frame.baseHue, 50) + 42;
