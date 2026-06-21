@@ -410,6 +410,81 @@ function growthLevel(prevGrowth, audioLevel, mode, attack, release) {
   return Math.max(0, Math.min(1, raw));
 }
 
+// src/theme-engine/renderers/cell/math.ts
+function sanitizeUnit(x) {
+  if (!Number.isFinite(x))
+    return 0;
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+function sanitizeFinite(x, fallback) {
+  return Number.isFinite(x) ? x : fallback;
+}
+function sanitizeBins(bins) {
+  if (!bins || bins.length === 0)
+    return [];
+  const out = new Array(bins.length);
+  for (let i = 0;i < bins.length; i++)
+    out[i] = sanitizeUnit(bins[i]);
+  return out;
+}
+
+// src/theme-engine/renderers/cell/activity.ts
+function cellEnergy(mode, audioLevel, t, idle, levelGain) {
+  switch (mode) {
+    case "idle":
+      return idle * (1 + Math.sin(t * 0.8) * 0.25);
+    case "recording":
+      return Math.max(0, Math.min(1, idle + audioLevel * levelGain));
+    case "transcribing":
+      return Math.max(0, Math.min(1, idle * 0.72 + audioLevel * 0.12));
+    case "error":
+      return idle;
+    default:
+      return idle;
+  }
+}
+function smoothEnergy(prev, target, dt, params) {
+  if (params.enableEnergySmoothing === false)
+    return target;
+  const tau = params.energySmoothTau ?? 0.08;
+  if (tau <= 0)
+    return target;
+  const alpha = 1 - Math.exp(-Math.max(0, dt) / tau);
+  return prev + (target - prev) * alpha;
+}
+function cellActivity(energy, growth, params) {
+  const we = params?.activityEnergyWeight ?? 0.6;
+  const wg = params?.activityGrowthWeight ?? 0.4;
+  const a = we * energy + wg * growth;
+  return a < 0 ? 0 : a > 1 ? 1 : a;
+}
+function effectiveCyclosisPeriod(activity, params) {
+  const base = Math.max(0.1, params.cyclosisPeriod ?? 45);
+  const boost = params.cyclosisActivityBoost ?? 0;
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  return Math.max(0.1, base / (1 + a * boost));
+}
+
+// src/theme-engine/renderers/cell/phases.ts
+function advanceAxialSpinPhase(prevPhase, dt, speedNorm, params) {
+  if (!params.enableAxialSpin)
+    return 0;
+  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
+  const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
+  return prevPhase - (params.axialSpinMax ?? 0) * s * safeDt;
+}
+function advanceCyclosisPhase(prevPhase, dt, params) {
+  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
+  const T = Math.max(0.1, params.cyclosisPeriod ?? 45);
+  const sense = (params.cyclosisSense ?? 1) >= 0 ? 1 : -1;
+  return prevPhase + sense * (TAU / T) * safeDt;
+}
+function advanceCiliaBeatCycles(prevCycles, dt, hz) {
+  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
+  const next = prevCycles + Math.max(0, Number.isFinite(hz) ? hz : 0) * safeDt;
+  return (next % 1 + 1) % 1;
+}
+
 // src/theme-engine/renderers/cell.ts
 var CELL_DEFAULTS = {
   noiseScale: 0.9,
@@ -551,57 +626,6 @@ var CELL_DEFAULTS = {
   cvPosteriorU: -0.55,
   cvPosteriorS: 0.62
 };
-function sanitizeUnit(x) {
-  if (!Number.isFinite(x))
-    return 0;
-  return x < 0 ? 0 : x > 1 ? 1 : x;
-}
-function sanitizeFinite(x, fallback) {
-  return Number.isFinite(x) ? x : fallback;
-}
-function sanitizeBins(bins) {
-  if (!bins || bins.length === 0)
-    return [];
-  const out = new Array(bins.length);
-  for (let i = 0;i < bins.length; i++)
-    out[i] = sanitizeUnit(bins[i]);
-  return out;
-}
-function cellEnergy(mode, audioLevel, t, idle, levelGain) {
-  switch (mode) {
-    case "idle":
-      return idle * (1 + Math.sin(t * 0.8) * 0.25);
-    case "recording":
-      return Math.max(0, Math.min(1, idle + audioLevel * levelGain));
-    case "transcribing":
-      return Math.max(0, Math.min(1, idle * 0.72 + audioLevel * 0.12));
-    case "error":
-      return idle;
-    default:
-      return idle;
-  }
-}
-function smoothEnergy(prev, target, dt, params) {
-  if (params.enableEnergySmoothing === false)
-    return target;
-  const tau = params.energySmoothTau ?? 0.08;
-  if (tau <= 0)
-    return target;
-  const alpha = 1 - Math.exp(-Math.max(0, dt) / tau);
-  return prev + (target - prev) * alpha;
-}
-function cellActivity(energy, growth, params) {
-  const we = params?.activityEnergyWeight ?? 0.6;
-  const wg = params?.activityGrowthWeight ?? 0.4;
-  const a = we * energy + wg * growth;
-  return a < 0 ? 0 : a > 1 ? 1 : a;
-}
-function effectiveCyclosisPeriod(activity, params) {
-  const base = Math.max(0.1, params.cyclosisPeriod ?? 45);
-  const boost = params.cyclosisActivityBoost ?? 0;
-  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
-  return Math.max(0.1, base / (1 + a * boost));
-}
 function swimSpeed(activity, width, height, params) {
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
   const frac = params.swimSpeedMaxFrac ?? 0.06;
@@ -633,13 +657,6 @@ function prolateAspect(speedNorm, params) {
     return base;
   const rest = params.prolateRestAspect ?? 1.7;
   return Math.max(rest, base);
-}
-function advanceAxialSpinPhase(prevPhase, dt, speedNorm, params) {
-  if (!params.enableAxialSpin)
-    return 0;
-  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
-  const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
-  return prevPhase - (params.axialSpinMax ?? 0) * s * safeDt;
 }
 function helicalOffset(spinPhi, bodyHeading, baseR, params) {
   const hAmp = params.helicalAmplitude ?? 0;
@@ -688,11 +705,6 @@ function ciliaBeatPhaseAtCycle(baseCycles, index, params) {
   const A = a;
   const phase = u + A / TAU * (1 - Math.cos(TAU * u));
   return (phase % 1 + 1) % 1;
-}
-function advanceCiliaBeatCycles(prevCycles, dt, hz) {
-  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
-  const next = prevCycles + Math.max(0, Number.isFinite(hz) ? hz : 0) * safeDt;
-  return (next % 1 + 1) % 1;
 }
 function strokeAxisStrength(activity, params) {
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
@@ -1338,12 +1350,6 @@ function cyclosisLoopPointAtPhase(g, phase) {
   const u = amp * Math.sin(phi);
   const s = amp * Math.sin(phi + Math.PI / 2);
   return { u, s };
-}
-function advanceCyclosisPhase(prevPhase, dt, params) {
-  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
-  const T = Math.max(0.1, params.cyclosisPeriod ?? 45);
-  const sense = (params.cyclosisSense ?? 1) >= 0 ? 1 : -1;
-  return prevPhase + sense * (TAU / T) * safeDt;
 }
 function contractileVacuole(t, baseR, params) {
   const period = Math.max(0.1, params.vacuolePeriod ?? 7);

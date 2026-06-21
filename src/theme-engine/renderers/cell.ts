@@ -16,9 +16,15 @@ import {
   noise2D, fbm, catmullRom, catmullRomOpen, integrateDeformation, hsla, TAU, growthLevel,
   lerp, smoothstep, wrapPi, deformAt, deformDerivAt,
 } from "./shared";
+import { sanitizeUnit, sanitizeFinite, sanitizeBins } from "./cell/math";
+import { cellEnergy, smoothEnergy, cellActivity, effectiveCyclosisPeriod } from "./cell/activity";
+import { advanceAxialSpinPhase, advanceCyclosisPhase, advanceCiliaBeatCycles } from "./cell/phases";
 
 // Backward-compat re-exports: existing imports of these from "./cell" keep working.
 export { noise2D, fbm, catmullRom, catmullRomOpen, lowpassRadii, integrateDeformation, TAU, smoothstep } from "./shared";
+export { sanitizeUnit, sanitizeFinite, sanitizeBins } from "./cell/math";
+export { cellEnergy, smoothEnergy, cellActivity, effectiveCyclosisPeriod } from "./cell/activity";
+export { advanceAxialSpinPhase, advanceCyclosisPhase, advanceCiliaBeatCycles } from "./cell/phases";
 
 
 
@@ -762,129 +768,8 @@ export const CELL_DEFAULTS: CellParams = {
 
 
 // ---------------------------------------------------------------------------
-// M15: NaN-poison guards
-// ---------------------------------------------------------------------------
-// External frame state (audioLevel, spectrum bins) and persistent form-memory
-// (integrated deform, growth, baseline) are all sanitised at the tick boundary.
-// A single NaN/Inf frame must NOT permanently poison form-memory: once a value
-// becomes non-finite, every subsequent EMA/integration step would stay NaN
-// forever (NaN propagates through +,*, and Math.min/max). These pure helpers
-// keep the state finite and identical for normal in-range input.
-
-/** Clamp to [0,1]; NaN/Inf -> 0. Identity for finite in-range input. */
-export function sanitizeUnit(x: number): number {
-  if (!Number.isFinite(x)) return 0;
-  return x < 0 ? 0 : x > 1 ? 1 : x;
-}
-
-/** Pass finite values through unchanged; non-finite -> `fallback`. */
-export function sanitizeFinite(x: number, fallback: number): number {
-  return Number.isFinite(x) ? x : fallback;
-}
-
-/** Clamp each bin to [0,1]; bad/missing bins -> 0. Returns a new array. */
-export function sanitizeBins(bins: number[] | undefined | null): number[] {
-  if (!bins || bins.length === 0) return [];
-  const out = new Array<number>(bins.length);
-  for (let i = 0; i < bins.length; i++) out[i] = sanitizeUnit(bins[i]);
-  return out;
-}
-
-
-// ---------------------------------------------------------------------------
 // Cell geometry functions
 // ---------------------------------------------------------------------------
-
-/**
- * Energy level blending idle breathing with audio-driven activity.
- *
- * During idle: oscillates gently around `idle` using sin(t).
- * During recording: idle + audioLevel * levelGain.
- * During transcribing: faded idle + residual level.
- * During error: idle only.
- */
-export function cellEnergy(
-  mode: string,
-  audioLevel: number,
-  t: number,
-  idle: number,
-  levelGain: number,
-): number {
-  switch (mode) {
-    case "idle":
-      return idle * (1.0 + Math.sin(t * 0.8) * 0.25);
-    case "recording":
-      return Math.max(0, Math.min(1, idle + audioLevel * levelGain));
-    case "transcribing":
-      return Math.max(0, Math.min(1, idle * 0.72 + audioLevel * 0.12));
-    case "error":
-      return idle;
-    default:
-      return idle;
-  }
-}
-
-/**
- * M6 — EMA-chase the (step-valued) energy target to kill the mode-change POP.
- * `cellEnergy` returns a different formula per mode, so at a mode flip (idle ->
- * recording -> transcribing -> idle) the raw energy jumps in one frame. We chase
- * it with a fast exponential `e += (target - e)*(1 - exp(-dt/tau))`, so the
- * change is C0 across the flip while staying responsive. tau is deliberately
- * SMALL (~0.08s) so the idle breathing sine (0.8 rad/s) passes through with <1%
- * attenuation — this smooths discontinuities, not the intended slow motion.
- * Gated by `enableEnergySmoothing` (default on); off => returns target verbatim
- * (byte-identical to pre-M6). Pure & frame-rate independent.
- */
-export function smoothEnergy(
-  prev: number,
-  target: number,
-  dt: number,
-  params: CellParams,
-): number {
-  if (params.enableEnergySmoothing === false) return target;
-  const tau = params.energySmoothTau ?? 0.08;
-  if (tau <= 0) return target;
-  const alpha = 1 - Math.exp(-Math.max(0, dt) / tau);
-  return prev + (target - prev) * alpha;
-}
-
-/**
- * G1 — master ACTIVITY scalar `a ∈ [0,1]`. ONE coherent drive so that
- * audio → ciliary beat → swimming all share a single envelope. As of 8a it
- * drives the swim speed + beat frequency + curl; pseudopod/nucleus amplitude
- * are moved onto `a` in a later sub-commit (8c), after which raw `audioLevel`
- * is used for COLOR (iridescentHue) only. Weighted blend of instantaneous energy
- * (fast) and the smoothed growth accumulator (slow, asymmetric attack/release)
- * so the cell ramps up promptly but winds down gracefully. (plan G1.)
- *
- * Pure & deterministic.
- */
-export function cellActivity(
-  energy: number,
-  growth: number,
-  params?: Pick<CellParams, "activityEnergyWeight" | "activityGrowthWeight">,
-): number {
-  const we = params?.activityEnergyWeight ?? 0.6;
-  const wg = params?.activityGrowthWeight ?? 0.4;
-  const a = we * energy + wg * growth;
-  return a < 0 ? 0 : a > 1 ? 1 : a;
-}
-
-/**
- * v3.7C — effective cyclosis period modulated by activity.
- * At rest (activity=0) returns the base `cyclosisPeriod`. At full activity
- * and `cyclosisActivityBoost=0.4` the period = base / 1.4 (40% faster).
- * Default boost=0 preserves legacy (no modulation). Pure & deterministic.
- */
-export function effectiveCyclosisPeriod(
-  activity: number,
-  params: Pick<CellParams, "cyclosisPeriod" | "cyclosisActivityBoost">,
-): number {
-  const base = Math.max(0.1, params.cyclosisPeriod ?? 45);
-  const boost = params.cyclosisActivityBoost ?? 0;
-  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
-  return Math.max(0.1, base / (1 + a * boost));
-}
 
 /**
  * G2 — propulsion speed law. Low-Reynolds swimming is Stokes-linear: the swim
@@ -986,24 +871,6 @@ export function axialSpin(simTime: number, speedNorm: number, params: CellParams
   const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm; // clamp01
   const rate = (params.axialSpinMax ?? 0) * s; // rad/s, proportional to speed
   return -rate * simTime; // LEFT-handed spin => negative
-}
-
-/**
- * Step A+B: dt-integrated axial spin phase for the live render loop.
- * Unlike `axialSpin(simTime, speedNorm)`, the increment depends only on the
- * current frame's bounded rate and dt, so speed/activity changes cannot multiply
- * by the renderer's total elapsed time.
- */
-export function advanceAxialSpinPhase(
-  prevPhase: number,
-  dt: number,
-  speedNorm: number,
-  params: CellParams,
-): number {
-  if (!params.enableAxialSpin) return 0;
-  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
-  const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
-  return prevPhase - (params.axialSpinMax ?? 0) * s * safeDt;
 }
 
 /**
@@ -1229,11 +1096,6 @@ export function ciliaBeatPhaseAtCycle(
   return ((phase % 1) + 1) % 1; // keep in [0,1) against FP drift
 }
 
-export function advanceCiliaBeatCycles(prevCycles: number, dt: number, hz: number): number {
-  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
-  const next = prevCycles + Math.max(0, Number.isFinite(hz) ? hz : 0) * safeDt;
-  return ((next % 1) + 1) % 1;
-}
 
 /**
  * D2 motion basis for cilia drag-lean. When the cell swims, viscous drag bends
@@ -2843,12 +2705,6 @@ export function cyclosisLoopPointAtPhase(
   return { u, s };
 }
 
-export function advanceCyclosisPhase(prevPhase: number, dt: number, params: CellParams): number {
-  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
-  const T = Math.max(0.1, params.cyclosisPeriod ?? 45);
-  const sense = (params.cyclosisSense ?? 1) >= 0 ? 1 : -1;
-  return prevPhase + sense * (TAU / T) * safeDt;
-}
 
 /**
  * F11 (OPT) — contractile vacuole. A peripheral vesicle that slowly FILLS
