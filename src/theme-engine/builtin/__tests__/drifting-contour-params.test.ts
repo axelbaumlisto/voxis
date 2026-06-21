@@ -42,25 +42,39 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function readSourceMountBlock(): string {
+function readSourceMountBody(): string {
   const source = readFileSync(SOURCE_PATH, "utf8");
   const start = source.indexOf("export function mount");
-  const end = source.indexOf("...userParams", start);
+  const end = source.indexOf("const unsubscribe", start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
   return source.slice(start, end);
 }
 
-function readBundleMountBlock(): string {
+function readBundleMountBody(): string {
   const source = readFileSync(BUNDLE_PATH, "utf8");
   const marker = "// src/theme-engine/builtin/drifting_contour/index.ts";
   const markerStart = source.indexOf(marker);
   const start = source.indexOf("function mount", markerStart);
-  const end = source.indexOf("...userParams", start);
+  const end = source.indexOf("const unsubscribe", start);
   expect(markerStart).toBeGreaterThanOrEqual(0);
   expect(start).toBeGreaterThan(markerStart);
   expect(end).toBeGreaterThan(start);
   return source.slice(start, end);
+}
+
+function readSourceMountBlock(): string {
+  const body = readSourceMountBody();
+  const end = body.indexOf("...userParams");
+  expect(end).toBeGreaterThanOrEqual(0);
+  return body.slice(0, end);
+}
+
+function readBundleMountBlock(): string {
+  const body = readBundleMountBody();
+  const end = body.indexOf("...userParams");
+  expect(end).toBeGreaterThanOrEqual(0);
+  return body.slice(0, end);
 }
 
 function readParam(block: string, name: CriticalParamName): CriticalParamValue {
@@ -79,6 +93,16 @@ function expectCriticalParams(block: string): void {
   }
 }
 
+function expectUserParamsLast(body: string): void {
+  const paramsStart = body.indexOf("params: {");
+  const userParams = body.indexOf("...userParams", paramsStart);
+  const paramsEnd = body.indexOf("}", userParams);
+  expect(paramsStart).toBeGreaterThanOrEqual(0);
+  expect(userParams).toBeGreaterThan(paramsStart);
+  expect(paramsEnd).toBeGreaterThan(userParams);
+  expect(body.slice(userParams + "...userParams".length, paramsEnd)).not.toMatch(/\w+\s*:/);
+}
+
 describe("drifting_contour v1.0 critical params", () => {
   it("freezes approved source theme params", () => {
     expectCriticalParams(readSourceMountBlock());
@@ -86,5 +110,13 @@ describe("drifting_contour v1.0 critical params", () => {
 
   it("freezes approved built bundle mount params", () => {
     expectCriticalParams(readBundleMountBlock());
+  });
+
+  it("keeps source theme params before user params so user overrides win", () => {
+    expectUserParamsLast(readSourceMountBody());
+  });
+
+  it("keeps built bundle theme params before user params so user overrides win", () => {
+    expectUserParamsLast(readBundleMountBody());
   });
 });

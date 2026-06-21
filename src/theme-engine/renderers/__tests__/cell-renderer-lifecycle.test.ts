@@ -2,6 +2,8 @@
 /**
  * Split from cell.test.ts. Tests moved by domain; assertions intentionally unchanged.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   smoothstep,
@@ -49,6 +51,7 @@ import {
 import type { CellParams, CellPersistState } from "../cell/testing";
 
 const TAU = Math.PI * 2;
+const RENDERER_SOURCE_PATH = join(process.cwd(), "src/theme-engine/renderers/cell/renderer.ts");
 
 // ---------------------------------------------------------------------------
 // startleOffset
@@ -139,6 +142,12 @@ describe("createCellRenderer", () => {
       }),
     ).not.toThrow();
     r.destroy();
+  });
+
+  it("freezes flat params merge order as CELL_DEFAULTS then opts.params", () => {
+    const source = readFileSync(RENDERER_SOURCE_PATH, "utf8");
+    expect(source).toContain("const params: CellParams = { ...CELL_DEFAULTS, ...(opts.params ?? {}) };");
+    expect(source).not.toContain("resolveCellPreset(");
   });
 
   it("destroy clears container", () => {
