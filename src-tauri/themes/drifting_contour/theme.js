@@ -530,6 +530,94 @@ function startleBurstSpeed(startle, baseR, params) {
   return s * (params.startleBurstFrac ?? 0.5) * baseR;
 }
 
+// src/theme-engine/renderers/cell/locomotion.ts
+function swimSpeed(activity, width, height, params) {
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  const frac = params.swimSpeedMaxFrac ?? 0.06;
+  return a * frac * Math.min(width, height);
+}
+function driftActivation(prev, recording, rate, dt) {
+  const target = recording ? 1 : 0;
+  const r = rate < 0 ? 0 : rate > 1 ? 1 : rate;
+  const alpha = dt === undefined ? r : 1 - Math.pow(1 - r, dt * 60);
+  const raw = prev + (target - prev) * alpha;
+  if (raw > 1)
+    return 1;
+  if (raw < 0)
+    return 0;
+  return raw;
+}
+function wallReorientHeading(incoming, t, params) {
+  const jitter = (params.wallReorientJitter ?? 0.6) * noise2D(517.3, t * 1.9);
+  return incoming + Math.PI + jitter;
+}
+function rotationalBrownianStep(t, dt, params) {
+  const Dr = params.rotationalDiffusion ?? 0;
+  if (Dr <= 0)
+    return 0;
+  const TAP_SUM_STD = 0.795;
+  const g = (noise2D(211.7, t * 7.3) + noise2D(389.1, t * 11.9 + 5.5) + noise2D(53.9, t * 17.1 + 1.3)) / TAP_SUM_STD;
+  return g * Math.sqrt(2 * Dr * Math.max(0, dt));
+}
+function sedimentationBias(speed, params) {
+  const frac = Math.max(0, Math.min(0.15, params.sedimentationFrac ?? 0));
+  return { dvx: 0, dvy: frac * speed };
+}
+function wanderStep(s, dt, width, height, baseR, params, speedOverride) {
+  const reach = cellReach(baseR, params);
+  const inset = Math.max(params.driftMargin ?? 4, reach);
+  const minX = inset, maxX = width - inset;
+  const minY = inset, maxY = height - inset;
+  if (maxX <= minX || maxY <= minY) {
+    return { x: width / 2, y: height / 2, heading: s.heading, vx: 0, vy: 0, clock: (s.clock ?? 0) + dt };
+  }
+  const speed = speedOverride !== undefined ? speedOverride : (params.driftSpeed ?? 0.03) * Math.min(width, height) * 1.2;
+  const turnRate = params.wanderTurnRate ?? 1.1;
+  const wanderFreq = params.wanderFreq ?? 0.6;
+  const clock = (s.clock ?? 0) + dt;
+  const jitter = noise2D(s.heading * 0.5 + 13, clock * wanderFreq);
+  let heading = s.heading + jitter * turnRate * dt;
+  if (params.enableRotationalBrownian) {
+    heading += rotationalBrownianStep(clock, dt, params);
+  }
+  let vx = Math.cos(heading) * speed;
+  let vy = Math.sin(heading) * speed;
+  let x = s.x + vx * dt;
+  let y = s.y + vy * dt;
+  const hitWall = x < minX || x > maxX || y < minY || y > maxY;
+  if (params.enableWallReorient && hitWall) {
+    x = Math.max(minX, Math.min(maxX, x));
+    y = Math.max(minY, Math.min(maxY, y));
+    heading = wallReorientHeading(heading, clock, params);
+  } else {
+    if (x < minX) {
+      x = minX;
+      heading = Math.PI - heading;
+    } else if (x > maxX) {
+      x = maxX;
+      heading = Math.PI - heading;
+    }
+    if (y < minY) {
+      y = minY;
+      heading = -heading;
+    } else if (y > maxY) {
+      y = maxY;
+      heading = -heading;
+    }
+  }
+  vx = Math.cos(heading) * speed;
+  vy = Math.sin(heading) * speed;
+  if (params.enableSedimentation) {
+    const sed = sedimentationBias(speed, params);
+    vx += sed.dvx;
+    vy += sed.dvy;
+    x = Math.max(minX, Math.min(maxX, x + sed.dvx * dt));
+    y = Math.max(minY, Math.min(maxY, y + sed.dvy * dt));
+  }
+  heading = Math.atan2(Math.sin(heading), Math.cos(heading));
+  return { x, y, heading, vx, vy, clock };
+}
+
 // src/theme-engine/renderers/cell/persistence.ts
 function serializeCellState(s) {
   return JSON.stringify(s);
@@ -724,11 +812,6 @@ var CELL_DEFAULTS = {
 };
 
 // src/theme-engine/renderers/cell.ts
-function swimSpeed(activity, width, height, params) {
-  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
-  const frac = params.swimSpeedMaxFrac ?? 0.06;
-  return a * frac * Math.min(width, height);
-}
 function ciliaBeatHzEff(activity, params) {
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
   const f0 = params.ciliaBeatHz ?? 0.9;
@@ -1525,87 +1608,6 @@ function micronucleusTransform(macroCx, macroCy, macroR, params) {
     cy: macroCy + Math.sin(bearing) * off,
     r
   };
-}
-function driftActivation(prev, recording, rate, dt) {
-  const target = recording ? 1 : 0;
-  const r = rate < 0 ? 0 : rate > 1 ? 1 : rate;
-  const alpha = dt === undefined ? r : 1 - Math.pow(1 - r, dt * 60);
-  const raw = prev + (target - prev) * alpha;
-  if (raw > 1)
-    return 1;
-  if (raw < 0)
-    return 0;
-  return raw;
-}
-function wallReorientHeading(incoming, t, params) {
-  const jitter = (params.wallReorientJitter ?? 0.6) * noise2D(517.3, t * 1.9);
-  return incoming + Math.PI + jitter;
-}
-function rotationalBrownianStep(t, dt, params) {
-  const Dr = params.rotationalDiffusion ?? 0;
-  if (Dr <= 0)
-    return 0;
-  const TAP_SUM_STD = 0.795;
-  const g = (noise2D(211.7, t * 7.3) + noise2D(389.1, t * 11.9 + 5.5) + noise2D(53.9, t * 17.1 + 1.3)) / TAP_SUM_STD;
-  return g * Math.sqrt(2 * Dr * Math.max(0, dt));
-}
-function sedimentationBias(speed, params) {
-  const frac = Math.max(0, Math.min(0.15, params.sedimentationFrac ?? 0));
-  return { dvx: 0, dvy: frac * speed };
-}
-function wanderStep(s, dt, width, height, baseR, params, speedOverride) {
-  const reach = cellReach(baseR, params);
-  const inset = Math.max(params.driftMargin ?? 4, reach);
-  const minX = inset, maxX = width - inset;
-  const minY = inset, maxY = height - inset;
-  if (maxX <= minX || maxY <= minY) {
-    return { x: width / 2, y: height / 2, heading: s.heading, vx: 0, vy: 0, clock: (s.clock ?? 0) + dt };
-  }
-  const speed = speedOverride !== undefined ? speedOverride : (params.driftSpeed ?? 0.03) * Math.min(width, height) * 1.2;
-  const turnRate = params.wanderTurnRate ?? 1.1;
-  const wanderFreq = params.wanderFreq ?? 0.6;
-  const clock = (s.clock ?? 0) + dt;
-  const jitter = noise2D(s.heading * 0.5 + 13, clock * wanderFreq);
-  let heading = s.heading + jitter * turnRate * dt;
-  if (params.enableRotationalBrownian) {
-    heading += rotationalBrownianStep(clock, dt, params);
-  }
-  let vx = Math.cos(heading) * speed;
-  let vy = Math.sin(heading) * speed;
-  let x = s.x + vx * dt;
-  let y = s.y + vy * dt;
-  const hitWall = x < minX || x > maxX || y < minY || y > maxY;
-  if (params.enableWallReorient && hitWall) {
-    x = Math.max(minX, Math.min(maxX, x));
-    y = Math.max(minY, Math.min(maxY, y));
-    heading = wallReorientHeading(heading, clock, params);
-  } else {
-    if (x < minX) {
-      x = minX;
-      heading = Math.PI - heading;
-    } else if (x > maxX) {
-      x = maxX;
-      heading = Math.PI - heading;
-    }
-    if (y < minY) {
-      y = minY;
-      heading = -heading;
-    } else if (y > maxY) {
-      y = maxY;
-      heading = -heading;
-    }
-  }
-  vx = Math.cos(heading) * speed;
-  vy = Math.sin(heading) * speed;
-  if (params.enableSedimentation) {
-    const sed = sedimentationBias(speed, params);
-    vx += sed.dvx;
-    vy += sed.dvy;
-    x = Math.max(minX, Math.min(maxX, x + sed.dvx * dt));
-    y = Math.max(minY, Math.min(maxY, y + sed.dvy * dt));
-  }
-  heading = Math.atan2(Math.sin(heading), Math.cos(heading));
-  return { x, y, heading, vx, vy, clock };
 }
 function createCellRenderer(container, opts) {
   const params = { ...CELL_DEFAULTS, ...opts.params ?? {} };
