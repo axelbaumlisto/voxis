@@ -154,8 +154,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       diatomAlpha: 0.16,
       diatomDriftSpeed: 0.35,
       euglenaCount: 1,
-      euglenaSpeed: 0.75,
-      euglenaSpeedActive: 1.0,
+      euglenaSpeed: 0.15,        // body-lengths/sec (idle) — gentle companion drift
+      euglenaSpeedActive: 0.30,  // body-lengths/sec (recording)
       euglenaScale: 6.45,
       vorticellaCount: 0,
       ...userParams,

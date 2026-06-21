@@ -66,6 +66,13 @@ export interface EuglenaState extends AquariumSeedPoint {
   readonly metabolyRate: number;
   readonly flagellumRate: number;
   readonly spiralAmplitude: number;
+  readonly cvPhase?: number;
+  readonly cvRate?: number;
+  readonly burstPhase?: number;
+  readonly burstRate?: number;
+  readonly turnProgress?: number;
+  readonly turnFrom?: number;
+  readonly turnTo?: number;
 }
 
 export interface VorticellaState extends AquariumSeedPoint {

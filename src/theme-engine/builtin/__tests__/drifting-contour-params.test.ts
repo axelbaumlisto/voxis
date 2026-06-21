@@ -41,8 +41,8 @@ const CRITICAL_PARAMS = {
   diatomAlpha: 0.16,
   diatomDriftSpeed: 0.35,
   euglenaCount: 1,
-  euglenaSpeed: 0.75,
-  euglenaSpeedActive: 1.0,
+  euglenaSpeed: 0.15,
+  euglenaSpeedActive: 0.30,
   euglenaScale: 6.45,
   vorticellaCount: 0,
 } as const;

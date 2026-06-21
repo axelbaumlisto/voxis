@@ -11,11 +11,41 @@ export interface EuglenaPoseOptions {
   readonly flagellumLength?: number;
   readonly stripeCount?: number;
   readonly flagellumPhase?: number;
+  /** Flagellar beat tip amplitude in px (lateral). Default derived from width. */
+  readonly flagellumAmp?: number;
+  /** Number of flagellum sample segments. Default 8. */
+  readonly flagellumSegments?: number;
+  /** Whole wavelengths along the flagellum. Default 1.8. */
+  readonly flagellumWaves?: number;
+  /** Hard cap on flagellar lateral excursion (keeps it inside the strip). */
+  readonly maxFlagellumLateral?: number;
+  /** Slow intermittent metaboly envelope E(t) ∈ [0,1]. Default 1. */
+  readonly metabolyEnvelope?: number;
+  /** Deterministic per-cell seed for organelle jitter. Omit → no organelles. */
+  readonly organelleSeed?: number;
+  readonly chloroplastCount?: number;
+  readonly paramylonCount?: number;
+  readonly striaeCount?: number;
+  readonly includeNucleus?: boolean;
+  readonly includeReservoir?: boolean;
+  readonly includeCV?: boolean;
+  /** Contractile-vacuole pulse phase (cycles) for slow systole/diastole. */
+  readonly cvPhase?: number;
 }
 
 export interface AquariumPoint {
   readonly x: number;
   readonly y: number;
+}
+
+export interface EuglenaOrganelle {
+  readonly x: number;
+  readonly y: number;
+  readonly rx: number;
+  readonly ry: number;
+  readonly angle: number;
+  readonly hueShift: number;
+  readonly lightShift: number;
 }
 
 export interface EuglenaPose {
@@ -28,6 +58,17 @@ export interface EuglenaPose {
   readonly apparentWidth: number;
   readonly stripePhase: number;
   readonly bodySamples: readonly { readonly u: number; readonly halfWidth: number }[];
+  readonly heading: number;
+  readonly ux: number;
+  readonly uy: number;
+  readonly halfLength: number;
+  readonly outline: readonly AquariumPoint[];
+  readonly chloroplasts: readonly EuglenaOrganelle[];
+  readonly nucleus: EuglenaOrganelle | null;
+  readonly paramylon: readonly EuglenaOrganelle[];
+  readonly reservoir: AquariumPoint | null;
+  readonly contractileVacuole: { readonly x: number; readonly y: number; readonly r: number } | null;
+  readonly pellicleStrips: readonly (readonly AquariumPoint[])[];
 }
 
 function finiteOr(value: number | undefined, fallback: number): number {
@@ -43,7 +84,8 @@ function positive(value: number | undefined, fallback: number): number {
 }
 
 const TAU = Math.PI * 2;
-const METABOLY_AMP = 0.045;
+const METABOLY_AMP = 0.16; // local traveling-bulge amplitude (was a 0.045 global breathe)
+const METABOLY_K = 1.3; // ~1.3 wavelengths along the body
 
 interface EuglenaModeView {
   readonly motionMul: number;
@@ -100,6 +142,45 @@ function transform(
   return { x: cx + ux * along + nx * lateral, y: cy + uy * along + ny * lateral };
 }
 
+/**
+ * Display body length (px). SINGLE SOURCE OF TRUTH shared by updateEuglena
+ * (speed in body-lengths) and drawEuglena (geometry). Replicates the exact
+ * max(5, min(16·scale, …)) nesting so update/draw agree.
+ */
+export function euglenaDisplayLength(size: number, scale: number): number {
+  const s = Math.max(0.1, finite(scale, 1));
+  return Math.max(5, Math.min(16 * s, (7.2 + finite(size, 1) * 1.6) * s));
+}
+
+/**
+ * Asymmetric spindle half-width profile (normalized, peak ≈ 1). Blunt rounded
+ * anterior (u>0, low exponent → wide near pole), pointed posterior tail (u<0,
+ * high exponent → narrows fast). A small anterior canal notch at u≈+0.9 marks
+ * the flagellar reservoir mouth.
+ */
+function bodyShape(u: number): number {
+  const a = Math.max(0, 1 - u * u);
+  const p = u >= 0 ? 0.40 : 0.95;
+  let w = Math.pow(a, p);
+  // anterior canal notch (subtle concavity where the flagellum exits)
+  const d = (u - 0.9) / 0.07;
+  w *= 1 - 0.35 * Math.exp(-d * d);
+  return w;
+}
+
+const BODY_SHAPE_MAX = (() => {
+  let m = 0;
+  for (let i = 0; i <= 200; i++) {
+    const u = -1 + (i / 200) * 2;
+    m = Math.max(m, bodyShape(u));
+  }
+  return m;
+})();
+
+function normHalfWidth(u: number): number {
+  return bodyShape(u) / BODY_SHAPE_MAX;
+}
+
 export function euglenaPose(
   rollPhase: number,
   metabolyPhase: number,
@@ -108,42 +189,138 @@ export function euglenaPose(
   const cx = finiteOr(options.centerX, 0);
   const cy = finiteOr(options.centerY, 0);
   const length = positive(options.length, 8);
-  const baseWidth = positive(options.baseWidth, length * 0.28);
+  const baseWidth = positive(options.baseWidth, length * 0.22);
   const heading = finiteOr(options.heading, 0);
-  const flagellumLength = positive(options.flagellumLength, length * 0.45);
-  const stripeCount = Math.max(1, Math.floor(finiteOr(options.stripeCount, 6)));
+  const flagellumLength = positive(options.flagellumLength, length * 1.1);
+  const envelope = clamp01(finiteOr(options.metabolyEnvelope, 1));
   const roll = wrapUnit(rollPhase);
   const metaboly = wrapUnit(metabolyPhase);
   const flagellum = wrapUnit(options.flagellumPhase ?? roll * 1.7);
 
   const ux = Math.cos(heading);
   const uy = Math.sin(heading);
-  const lengthScale = 1 + METABOLY_AMP * Math.sin(metaboly * TAU);
-  const widthScale = 1 / lengthScale;
-  const halfLength = (length * lengthScale) / 2;
+  const halfLength = length / 2;
   const rollCos = Math.cos(roll * TAU);
-  const apparentWidth = baseWidth * widthScale * (0.72 + 0.28 * Math.abs(rollCos));
-  const stripePhase = wrapUnit(roll * stripeCount + metaboly * 0.18);
+  // near-circular cross-section → gentle width pulse on roll
+  const widthMul = 0.85 + 0.15 * Math.abs(rollCos);
+  const wmax = baseWidth / 2;
+  const apparentWidth = baseWidth * widthMul;
+  // anti-strobe: stripes advance slowly with roll, not roll·stripeCount
+  const stripePhase = wrapUnit(roll + metaboly * 0.18);
+
+  // half-width at body-normalised u, with the slow traveling metaboly bulge
+  const metabolyAt = (u: number): number => {
+    const wave = Math.sin(TAU * (METABOLY_K * (u + 1) / 2 - metaboly)) * (1 - u * u);
+    return 1 + METABOLY_AMP * envelope * wave;
+  };
+  const halfWidthAt = (u: number): number => wmax * widthMul * normHalfWidth(u) * metabolyAt(u);
+
   const anterior = point(cx, cy, ux, uy, halfLength);
   const posterior = point(cx, cy, ux, uy, -halfLength);
-  const eyespot = point(cx, cy, ux, uy, halfLength - length * 0.08);
 
-  const flagellumPoints: AquariumPoint[] = [eyespot];
-  const waveAmp = Math.min(1.25, Math.max(0.35, apparentWidth * 0.34));
-  for (let i = 1; i <= 4; i++) {
-    const q = i / 4;
-    const along = halfLength - length * 0.08 + flagellumLength * q;
-    const taper = 1 - q * 0.35;
-    const lateral = Math.sin(flagellum * TAU + q * Math.PI * 1.35) * waveAmp * taper;
+  // --- body outline (≥20 samples each side for the asymmetric shape + bulge) ---
+  const SAMPLES = 24;
+  const upper: AquariumPoint[] = [];
+  const lower: AquariumPoint[] = [];
+  for (let i = 0; i <= SAMPLES; i++) {
+    const u = -1 + (i / SAMPLES) * 2;
+    const hw = halfWidthAt(u);
+    upper.push(transform(cx, cy, ux, uy, halfLength * u, hw));
+    lower.push(transform(cx, cy, ux, uy, halfLength * u, -hw));
+  }
+  const outline = [...upper, ...lower.reverse()];
+
+  const bodySamples = [-1, -0.5, 0, 0.5, 1].map((u) => ({ u, halfWidth: halfWidthAt(u) }));
+
+  // --- flagellum: single anterior whip, tip-amplified traveling wave ---
+  const ampTip = positive(options.flagellumAmp, apparentWidth * 0.9);
+  const maxLat = positive(options.maxFlagellumLateral, ampTip);
+  const waves = positive(options.flagellumWaves, 1.8);
+  const segs = Math.max(2, Math.floor(finiteOr(options.flagellumSegments, 8)));
+  const flagellumPoints: AquariumPoint[] = [anterior];
+  for (let i = 1; i <= segs; i++) {
+    const q = i / segs;
+    const along = halfLength + flagellumLength * q;
+    const env = Math.pow(q, 1.3); // amplitude grows toward the tip (a whip)
+    const lateral = clamp(
+      ampTip * env * Math.sin(TAU * flagellum - waves * TAU * q),
+      -maxLat,
+      maxLat,
+    );
     flagellumPoints.push(transform(cx, cy, ux, uy, along, lateral));
   }
   const flagellumEnd = flagellumPoints[flagellumPoints.length - 1];
 
-  const bodySamples = [-1, -0.5, 0, 0.5, 1].map((u) => {
-    const taper = Math.max(0, 1 - u * u);
-    const anteriorTaper = 1 - 0.12 * Math.max(0, u);
-    return { u, halfWidth: (apparentWidth / 2) * Math.sqrt(taper) * anteriorTaper };
-  });
+  // --- stigma / eyespot: lateral, beside the reservoir (NOT at the tip) ---
+  const eyespot = transform(cx, cy, ux, uy, halfLength * 0.66, wmax * 0.9);
+
+  // --- interior organelles (deterministic, body-normalised, LOD-gated) ---
+  const seed = options.organelleSeed;
+  const chloroplasts: EuglenaOrganelle[] = [];
+  const paramylon: EuglenaOrganelle[] = [];
+  let nucleus: EuglenaOrganelle | null = null;
+  let reservoir: AquariumPoint | null = null;
+  let contractileVacuole: { x: number; y: number; r: number } | null = null;
+  const pellicleStrips: AquariumPoint[][] = [];
+
+  if (seed !== undefined) {
+    const bodyPoint = (u: number, sFrac: number): AquariumPoint =>
+      transform(cx, cy, ux, uy, halfLength * u, sFrac * halfWidthAt(u));
+
+    const chCount = Math.max(0, Math.floor(finiteOr(options.chloroplastCount, 0)));
+    for (let j = 0; j < chCount; j++) {
+      const u = -0.8 + seededUnit(seed, j, 0x9a1f2b3c) * 1.35; // [-0.8, +0.55]
+      const sFrac = (seededUnit(seed, j, 0x51bd0e77) - 0.5) * 1.5; // ±0.75
+      const p = bodyPoint(u, sFrac);
+      chloroplasts.push({
+        x: p.x,
+        y: p.y,
+        rx: length * 0.07,
+        ry: length * 0.035,
+        angle: heading,
+        hueShift: (seededUnit(seed, j, 0x2cd9a14b) - 0.5) * 12,
+        lightShift: (seededUnit(seed, j, 0x7e3a5d91) - 0.5) * 12,
+      });
+    }
+
+    if (options.includeNucleus) {
+      const p = bodyPoint(-0.22, 0);
+      nucleus = { x: p.x, y: p.y, rx: length * 0.11, ry: length * 0.11, angle: heading, hueShift: 0, lightShift: 0 };
+    }
+
+    const pmCount = Math.max(0, Math.floor(finiteOr(options.paramylonCount, 0)));
+    if (pmCount >= 1) {
+      const a = bodyPoint(0.12, 0.35);
+      paramylon.push({ x: a.x, y: a.y, rx: length * 0.065, ry: length * 0.065, angle: heading, hueShift: 0, lightShift: 0 });
+    }
+    if (pmCount >= 2) {
+      const b = bodyPoint(-0.40, -0.35);
+      paramylon.push({ x: b.x, y: b.y, rx: length * 0.06, ry: length * 0.06, angle: heading, hueShift: 0, lightShift: 0 });
+    }
+
+    if (options.includeReservoir) {
+      reservoir = bodyPoint(0.78, 0);
+    }
+    if (options.includeCV) {
+      const cvP = bodyPoint(0.60, -0.25);
+      const cvPulse = 0.5 - 0.5 * Math.cos(TAU * wrapUnit(finiteOr(options.cvPhase, 0)));
+      contractileVacuole = { x: cvP.x, y: cvP.y, r: length * (0.02 + 0.055 * cvPulse) };
+    }
+
+    const stCount = Math.max(0, Math.floor(finiteOr(options.striaeCount, 0)));
+    for (let j = 0; j < stCount; j++) {
+      const base = (j + 0.5) / stCount; // 0..1
+      const sFrac0 = -0.9 + base * 1.8;
+      const strip: AquariumPoint[] = [];
+      for (let k = 0; k <= 6; k++) {
+        const u = -0.85 + (k / 6) * 1.7;
+        // diagonal: lateral fraction drifts with u (≈20° tilt) + slow roll sweep
+        const sFrac = clamp(sFrac0 + (u) * 0.35 + Math.sin(TAU * (stripePhase)) * 0.05, -0.95, 0.95);
+        strip.push(bodyPoint(u, sFrac));
+      }
+      pellicleStrips.push(strip);
+    }
+  }
 
   return {
     center: { x: cx, y: cy },
@@ -155,6 +332,17 @@ export function euglenaPose(
     apparentWidth,
     stripePhase,
     bodySamples,
+    heading,
+    ux,
+    uy,
+    halfLength,
+    outline,
+    chloroplasts,
+    nucleus,
+    paramylon,
+    reservoir,
+    contractileVacuole,
+    pellicleStrips,
   };
 }
 
@@ -164,10 +352,9 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
   const safeWidth = Math.max(0, finite(frame.width, 0));
   const safeHeight = Math.max(0, finite(frame.height, 0));
   for (let i = 0; i < count; i++) {
-    // Bias heading near-horizontal so a large euglena swims along the wide
-    // aquarium (lots of room in x) instead of clipping the short 36px height.
+    // near-horizontal heading so a large euglena swims along the wide aquarium
     const dir = seededUnit(seed, i, salt ^ 0x68bc21eb) < 0.5 ? 0 : Math.PI;
-    const tilt = (seededUnit(seed, i, salt ^ 0x1b9c4e3d) - 0.5) * 0.7;
+    const tilt = (seededUnit(seed, i, salt ^ 0x1b9c4e3d) - 0.5) * 0.5;
     const heading = dir + tilt;
     euglena.push({
       x: seededUnit(seed, i, salt) * safeWidth,
@@ -175,17 +362,30 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
       phase: heading,
       size: 0.5 + seededUnit(seed, i, salt ^ 0x02e5be93),
       heading,
-      swimSpeed: 0.55 + seededUnit(seed, i, salt ^ 0x2fda92a1) * 0.75,
+      swimSpeed: 0.85 + seededUnit(seed, i, salt ^ 0x2fda92a1) * 0.30, // unitless × body-lengths/s
       rollPhase: seededUnit(seed, i, salt ^ 0x4207e617),
       metabolyPhase: seededUnit(seed, i, salt ^ 0x39f0b4f5),
       flagellumPhase: seededUnit(seed, i, salt ^ 0x27d4eb2f),
-      rollRate: 0.18 + seededUnit(seed, i, salt ^ 0x14c8af21) * 0.12,
-      metabolyRate: 0.028 + seededUnit(seed, i, salt ^ 0x3bc85a13) * 0.024,
-      flagellumRate: 1.05 + seededUnit(seed, i, salt ^ 0x752f7c59) * 0.55,
-      spiralAmplitude: 0.28 + seededUnit(seed, i, salt ^ 0x61ab0917) * 0.34,
+      rollRate: 0.45 + seededUnit(seed, i, salt ^ 0x14c8af21) * 0.45, // rev/s (idle)
+      metabolyRate: 0.12 + seededUnit(seed, i, salt ^ 0x3bc85a13) * 0.08, // Hz (idle)
+      flagellumRate: 2.0 + seededUnit(seed, i, salt ^ 0x752f7c59) * 3.0, // Hz (idle)
+      spiralAmplitude: 0.12 + seededUnit(seed, i, salt ^ 0x61ab0917) * 0.06, // fraction of L
+      cvPhase: seededUnit(seed, i, salt ^ 0x3da17c45),
+      cvRate: 0.035 + seededUnit(seed, i, salt ^ 0x59e2b7a3) * 0.015, // Hz (~1/25s)
+      burstPhase: seededUnit(seed, i, salt ^ 0x1f7c6b29),
+      burstRate: 0.08 + seededUnit(seed, i, salt ^ 0x46b9d2e1) * 0.05, // Hz (~10s)
+      turnProgress: 2, // ≥1 → not turning
+      turnFrom: heading,
+      turnTo: heading,
     });
   }
   return euglena;
+}
+
+/** Eased 0→1 (smoothstep). */
+function smoothstep(x: number): number {
+  const t = clamp01(x);
+  return t * t * (3 - 2 * t);
 }
 
 export function updateEuglena(
@@ -198,29 +398,57 @@ export function updateEuglena(
   const safeWidth = Math.max(0, finite(frame.width, 0));
   const safeHeight = Math.max(0, finite(frame.height, 0));
   const activityMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
-  const idleRate = Math.max(0, finite(view.euglena.speed, 0));
-  const activeRate = Math.max(0, finite(view.euglena.speedActive, idleRate));
-  const activityRate = idleRate + (activeRate - idleRate) * activityMix;
   const modeView = euglenaModeView(frame.mode);
-  const rate = activityRate * modeView.motionMul;
+  // translation speed in body-lengths/s (view.speed/speedActive reinterpreted)
+  const vIdleBL = Math.max(0, finite(view.euglena.speed, 0));
+  const vActiveBL = Math.max(0, finite(view.euglena.speedActive, vIdleBL));
+  const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
+  // dimensionless activity factor for phase rates (idle ≈ 1)
+  const act = modeView.motionMul * (1 + 1.5 * activityMix);
+  const scale = view.euglena.scale;
+  const turnTime = 1.8; // seconds for a 180° U-turn
+  const margin = Math.max(8, safeWidth * 0.07);
 
   return euglena.map((cell) => {
-    const rollRate = Math.max(0, finite(cell.rollRate, 0)) * rate;
-    const rollDelta = rollRate * dt;
-    const oldRoll = wrapUnit(cell.rollPhase);
-    const nextRoll = wrapUnit(oldRoll + rollDelta);
-    const heading = finite(cell.heading, 0);
+    const L = euglenaDisplayLength(finite(cell.size, 1), scale);
+    let heading = finite(cell.heading, 0);
+
+    // --- eased U-turn at the horizontal edges (partition-exempt) ---
+    let turnProgress = finiteOr(cell.turnProgress, 2);
+    let turnFrom = finiteOr(cell.turnFrom, heading);
+    let turnTo = finiteOr(cell.turnTo, heading);
+    let speedScale = 1;
+    const turning = turnProgress < 1;
+    if (turning) {
+      turnProgress = Math.min(1, turnProgress + dt / turnTime);
+      heading = turnFrom + (turnTo - turnFrom) * smoothstep(turnProgress);
+      speedScale = 0.4 + 0.6 * Math.abs(Math.cos(turnProgress * Math.PI));
+      if (turnProgress >= 1) heading = turnTo;
+    } else {
+      const ux0 = Math.cos(heading);
+      const lead = finite(cell.x, 0) + ux0 * (L / 2);
+      if ((ux0 > 0 && lead > safeWidth - margin) || (ux0 < 0 && lead < margin)) {
+        turnProgress = 0;
+        turnFrom = heading;
+        turnTo = heading + Math.PI;
+        speedScale = 1;
+      }
+    }
+
     const ux = Math.cos(heading);
     const uy = Math.sin(heading);
-    const nx = -uy;
-    const ny = ux;
-    const swim = Math.max(0, finite(cell.swimSpeed, 0)) * rate;
-    const lateralDelta = rollDelta === 0
-      ? 0
-      : finite(cell.spiralAmplitude, 0) * (Math.cos(oldRoll * TAU) - Math.cos((oldRoll + rollDelta) * TAU)) / TAU;
-    let nextX = finite(cell.x, 0) + ux * swim * dt + nx * lateralDelta;
-    let nextY = finite(cell.y, 0) + uy * swim * dt + ny * lateralDelta;
+    const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L * speedScale;
 
+    let nextX = finite(cell.x, 0) + ux * vPx * dt;
+    let nextY = finite(cell.y, 0) + uy * vPx * dt;
+
+    // soft vertical containment (no teleport): nudge back toward strip centre
+    const yc = safeHeight / 2;
+    if (safeHeight > 0 && Math.abs(nextY - yc) > 0.35 * safeHeight) {
+      nextY += (yc - nextY) * Math.min(1, 2 * dt);
+    }
+
+    // --- hero exclusion (dormant when no hero, e.g. euglena_drift) ---
     if (frame.hero) {
       const hx = finite(frame.hero.x, safeWidth / 2);
       const hy = finite(frame.hero.y, safeHeight / 2);
@@ -238,14 +466,21 @@ export function updateEuglena(
       }
     }
 
+    const rollDelta = Math.max(0, finite(cell.rollRate, 0)) * act * dt;
     return {
       ...cell,
       x: clamp(wrap(nextX, safeWidth), 0, safeWidth),
-      y: clamp(wrap(nextY, safeHeight), 0, safeHeight),
+      y: clamp(nextY, 0, safeHeight),
       phase: heading,
-      rollPhase: nextRoll,
-      metabolyPhase: wrapUnit(cell.metabolyPhase + Math.max(0, finite(cell.metabolyRate, 0)) * rate * dt),
-      flagellumPhase: wrapUnit(cell.flagellumPhase + Math.max(0, finite(cell.flagellumRate, 0)) * rate * dt),
+      heading,
+      turnProgress,
+      turnFrom,
+      turnTo,
+      rollPhase: wrapUnit(finite(cell.rollPhase, 0) + rollDelta),
+      metabolyPhase: wrapUnit(finite(cell.metabolyPhase, 0) + Math.max(0, finite(cell.metabolyRate, 0)) * act * dt),
+      flagellumPhase: wrapUnit(finite(cell.flagellumPhase, 0) + Math.max(0, finite(cell.flagellumRate, 0)) * act * dt),
+      cvPhase: wrapUnit(finiteOr(cell.cvPhase, 0) + Math.max(0, finiteOr(cell.cvRate, 0)) * act * dt),
+      burstPhase: wrapUnit(finiteOr(cell.burstPhase, 0) + Math.max(0, finiteOr(cell.burstRate, 0)) * act * dt),
     };
   });
 }
@@ -258,21 +493,12 @@ function drawPolyline(ctx: CanvasRenderingContext2D, points: readonly AquariumPo
   if (close) ctx.closePath();
 }
 
-function euglenaBodyOutline(pose: EuglenaPose, heading: number): AquariumPoint[] {
-  const ux = Math.cos(heading);
-  const uy = Math.sin(heading);
-  const halfLength = Math.hypot(pose.anterior.x - pose.center.x, pose.anterior.y - pose.center.y);
-  const upper: AquariumPoint[] = [];
-  const lower: AquariumPoint[] = [];
-  for (let i = 0; i <= 10; i++) {
-    const u = -1 + (i / 10) * 2;
-    const sampleTaper = Math.max(0, 1 - u * u);
-    const anteriorTaper = 1 - 0.12 * Math.max(0, u);
-    const halfWidth = (pose.apparentWidth / 2) * Math.sqrt(sampleTaper) * anteriorTaper;
-    upper.push(transform(pose.center.x, pose.center.y, ux, uy, halfLength * u, halfWidth));
-    lower.push(transform(pose.center.x, pose.center.y, ux, uy, halfLength * u, -halfWidth));
-  }
-  return [...upper, ...lower.reverse()];
+/** Intermittent metaboly envelope from a dt-integrated burst phase (~40% duty). */
+function metabolyEnvelope(burstPhase: number): number {
+  const p = wrapUnit(burstPhase);
+  // rest for ~60% of the cycle, ease a bulge over the remaining ~40%
+  if (p < 0.6) return 0;
+  return Math.sin(((p - 0.6) / 0.4) * Math.PI); // 0→1→0 eased pulse
 }
 
 export function drawEuglena(
@@ -286,83 +512,151 @@ export function drawEuglena(
   if (alpha <= 0) return;
   const scale = Math.max(0.1, finite(view.euglena.scale, 1));
   const hue = finite(frame.baseHue, 50) + 42;
+  const H = Math.max(1, finite(frame.height, 36));
 
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  for (const cell of euglena) {
-    const length = Math.max(5, Math.min(16 * scale, (7.2 + finite(cell.size, 1) * 1.6) * scale));
-    const width = Math.max(1.4, Math.min(7.2 * scale, length * 0.45));
-    const flagellumLength = Math.max(2.2, Math.min(7.5 * scale, length * 0.55));
+  euglena.forEach((cell, idx) => {
+    const length = euglenaDisplayLength(finite(cell.size, 1), scale);
+    const width = length * 0.22;
+    const flagellumLength = length * 1.1;
     const heading = finite(cell.heading, 0);
+
+    // --- LOD ladder by display length L ---
+    const chCount = length < 7 ? 0 : length < 14 ? 2 : length < 40 ? clamp(Math.round(length / 6), 4, 6) : clamp(Math.round(length / 6), 8, 14);
+    const stCount = length < 7 ? 0 : length < 14 ? 2 : length < 40 ? 4 : Math.min(7, Math.round(length / 9));
+    const pmCount = length < 14 ? 0 : length < 40 ? 1 : 2;
+    const includeNucleus = length >= 14;
+    const includeReservoir = length >= 7;
+    const includeCV = length >= 14;
+    const flagSegs = clamp(Math.round(length / 6), 4, 14);
+
+    // --- helix lateral offset as a pure function of roll (partition-safe) ---
+    const roll = wrapUnit(finite(cell.rollPhase, 0));
+    const aHelix = finiteOr(cell.spiralAmplitude, 0.15) * length;
+    const apparentW = width * (0.85 + 0.15 * Math.abs(Math.cos(roll * TAU)));
+    const lmax = Math.max(0, 0.4 * H - apparentW / 2);
+    const lateral = clamp(aHelix * Math.sin(roll * TAU + heading), -lmax, lmax);
+    const ux = Math.cos(heading);
+    const uy = Math.sin(heading);
+    const nx = -uy;
+    const ny = ux;
+    const cxr = finite(cell.x, 0) + nx * lateral;
+    const cyr = finite(cell.y, 0) + ny * lateral;
+
+    const ampTip = clamp(length * 0.18, 1, 0.30 * H);
+    const env = metabolyEnvelope(finiteOr(cell.burstPhase, 0));
+
     const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {
-      centerX: finite(cell.x, 0),
-      centerY: finite(cell.y, 0),
+      centerX: cxr,
+      centerY: cyr,
       length,
       baseWidth: width,
       heading,
       flagellumLength,
       flagellumPhase: cell.flagellumPhase,
-      stripeCount: 5,
+      flagellumAmp: ampTip,
+      maxFlagellumLateral: 0.30 * H,
+      flagellumSegments: flagSegs,
+      flagellumWaves: 1.8,
+      metabolyEnvelope: env,
+      stripeCount: 3,
+      organelleSeed: (view.seed ^ ((idx + 1) * 0x9e3779b1)) >>> 0,
+      chloroplastCount: chCount,
+      striaeCount: stCount,
+      paramylonCount: pmCount,
+      includeNucleus,
+      includeReservoir,
+      includeCV,
+      cvPhase: cell.cvPhase,
     });
-    const outline = euglenaBodyOutline(pose, heading);
-    const detailCount = length >= 9 ? 3 : length >= 7 ? 2 : 0;
 
-    drawPolyline(ctx, outline, true);
-    ctx.fillStyle = `hsla(${hue}, 24%, 48%, ${alpha * 0.34})`;
-    ctx.strokeStyle = `hsla(${hue + 8}, 22%, 66%, ${alpha * 0.55})`;
-    ctx.lineWidth = Math.max(0.48, Math.min(0.9, width * 0.12));
+    // === draw order: body → striae → chloroplasts → nucleus → paramylon →
+    //     reservoir → CV → stigma → flagellum ===
+
+    // body fill + rim (vivid grass green)
+    drawPolyline(ctx, pose.outline, true);
+    ctx.fillStyle = `hsla(${hue}, 38%, 44%, ${alpha * 0.40})`;
+    ctx.strokeStyle = `hsla(${hue + 6}, 30%, 60%, ${alpha * 0.55})`;
+    ctx.lineWidth = Math.max(0.4, Math.min(0.9, width * 0.08));
     ctx.fill();
     ctx.stroke();
 
-    const ux = Math.cos(heading);
-    const uy = Math.sin(heading);
-
-    if (detailCount > 0) {
-      ctx.fillStyle = `hsla(${hue - 12}, 30%, 42%, ${alpha * 0.34})`;
-      for (let i = 0; i < detailCount; i++) {
-        const q = i / (detailCount - 1);
-        const along = length * (-0.17 + q * 0.34);
-        const lateralSign = i % 2 === 0 ? 1 : -1;
-        const p = transform(pose.center.x, pose.center.y, ux, uy, along, width * 0.13 * lateralSign);
-        ctx.beginPath();
-        ctx.ellipse(p.x, p.y, 0.50, 0.30, heading, 0, TAU);
-        ctx.fill();
-      }
-
-      const stripeAlpha = alpha * 0.30;
-      ctx.strokeStyle = `hsla(${hue - 8}, 24%, 36%, ${stripeAlpha})`;
-      ctx.lineWidth = Math.max(0.24, Math.min(0.55, width * 0.08));
-      for (let i = 0; i < detailCount; i++) {
-        const q = i / (detailCount - 1);
-        const bandOffset = -0.16 + q * 0.32;
-        const along = length * (bandOffset + (pose.stripePhase - 0.5) * 0.08);
-        const band = [
-          transform(pose.center.x, pose.center.y, ux, uy, along - length * 0.16, -width * 0.18),
-          transform(pose.center.x, pose.center.y, ux, uy, along + length * 0.16, width * 0.18),
-        ];
-        drawPolyline(ctx, band, false);
+    // pellicle striae
+    if (pose.pellicleStrips.length > 0) {
+      ctx.strokeStyle = `hsla(${hue - 7}, 30%, 30%, ${alpha * 0.22})`;
+      ctx.lineWidth = Math.max(0.2, Math.min(0.5, width * 0.06));
+      for (const strip of pose.pellicleStrips) {
+        drawPolyline(ctx, strip, false);
         ctx.stroke();
       }
     }
 
-    ctx.strokeStyle = `hsla(${hue + 10}, 18%, 70%, ${alpha * 0.48})`;
-    ctx.lineWidth = Math.max(0.34, Math.min(0.65, width * 0.08));
-    drawPolyline(ctx, pose.flagellumPoints, false);
-    ctx.stroke();
-
-    if (length >= 7) {
-      const reservoir = transform(pose.center.x, pose.center.y, ux, uy, length * 0.33, -width * 0.11);
-      ctx.fillStyle = `hsla(175, 22%, 80%, ${alpha * 0.46})`;
+    // chloroplasts (the green mass)
+    for (const c of pose.chloroplasts) {
+      ctx.fillStyle = `hsla(${hue + c.hueShift}, ${52}%, ${42 + c.lightShift}%, ${alpha * 0.62})`;
       ctx.beginPath();
-      ctx.arc(reservoir.x, reservoir.y, Math.min(0.8, Math.max(0.34, width * 0.18)), 0, TAU);
+      ctx.ellipse(c.x, c.y, c.rx, c.ry, c.angle, 0, TAU);
       ctx.fill();
     }
 
-    ctx.fillStyle = `hsla(20, 48%, 50%, ${alpha * 0.78})`;
+    // nucleus (paler clearing)
+    if (pose.nucleus) {
+      ctx.fillStyle = `hsla(${hue - 2}, 18%, 56%, ${alpha * 0.40})`;
+      ctx.beginPath();
+      ctx.ellipse(pose.nucleus.x, pose.nucleus.y, pose.nucleus.rx, pose.nucleus.ry, pose.nucleus.angle, 0, TAU);
+      ctx.fill();
+    }
+
+    // paramylon (bright refractile bodies; first one a ring)
+    pose.paramylon.forEach((p, j) => {
+      ctx.fillStyle = `hsla(50, 12%, 88%, ${alpha * 0.80})`;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.rx, p.ry, p.angle, 0, TAU);
+      ctx.fill();
+      if (j === 0) {
+        ctx.strokeStyle = `hsla(50, 14%, 70%, ${alpha * 0.6})`;
+        ctx.lineWidth = Math.max(0.3, width * 0.05);
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, p.rx, p.ry, p.angle, 0, TAU);
+        ctx.stroke();
+      }
+    });
+
+    // reservoir (pale lens at the anterior)
+    if (pose.reservoir) {
+      ctx.fillStyle = `hsla(186, 18%, 84%, ${alpha * 0.50})`;
+      ctx.beginPath();
+      ctx.arc(pose.reservoir.x, pose.reservoir.y, Math.max(0.4, width * 0.18), 0, TAU);
+      ctx.fill();
+    }
+
+    // contractile vacuole (slow pulse)
+    if (pose.contractileVacuole) {
+      ctx.fillStyle = `hsla(190, 16%, 86%, ${alpha * 0.45})`;
+      ctx.beginPath();
+      ctx.arc(pose.contractileVacuole.x, pose.contractileVacuole.y, Math.max(0.4, pose.contractileVacuole.r), 0, TAU);
+      ctx.fill();
+    }
+
+    // stigma / eyespot (the single warm accent, beside the reservoir)
+    ctx.fillStyle = `hsla(14, 88%, 49%, ${alpha * 0.92})`;
     ctx.beginPath();
-    ctx.arc(pose.eyespot.x, pose.eyespot.y, Math.min(1, Math.max(0.45, width * 0.22)), 0, TAU);
+    ctx.arc(pose.eyespot.x, pose.eyespot.y, Math.max(0.45, length * 0.03), 0, TAU);
     ctx.fill();
-  }
+
+    // flagellum (anterior whip, stroke-width taper, on top)
+    const fp = pose.flagellumPoints;
+    for (let i = 1; i < fp.length; i++) {
+      const q = i / (fp.length - 1);
+      ctx.strokeStyle = `hsla(${hue + 8}, 22%, 60%, ${alpha * 0.70})`;
+      ctx.lineWidth = Math.max(0.35, (1.2 - 0.8 * q) * Math.max(0.5, width * 0.10));
+      ctx.beginPath();
+      ctx.moveTo(fp[i - 1].x, fp[i - 1].y);
+      ctx.lineTo(fp[i].x, fp[i].y);
+      ctx.stroke();
+    }
+  });
   ctx.restore();
 }

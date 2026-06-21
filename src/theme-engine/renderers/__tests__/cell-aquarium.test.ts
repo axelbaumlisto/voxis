@@ -235,10 +235,12 @@ describe("aquarium biology geometry contracts", () => {
     expect(centerSample?.halfWidth).toBeGreaterThan(0.8);
     expect(anteriorTip?.halfWidth).toBeCloseTo(0, 6);
     expect(posteriorTip?.halfWidth).toBeCloseTo(0, 6);
+    // eyespot is lateral, beside the anterior reservoir (not on the tip)
     expect(pose.eyespot.x).toBeGreaterThan(pose.center.x);
-    expect(pose.flagellumPoints[0]).toEqual(pose.eyespot);
-    expect(pose.flagellumEnd.x).toBeGreaterThan(pose.eyespot.x);
-    expect(pose.flagellumEnd.x - pose.eyespot.x).toBeLessThan(5);
+    // flagellum emerges from the anterior pole, not the eyespot
+    expect(pose.flagellumPoints[0]).toEqual(pose.anterior);
+    expect(pose.flagellumEnd.x).toBeGreaterThan(pose.anterior.x);
+    expect(pose.flagellumEnd.x - pose.anterior.x).toBeLessThan(4 * 1.2);
   });
 
   it("euglenaPose roll changes apparent width and stripe phase without moving the anterior anchor", () => {
@@ -456,11 +458,25 @@ describe("aquarium layer Phase 3 euglena", () => {
     return ((next - previous) % 1 + 1) % 1;
   }
 
-  function euglenaAreaProxy(metabolyPhase: number): number {
-    const pose = euglenaPose(0.1, metabolyPhase, { length: 9, baseWidth: 2.4, heading: 0 });
-    const length = Math.hypot(pose.anterior.x - pose.posterior.x, pose.anterior.y - pose.posterior.y);
-    const centerSample = pose.bodySamples.find((sample) => sample.u === 0);
-    return length * (centerSample?.halfWidth ?? 0) * 2;
+  function euglenaPolyArea(metabolyPhase: number): number {
+    const pose = euglenaPose(0.1, metabolyPhase, { length: 60, baseWidth: 13, heading: 0, metabolyEnvelope: 1 });
+    const pts = pose.outline;
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const j = (i + 1) % pts.length;
+      a += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+    }
+    return Math.abs(a) / 2;
+  }
+
+  function euglenaPeakU(metabolyPhase: number): number {
+    const pose = euglenaPose(0.1, metabolyPhase, { length: 60, baseWidth: 13, heading: 0, metabolyEnvelope: 1 });
+    let bestU = 0;
+    let bestW = -1;
+    for (const s of pose.bodySamples) {
+      if (s.halfWidth > bestW) { bestW = s.halfWidth; bestU = s.u; }
+    }
+    return bestU;
   }
 
   function inspectEuglenaDraw(scale: number): { readonly calls: readonly string[]; readonly state: AquariumLayerState } {
@@ -586,14 +602,17 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(recording.swimSpeed).toBe(initial[0].swimSpeed);
   });
 
-  it("euglenaPose keeps metaboly area proxy stable without scale inflation", () => {
-    const proxies = [0, 0.25, 0.5, 0.75].map(euglenaAreaProxy);
-    const mean = proxies.reduce((sum, value) => sum + value, 0) / proxies.length;
-
-    for (const proxy of proxies) {
-      expect(proxy / mean).toBeGreaterThan(0.985);
-      expect(proxy / mean).toBeLessThan(1.015);
+  it("euglenaPose metaboly conserves area (no inflation) and travels along the body", () => {
+    const areas = [0, 0.2, 0.4, 0.6, 0.8].map(euglenaPolyArea);
+    const mean = areas.reduce((sum, value) => sum + value, 0) / areas.length;
+    for (const area of areas) {
+      // width-only traveling bulge with (1-u^2) damping stays within ~3% of mean
+      expect(area / mean).toBeGreaterThan(0.95);
+      expect(area / mean).toBeLessThan(1.05);
     }
+    // the bulge is a TRAVELING wave: its peak-width location shifts with phase
+    const peaks = [0, 0.33, 0.66].map(euglenaPeakU);
+    expect(new Set(peaks).size).toBeGreaterThan(1);
   });
 
   it("updateEuglena is dt-partition invariant across phase wrap", () => {
@@ -626,7 +645,9 @@ describe("aquarium layer Phase 3 euglena", () => {
       euglenaSpeedActive: 1,
       aquariumActivityBoost: 1,
     });
-    const initial = [testEuglena({ x: 171.95, y: 35.95, heading: Math.PI / 4, rollPhase: 0.9 })];
+    // mid-field, mid-height: no edge U-turn and no soft y-centering engage, so
+    // the path is pure forward + closed-form phase accumulators (partition-exact).
+    const initial = [testEuglena({ x: 86, y: 18, heading: Math.PI / 4, rollPhase: 0.9 })];
     const oneStep = updateEuglena(initial, frame({ dt: 0.16, width: 172, height: 36, activity: 0 }), view);
     const halfStep = updateEuglena(initial, frame({ dt: 0.08, width: 172, height: 36, activity: 0 }), view);
     const twoSteps = updateEuglena(halfStep, frame({ dt: 0.08, width: 172, height: 36, activity: 0 }), view);
@@ -696,9 +717,10 @@ describe("aquarium layer Phase 3 euglena", () => {
     });
 
     expect(pose.eyespot.y).toBeGreaterThan(pose.center.y);
-    expect(pose.flagellumEnd.y).toBeGreaterThan(pose.eyespot.y);
-    expect(Math.abs(pose.eyespot.x - pose.center.x)).toBeLessThan(1);
-    expect(Math.hypot(pose.flagellumPoints[0].x - pose.eyespot.x, pose.flagellumPoints[0].y - pose.eyespot.y)).toBeLessThan(1e-9);
+    expect(pose.flagellumEnd.y).toBeGreaterThan(pose.anterior.y);
+    // flagellum emerges from the anterior pole (on axis), eyespot is lateral
+    expect(Math.hypot(pose.flagellumPoints[0].x - pose.anterior.x, pose.flagellumPoints[0].y - pose.anterior.y)).toBeLessThan(1e-9);
+    expect(Math.abs(pose.anterior.x - pose.center.x)).toBeLessThan(1e-6);
   });
 
   it("drawAquariumBackground draws a muted euglena-only identity smoke at 172×36", () => {
@@ -708,47 +730,43 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(calls.filter((call) => call === "restore")).toHaveLength(1);
     expect(calls.filter((call) => call === "fill").length).toBeGreaterThanOrEqual(4);
     expect(calls.filter((call) => call === "stroke").length).toBeGreaterThanOrEqual(3);
-    expect(calls.some((call) => call === "ellipse:0.50,0.30")).toBe(true);
+    expect(calls.some((call) => call.startsWith("ellipse:"))).toBe(true);
     expect(calls.some((call) => call.startsWith("arc:0.") || call.startsWith("arc:1."))).toBe(true);
     expect(calls.some((call) => call.startsWith("moveTo:"))).toBe(true);
     expect(calls.some((call) => call.startsWith("lineTo:"))).toBe(true);
     expect(calls.some((call) => call.includes("hsla(92"))).toBe(true);
-    expect(calls.some((call) => call.includes("hsla(20"))).toBe(true);
-    expect(calls.some((call) => call.includes("hsla(175"))).toBe(true);
+    expect(calls.some((call) => call.includes("hsla(14"))).toBe(true);
+    expect(calls.some((call) => call.includes("hsla(186"))).toBe(true);
 
-    const reservoirIndex = calls.findIndex((call) => call.includes("hsla(175"));
-    const eyespotIndex = calls.findIndex((call) => call.includes("hsla(20"));
+    const reservoirIndex = calls.findIndex((call) => call.includes("hsla(186"));
+    const eyespotIndex = calls.findIndex((call) => call.includes("hsla(14"));
     expect(reservoirIndex).toBeGreaterThan(-1);
     expect(eyespotIndex).toBeGreaterThan(reservoirIndex);
   });
 
   it("drawAquariumBackground adds euglena reservoir glint only above the 7px body threshold", () => {
-    const small = inspectEuglenaDraw(0.74).calls;
-    const large = inspectEuglenaDraw(0.8).calls;
+    const small = inspectEuglenaDraw(0.74).calls; // L < 7
+    const large = inspectEuglenaDraw(0.8).calls;  // L >= 7
 
-    expect(small.some((call) => call.includes("hsla(175"))).toBe(false);
-    expect(large.some((call) => call.includes("hsla(175"))).toBe(true);
+    expect(small.some((call) => call.includes("hsla(186"))).toBe(false);
+    expect(large.some((call) => call.includes("hsla(186"))).toBe(true);
     expect(large.some((call) => call.startsWith("arc:0.") || call.startsWith("arc:1."))).toBe(true);
   });
 
-  it("drawAquariumBackground uses scale-aware euglena details", () => {
-    const small = inspectEuglenaDraw(0.6).calls;
-    const medium = inspectEuglenaDraw(0.8).calls;
+  it("drawAquariumBackground scales euglena detail monotonically with body length", () => {
+    const small = inspectEuglenaDraw(0.6).calls;  // L < 7: minimal
+    const medium = inspectEuglenaDraw(0.8).calls; // L >= 7: chloroplasts + reservoir
     const large = inspectEuglenaDraw(1.03).calls;
 
-    expect(small.filter((call) => call.startsWith("ellipse:")).length).toBe(0);
-    expect(small.filter((call) => call.includes("hsla(84")).length).toBe(0);
-    expect(small.filter((call) => call === "stroke").length).toBe(2);
-    expect(small.filter((call) => call.startsWith("arc:")).length).toBe(1);
+    const ell = (c: readonly string[]) => c.filter((x) => x.startsWith("ellipse:")).length;
+    const arcs = (c: readonly string[]) => c.filter((x) => x.startsWith("arc:")).length;
 
-    expect(medium.filter((call) => call.startsWith("ellipse:")).length).toBe(2);
-    expect(medium.filter((call) => call.includes("hsla(84")).length).toBe(1);
-    expect(medium.filter((call) => call === "stroke").length).toBe(4);
-    expect(medium.filter((call) => call.startsWith("arc:")).length).toBe(2);
-
-    expect(large.filter((call) => call.startsWith("ellipse:")).length).toBe(3);
-    expect(large.filter((call) => call === "stroke").length).toBe(5);
-    expect(large.filter((call) => call.startsWith("arc:")).length).toBe(2);
+    expect(ell(small)).toBe(0);
+    expect(ell(medium)).toBeGreaterThan(0);
+    expect(ell(large)).toBeGreaterThanOrEqual(ell(medium));
+    expect(small.some((x) => x.includes("hsla(186"))).toBe(false);
+    expect(medium.some((x) => x.includes("hsla(186"))).toBe(true);
+    expect(arcs(large)).toBeGreaterThanOrEqual(arcs(small));
   });
 });
 

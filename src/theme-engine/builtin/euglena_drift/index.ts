@@ -33,9 +33,9 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       aquariumActivityBoost: 0.35,
       diatomCount: 0,
       euglenaCount: 1,
-      euglenaSpeed: 0.55,
-      euglenaSpeedActive: 0.95,
-      euglenaScale: 6.45,
+      euglenaSpeed: 0.19,        // body-lengths/sec (idle) — crosses field in ~12s
+      euglenaSpeedActive: 0.40,  // body-lengths/sec (recording) — ~6s
+      euglenaScale: 7.5,
       vorticellaCount: 0,
       ...userParams,
     },
