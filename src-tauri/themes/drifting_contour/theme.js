@@ -1945,7 +1945,9 @@ function seedEuglena(count, seed, frame, salt = 235478698) {
   const safeWidth = Math.max(0, finite2(frame.width, 0));
   const safeHeight = Math.max(0, finite2(frame.height, 0));
   for (let i = 0;i < count; i++) {
-    const heading = seededUnit(seed, i, salt ^ 1757159915) * TAU3;
+    const dir = seededUnit(seed, i, salt ^ 1757159915) < 0.5 ? 0 : Math.PI;
+    const tilt = (seededUnit(seed, i, salt ^ 463228477) - 0.5) * 0.7;
+    const heading = dir + tilt;
     euglena.push({
       x: seededUnit(seed, i, salt) * safeWidth,
       y: seededUnit(seed, i, salt ^ 1374496523) * safeHeight,
@@ -3146,7 +3148,7 @@ function mount(container, api) {
       euglenaCount: 1,
       euglenaSpeed: 0.75,
       euglenaSpeedActive: 1,
-      euglenaScale: 2.15,
+      euglenaScale: 6.45,
       vorticellaCount: 0,
       ...userParams
     }

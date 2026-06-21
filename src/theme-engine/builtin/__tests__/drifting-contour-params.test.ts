@@ -43,7 +43,7 @@ const CRITICAL_PARAMS = {
   euglenaCount: 1,
   euglenaSpeed: 0.75,
   euglenaSpeedActive: 1.0,
-  euglenaScale: 2.15,
+  euglenaScale: 6.45,
   vorticellaCount: 0,
 } as const;
 
