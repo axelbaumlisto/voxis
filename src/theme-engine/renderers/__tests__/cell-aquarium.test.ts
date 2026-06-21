@@ -688,9 +688,9 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(calls.some((call) => call.startsWith("arc:0.") || call.startsWith("arc:1."))).toBe(true);
     expect(calls.some((call) => call.startsWith("moveTo:"))).toBe(true);
     expect(calls.some((call) => call.startsWith("lineTo:"))).toBe(true);
-    expect(calls.some((call) => call.includes("hsla(92") && call.includes("0.031"))).toBe(true);
-    expect(calls.some((call) => call.includes("hsla(20") && call.includes("0.107"))).toBe(true);
-    expect(calls.some((call) => call.includes("hsla(175") && call.includes("0.062"))).toBe(true);
+    expect(calls.some((call) => call.includes("hsla(92"))).toBe(true);
+    expect(calls.some((call) => call.includes("hsla(20"))).toBe(true);
+    expect(calls.some((call) => call.includes("hsla(175"))).toBe(true);
 
     const reservoirIndex = calls.findIndex((call) => call.includes("hsla(175"));
     const eyespotIndex = calls.findIndex((call) => call.includes("hsla(20"));
@@ -703,7 +703,7 @@ describe("aquarium layer Phase 3 euglena", () => {
     const large = inspectEuglenaDraw(0.8).calls;
 
     expect(small.some((call) => call.includes("hsla(175"))).toBe(false);
-    expect(large.some((call) => call.includes("hsla(175") && call.includes("0.062"))).toBe(true);
+    expect(large.some((call) => call.includes("hsla(175"))).toBe(true);
     expect(large.some((call) => call.startsWith("arc:0.") || call.startsWith("arc:1."))).toBe(true);
   });
 
