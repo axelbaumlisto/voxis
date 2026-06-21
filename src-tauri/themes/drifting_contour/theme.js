@@ -2144,7 +2144,11 @@ function createCellRenderer(container, opts) {
             };
             for (let i = 0;i < interiorFoodVacuoles.length; i++) {
               const fv = interiorFoodVacuoles[i];
-              const loop = cyclosisLoopPointAtPhase(fv, cyclosisPhase);
+              const loopRaw = cyclosisLoopPointAtPhase(fv, cyclosisPhase);
+              const fvMaxAmp = params.foodVacuoleLoopMaxAmp ?? 0.82;
+              const fvAmp = Math.hypot(loopRaw.u, loopRaw.s);
+              const fvScale = fvAmp > fvMaxAmp && fvAmp > 0 ? fvMaxAmp / fvAmp : 1;
+              const loop = { u: loopRaw.u * fvScale, s: loopRaw.s * fvScale };
               const size = foodVacuoleSize(t, fv.digestPhase, params);
               const drawR = fvSizePx * (0.4 + 0.6 * size);
               const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);
@@ -2326,7 +2330,8 @@ function mount(container, api) {
       enableWallReorient: true,
       enableRotationalBrownian: true,
       rotationalDiffusion: 0.02,
-      foodVacuoleSizeMul: 1.8,
+      foodVacuoleSizeMul: 1.4,
+      foodVacuoleLoopMaxAmp: 0.78,
       enableTrichocysts: false,
       trichocystCount: 30,
       trichocystLengthMul: 3,
@@ -2345,7 +2350,7 @@ function mount(container, api) {
       cyclosisGranuleCount: 40,
       granuleSizePx: 1.6,
       enableOrganelles: true,
-      foodVacuoleCount: 10,
+      foodVacuoleCount: 8,
       enableInteriorField: true,
       cyclosisPeriod: 65,
       ...userParams
