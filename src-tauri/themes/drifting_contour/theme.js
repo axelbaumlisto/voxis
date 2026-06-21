@@ -1423,19 +1423,7 @@ function cyclosisLoopPointAtPhase(g, phase) {
   return { u, s };
 }
 
-// src/theme-engine/renderers/cell.ts
-function ciliaBeatHzEff(activity, params) {
-  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
-  const f0 = params.ciliaBeatHz ?? 0.9;
-  const f1 = params.ciliaBeatHzActive ?? 1.6;
-  return f0 + (f1 - f0) * a;
-}
-function iridescentHue(angle, t, audioLevel, baseHue, params) {
-  const norm = (angle % TAU + TAU) % TAU / TAU;
-  let hue = baseHue + norm * params.hueSpread + t * params.shimmerSpeed + audioLevel * params.hueBoost;
-  hue = (hue % 360 + 360) % 360;
-  return hue;
-}
+// src/theme-engine/renderers/cell/organelles.ts
 function nucleusTransform(t, audioLevel, baseR, params, minMembraneR) {
   const rawCx = baseR * params.nucleusWander * noise2D(137, t * params.nucleusDrift);
   const rawCy = baseR * params.nucleusWander * noise2D(241, t * params.nucleusDrift * 1.3 + 555.5);
@@ -1499,6 +1487,72 @@ function contractileVacuolePair(t, baseR, squeezePhi, params) {
     { bearing: squeezePhi + antBearing, r: anterior.r },
     { bearing: squeezePhi + postBearing, r: posterior.r }
   ];
+}
+function foodVacuoleSize(t, seedPhase, params) {
+  const period = Math.max(0.1, params.foodVacuoleDigestPeriod ?? 30);
+  const u = ((t / period + seedPhase) % 1 + 1) % 1;
+  return 1 - 0.7 * u;
+}
+function seedFoodVacuoles(baseR, params) {
+  if (!params.enableOrganelles)
+    return [];
+  const n = Math.max(0, Math.floor(params.foodVacuoleCount ?? 0));
+  if (n === 0)
+    return [];
+  const maxRad = Math.max(0, params.foodVacuoleMaxRadiusFrac ?? 0.62) * Math.max(0, baseR);
+  const out = [];
+  for (let i = 0;i < n; i++) {
+    const ang = (noise2D(i * 17.413 + 3.1, 52.917) + 1) * Math.PI;
+    const rad = Math.sqrt((noise2D(i * 44.197 + 9.7, 23.671) + 1) * 0.5) * maxRad;
+    const phase = (noise2D(i * 61.829 + 2.3, 88.541) + 1) * 0.5;
+    out.push({ x: rad * Math.cos(ang), y: rad * Math.sin(ang), phase });
+  }
+  return out;
+}
+function seedInteriorFoodVacuoles(count, params) {
+  const n = Math.max(0, Math.floor(count));
+  const out = [];
+  for (let i = 0;i < n; i++) {
+    const xi_q = (noise2D(i * 17.413 + 3.1, 52.917) + 1) * 0.5;
+    const xi_p = (noise2D(i * 44.197 + 9.7, 23.671) + 1) * 0.5;
+    const xi_d = (noise2D(i * 61.829 + 2.3, 88.541) + 1) * 0.5;
+    out.push({ q: xi_q, phi0: xi_p * TAU, digestPhase: xi_d });
+  }
+  return out;
+}
+function advectFoodVacuole(v, baseR, dt, params) {
+  const omega = TAU / Math.max(0.1, params.foodVacuolePeriod ?? 55);
+  const nx = v.x - omega * v.y * dt;
+  const ny = v.y + omega * v.x * dt;
+  const maxRad = Math.max(0, params.foodVacuoleMaxRadiusFrac ?? 0.62) * Math.max(0, baseR);
+  const r0 = Math.min(Math.hypot(v.x, v.y), maxRad);
+  const r1 = Math.hypot(nx, ny) || 1;
+  const s = r0 / r1;
+  return { x: nx * s, y: ny * s, phase: v.phase };
+}
+function micronucleusTransform(macroCx, macroCy, macroR, params) {
+  const r = macroR * (params.micronucleusSizeFrac ?? 0.32);
+  const off = macroR * (params.micronucleusOffsetFrac ?? 1.15);
+  const bearing = 0.7;
+  return {
+    cx: macroCx + Math.cos(bearing) * off,
+    cy: macroCy + Math.sin(bearing) * off,
+    r
+  };
+}
+
+// src/theme-engine/renderers/cell.ts
+function ciliaBeatHzEff(activity, params) {
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  const f0 = params.ciliaBeatHz ?? 0.9;
+  const f1 = params.ciliaBeatHzActive ?? 1.6;
+  return f0 + (f1 - f0) * a;
+}
+function iridescentHue(angle, t, audioLevel, baseHue, params) {
+  const norm = (angle % TAU + TAU) % TAU / TAU;
+  let hue = baseHue + norm * params.hueSpread + t * params.shimmerSpeed + audioLevel * params.hueBoost;
+  hue = (hue % 360 + 360) % 360;
+  return hue;
 }
 function dipoleFlowAt(dx, dy, heading, strength) {
   if (strength === 0)
@@ -1565,59 +1619,6 @@ function advectGranule(g, baseR, dt, params) {
   const r1 = Math.hypot(nx, ny) || 1;
   const s = r0 / r1;
   return { x: nx * s, y: ny * s };
-}
-function foodVacuoleSize(t, seedPhase, params) {
-  const period = Math.max(0.1, params.foodVacuoleDigestPeriod ?? 30);
-  const u = ((t / period + seedPhase) % 1 + 1) % 1;
-  return 1 - 0.7 * u;
-}
-function seedFoodVacuoles(baseR, params) {
-  if (!params.enableOrganelles)
-    return [];
-  const n = Math.max(0, Math.floor(params.foodVacuoleCount ?? 0));
-  if (n === 0)
-    return [];
-  const maxRad = Math.max(0, params.foodVacuoleMaxRadiusFrac ?? 0.62) * Math.max(0, baseR);
-  const out = [];
-  for (let i = 0;i < n; i++) {
-    const ang = (noise2D(i * 17.413 + 3.1, 52.917) + 1) * Math.PI;
-    const rad = Math.sqrt((noise2D(i * 44.197 + 9.7, 23.671) + 1) * 0.5) * maxRad;
-    const phase = (noise2D(i * 61.829 + 2.3, 88.541) + 1) * 0.5;
-    out.push({ x: rad * Math.cos(ang), y: rad * Math.sin(ang), phase });
-  }
-  return out;
-}
-function seedInteriorFoodVacuoles(count, params) {
-  const n = Math.max(0, Math.floor(count));
-  const out = [];
-  for (let i = 0;i < n; i++) {
-    const xi_q = (noise2D(i * 17.413 + 3.1, 52.917) + 1) * 0.5;
-    const xi_p = (noise2D(i * 44.197 + 9.7, 23.671) + 1) * 0.5;
-    const xi_d = (noise2D(i * 61.829 + 2.3, 88.541) + 1) * 0.5;
-    out.push({ q: xi_q, phi0: xi_p * TAU, digestPhase: xi_d });
-  }
-  return out;
-}
-function advectFoodVacuole(v, baseR, dt, params) {
-  const omega = TAU / Math.max(0.1, params.foodVacuolePeriod ?? 55);
-  const f = cyclosisField(v.x, v.y, omega);
-  const nx = v.x + f.vx * dt;
-  const ny = v.y + f.vy * dt;
-  const maxRad = Math.max(0, params.foodVacuoleMaxRadiusFrac ?? 0.62) * Math.max(0, baseR);
-  const r0 = Math.min(Math.hypot(v.x, v.y), maxRad);
-  const r1 = Math.hypot(nx, ny) || 1;
-  const s = r0 / r1;
-  return { x: nx * s, y: ny * s, phase: v.phase };
-}
-function micronucleusTransform(macroCx, macroCy, macroR, params) {
-  const r = macroR * (params.micronucleusSizeFrac ?? 0.32);
-  const off = macroR * (params.micronucleusOffsetFrac ?? 1.15);
-  const bearing = 0.7;
-  return {
-    cx: macroCx + Math.cos(bearing) * off,
-    cy: macroCy + Math.sin(bearing) * off,
-    r
-  };
 }
 function createCellRenderer(container, opts) {
   const params = { ...CELL_DEFAULTS, ...opts.params ?? {} };
