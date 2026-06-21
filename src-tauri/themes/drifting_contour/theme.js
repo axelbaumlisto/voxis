@@ -2094,7 +2094,7 @@ function seedEuglena(count, seed, frame, salt = 235478698) {
       flagellumPhase: seededUnit(seed, i, salt ^ 668265263),
       rollRate: 0.25 + seededUnit(seed, i, salt ^ 348696353) * 0.25,
       metabolyRate: 0.1 + seededUnit(seed, i, salt ^ 1002986003) * 0.06,
-      flagellumRate: 1.2 + seededUnit(seed, i, salt ^ 1966046297) * 1.3,
+      flagellumRate: 3 + seededUnit(seed, i, salt ^ 1966046297) * 2,
       spiralAmplitude: 0.12 + seededUnit(seed, i, salt ^ 1638598935) * 0.06,
       cvPhase: seededUnit(seed, i, salt ^ 1033993285),
       cvRate: 0.035 + seededUnit(seed, i, salt ^ 1508030371) * 0.015,
@@ -2248,9 +2248,9 @@ function drawEuglena(ctx, euglena, frame, view) {
     const length = fullLength * turnShrink;
     const turnWiden = 1 + 0.9 * (1 - turnShrink);
     const width = fullLength * 0.22 * turnWiden;
-    const flagellumLength = length * 1.1;
+    const flagellumLength = length * 0.95;
     const heading = finite2(cell.heading, 0);
-    const chCount = length < 7 ? 0 : length < 14 ? 3 : length < 40 ? clamp(Math.round(length / 5), 6, 10) : clamp(Math.round(length / 4.5), 12, 20);
+    const chCount = length < 7 ? 0 : length < 14 ? 5 : length < 40 ? clamp(Math.round(length / 4), 8, 12) : clamp(Math.round(length / 4.5), 12, 20);
     const stCount = length < 7 ? 0 : length < 14 ? 2 : length < 40 ? 4 : Math.min(7, Math.round(length / 9));
     const pmCount = length < 14 ? 0 : length < 40 ? 1 : 2;
     const includeNucleus = length >= 14;
@@ -2353,7 +2353,7 @@ function drawEuglena(ctx, euglena, frame, view) {
     }
     ctx.fillStyle = `hsla(8, 88%, 49%, ${alpha * (0.45 + 0.47 * pose.eyespotFront)})`;
     ctx.beginPath();
-    ctx.arc(pose.eyespot.x, pose.eyespot.y, Math.max(0.45, length * 0.03), 0, TAU3);
+    ctx.arc(pose.eyespot.x, pose.eyespot.y, Math.max(0.6, length * 0.03), 0, TAU3);
     ctx.fill();
     const fp = pose.flagellumPoints;
     if (fp.length >= 2) {

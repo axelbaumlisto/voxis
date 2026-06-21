@@ -404,7 +404,7 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
       flagellumPhase: seededUnit(seed, i, salt ^ 0x27d4eb2f),
       rollRate: 0.25 + seededUnit(seed, i, salt ^ 0x14c8af21) * 0.25,
       metabolyRate: 0.10 + seededUnit(seed, i, salt ^ 0x3bc85a13) * 0.06,
-      flagellumRate: 1.2 + seededUnit(seed, i, salt ^ 0x752f7c59) * 1.3,
+      flagellumRate: 3.0 + seededUnit(seed, i, salt ^ 0x752f7c59) * 2.0, // Hz; ~8-12 beats/roll (real 15-20), under 30Hz Nyquist
       spiralAmplitude: 0.12 + seededUnit(seed, i, salt ^ 0x61ab0917) * 0.06,
       cvPhase: seededUnit(seed, i, salt ^ 0x3da17c45),
       cvRate: 0.035 + seededUnit(seed, i, salt ^ 0x59e2b7a3) * 0.015,
@@ -586,11 +586,11 @@ export function drawEuglena(
     // pivoting toward the viewer, not a thin edge-on blade.
     const turnWiden = 1 + 0.9 * (1 - turnShrink);
     const width = fullLength * 0.22 * turnWiden;
-    const flagellumLength = length * 1.1;
+    const flagellumLength = length * 0.95; // ~1× body (real: ½–1×)
     const heading = finite(cell.heading, 0);
 
     // LOD ladder by display length L
-    const chCount = length < 7 ? 0 : length < 14 ? 3 : length < 40 ? clamp(Math.round(length / 5), 6, 10) : clamp(Math.round(length / 4.5), 12, 20);
+    const chCount = length < 7 ? 0 : length < 14 ? 5 : length < 40 ? clamp(Math.round(length / 4), 8, 12) : clamp(Math.round(length / 4.5), 12, 20); // real 6-16 discoid chloroplasts
     const stCount = length < 7 ? 0 : length < 14 ? 2 : length < 40 ? 4 : Math.min(7, Math.round(length / 9));
     const pmCount = length < 14 ? 0 : length < 40 ? 1 : 2;
     const includeNucleus = length >= 14;
@@ -713,7 +713,7 @@ export function drawEuglena(
     // stigma / eyespot (single warm accent; dims as it rolls to the far face)
     ctx.fillStyle = `hsla(8, 88%, 49%, ${alpha * (0.45 + 0.47 * pose.eyespotFront)})`;
     ctx.beginPath();
-    ctx.arc(pose.eyespot.x, pose.eyespot.y, Math.max(0.45, length * 0.03), 0, TAU);
+    ctx.arc(pose.eyespot.x, pose.eyespot.y, Math.max(0.6, length * 0.03), 0, TAU);
     ctx.fill();
 
     // flagellum (anterior whip): ONE fused continuous path, base→tip taper via
