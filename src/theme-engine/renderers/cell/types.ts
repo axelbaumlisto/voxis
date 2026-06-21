@@ -413,6 +413,37 @@ export interface CellParams {
   /** Commit 32e: body-normalised transverse anchor of the posterior contractile
    * vacuole. Default 0.62. */
   cvPosteriorS?: number;
+  /** Micro-aquarium companions master gate. Default false; Phase 0 API only,
+   * with no renderer wiring/drawing until the A/B-approved aquarium phase. */
+  enableAquarium?: boolean;
+  /** Deterministic seed for future aquarium companion placement. */
+  aquariumSeed?: number;
+  /** Global companion layer alpha multiplier. */
+  aquariumAlpha?: number;
+  /** Activity-to-motion boost for future companions. */
+  aquariumActivityBoost?: number;
+  /** Number of diatom companions. Default 0 = none. */
+  diatomCount?: number;
+  /** Diatom alpha multiplier. */
+  diatomAlpha?: number;
+  /** Diatom drift speed scalar. */
+  diatomDriftSpeed?: number;
+  /** Number of euglena companions. Default 0 = none. */
+  euglenaCount?: number;
+  /** Euglena idle swim speed scalar. */
+  euglenaSpeed?: number;
+  /** Euglena active swim speed scalar. */
+  euglenaSpeedActive?: number;
+  /** Euglena size scalar. */
+  euglenaScale?: number;
+  /** Number of vorticella companions. Default 0 = none. */
+  vorticellaCount?: number;
+  /** Vorticella idle contraction rate scalar. */
+  vorticellaContractRate?: number;
+  /** Vorticella active contraction rate scalar. */
+  vorticellaContractRateActive?: number;
+  /** Vorticella size scalar. */
+  vorticellaScale?: number;
   /** H4 (OPT, default off): advect ambient motes by the body's dipolar wake so a
    * swimming cell visibly drags the surrounding fluid. */
   enableFlowField?: boolean;

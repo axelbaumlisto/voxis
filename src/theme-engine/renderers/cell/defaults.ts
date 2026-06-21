@@ -90,6 +90,24 @@ export const CELL_DEFAULTS: CellParams = {
   enableAreaNorm: true,
   enableAffine: true,
   enableActivity: true,
+  // Micro-aquarium companions: OFF by default (Phase 0 API/defaults only; no
+  // renderer wiring/drawing yet). Counts stay 0 so the accepted Paramecium look
+  // remains unchanged until A/B approval.
+  enableAquarium: false,
+  aquariumSeed: 1,
+  aquariumAlpha: 0.35,
+  aquariumActivityBoost: 0.4,
+  diatomCount: 0,
+  diatomAlpha: 0.35,
+  diatomDriftSpeed: 1.0,
+  euglenaCount: 0,
+  euglenaSpeed: 1.0,
+  euglenaSpeedActive: 2.0,
+  euglenaScale: 1.0,
+  vorticellaCount: 0,
+  vorticellaContractRate: 1.0,
+  vorticellaContractRateActive: 2.0,
+  vorticellaScale: 1.0,
   // H4 ambient flow field: OFF by default (dark-launch). flowStrength folds the
   // body-size^2 doublet length scale so the render path passes raw swim speed.
   enableFlowField: false,
