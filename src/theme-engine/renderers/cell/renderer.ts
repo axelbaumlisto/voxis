@@ -292,23 +292,6 @@ export function createCellRenderer(
       // H1/M8: startle is a low-Re ESCAPE DART (heading kick + speed burst on the
       // wander), not a positional centre shove. The legacy (sdx,sdy) offset is
       // only used when the kick is disabled (back-compat).
-      if (params.enableAquarium) {
-        const aquariumFrame: AquariumFrame = {
-          t,
-          dt,
-          width,
-          height,
-          mode: s.mode,
-          activity,
-          audioLevel,
-          startle,
-          baseHue,
-        };
-        aquarium = aquarium ?? seedAquarium(aquariumFrame, params);
-        aquarium = updateAquarium(aquarium, aquariumFrame, params);
-        drawAquariumBackground(ctx, aquarium, aquariumFrame, params);
-      }
-
       const useKick = params.enableStartleKick !== false;
       let sdx = 0;
       let sdy = 0;
@@ -475,6 +458,24 @@ export function createCellRenderer(
         for (let i = 0; i < smoothedPoints.length; i++) {
           smoothedPoints[i] = [smoothedPoints[i][0] + hdx, smoothedPoints[i][1] + hdy];
         }
+      }
+
+      if (params.enableAquarium) {
+        const aquariumFrame: AquariumFrame = {
+          t,
+          dt,
+          width,
+          height,
+          mode: s.mode,
+          activity,
+          audioLevel,
+          startle,
+          baseHue,
+          hero: { x: cx, y: cy, radius: baseR },
+        };
+        aquarium = aquarium ?? seedAquarium(aquariumFrame, params);
+        aquarium = updateAquarium(aquarium, aquariumFrame, params);
+        drawAquariumBackground(ctx, aquarium, aquariumFrame, params);
       }
 
       const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);

@@ -10,6 +10,11 @@ export interface AquariumFrame {
   readonly audioLevel: number;
   readonly startle: number;
   readonly baseHue: number;
+  readonly hero?: {
+    readonly x: number;
+    readonly y: number;
+    readonly radius: number;
+  };
 }
 
 export interface AquariumParamsView {

@@ -1875,6 +1875,9 @@ function wrap2(value, max) {
   const wrapped = value % max;
   return wrapped < 0 ? wrapped + max : wrapped;
 }
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
 function clamp01(value) {
   return Math.max(0, Math.min(1, finite2(value, 0)));
 }
@@ -1985,12 +1988,25 @@ function updateEuglena(euglena, frame, view) {
     const ny = ux;
     const swim = Math.max(0, finite2(cell.swimSpeed, 0)) * rate;
     const lateralDelta = rollDelta === 0 ? 0 : finite2(cell.spiralAmplitude, 0) * (Math.cos(oldRoll * TAU3) - Math.cos((oldRoll + rollDelta) * TAU3)) / TAU3;
-    const nextX = finite2(cell.x, 0) + ux * swim * dt + nx * lateralDelta;
-    const nextY = finite2(cell.y, 0) + uy * swim * dt + ny * lateralDelta;
+    let nextX = finite2(cell.x, 0) + ux * swim * dt + nx * lateralDelta;
+    let nextY = finite2(cell.y, 0) + uy * swim * dt + ny * lateralDelta;
+    if (frame.hero) {
+      const hx = finite2(frame.hero.x, safeWidth / 2);
+      const hy = finite2(frame.hero.y, safeHeight / 2);
+      const exclusion = Math.max(0, finite2(frame.hero.radius, 0)) * 3.8;
+      const dx = nextX - hx;
+      const dy = nextY - hy;
+      const dist = Math.hypot(dx, dy);
+      if (dist < exclusion && exclusion > 0) {
+        const angle = dist > 0.000001 ? Math.atan2(dy, dx) : heading;
+        nextX = hx + Math.cos(angle) * exclusion;
+        nextY = hy + Math.sin(angle) * exclusion;
+      }
+    }
     return {
       ...cell,
-      x: wrap2(nextX, safeWidth),
-      y: wrap2(nextY, safeHeight),
+      x: clamp(wrap2(nextX, safeWidth), 0, safeWidth),
+      y: clamp(wrap2(nextY, safeHeight), 0, safeHeight),
       phase: heading,
       rollPhase: nextRoll,
       metabolyPhase: wrapUnit(cell.metabolyPhase + Math.max(0, finite2(cell.metabolyRate, 0)) * rate * dt),
@@ -2516,22 +2532,6 @@ function createCellRenderer(container, opts) {
       baseline = sanitizeFinite(baseline + (audioLevel - sanitizeFinite(baseline, 0)) * params.startleBaselineRate, 0);
       const prevStartle = startle;
       startle = sanitizeUnit(startleOffset(sanitizeUnit(startle), audioLevel, baseline, params.startleSensitivity, params.startleDecay));
-      if (params.enableAquarium) {
-        const aquariumFrame = {
-          t,
-          dt,
-          width,
-          height,
-          mode: s.mode,
-          activity,
-          audioLevel,
-          startle,
-          baseHue
-        };
-        aquarium = aquarium ?? seedAquarium(aquariumFrame, params);
-        aquarium = updateAquarium(aquarium, aquariumFrame, params);
-        drawAquariumBackground(ctx, aquarium, aquariumFrame, params);
-      }
       const useKick = params.enableStartleKick !== false;
       let sdx = 0;
       let sdy = 0;
@@ -2620,6 +2620,23 @@ function createCellRenderer(container, opts) {
         for (let i = 0;i < smoothedPoints.length; i++) {
           smoothedPoints[i] = [smoothedPoints[i][0] + hdx, smoothedPoints[i][1] + hdy];
         }
+      }
+      if (params.enableAquarium) {
+        const aquariumFrame = {
+          t,
+          dt,
+          width,
+          height,
+          mode: s.mode,
+          activity,
+          audioLevel,
+          startle,
+          baseHue,
+          hero: { x: cx, y: cy, radius: baseR }
+        };
+        aquarium = aquarium ?? seedAquarium(aquariumFrame, params);
+        aquarium = updateAquarium(aquarium, aquariumFrame, params);
+        drawAquariumBackground(ctx, aquarium, aquariumFrame, params);
       }
       const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
       const splinePoints = catmullRom(contourPoints, 4);
