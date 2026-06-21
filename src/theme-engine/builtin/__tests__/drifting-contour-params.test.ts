@@ -103,6 +103,10 @@ function expectUserParamsLast(body: string): void {
   expect(body.slice(userParams + "...userParams".length, paramsEnd)).not.toMatch(/\w+\s*:/);
 }
 
+function expectNoAquariumParams(block: string): void {
+  expect(block).not.toMatch(/\b(?:enableAquarium|aquarium\w*|diatom\w*|euglena\w*|vorticella\w*)\s*:/i);
+}
+
 describe("drifting_contour v1.0 critical params", () => {
   it("freezes approved source theme params", () => {
     expectCriticalParams(readSourceMountBlock());
@@ -110,6 +114,14 @@ describe("drifting_contour v1.0 critical params", () => {
 
   it("freezes approved built bundle mount params", () => {
     expectCriticalParams(readBundleMountBlock());
+  });
+
+  it("does not opt source theme into aquarium params before A/B approval", () => {
+    expectNoAquariumParams(readSourceMountBlock());
+  });
+
+  it("does not opt built bundle into aquarium params before A/B approval", () => {
+    expectNoAquariumParams(readBundleMountBlock());
   });
 
   it("keeps source theme params before user params so user overrides win", () => {

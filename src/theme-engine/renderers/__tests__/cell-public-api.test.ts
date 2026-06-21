@@ -38,6 +38,8 @@ const SUPPORTED_RUNTIME_EXPORT_KEYS = [
   "resolveCellPreset",
 ] as const;
 
+const AQUARIUM_COUNT_DEFAULTS = ["diatomCount", "euglenaCount", "vorticellaCount"] as const;
+
 const RUNTIME_EXPORT_KEYS = [
   "CELL_DEFAULTS",
   "TAU",
@@ -142,6 +144,18 @@ describe("cell public API", () => {
   it("keeps current public cilia defaults stable", () => {
     expect(cell.CELL_DEFAULTS.ciliaCount).toBe(18);
     expect(cell.CELL_DEFAULTS.ciliaLength).toBe(0.45);
+  });
+
+  it("keeps aquarium defaults gated off and invisible", () => {
+    expect(cell.CELL_DEFAULTS.enableAquarium ?? false).toBe(false);
+    for (const key of AQUARIUM_COUNT_DEFAULTS) {
+      expect(cell.CELL_DEFAULTS[key]).toBe(0);
+    }
+  });
+
+  it("does not export aquarium internals from runtime entrypoints", () => {
+    expect(Object.keys(cell).some((key) => key.toLowerCase().includes("aquarium"))).toBe(false);
+    expect(Object.keys(supportedCell).some((key) => key.toLowerCase().includes("aquarium"))).toBe(false);
   });
 
   it("keeps key public types exported", () => {
