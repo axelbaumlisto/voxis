@@ -651,6 +651,186 @@ function helicalOffset(spinPhi, bodyHeading, baseR, params) {
   ];
 }
 
+// src/theme-engine/renderers/cell/profile.ts
+function bodyHalfWidth(u, params) {
+  const c = params.bodyProfileTaper ?? 0.3;
+  const base = Math.sqrt(Math.max(0, 1 - u * u));
+  const type = params.bodyProfileType ?? "taperedEllipse";
+  switch (type) {
+    case "egg":
+      return base / Math.sqrt(1 - 2 * c * u + c * c);
+    case "piriform": {
+      const w = base * (1 + c * u) * Math.sqrt(Math.max(0, (1 + u) / 2));
+      return w < 0 ? 0 : w;
+    }
+    case "taperedEllipse":
+    default: {
+      const w = base * (1 + c * u);
+      return w < 0 ? 0 : w;
+    }
+  }
+}
+function bodyProfilePoint(t, baseR, params) {
+  const c = params.bodyProfileTaper ?? 0.3;
+  const aspect = params.bodyAspect ?? 3;
+  const L = baseR * Math.sqrt(aspect);
+  const W = baseR / Math.sqrt(aspect);
+  const ct = Math.cos(t);
+  const st = Math.sin(t);
+  const x = L * ct;
+  let y;
+  const type = params.bodyProfileType ?? "taperedEllipse";
+  switch (type) {
+    case "egg":
+      y = W * st / Math.sqrt(1 - 2 * c * ct + c * c);
+      break;
+    case "piriform":
+      y = W * st * (1 + c * ct) * Math.sqrt(Math.max(0, (1 + ct) / 2));
+      break;
+    case "taperedEllipse":
+    default:
+      y = W * st * (1 + c * ct);
+      break;
+  }
+  const bend = params.bodyVentralBend ?? 0;
+  if (bend !== 0) {
+    y += bend * W * Math.max(0, ct);
+  }
+  return [x, y];
+}
+function bodyProfileArea(baseR, params, samples = 96) {
+  const n = Math.max(3, Math.floor(samples));
+  let a = 0;
+  let [px, py] = bodyProfilePoint(0, baseR, params);
+  const [x0, y0] = [px, py];
+  for (let k = 1;k <= n; k++) {
+    const [cx, cy] = k === n ? [x0, y0] : bodyProfilePoint(TAU * k / n, baseR, params);
+    a += px * cy - cx * py;
+    px = cx;
+    py = cy;
+  }
+  return Math.abs(a) / 2;
+}
+function bodyProfileAreaScale(baseR, params, samples = 96) {
+  const area = bodyProfileArea(baseR, params, samples);
+  if (!(area > 0))
+    return 1;
+  return Math.sqrt(Math.PI * baseR * baseR / area);
+}
+function interpProfileRadius(angle, pts) {
+  const n = pts.length;
+  if (n === 0)
+    return 0;
+  let a = angle % TAU;
+  if (a < 0)
+    a += TAU;
+  const sorted = pts.map((p) => ({ ang: (p.ang % TAU + TAU) % TAU, rad: p.rad })).sort((u, v) => u.ang - v.ang);
+  for (let i = 0;i < n; i++) {
+    const lo2 = sorted[i];
+    const hi2 = sorted[(i + 1) % n];
+    let hiAng = hi2.ang;
+    if (i === n - 1)
+      hiAng += TAU;
+    if (a >= lo2.ang && a <= hiAng) {
+      const span2 = hiAng - lo2.ang;
+      const f2 = span2 > 0 ? (a - lo2.ang) / span2 : 0;
+      return lo2.rad + (hi2.rad - lo2.rad) * f2;
+    }
+  }
+  const lo = sorted[n - 1];
+  const hi = sorted[0];
+  const span = hi.ang + TAU - lo.ang;
+  const aShift = a + TAU;
+  const f = span > 0 ? (aShift - lo.ang) / span : 0;
+  return lo.rad + (hi.rad - lo.rad) * f;
+}
+function bodyProfileDeform(sampleCount, bodyHeading, baseR, params) {
+  const N = Math.max(3, Math.floor(sampleCount));
+  const pts = [];
+  for (let k = 0;k < N; k++) {
+    const t = k / N * TAU;
+    const [px, py] = bodyProfilePoint(t, baseR, params);
+    pts.push({ ang: Math.atan2(py, px), rad: Math.hypot(px, py) });
+  }
+  const scale = bodyProfileAreaScale(baseR, params, N);
+  const out = [];
+  for (let j = 0;j < N; j++) {
+    const phi = j / N * TAU;
+    const bodyAng = phi - bodyHeading;
+    const r = interpProfileRadius(bodyAng, pts) * scale;
+    out.push(r / baseR - 1);
+  }
+  return out;
+}
+function applyOralGroove(deform, bodyHeading, params) {
+  if (!params.enableOralGroove)
+    return deform;
+  const N = deform.length;
+  if (N < 3)
+    return deform;
+  const depth = params.oralGrooveDepth ?? 0.04;
+  const center = params.oralGrooveAngle ?? 1.2;
+  const halfW = params.oralGrooveWidth ?? 0.6;
+  for (let i = 0;i < N; i++) {
+    const canvasAng = i / N * TAU;
+    let bodyAng = canvasAng - bodyHeading;
+    bodyAng = (bodyAng % TAU + TAU + Math.PI) % TAU - Math.PI;
+    const dist = Math.abs(bodyAng - center);
+    if (dist < halfW) {
+      const t = dist / halfW;
+      const bell = 0.5 * (1 + Math.cos(Math.PI * t));
+      deform[i] -= depth * bell;
+    }
+  }
+  return deform;
+}
+function buildProfilePts(baseR, params, samples = 96) {
+  const N = Math.max(3, Math.floor(samples));
+  const pts = [];
+  for (let k = 0;k < N; k++) {
+    const t = k / N * TAU;
+    const [px, py] = bodyProfilePoint(t, baseR, params);
+    pts.push({ ang: Math.atan2(py, px), rad: Math.hypot(px, py) });
+  }
+  return pts;
+}
+function profileCDFInv(xi, params) {
+  const M = 128;
+  const us = [];
+  const cdf = [];
+  let acc = 0;
+  let prevW = bodyHalfWidth(-1, params);
+  us.push(-1);
+  cdf.push(0);
+  for (let k = 1;k <= M; k++) {
+    const u2 = -1 + 2 * k / M;
+    const w = bodyHalfWidth(u2, params);
+    acc += (prevW + w) * 0.5 * (2 / M);
+    prevW = w;
+    us.push(u2);
+    cdf.push(acc);
+  }
+  const Z = acc || 1;
+  const target = Math.max(0, Math.min(1, xi)) * Z;
+  let lo = 0;
+  let hi = cdf.length - 1;
+  while (lo < hi) {
+    const mid = lo + hi >> 1;
+    if (cdf[mid] < target)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  if (lo === 0)
+    return us[0];
+  const c0 = cdf[lo - 1];
+  const c1 = cdf[lo];
+  const span = c1 - c0;
+  const frac = span > 0 ? (target - c0) / span : 0;
+  const u = us[lo - 1] + frac * (us[lo] - us[lo - 1]);
+  return u < -1 ? -1 : u > 1 ? 1 : u;
+}
+
 // src/theme-engine/renderers/cell/persistence.ts
 function serializeCellState(s) {
   return JSON.stringify(s);
@@ -1237,148 +1417,6 @@ function bandLimitDeform(deform, params) {
   }
   return out;
 }
-function bodyHalfWidth(u, params) {
-  const c = params.bodyProfileTaper ?? 0.3;
-  const base = Math.sqrt(Math.max(0, 1 - u * u));
-  const type = params.bodyProfileType ?? "taperedEllipse";
-  switch (type) {
-    case "egg":
-      return base / Math.sqrt(1 - 2 * c * u + c * c);
-    case "piriform": {
-      const w = base * (1 + c * u) * Math.sqrt(Math.max(0, (1 + u) / 2));
-      return w < 0 ? 0 : w;
-    }
-    case "taperedEllipse":
-    default: {
-      const w = base * (1 + c * u);
-      return w < 0 ? 0 : w;
-    }
-  }
-}
-function bodyProfilePoint(t, baseR, params) {
-  const c = params.bodyProfileTaper ?? 0.3;
-  const aspect = params.bodyAspect ?? 3;
-  const L = baseR * Math.sqrt(aspect);
-  const W = baseR / Math.sqrt(aspect);
-  const ct = Math.cos(t);
-  const st = Math.sin(t);
-  const x = L * ct;
-  let y;
-  const type = params.bodyProfileType ?? "taperedEllipse";
-  switch (type) {
-    case "egg":
-      y = W * st / Math.sqrt(1 - 2 * c * ct + c * c);
-      break;
-    case "piriform":
-      y = W * st * (1 + c * ct) * Math.sqrt(Math.max(0, (1 + ct) / 2));
-      break;
-    case "taperedEllipse":
-    default:
-      y = W * st * (1 + c * ct);
-      break;
-  }
-  const bend = params.bodyVentralBend ?? 0;
-  if (bend !== 0) {
-    y += bend * W * Math.max(0, ct);
-  }
-  return [x, y];
-}
-function bodyProfileArea(baseR, params, samples = 96) {
-  const n = Math.max(3, Math.floor(samples));
-  let a = 0;
-  let [px, py] = bodyProfilePoint(0, baseR, params);
-  const [x0, y0] = [px, py];
-  for (let k = 1;k <= n; k++) {
-    const [cx, cy] = k === n ? [x0, y0] : bodyProfilePoint(TAU * k / n, baseR, params);
-    a += px * cy - cx * py;
-    px = cx;
-    py = cy;
-  }
-  return Math.abs(a) / 2;
-}
-function bodyProfileAreaScale(baseR, params, samples = 96) {
-  const area = bodyProfileArea(baseR, params, samples);
-  if (!(area > 0))
-    return 1;
-  return Math.sqrt(Math.PI * baseR * baseR / area);
-}
-function interpProfileRadius(angle, pts) {
-  const n = pts.length;
-  if (n === 0)
-    return 0;
-  let a = angle % TAU;
-  if (a < 0)
-    a += TAU;
-  const sorted = pts.map((p) => ({ ang: (p.ang % TAU + TAU) % TAU, rad: p.rad })).sort((u, v) => u.ang - v.ang);
-  for (let i = 0;i < n; i++) {
-    const lo2 = sorted[i];
-    const hi2 = sorted[(i + 1) % n];
-    let hiAng = hi2.ang;
-    if (i === n - 1)
-      hiAng += TAU;
-    if (a >= lo2.ang && a <= hiAng) {
-      const span2 = hiAng - lo2.ang;
-      const f2 = span2 > 0 ? (a - lo2.ang) / span2 : 0;
-      return lo2.rad + (hi2.rad - lo2.rad) * f2;
-    }
-  }
-  const lo = sorted[n - 1];
-  const hi = sorted[0];
-  const span = hi.ang + TAU - lo.ang;
-  const aShift = a + TAU;
-  const f = span > 0 ? (aShift - lo.ang) / span : 0;
-  return lo.rad + (hi.rad - lo.rad) * f;
-}
-function bodyProfileDeform(sampleCount, bodyHeading, baseR, params) {
-  const N = Math.max(3, Math.floor(sampleCount));
-  const pts = [];
-  for (let k = 0;k < N; k++) {
-    const t = k / N * TAU;
-    const [px, py] = bodyProfilePoint(t, baseR, params);
-    pts.push({ ang: Math.atan2(py, px), rad: Math.hypot(px, py) });
-  }
-  const scale = bodyProfileAreaScale(baseR, params, N);
-  const out = [];
-  for (let j = 0;j < N; j++) {
-    const phi = j / N * TAU;
-    const bodyAng = phi - bodyHeading;
-    const r = interpProfileRadius(bodyAng, pts) * scale;
-    out.push(r / baseR - 1);
-  }
-  return out;
-}
-function applyOralGroove(deform, bodyHeading, params) {
-  if (!params.enableOralGroove)
-    return deform;
-  const N = deform.length;
-  if (N < 3)
-    return deform;
-  const depth = params.oralGrooveDepth ?? 0.04;
-  const center = params.oralGrooveAngle ?? 1.2;
-  const halfW = params.oralGrooveWidth ?? 0.6;
-  for (let i = 0;i < N; i++) {
-    const canvasAng = i / N * TAU;
-    let bodyAng = canvasAng - bodyHeading;
-    bodyAng = (bodyAng % TAU + TAU + Math.PI) % TAU - Math.PI;
-    const dist = Math.abs(bodyAng - center);
-    if (dist < halfW) {
-      const t = dist / halfW;
-      const bell = 0.5 * (1 + Math.cos(Math.PI * t));
-      deform[i] -= depth * bell;
-    }
-  }
-  return deform;
-}
-function buildProfilePts(baseR, params, samples = 96) {
-  const N = Math.max(3, Math.floor(samples));
-  const pts = [];
-  for (let k = 0;k < N; k++) {
-    const t = k / N * TAU;
-    const [px, py] = bodyProfilePoint(t, baseR, params);
-    pts.push({ ang: Math.atan2(py, px), rad: Math.hypot(px, py) });
-  }
-  return pts;
-}
 function interiorPoint(u, s, ctx) {
   const { cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params } = ctx;
   const aspect = params.bodyAspect ?? 3;
@@ -1398,42 +1436,6 @@ function interiorPoint(u, s, ctx) {
   const px0 = cx + Math.cos(thetaCanvas) * f * wallR;
   const py0 = cy + Math.sin(thetaCanvas) * f * wallR;
   return affineSqueezePoints([[px0, py0]], squeezeK, squeezePhi, cx, cy, params)[0];
-}
-function profileCDFInv(xi, params) {
-  const M = 128;
-  const us = [];
-  const cdf = [];
-  let acc = 0;
-  let prevW = bodyHalfWidth(-1, params);
-  us.push(-1);
-  cdf.push(0);
-  for (let k = 1;k <= M; k++) {
-    const u2 = -1 + 2 * k / M;
-    const w = bodyHalfWidth(u2, params);
-    acc += (prevW + w) * 0.5 * (2 / M);
-    prevW = w;
-    us.push(u2);
-    cdf.push(acc);
-  }
-  const Z = acc || 1;
-  const target = Math.max(0, Math.min(1, xi)) * Z;
-  let lo = 0;
-  let hi = cdf.length - 1;
-  while (lo < hi) {
-    const mid = lo + hi >> 1;
-    if (cdf[mid] < target)
-      lo = mid + 1;
-    else
-      hi = mid;
-  }
-  if (lo === 0)
-    return us[0];
-  const c0 = cdf[lo - 1];
-  const c1 = cdf[lo];
-  const span = c1 - c0;
-  const frac = span > 0 ? (target - c0) / span : 0;
-  const u = us[lo - 1] + frac * (us[lo] - us[lo - 1]);
-  return u < -1 ? -1 : u > 1 ? 1 : u;
 }
 function seedInteriorGranules(count, seedBase, params) {
   const n = Math.max(0, Math.floor(count));
