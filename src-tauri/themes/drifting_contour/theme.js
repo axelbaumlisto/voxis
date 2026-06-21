@@ -1623,6 +1623,22 @@ function iridescentHue(angle, t, audioLevel, baseHue, params) {
   hue = (hue % 360 + 360) % 360;
   return hue;
 }
+function drawCVCanals(ctx, vx, vy, r, cvH, params) {
+  if (!params.enableCVCanals || r <= 1)
+    return;
+  const canalCount = 6;
+  const canalLen = r * (params.canalLenMul ?? 2);
+  const canalAlpha = params.nucleusAlpha * 0.45 * (params.canalAlphaMul ?? 0.3);
+  ctx.strokeStyle = hsla(cvH, 0.3, 0.72, canalAlpha);
+  ctx.lineWidth = params.canalLineWidth ?? 0.5;
+  for (let ci = 0;ci < canalCount; ci++) {
+    const angle = ci / canalCount * TAU;
+    ctx.beginPath();
+    ctx.moveTo(vx, vy);
+    ctx.lineTo(vx + Math.cos(angle) * canalLen, vy + Math.sin(angle) * canalLen);
+    ctx.stroke();
+  }
+}
 function createCellRenderer(container, opts) {
   const params = { ...CELL_DEFAULTS, ...opts.params ?? {} };
   const baseHue = opts.baseHue ?? 34;
@@ -1916,26 +1932,34 @@ function createCellRenderer(container, opts) {
         }
         ctx.save();
         clipToCellPath(ctx, splinePoints);
+        const frameDeform = deform;
         let minMembraneR = Infinity;
-        for (const dv of deform)
+        for (const dv of frameDeform)
           minMembraneR = Math.min(minMembraneR, baseR * (1 + dv));
+        let interiorCtx = null;
+        const getInteriorCtx = () => {
+          if (interiorCtx)
+            return interiorCtx;
+          const next = {
+            cx,
+            cy,
+            baseR,
+            deform: frameDeform,
+            squeezeK,
+            squeezePhi,
+            bodyHeading: interiorHeading,
+            params,
+            profilePts: buildProfilePts(baseR, params)
+          };
+          interiorCtx = next;
+          return next;
+        };
         const nucleus = nucleusTransform(t, audioLevel, baseR, params, minMembraneR);
         if (nucleus.r >= 2.5) {
           let nx, ny;
           let macroIctx = null;
           if (params.enableInteriorField) {
-            const profilePts = buildProfilePts(baseR, params);
-            macroIctx = {
-              cx,
-              cy,
-              baseR,
-              deform,
-              squeezeK,
-              squeezePhi,
-              bodyHeading: interiorHeading,
-              params,
-              profilePts
-            };
+            macroIctx = getInteriorCtx();
             const uM = params.macronucleusU ?? -0.05;
             const sM = params.macronucleusS ?? 0.1;
             [nx, ny] = interiorPoint(uM, sM, macroIctx);
@@ -2030,18 +2054,7 @@ function createCellRenderer(container, opts) {
         if (params.enableVacuoles) {
           const pair = contractileVacuolePair(t, baseR, squeezePhi, params);
           if (params.enableInteriorField) {
-            const profilePts = buildProfilePts(baseR, params);
-            const ictx = {
-              cx,
-              cy,
-              baseR,
-              deform,
-              squeezeK,
-              squeezePhi,
-              bodyHeading: interiorHeading,
-              params,
-              profilePts
-            };
+            const ictx = getInteriorCtx();
             const anchors = [
               { u: params.cvAnteriorU ?? 0.55, s: params.cvAnteriorS ?? 0.62 },
               { u: params.cvPosteriorU ?? -0.55, s: params.cvPosteriorS ?? 0.62 }
@@ -2055,20 +2068,7 @@ function createCellRenderer(container, opts) {
               ctx.beginPath();
               ctx.arc(vx, vy, e.r, 0, TAU);
               ctx.fill();
-              if (params.enableCVCanals && e.r > 1) {
-                const canalCount = 6;
-                const canalLen = e.r * (params.canalLenMul ?? 2);
-                const canalAlpha = params.nucleusAlpha * 0.45 * (params.canalAlphaMul ?? 0.3);
-                ctx.strokeStyle = hsla(cvH, 0.3, 0.72, canalAlpha);
-                ctx.lineWidth = params.canalLineWidth ?? 0.5;
-                for (let ci = 0;ci < canalCount; ci++) {
-                  const angle = ci / canalCount * TAU;
-                  ctx.beginPath();
-                  ctx.moveTo(vx, vy);
-                  ctx.lineTo(vx + Math.cos(angle) * canalLen, vy + Math.sin(angle) * canalLen);
-                  ctx.stroke();
-                }
-              }
+              drawCVCanals(ctx, vx, vy, e.r, cvH, params);
             }
           } else {
             for (const e of pair) {
@@ -2082,20 +2082,7 @@ function createCellRenderer(container, opts) {
               ctx.beginPath();
               ctx.arc(vx, vy, e.r, 0, TAU);
               ctx.fill();
-              if (params.enableCVCanals && e.r > 1) {
-                const canalCount = 6;
-                const canalLen = e.r * (params.canalLenMul ?? 2);
-                const canalAlpha = params.nucleusAlpha * 0.45 * (params.canalAlphaMul ?? 0.3);
-                ctx.strokeStyle = hsla(cvH, 0.3, 0.72, canalAlpha);
-                ctx.lineWidth = params.canalLineWidth ?? 0.5;
-                for (let ci = 0;ci < canalCount; ci++) {
-                  const angle = ci / canalCount * TAU;
-                  ctx.beginPath();
-                  ctx.moveTo(vx, vy);
-                  ctx.lineTo(vx + Math.cos(angle) * canalLen, vy + Math.sin(angle) * canalLen);
-                  ctx.stroke();
-                }
-              }
+              drawCVCanals(ctx, vx, vy, e.r, cvH, params);
             }
           }
         }
@@ -2106,18 +2093,7 @@ function createCellRenderer(container, opts) {
             if (!interiorGranules) {
               interiorGranules = seedInteriorGranules(params.cyclosisGranuleCount ?? 0, 0, params);
             }
-            const profilePts = buildProfilePts(baseR, params);
-            const ictx = {
-              cx,
-              cy,
-              baseR,
-              deform,
-              squeezeK,
-              squeezePhi,
-              bodyHeading: interiorHeading,
-              params,
-              profilePts
-            };
+            const ictx = getInteriorCtx();
             for (let i = 0;i < interiorGranules.length; i++) {
               const g = interiorGranules[i];
               const loop = cyclosisLoopPointAtPhase(g, cyclosisPhase);
@@ -2148,18 +2124,7 @@ function createCellRenderer(container, opts) {
             if (!interiorFoodVacuoles) {
               interiorFoodVacuoles = seedInteriorFoodVacuoles(params.foodVacuoleCount ?? 0, params);
             }
-            const profilePts = buildProfilePts(baseR, params);
-            const ictx = {
-              cx,
-              cy,
-              baseR,
-              deform,
-              squeezeK,
-              squeezePhi,
-              bodyHeading: interiorHeading,
-              params,
-              profilePts
-            };
+            const ictx = getInteriorCtx();
             for (let i = 0;i < interiorFoodVacuoles.length; i++) {
               const fv = interiorFoodVacuoles[i];
               const loopRaw = cyclosisLoopPointAtPhase(fv, cyclosisPhase);

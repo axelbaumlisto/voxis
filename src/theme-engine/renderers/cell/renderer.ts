@@ -78,12 +78,29 @@ export function iridescentHue(
   return hue;
 }
 
-
-// ---------------------------------------------------------------------------
-// Canvas helper
-// ---------------------------------------------------------------------------
-
-
+function drawCVCanals(
+  ctx: CanvasRenderingContext2D,
+  vx: number,
+  vy: number,
+  r: number,
+  cvH: number,
+  params: CellParams,
+): void {
+  // CV radial canals — star shape (biologist: 6-7 canals, visible during diastole)
+  if (!params.enableCVCanals || r <= 1.0) return;
+  const canalCount = 6;
+  const canalLen = r * (params.canalLenMul ?? 2.0);
+  const canalAlpha = params.nucleusAlpha * 0.45 * (params.canalAlphaMul ?? 0.3);
+  ctx.strokeStyle = hsla(cvH, 0.30, 0.72, canalAlpha);
+  ctx.lineWidth = params.canalLineWidth ?? 0.5;
+  for (let ci = 0; ci < canalCount; ci++) {
+    const angle = (ci / canalCount) * TAU;
+    ctx.beginPath();
+    ctx.moveTo(vx, vy);
+    ctx.lineTo(vx + Math.cos(angle) * canalLen, vy + Math.sin(angle) * canalLen);
+    ctx.stroke();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Renderer factory
@@ -647,8 +664,26 @@ export function createCellRenderer(
         // --- Nucleus: denser organelle drifting/pulsing inside the cell ---
         // F9: thread the LIVE minimum membrane radius so a deep inward pinch
         // cannot let the nucleus poke through the wall.
+        const frameDeform = deform;
         let minMembraneR = Infinity;
-        for (const dv of deform) minMembraneR = Math.min(minMembraneR, baseR * (1 + dv));
+        for (const dv of frameDeform) minMembraneR = Math.min(minMembraneR, baseR * (1 + dv));
+        let interiorCtx: InteriorCtx | null = null;
+        const getInteriorCtx = (): InteriorCtx => {
+          if (interiorCtx) return interiorCtx;
+          const next: InteriorCtx = {
+            cx,
+            cy,
+            baseR,
+            deform: frameDeform,
+            squeezeK,
+            squeezePhi,
+            bodyHeading: interiorHeading,
+            params,
+            profilePts: buildProfilePts(baseR, params),
+          };
+          interiorCtx = next;
+          return next;
+        };
         const nucleus = nucleusTransform(t, audioLevel, baseR, params, minMembraneR);
         if (nucleus.r >= 2.5) {
           // Commit 32e: the macronucleus is a cortically-anchored organelle. On
@@ -660,10 +695,7 @@ export function createCellRenderer(
           let nx: number, ny: number;
           let macroIctx: InteriorCtx | null = null;
           if (params.enableInteriorField) {
-            const profilePts = buildProfilePts(baseR, params);
-            macroIctx = {
-              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading: interiorHeading, params, profilePts,
-            };
+            macroIctx = getInteriorCtx();
             const uM = params.macronucleusU ?? -0.05;
             const sM = params.macronucleusS ?? 0.1;
             [nx, ny] = interiorPoint(uM, sM, macroIctx);
@@ -815,10 +847,7 @@ export function createCellRenderer(
             // radii still come from contractileVacuolePair (pair[0]=anterior,
             // pair[1]=posterior); pair[i].bearing is unused on this path.
             // Containment is automatic (|s| <= 1).
-            const profilePts = buildProfilePts(baseR, params);
-            const ictx: InteriorCtx = {
-              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading: interiorHeading, params, profilePts,
-            };
+            const ictx = getInteriorCtx();
             const anchors = [
               { u: params.cvAnteriorU ?? 0.55, s: params.cvAnteriorS ?? 0.62 },
               { u: params.cvPosteriorU ?? -0.55, s: params.cvPosteriorS ?? 0.62 },
@@ -831,21 +860,7 @@ export function createCellRenderer(
               ctx.beginPath();
               ctx.arc(vx, vy, e.r, 0, TAU);
               ctx.fill();
-              // CV radial canals — star shape (biologist: 6-7 canals, visible during diastole)
-              if (params.enableCVCanals && e.r > 1.0) {
-                const canalCount = 6;
-                const canalLen = e.r * (params.canalLenMul ?? 2.0);
-                const canalAlpha = params.nucleusAlpha * 0.45 * (params.canalAlphaMul ?? 0.3);
-                ctx.strokeStyle = hsla(cvH, 0.30, 0.72, canalAlpha);
-                ctx.lineWidth = params.canalLineWidth ?? 0.5;
-                for (let ci = 0; ci < canalCount; ci++) {
-                  const angle = (ci / canalCount) * TAU;
-                  ctx.beginPath();
-                  ctx.moveTo(vx, vy);
-                  ctx.lineTo(vx + Math.cos(angle) * canalLen, vy + Math.sin(angle) * canalLen);
-                  ctx.stroke();
-                }
-              }
+              drawCVCanals(ctx, vx, vy, e.r, cvH, params);
             }
           } else {
             // LEGACY path — VERBATIM (do not tidy).
@@ -863,21 +878,7 @@ export function createCellRenderer(
               ctx.beginPath();
               ctx.arc(vx, vy, e.r, 0, TAU);
               ctx.fill();
-              // CV radial canals — star shape (biologist: 6-7 canals, visible during diastole)
-              if (params.enableCVCanals && e.r > 1.0) {
-                const canalCount = 6;
-                const canalLen = e.r * (params.canalLenMul ?? 2.0);
-                const canalAlpha = params.nucleusAlpha * 0.45 * (params.canalAlphaMul ?? 0.3);
-                ctx.strokeStyle = hsla(cvH, 0.30, 0.72, canalAlpha);
-                ctx.lineWidth = params.canalLineWidth ?? 0.5;
-                for (let ci = 0; ci < canalCount; ci++) {
-                  const angle = (ci / canalCount) * TAU;
-                  ctx.beginPath();
-                  ctx.moveTo(vx, vy);
-                  ctx.lineTo(vx + Math.cos(angle) * canalLen, vy + Math.sin(angle) * canalLen);
-                  ctx.stroke();
-                }
-              }
+              drawCVCanals(ctx, vx, vy, e.r, cvH, params);
             }
           }
         }
@@ -902,10 +903,7 @@ export function createCellRenderer(
             if (!interiorGranules) {
               interiorGranules = seedInteriorGranules(params.cyclosisGranuleCount ?? 0, 0, params);
             }
-            const profilePts = buildProfilePts(baseR, params);
-            const ictx: InteriorCtx = {
-              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading: interiorHeading, params, profilePts,
-            };
+            const ictx = getInteriorCtx();
             for (let i = 0; i < interiorGranules.length; i++) {
               const g = interiorGranules[i];
               const loop = cyclosisLoopPointAtPhase(g, cyclosisPhase);
@@ -957,10 +955,7 @@ export function createCellRenderer(
             if (!interiorFoodVacuoles) {
               interiorFoodVacuoles = seedInteriorFoodVacuoles(params.foodVacuoleCount ?? 0, params);
             }
-            const profilePts = buildProfilePts(baseR, params);
-            const ictx: InteriorCtx = {
-              cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading: interiorHeading, params, profilePts,
-            };
+            const ictx = getInteriorCtx();
             for (let i = 0; i < interiorFoodVacuoles.length; i++) {
               const fv = interiorFoodVacuoles[i];
               const loopRaw = cyclosisLoopPointAtPhase(fv, cyclosisPhase); // same phase as granules
