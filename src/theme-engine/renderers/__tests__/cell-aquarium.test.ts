@@ -243,6 +243,52 @@ describe("aquarium biology geometry contracts", () => {
     expect(pose.flagellumEnd.x - pose.anterior.x).toBeLessThan(4 * 1.2);
   });
 
+  it("keeps every interior organelle AND the eyespot inside the body outline across all roll/metaboly phases", () => {
+    function inside(poly: readonly { x: number; y: number }[], px: number, py: number): boolean {
+      let hit = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+        if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) hit = !hit;
+      }
+      return hit;
+    }
+    // small slack for the polyline chord vs the smooth boundary it approximates
+    const SLACK = 0.6;
+    function insideSlack(poly: readonly { x: number; y: number }[], cx: number, cy: number, p: { x: number; y: number }): boolean {
+      if (inside(poly, p.x, p.y)) return true;
+      const dx = cx - p.x, dy = cy - p.y, d = Math.hypot(dx, dy) || 1;
+      return inside(poly, p.x + (dx / d) * SLACK, p.y + (dy / d) * SLACK);
+    }
+    for (const roll of [0, 0.12, 0.25, 0.37, 0.5, 0.62, 0.75, 0.88]) {
+      for (const meta of [0, 0.33, 0.66]) {
+        const pose = euglenaPose(roll, meta, {
+          centerX: 90, centerY: 18, length: 70, baseWidth: 70 * 0.22, heading: 0,
+          metabolyEnvelope: 1, organelleSeed: 12345,
+          chloroplastCount: 16, striaeCount: 6, paramylonCount: 2,
+          includeNucleus: true, includeReservoir: true, includeCV: true, cvPhase: roll,
+        });
+        const poly = pose.outline;
+        const cx = pose.center.x, cy = pose.center.y;
+        const ux = pose.ux, uy = pose.uy, nx = -uy, ny = ux;
+        const ellipses = [...pose.chloroplasts, ...pose.paramylon, ...(pose.nucleus ? [pose.nucleus] : [])];
+        for (const e of ellipses) {
+          for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+            const px = e.x + ux * e.rx * a + nx * e.ry * b;
+            const py = e.y + uy * e.rx * a + ny * e.ry * b;
+            expect(insideSlack(poly, cx, cy, { x: px, y: py })).toBe(true);
+          }
+        }
+        for (const c of [pose.reservoir, pose.contractileVacuole]) {
+          if (!c) continue;
+          for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+            expect(insideSlack(poly, cx, cy, { x: c.x + nx * c.r * b + ux * c.r * a, y: c.y + ny * c.r * b + uy * c.r * a })).toBe(true);
+          }
+        }
+        expect(insideSlack(poly, cx, cy, pose.eyespot)).toBe(true);
+      }
+    }
+  });
+
   it("euglenaPose roll changes apparent width and stripe phase without moving the anterior anchor", () => {
     const a = euglenaPose(0, 0.2, { centerX: 2, centerY: 3, length: 8, baseWidth: 2, heading: 0 });
     const b = euglenaPose(0.25, 0.2, { centerX: 2, centerY: 3, length: 8, baseWidth: 2, heading: 0 });
