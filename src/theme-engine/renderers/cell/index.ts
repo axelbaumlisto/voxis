@@ -42,4 +42,6 @@ export {
 } from "./flow";
 export type { CellParams, CellOptions } from "./types";
 export { CELL_DEFAULTS } from "./defaults";
+export type { CellPreset } from "./presets";
+export { resolveCellPreset } from "./presets";
 export { createCellRenderer, ciliaBeatHzEff, iridescentHue } from "./renderer";

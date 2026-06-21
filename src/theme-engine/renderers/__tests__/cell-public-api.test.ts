@@ -4,6 +4,7 @@ import type {
   CellOptions,
   CellParams,
   CellPersistState,
+  CellPreset,
   CiliaMotion,
   InteriorCtx,
   WanderState,
@@ -15,6 +16,7 @@ type PublicTypeManifest = {
   ciliaMotion: CiliaMotion;
   interiorCtx: InteriorCtx;
   persistState: CellPersistState;
+  preset: CellPreset;
   wanderState: WanderState;
 };
 
@@ -86,6 +88,7 @@ const RUNTIME_EXPORT_KEYS = [
   "prolateAspect",
   "pseudopodOffset",
   "resolveBaseRadius",
+  "resolveCellPreset",
   "restoreSeed",
   "rotationalBrownianStep",
   "sampleBinLevel",
@@ -130,6 +133,7 @@ describe("cell public API", () => {
       ciliaMotion: CiliaMotion;
       interiorCtx: InteriorCtx;
       persistState: CellPersistState;
+      preset: CellPreset;
       wanderState: WanderState;
     }>();
   });
