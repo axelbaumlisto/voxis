@@ -485,7 +485,7 @@ function advanceCiliaBeatCycles(prevCycles, dt, hz) {
   return (next % 1 + 1) % 1;
 }
 
-// src/theme-engine/renderers/cell.ts
+// src/theme-engine/renderers/cell/defaults.ts
 var CELL_DEFAULTS = {
   noiseScale: 0.9,
   octaves: 4,
@@ -626,6 +626,8 @@ var CELL_DEFAULTS = {
   cvPosteriorU: -0.55,
   cvPosteriorS: 0.62
 };
+
+// src/theme-engine/renderers/cell.ts
 function swimSpeed(activity, width, height, params) {
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
   const frac = params.swimSpeedMaxFrac ?? 0.06;
