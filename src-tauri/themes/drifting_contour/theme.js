@@ -1609,20 +1609,6 @@ function clipToCellPath(ctx, splinePoints) {
   if (typeof ctx.clip === "function")
     ctx.clip();
 }
-
-// src/theme-engine/renderers/cell/renderer.ts
-function ciliaBeatHzEff(activity, params) {
-  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
-  const f0 = params.ciliaBeatHz ?? 0.9;
-  const f1 = params.ciliaBeatHzActive ?? 1.6;
-  return f0 + (f1 - f0) * a;
-}
-function iridescentHue(angle, t, audioLevel, baseHue, params) {
-  const norm = (angle % TAU + TAU) % TAU / TAU;
-  let hue = baseHue + norm * params.hueSpread + t * params.shimmerSpeed + audioLevel * params.hueBoost;
-  hue = (hue % 360 + 360) % 360;
-  return hue;
-}
 function drawCVCanals(ctx, vx, vy, r, cvH, params) {
   if (!params.enableCVCanals || r <= 1)
     return;
@@ -1638,6 +1624,20 @@ function drawCVCanals(ctx, vx, vy, r, cvH, params) {
     ctx.lineTo(vx + Math.cos(angle) * canalLen, vy + Math.sin(angle) * canalLen);
     ctx.stroke();
   }
+}
+
+// src/theme-engine/renderers/cell/renderer.ts
+function ciliaBeatHzEff(activity, params) {
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  const f0 = params.ciliaBeatHz ?? 0.9;
+  const f1 = params.ciliaBeatHzActive ?? 1.6;
+  return f0 + (f1 - f0) * a;
+}
+function iridescentHue(angle, t, audioLevel, baseHue, params) {
+  const norm = (angle % TAU + TAU) % TAU / TAU;
+  let hue = baseHue + norm * params.hueSpread + t * params.shimmerSpeed + audioLevel * params.hueBoost;
+  hue = (hue % 360 + 360) % 360;
+  return hue;
 }
 function createCellRenderer(container, opts) {
   const params = { ...CELL_DEFAULTS, ...opts.params ?? {} };

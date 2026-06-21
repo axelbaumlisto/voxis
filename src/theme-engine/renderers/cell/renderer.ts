@@ -36,7 +36,7 @@ import {
   advectFoodVacuole, micronucleusTransform,
 } from "./organelles";
 import { advectMote, seedMotes, seedGranules, advectGranule } from "./flow";
-import { pathFromPoints, clipToCellPath } from "./draw";
+import { pathFromPoints, clipToCellPath, drawCVCanals } from "./draw";
 
 // ---------------------------------------------------------------------------
 // Cell geometry functions
@@ -76,30 +76,6 @@ export function iridescentHue(
   // Wrap to [0, 360)
   hue = ((hue % 360) + 360) % 360;
   return hue;
-}
-
-function drawCVCanals(
-  ctx: CanvasRenderingContext2D,
-  vx: number,
-  vy: number,
-  r: number,
-  cvH: number,
-  params: CellParams,
-): void {
-  // CV radial canals — star shape (biologist: 6-7 canals, visible during diastole)
-  if (!params.enableCVCanals || r <= 1.0) return;
-  const canalCount = 6;
-  const canalLen = r * (params.canalLenMul ?? 2.0);
-  const canalAlpha = params.nucleusAlpha * 0.45 * (params.canalAlphaMul ?? 0.3);
-  ctx.strokeStyle = hsla(cvH, 0.30, 0.72, canalAlpha);
-  ctx.lineWidth = params.canalLineWidth ?? 0.5;
-  for (let ci = 0; ci < canalCount; ci++) {
-    const angle = (ci / canalCount) * TAU;
-    ctx.beginPath();
-    ctx.moveTo(vx, vy);
-    ctx.lineTo(vx + Math.cos(angle) * canalLen, vy + Math.sin(angle) * canalLen);
-    ctx.stroke();
-  }
 }
 
 // ---------------------------------------------------------------------------
