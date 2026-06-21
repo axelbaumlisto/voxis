@@ -26,6 +26,8 @@ import {
 import type { CiliaMotion } from "./cilia";
 import type { CellParams, CellOptions } from "./types";
 import { CELL_DEFAULTS } from "./defaults";
+import type { AquariumLayerState, AquariumFrame } from "./aquarium/types";
+import { seedAquarium, updateAquarium, drawAquariumBackground } from "./aquarium/layer";
 import {
   interiorPoint, seedInteriorGranules, cyclosisLoopPointAtPhase,
 } from "./interior";
@@ -124,6 +126,7 @@ export function createCellRenderer(
   let triPrevStartle = 0;   // v3.9B: previous startle for onset detection (rising edge)
   let baseline = 0; // slow-tracking audio baseline for startle edge detection
   let drift01 = 0; // smoothed drift activation (0=centered, 1=full drift)
+  let aquarium: AquariumLayerState | null = null;
 
   // Reynolds-style integrated wander state (replaces position=noise(t), which
   // oscillated about the centre and kept "returning"). Lazily initialised at
@@ -289,6 +292,23 @@ export function createCellRenderer(
       // H1/M8: startle is a low-Re ESCAPE DART (heading kick + speed burst on the
       // wander), not a positional centre shove. The legacy (sdx,sdy) offset is
       // only used when the kick is disabled (back-compat).
+      if (params.enableAquarium) {
+        const aquariumFrame: AquariumFrame = {
+          t,
+          dt,
+          width,
+          height,
+          mode: s.mode,
+          activity,
+          audioLevel,
+          startle,
+          baseHue,
+        };
+        aquarium = aquarium ?? seedAquarium(aquariumFrame, params);
+        aquarium = updateAquarium(aquarium, aquariumFrame, params);
+        drawAquariumBackground(ctx, aquarium, aquariumFrame, params);
+      }
+
       const useKick = params.enableStartleKick !== false;
       let sdx = 0;
       let sdy = 0;

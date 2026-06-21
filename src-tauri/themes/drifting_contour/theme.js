@@ -1610,6 +1610,88 @@ var CELL_DEFAULTS = {
   cvPosteriorU: -0.55,
   cvPosteriorS: 0.62
 };
+// src/theme-engine/renderers/cell/aquarium/params.ts
+function finiteOr(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+function nonNegativeInt(value, fallback) {
+  return Math.max(0, Math.floor(finiteOr(value, fallback)));
+}
+function nonNegative(value, fallback) {
+  return Math.max(0, finiteOr(value, fallback));
+}
+function aquariumParamsView(params) {
+  return {
+    enabled: params.enableAquarium === true,
+    seed: Math.trunc(finiteOr(params.aquariumSeed, 1)),
+    alpha: nonNegative(params.aquariumAlpha, 0.35),
+    activityBoost: nonNegative(params.aquariumActivityBoost, 0.4),
+    diatoms: {
+      count: nonNegativeInt(params.diatomCount, 0),
+      alpha: nonNegative(params.diatomAlpha, 0.35),
+      driftSpeed: nonNegative(params.diatomDriftSpeed, 1)
+    },
+    euglena: {
+      count: nonNegativeInt(params.euglenaCount, 0),
+      speed: nonNegative(params.euglenaSpeed, 1),
+      speedActive: nonNegative(params.euglenaSpeedActive, 2),
+      scale: nonNegative(params.euglenaScale, 1)
+    },
+    vorticella: {
+      count: nonNegativeInt(params.vorticellaCount, 0),
+      contractRate: nonNegative(params.vorticellaContractRate, 1),
+      contractRateActive: nonNegative(params.vorticellaContractRateActive, 2),
+      scale: nonNegative(params.vorticellaScale, 1)
+    }
+  };
+}
+
+// src/theme-engine/renderers/cell/aquarium/seeds.ts
+function mix32(n) {
+  let x = n | 0;
+  x ^= x >>> 16;
+  x = Math.imul(x, 2146121005);
+  x ^= x >>> 15;
+  x = Math.imul(x, 2221713035);
+  x ^= x >>> 16;
+  return x >>> 0;
+}
+function unit(seed, index, salt) {
+  return mix32(seed ^ Math.imul(index + 1, 2654435761) ^ salt) / 4294967296;
+}
+function seedPoints(count, seed, frame, salt) {
+  if (count <= 0)
+    return [];
+  const points = [];
+  const safeWidth = Math.max(0, frame.width);
+  const safeHeight = Math.max(0, frame.height);
+  for (let i = 0;i < count; i++) {
+    points.push({
+      x: unit(seed, i, salt) * safeWidth,
+      y: unit(seed, i, salt ^ 1374496523) * safeHeight,
+      phase: unit(seed, i, salt ^ 1757159915) * Math.PI * 2,
+      size: 0.5 + unit(seed, i, salt ^ 48610963)
+    });
+  }
+  return points;
+}
+
+// src/theme-engine/renderers/cell/aquarium/layer.ts
+function seedAquarium(frame, params) {
+  const view = aquariumParamsView(params);
+  const seed = view.seed | 0;
+  return {
+    seed,
+    diatoms: seedPoints(view.diatoms.count, seed, frame, 219836621),
+    euglena: seedPoints(view.euglena.count, seed, frame, 235478698),
+    vorticella: seedPoints(view.vorticella.count, seed, frame, 117600714)
+  };
+}
+function updateAquarium(aquarium, _frame, _params) {
+  return aquarium;
+}
+function drawAquariumBackground(_ctx, _aquarium, _frame, _params) {}
+
 // src/theme-engine/renderers/cell/draw.ts
 function pathFromPoints(ctx, points) {
   ctx.beginPath();
@@ -1701,6 +1783,7 @@ function createCellRenderer(container, opts) {
   let triPrevStartle = 0;
   let baseline = 0;
   let drift01 = 0;
+  let aquarium = null;
   let wander = null;
   let bodyHeading = 0;
   let interiorHeading = 0;
@@ -1773,6 +1856,22 @@ function createCellRenderer(container, opts) {
       baseline = sanitizeFinite(baseline + (audioLevel - sanitizeFinite(baseline, 0)) * params.startleBaselineRate, 0);
       const prevStartle = startle;
       startle = sanitizeUnit(startleOffset(sanitizeUnit(startle), audioLevel, baseline, params.startleSensitivity, params.startleDecay));
+      if (params.enableAquarium) {
+        const aquariumFrame = {
+          t,
+          dt,
+          width,
+          height,
+          mode: s.mode,
+          activity,
+          audioLevel,
+          startle,
+          baseHue
+        };
+        aquarium = aquarium ?? seedAquarium(aquariumFrame, params);
+        aquarium = updateAquarium(aquarium, aquariumFrame, params);
+        drawAquariumBackground(ctx, aquarium, aquariumFrame, params);
+      }
       const useKick = params.enableStartleKick !== false;
       let sdx = 0;
       let sdy = 0;
