@@ -1889,6 +1889,15 @@ function createCellRenderer(container, opts) {
           ctx.stroke();
           ctx.restore();
         }
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
+        for (let i = 1;i < splinePoints.length; i++) {
+          ctx.lineTo(splinePoints[i][0], splinePoints[i][1]);
+        }
+        ctx.closePath();
+        if (typeof ctx.clip === "function")
+          ctx.clip();
         let minMembraneR = Infinity;
         for (const dv of deform)
           minMembraneR = Math.min(minMembraneR, baseR * (1 + dv));
@@ -2169,6 +2178,7 @@ function createCellRenderer(container, opts) {
             }
           }
         }
+        ctx.restore();
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
         const mSat = params.membraneSat ?? 0.85;

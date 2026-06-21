@@ -4027,6 +4027,18 @@ export function createCellRenderer(
           ctx.restore();
         }
 
+        // Clip all internal organelles to the live cell silhouette. interiorPoint
+        // guarantees centers are inside, but rendered radii (food vacuoles/CVs)
+        // can otherwise protrude beyond the membrane near the cortex.
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(splinePoints[0][0], splinePoints[0][1]);
+        for (let i = 1; i < splinePoints.length; i++) {
+          ctx.lineTo(splinePoints[i][0], splinePoints[i][1]);
+        }
+        ctx.closePath();
+        if (typeof ctx.clip === "function") ctx.clip();
+
         // --- Nucleus: denser organelle drifting/pulsing inside the cell ---
         // F9: thread the LIVE minimum membrane radius so a deep inward pinch
         // cannot let the nucleus poke through the wall.
@@ -4389,6 +4401,8 @@ export function createCellRenderer(
             }
           }
         }
+
+        ctx.restore();
 
         // --- Stroke: iridescent outline ---
         ctx.lineJoin = "round";
