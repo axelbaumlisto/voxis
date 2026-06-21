@@ -33,6 +33,14 @@ const CRITICAL_PARAMS = {
   cvAnteriorS: 0.52,
   cvPosteriorS: 0.52,
   canalAlphaMul: 0.25,
+  enableAquarium: true,
+  aquariumAlpha: 0.22,
+  aquariumActivityBoost: 0.25,
+  diatomCount: 3,
+  diatomAlpha: 0.24,
+  diatomDriftSpeed: 0.55,
+  euglenaCount: 0,
+  vorticellaCount: 0,
 } as const;
 
 type CriticalParamName = keyof typeof CRITICAL_PARAMS;
@@ -103,8 +111,8 @@ function expectUserParamsLast(body: string): void {
   expect(body.slice(userParams + "...userParams".length, paramsEnd)).not.toMatch(/\w+\s*:/);
 }
 
-function expectNoAquariumParams(block: string): void {
-  expect(block).not.toMatch(/\b(?:enableAquarium|aquarium\w*|diatom\w*|euglena\w*|vorticella\w*)\s*:/i);
+function expectNoLaterAquariumPreviewParams(block: string): void {
+  expect(block).not.toMatch(/\b(?:euglena(?:Speed|SpeedActive|Scale)|vorticella(?:ContractRate|ContractRateActive|Scale))\s*:/i);
 }
 
 describe("drifting_contour v1.0 critical params", () => {
@@ -116,12 +124,12 @@ describe("drifting_contour v1.0 critical params", () => {
     expectCriticalParams(readBundleMountBlock());
   });
 
-  it("does not opt source theme into aquarium params before A/B approval", () => {
-    expectNoAquariumParams(readSourceMountBlock());
+  it("opts source theme into Phase 5A diatoms-only aquarium preview", () => {
+    expectNoLaterAquariumPreviewParams(readSourceMountBlock());
   });
 
-  it("does not opt built bundle into aquarium params before A/B approval", () => {
-    expectNoAquariumParams(readBundleMountBlock());
+  it("opts built bundle into Phase 5A diatoms-only aquarium preview", () => {
+    expectNoLaterAquariumPreviewParams(readBundleMountBlock());
   });
 
   it("keeps source theme params before user params so user overrides win", () => {

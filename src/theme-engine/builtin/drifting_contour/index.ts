@@ -145,6 +145,15 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // disc granuleMaxRadiusFrac/foodVacuoleMaxRadiusFrac no longer apply.
       enableInteriorField: true,     // body-coord interior (not the central disc)
       cyclosisPeriod: 65,            // slower cyclosis — equatorial granules <3px/0.5s (was 38)
+      // === Micro-aquarium Phase 5A preview — diatoms only, behind hero. ===
+      enableAquarium: true,
+      aquariumAlpha: 0.22,
+      aquariumActivityBoost: 0.25,
+      diatomCount: 3,
+      diatomAlpha: 0.24,
+      diatomDriftSpeed: 0.55,
+      euglenaCount: 0,
+      vorticellaCount: 0,
       ...userParams,
     },
   });
