@@ -1380,47 +1380,7 @@ var CELL_DEFAULTS = {
   cvPosteriorS: 0.62
 };
 
-// src/theme-engine/renderers/cell.ts
-function ciliaBeatHzEff(activity, params) {
-  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
-  const f0 = params.ciliaBeatHz ?? 0.9;
-  const f1 = params.ciliaBeatHzActive ?? 1.6;
-  return f0 + (f1 - f0) * a;
-}
-function iridescentHue(angle, t, audioLevel, baseHue, params) {
-  const norm = (angle % TAU + TAU) % TAU / TAU;
-  let hue = baseHue + norm * params.hueSpread + t * params.shimmerSpeed + audioLevel * params.hueBoost;
-  hue = (hue % 360 + 360) % 360;
-  return hue;
-}
-function nucleusTransform(t, audioLevel, baseR, params, minMembraneR) {
-  const rawCx = baseR * params.nucleusWander * noise2D(137, t * params.nucleusDrift);
-  const rawCy = baseR * params.nucleusWander * noise2D(241, t * params.nucleusDrift * 1.3 + 555.5);
-  const idleBreath = Math.sin(t * 1.3) * params.nucleusPulse * 0.25;
-  let r = baseR * (params.nucleusRadius + audioLevel * params.nucleusPulse + idleBreath);
-  const MIN_PX_RADIUS = 2.5;
-  r = Math.max(MIN_PX_RADIUS, r);
-  const PINCH_MARGIN = 0.15;
-  const safeInner = minMembraneR !== undefined && Number.isFinite(minMembraneR) ? Math.max(0, minMembraneR) * (1 - PINCH_MARGIN) : baseR * 0.55;
-  if (r > safeInner)
-    r = Math.max(MIN_PX_RADIUS, safeInner);
-  const offsetMag = Math.sqrt(rawCx * rawCx + rawCy * rawCy);
-  const maxOffsetMag = Math.max(0, safeInner - r);
-  if (maxOffsetMag <= 0) {
-    return { cx: 0, cy: 0, r: Math.max(0, safeInner) };
-  }
-  let cx;
-  let cy;
-  if (offsetMag <= maxOffsetMag) {
-    cx = rawCx;
-    cy = rawCy;
-  } else {
-    const scale = maxOffsetMag / offsetMag;
-    cx = rawCx * scale;
-    cy = rawCy * scale;
-  }
-  return { cx, cy, r };
-}
+// src/theme-engine/renderers/cell/interior.ts
 function interiorPoint(u, s, ctx) {
   const { cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params } = ctx;
   const aspect = params.bodyAspect ?? 3;
@@ -1461,6 +1421,48 @@ function cyclosisLoopPointAtPhase(g, phase) {
   const u = amp * Math.sin(phi);
   const s = amp * Math.sin(phi + Math.PI / 2);
   return { u, s };
+}
+
+// src/theme-engine/renderers/cell.ts
+function ciliaBeatHzEff(activity, params) {
+  const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
+  const f0 = params.ciliaBeatHz ?? 0.9;
+  const f1 = params.ciliaBeatHzActive ?? 1.6;
+  return f0 + (f1 - f0) * a;
+}
+function iridescentHue(angle, t, audioLevel, baseHue, params) {
+  const norm = (angle % TAU + TAU) % TAU / TAU;
+  let hue = baseHue + norm * params.hueSpread + t * params.shimmerSpeed + audioLevel * params.hueBoost;
+  hue = (hue % 360 + 360) % 360;
+  return hue;
+}
+function nucleusTransform(t, audioLevel, baseR, params, minMembraneR) {
+  const rawCx = baseR * params.nucleusWander * noise2D(137, t * params.nucleusDrift);
+  const rawCy = baseR * params.nucleusWander * noise2D(241, t * params.nucleusDrift * 1.3 + 555.5);
+  const idleBreath = Math.sin(t * 1.3) * params.nucleusPulse * 0.25;
+  let r = baseR * (params.nucleusRadius + audioLevel * params.nucleusPulse + idleBreath);
+  const MIN_PX_RADIUS = 2.5;
+  r = Math.max(MIN_PX_RADIUS, r);
+  const PINCH_MARGIN = 0.15;
+  const safeInner = minMembraneR !== undefined && Number.isFinite(minMembraneR) ? Math.max(0, minMembraneR) * (1 - PINCH_MARGIN) : baseR * 0.55;
+  if (r > safeInner)
+    r = Math.max(MIN_PX_RADIUS, safeInner);
+  const offsetMag = Math.sqrt(rawCx * rawCx + rawCy * rawCy);
+  const maxOffsetMag = Math.max(0, safeInner - r);
+  if (maxOffsetMag <= 0) {
+    return { cx: 0, cy: 0, r: Math.max(0, safeInner) };
+  }
+  let cx;
+  let cy;
+  if (offsetMag <= maxOffsetMag) {
+    cx = rawCx;
+    cy = rawCy;
+  } else {
+    const scale = maxOffsetMag / offsetMag;
+    cx = rawCx * scale;
+    cy = rawCy * scale;
+  }
+  return { cx, cy, r };
 }
 function contractileVacuole(t, baseR, params) {
   const period = Math.max(0.1, params.vacuolePeriod ?? 7);
