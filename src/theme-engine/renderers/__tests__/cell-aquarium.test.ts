@@ -463,6 +463,45 @@ describe("aquarium layer Phase 3 euglena", () => {
     return length * (centerSample?.halfWidth ?? 0) * 2;
   }
 
+  function inspectEuglenaDraw(scale: number): { readonly calls: readonly string[]; readonly state: AquariumLayerState } {
+    const calls: string[] = [];
+    const ctx = {
+      save: vi.fn(() => calls.push("save")),
+      restore: vi.fn(() => calls.push("restore")),
+      beginPath: vi.fn(() => calls.push("beginPath")),
+      moveTo: vi.fn((x: number, y: number) => calls.push(`moveTo:${x.toFixed(2)},${y.toFixed(2)}`)),
+      lineTo: vi.fn((x: number, y: number) => calls.push(`lineTo:${x.toFixed(2)},${y.toFixed(2)}`)),
+      closePath: vi.fn(() => calls.push("closePath")),
+      fill: vi.fn(() => calls.push("fill")),
+      stroke: vi.fn(() => calls.push("stroke")),
+      ellipse: vi.fn((_x: number, _y: number, rx: number, ry: number) => calls.push(`ellipse:${rx.toFixed(2)},${ry.toFixed(2)}`)),
+      arc: vi.fn((_x: number, _y: number, r: number) => calls.push(`arc:${r.toFixed(2)}`)),
+      set lineCap(value: CanvasLineCap) { calls.push(`lineCap:${value}`); },
+      set lineJoin(value: CanvasLineJoin) { calls.push(`lineJoin:${value}`); },
+      set fillStyle(value: string | CanvasGradient | CanvasPattern) { calls.push(`fillStyle:${String(value)}`); },
+      set strokeStyle(value: string | CanvasGradient | CanvasPattern) { calls.push(`strokeStyle:${String(value)}`); },
+      set lineWidth(value: number) { calls.push(`lineWidth:${value}`); },
+    } as unknown as CanvasRenderingContext2D;
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumAlpha: 0.24,
+      diatomCount: 0,
+      euglenaCount: 1,
+      euglenaScale: scale,
+      vorticellaCount: 0,
+    };
+    const state: AquariumLayerState = {
+      seed: 1,
+      diatoms: [],
+      euglena: [testEuglena({ x: 20, y: 10, size: 1, heading: 0 })],
+      vorticella: [],
+    };
+
+    drawAquariumBackground(ctx, state, frame({ width: 172, height: 36, baseHue: 50 }), params);
+    return { calls, state };
+  }
+
   it("updateAquarium moves euglena deterministically with dt-integrated phases", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,
@@ -638,45 +677,54 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(Math.hypot(pose.flagellumPoints[0].x - pose.eyespot.x, pose.flagellumPoints[0].y - pose.eyespot.y)).toBeLessThan(1e-9);
   });
 
-  it("drawAquariumBackground draws a low-alpha euglena smoke at 172×36", () => {
-    const calls: string[] = [];
-    const ctx = {
-      save: vi.fn(() => calls.push("save")),
-      restore: vi.fn(() => calls.push("restore")),
-      beginPath: vi.fn(() => calls.push("beginPath")),
-      moveTo: vi.fn(),
-      lineTo: vi.fn(),
-      closePath: vi.fn(),
-      fill: vi.fn(() => calls.push("fill")),
-      stroke: vi.fn(() => calls.push("stroke")),
-      ellipse: vi.fn(() => calls.push("ellipse")),
-      arc: vi.fn(() => calls.push("arc")),
-      set lineCap(_value: CanvasLineCap) {},
-      set lineJoin(_value: CanvasLineJoin) {},
-      set fillStyle(value: string | CanvasGradient | CanvasPattern) { calls.push(String(value)); },
-      set strokeStyle(value: string | CanvasGradient | CanvasPattern) { calls.push(String(value)); },
-      set lineWidth(_value: number) {},
-    } as unknown as CanvasRenderingContext2D;
-    const params: CellParams = {
-      ...CELL_DEFAULTS,
-      enableAquarium: true,
-      aquariumSeed: 47,
-      aquariumAlpha: 0.24,
-      diatomCount: 0,
-      euglenaCount: 1,
-    };
-    const state = seedAquarium(frame({ width: 172, height: 36 }), params);
+  it("drawAquariumBackground draws a muted euglena-only identity smoke at 172×36", () => {
+    const { calls } = inspectEuglenaDraw(1);
 
-    drawAquariumBackground(ctx, state, frame({ width: 172, height: 36 }), params);
-
-    expect(ctx.save).toHaveBeenCalledTimes(1);
-    expect(ctx.restore).toHaveBeenCalledTimes(1);
-    expect(ctx.fill).toHaveBeenCalled();
-    expect(ctx.stroke).toHaveBeenCalled();
-    expect(ctx.ellipse).toHaveBeenCalled();
-    expect(ctx.arc).toHaveBeenCalled();
+    expect(calls.filter((call) => call === "save")).toHaveLength(1);
+    expect(calls.filter((call) => call === "restore")).toHaveLength(1);
+    expect(calls.filter((call) => call === "fill").length).toBeGreaterThanOrEqual(4);
+    expect(calls.filter((call) => call === "stroke").length).toBeGreaterThanOrEqual(3);
+    expect(calls.some((call) => call === "ellipse:0.50,0.30")).toBe(true);
+    expect(calls.some((call) => call === "arc:0.54")).toBe(true);
+    expect(calls.some((call) => call.startsWith("moveTo:"))).toBe(true);
+    expect(calls.some((call) => call.startsWith("lineTo:"))).toBe(true);
     expect(calls.some((call) => call.includes("hsla(92") && call.includes("0.031"))).toBe(true);
     expect(calls.some((call) => call.includes("hsla(20") && call.includes("0.107"))).toBe(true);
+    expect(calls.some((call) => call.includes("hsla(175") && call.includes("0.062"))).toBe(true);
+
+    const reservoirIndex = calls.findIndex((call) => call.includes("hsla(175"));
+    const eyespotIndex = calls.findIndex((call) => call.includes("hsla(20"));
+    expect(reservoirIndex).toBeGreaterThan(-1);
+    expect(eyespotIndex).toBeGreaterThan(reservoirIndex);
+  });
+
+  it("drawAquariumBackground adds euglena reservoir glint only above the 7px body threshold", () => {
+    const small = inspectEuglenaDraw(0.74).calls;
+    const large = inspectEuglenaDraw(0.8).calls;
+
+    expect(small.some((call) => call.includes("hsla(175"))).toBe(false);
+    expect(large.some((call) => call.includes("hsla(175") && call.includes("0.062"))).toBe(true);
+    expect(large.some((call) => call === "arc:0.35")).toBe(true);
+  });
+
+  it("drawAquariumBackground uses scale-aware euglena details", () => {
+    const small = inspectEuglenaDraw(0.6).calls;
+    const medium = inspectEuglenaDraw(0.8).calls;
+    const large = inspectEuglenaDraw(1.03).calls;
+
+    expect(small.filter((call) => call.startsWith("ellipse:")).length).toBe(0);
+    expect(small.filter((call) => call.includes("hsla(84")).length).toBe(0);
+    expect(small.filter((call) => call === "stroke").length).toBe(2);
+    expect(small.filter((call) => call.startsWith("arc:")).length).toBe(1);
+
+    expect(medium.filter((call) => call.startsWith("ellipse:")).length).toBe(2);
+    expect(medium.filter((call) => call.includes("hsla(84")).length).toBe(1);
+    expect(medium.filter((call) => call === "stroke").length).toBe(4);
+    expect(medium.filter((call) => call.startsWith("arc:")).length).toBe(2);
+
+    expect(large.filter((call) => call.startsWith("ellipse:")).length).toBe(3);
+    expect(large.filter((call) => call === "stroke").length).toBe(5);
+    expect(large.filter((call) => call.startsWith("arc:")).length).toBe(2);
   });
 });
 

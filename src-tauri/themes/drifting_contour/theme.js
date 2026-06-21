@@ -1850,6 +1850,20 @@ function positive2(value, fallback) {
   return Math.max(0.001, finiteOr3(value, fallback));
 }
 var TAU3 = Math.PI * 2;
+var METABOLY_AMP = 0.045;
+function euglenaModeView(mode) {
+  switch (mode) {
+    case "recording":
+      return { motionMul: 1.15, alphaMul: 1.08 };
+    case "transcribing":
+      return { motionMul: 0.35, alphaMul: 0.8 };
+    case "error":
+      return { motionMul: 0.15, alphaMul: 0.55 };
+    case "idle":
+    default:
+      return { motionMul: 1, alphaMul: 1 };
+  }
+}
 function wrapUnit(value) {
   if (!Number.isFinite(value))
     return 0;
@@ -1885,10 +1899,11 @@ function euglenaPose(rollPhase, metabolyPhase, options = {}) {
   const flagellum = wrapUnit(options.flagellumPhase ?? roll * 1.7);
   const ux = Math.cos(heading);
   const uy = Math.sin(heading);
-  const metabolyStretch = 1 + 0.06 * Math.sin(metaboly * TAU3);
-  const halfLength = length * metabolyStretch / 2;
+  const lengthScale = 1 + METABOLY_AMP * Math.sin(metaboly * TAU3);
+  const widthScale = 1 / lengthScale;
+  const halfLength = length * lengthScale / 2;
   const rollCos = Math.cos(roll * TAU3);
-  const apparentWidth = baseWidth * (0.72 + 0.28 * Math.abs(rollCos));
+  const apparentWidth = baseWidth * widthScale * (0.72 + 0.28 * Math.abs(rollCos));
   const stripePhase = wrapUnit(roll * stripeCount + metaboly * 0.18);
   const anterior = point(cx, cy, ux, uy, halfLength);
   const posterior = point(cx, cy, ux, uy, -halfLength);
@@ -1955,7 +1970,9 @@ function updateEuglena(euglena, frame, view) {
   const activityMix = clamp01(finite2(frame.activity, 0) * finite2(view.activityBoost, 0));
   const idleRate = Math.max(0, finite2(view.euglena.speed, 0));
   const activeRate = Math.max(0, finite2(view.euglena.speedActive, idleRate));
-  const rate = idleRate + (activeRate - idleRate) * activityMix;
+  const activityRate = idleRate + (activeRate - idleRate) * activityMix;
+  const modeView = euglenaModeView(frame.mode);
+  const rate = activityRate * modeView.motionMul;
   return euglena.map((cell) => {
     const rollRate = Math.max(0, finite2(cell.rollRate, 0)) * rate;
     const rollDelta = rollRate * dt;
@@ -2010,7 +2027,7 @@ function euglenaBodyOutline(pose, heading) {
 function drawEuglena(ctx, euglena, frame, view) {
   if (!view.enabled || euglena.length === 0 || view.euglena.count <= 0)
     return;
-  const alpha = Math.max(0, Math.min(1, view.alpha * 0.72));
+  const alpha = Math.max(0, Math.min(1, view.alpha * 0.72 * euglenaModeView(frame.mode).alphaMul));
   if (alpha <= 0)
     return;
   const scale = Math.max(0.1, finite2(view.euglena.scale, 1));
@@ -2034,6 +2051,7 @@ function drawEuglena(ctx, euglena, frame, view) {
       stripeCount: 5
     });
     const outline = euglenaBodyOutline(pose, heading);
+    const detailCount = length >= 9 ? 3 : length >= 7 ? 2 : 0;
     drawPolyline2(ctx, outline, true);
     ctx.fillStyle = `hsla(${hue}, 18%, 47%, ${alpha * 0.18})`;
     ctx.strokeStyle = `hsla(${hue + 8}, 16%, 63%, ${alpha * 0.35})`;
@@ -2042,29 +2060,43 @@ function drawEuglena(ctx, euglena, frame, view) {
     ctx.stroke();
     const ux = Math.cos(heading);
     const uy = Math.sin(heading);
-    const stripeAlpha = alpha * 0.18;
-    ctx.strokeStyle = `hsla(${hue - 8}, 20%, 38%, ${stripeAlpha})`;
-    ctx.lineWidth = 0.24;
-    for (let i = -1;i <= 1; i++) {
-      const along = length * (i * 0.16 + (pose.stripePhase - 0.5) * 0.08);
-      const band = [
-        transform2(pose.center.x, pose.center.y, ux, uy, along - length * 0.16, -width * 0.18),
-        transform2(pose.center.x, pose.center.y, ux, uy, along + length * 0.16, width * 0.18)
-      ];
-      drawPolyline2(ctx, band, false);
-      ctx.stroke();
-    }
-    ctx.fillStyle = `hsla(${hue - 12}, 24%, 42%, ${alpha * 0.2})`;
-    for (let i = -1;i <= 1; i++) {
-      const p = transform2(pose.center.x, pose.center.y, ux, uy, length * i * 0.17, width * 0.14 * (i === 0 ? -1 : 1));
-      ctx.beginPath();
-      ctx.ellipse(p.x, p.y, 0.55, 0.34, heading, 0, TAU3);
-      ctx.fill();
+    if (detailCount > 0) {
+      ctx.fillStyle = `hsla(${hue - 12}, 24%, 42%, ${alpha * 0.2})`;
+      for (let i = 0;i < detailCount; i++) {
+        const q = i / (detailCount - 1);
+        const along = length * (-0.17 + q * 0.34);
+        const lateralSign = i % 2 === 0 ? 1 : -1;
+        const p = transform2(pose.center.x, pose.center.y, ux, uy, along, width * 0.13 * lateralSign);
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, 0.5, 0.3, heading, 0, TAU3);
+        ctx.fill();
+      }
+      const stripeAlpha = alpha * 0.18;
+      ctx.strokeStyle = `hsla(${hue - 8}, 20%, 38%, ${stripeAlpha})`;
+      ctx.lineWidth = 0.24;
+      for (let i = 0;i < detailCount; i++) {
+        const q = i / (detailCount - 1);
+        const bandOffset = -0.16 + q * 0.32;
+        const along = length * (bandOffset + (pose.stripePhase - 0.5) * 0.08);
+        const band = [
+          transform2(pose.center.x, pose.center.y, ux, uy, along - length * 0.16, -width * 0.18),
+          transform2(pose.center.x, pose.center.y, ux, uy, along + length * 0.16, width * 0.18)
+        ];
+        drawPolyline2(ctx, band, false);
+        ctx.stroke();
+      }
     }
     ctx.strokeStyle = `hsla(${hue + 10}, 16%, 66%, ${alpha * 0.34})`;
     ctx.lineWidth = 0.34;
     drawPolyline2(ctx, pose.flagellumPoints, false);
     ctx.stroke();
+    if (length >= 7) {
+      const reservoir = transform2(pose.center.x, pose.center.y, ux, uy, length * 0.33, -width * 0.11);
+      ctx.fillStyle = `hsla(175, 18%, 78%, ${alpha * 0.36})`;
+      ctx.beginPath();
+      ctx.arc(reservoir.x, reservoir.y, Math.min(0.8, Math.max(0.34, width * 0.18)), 0, TAU3);
+      ctx.fill();
+    }
     ctx.fillStyle = `hsla(20, 40%, 48%, ${alpha * 0.62})`;
     ctx.beginPath();
     ctx.arc(pose.eyespot.x, pose.eyespot.y, Math.min(1, Math.max(0.45, width * 0.22)), 0, TAU3);

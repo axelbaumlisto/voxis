@@ -281,6 +281,7 @@ export function drawEuglena(
       stripeCount: 5,
     });
     const outline = euglenaBodyOutline(pose, heading);
+    const detailCount = length >= 9 ? 3 : length >= 7 ? 2 : 0;
 
     drawPolyline(ctx, outline, true);
     ctx.fillStyle = `hsla(${hue}, 18%, 47%, ${alpha * 0.18})`;
@@ -291,31 +292,47 @@ export function drawEuglena(
 
     const ux = Math.cos(heading);
     const uy = Math.sin(heading);
-    const stripeAlpha = alpha * 0.18;
-    ctx.strokeStyle = `hsla(${hue - 8}, 20%, 38%, ${stripeAlpha})`;
-    ctx.lineWidth = 0.24;
-    for (let i = -1; i <= 1; i++) {
-      const along = length * (i * 0.16 + (pose.stripePhase - 0.5) * 0.08);
-      const band = [
-        transform(pose.center.x, pose.center.y, ux, uy, along - length * 0.16, -width * 0.18),
-        transform(pose.center.x, pose.center.y, ux, uy, along + length * 0.16, width * 0.18),
-      ];
-      drawPolyline(ctx, band, false);
-      ctx.stroke();
-    }
 
-    ctx.fillStyle = `hsla(${hue - 12}, 24%, 42%, ${alpha * 0.20})`;
-    for (let i = -1; i <= 1; i++) {
-      const p = transform(pose.center.x, pose.center.y, ux, uy, length * i * 0.17, width * 0.14 * (i === 0 ? -1 : 1));
-      ctx.beginPath();
-      ctx.ellipse(p.x, p.y, 0.55, 0.34, heading, 0, TAU);
-      ctx.fill();
+    if (detailCount > 0) {
+      ctx.fillStyle = `hsla(${hue - 12}, 24%, 42%, ${alpha * 0.20})`;
+      for (let i = 0; i < detailCount; i++) {
+        const q = i / (detailCount - 1);
+        const along = length * (-0.17 + q * 0.34);
+        const lateralSign = i % 2 === 0 ? 1 : -1;
+        const p = transform(pose.center.x, pose.center.y, ux, uy, along, width * 0.13 * lateralSign);
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, 0.50, 0.30, heading, 0, TAU);
+        ctx.fill();
+      }
+
+      const stripeAlpha = alpha * 0.18;
+      ctx.strokeStyle = `hsla(${hue - 8}, 20%, 38%, ${stripeAlpha})`;
+      ctx.lineWidth = 0.24;
+      for (let i = 0; i < detailCount; i++) {
+        const q = i / (detailCount - 1);
+        const bandOffset = -0.16 + q * 0.32;
+        const along = length * (bandOffset + (pose.stripePhase - 0.5) * 0.08);
+        const band = [
+          transform(pose.center.x, pose.center.y, ux, uy, along - length * 0.16, -width * 0.18),
+          transform(pose.center.x, pose.center.y, ux, uy, along + length * 0.16, width * 0.18),
+        ];
+        drawPolyline(ctx, band, false);
+        ctx.stroke();
+      }
     }
 
     ctx.strokeStyle = `hsla(${hue + 10}, 16%, 66%, ${alpha * 0.34})`;
     ctx.lineWidth = 0.34;
     drawPolyline(ctx, pose.flagellumPoints, false);
     ctx.stroke();
+
+    if (length >= 7) {
+      const reservoir = transform(pose.center.x, pose.center.y, ux, uy, length * 0.33, -width * 0.11);
+      ctx.fillStyle = `hsla(175, 18%, 78%, ${alpha * 0.36})`;
+      ctx.beginPath();
+      ctx.arc(reservoir.x, reservoir.y, Math.min(0.8, Math.max(0.34, width * 0.18)), 0, TAU);
+      ctx.fill();
+    }
 
     ctx.fillStyle = `hsla(20, 40%, 48%, ${alpha * 0.62})`;
     ctx.beginPath();
