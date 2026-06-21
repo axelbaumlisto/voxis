@@ -62,6 +62,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       baseRadiusPx: 17,
       driftSpeed: 0.03,              // gentle glide (was 0.08)
       idleSwimFrac: 0.12,            // 12% of peak swim at idle — slow drift (was 0.30)
+      bodyHeadingTau: 1.5,             // slow heading response (default 0.4 = too twitchy)
       idleDriftMin: 0.40,            // subtle wander (was 0.70)
       driftMargin: 30,
       idleMorphAmplitude: 0.16,
@@ -125,8 +126,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       nucleusIndent: 0.3,               // kidney-shaped macronucleus concavity
       foodVacuoleSat: 0.25,             // warmer amber food vacuoles (was 0.10)
       enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)
-      cyclosisGranuleCount: 80,      // denser flow field (was 52)
-      granuleSizePx: 2.0,            // larger for visible streaming (was 1.6)
+      cyclosisGranuleCount: 40,      // fewer = less visible reshuffling on rotation
+      granuleSizePx: 1.6,            // smaller = subtler interior
       enableOrganelles: true,        // food vacuoles + micronucleus (Commit 28)
       foodVacuoleCount: 10,          // more food vacuoles filling the body
       // === v3.3 INTERIOR FIELD (Commit 32a-e) — organelles in body coords,
