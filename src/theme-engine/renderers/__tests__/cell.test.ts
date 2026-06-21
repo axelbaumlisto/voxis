@@ -99,6 +99,7 @@ import {
   effectiveCyclosisPeriod,
 } from "../cell";
 import { deformAt, wrapPi } from "../shared";
+import { membranePolyline, minDistToPolyline, pointInPolygon } from "./helpers/cell-geometry";
 import type { CellParams, CellPersistState, CiliaMotion, InteriorCtx } from "../cell";
 
 const TAU = Math.PI * 2;
@@ -6421,50 +6422,6 @@ describe("Commit 32a — interiorPoint (interior coupled to wall)", () => {
   const baseR = 40;
   const bodyHeading = 0.6;
 
-  // Min distance from a point to a closed polyline (segment distances, wrapped).
-  function minDistToPolyline(p: [number, number], poly: Array<[number, number]>): number {
-    let best = Infinity;
-    const n = poly.length;
-    for (let i = 0; i < n; i++) {
-      const a = poly[i];
-      const b = poly[(i + 1) % n];
-      const dx = b[0] - a[0];
-      const dy = b[1] - a[1];
-      const len2 = dx * dx + dy * dy;
-      let t = len2 > 0 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2 : 0;
-      t = t < 0 ? 0 : t > 1 ? 1 : t;
-      const qx = a[0] + t * dx;
-      const qy = a[1] + t * dy;
-      const d = Math.hypot(p[0] - qx, p[1] - qy);
-      if (d < best) best = d;
-    }
-    return best;
-  }
-
-  // Build the membrane polyline the renderer would draw for a given deform+affine.
-  function membranePolyline(
-    deform: number[],
-    squeezeK: number,
-    squeezePhi: number,
-    params: CellParams,
-  ): Array<[number, number]> {
-    const n = deform.length;
-    const poly: Array<[number, number]> = [];
-    for (let i = 0; i < n; i++) {
-      const angle = (i / n) * TAU;
-      const r = baseR * (1 + deform[i]);
-      const pt = affineSqueezePoints(
-        [[cx + r * Math.cos(angle), cy + r * Math.sin(angle)]],
-        squeezeK,
-        squeezePhi,
-        cx,
-        cy,
-        params,
-      )[0];
-      poly.push(pt);
-    }
-    return poly;
-  }
 
   function makeCtx(
     deform: number[],
@@ -6487,7 +6444,7 @@ describe("Commit 32a — interiorPoint (interior coupled to wall)", () => {
     const squeezeK = 1;
     const squeezePhi = bodyHeading;
     const ctx = makeCtx(deform, squeezeK, squeezePhi, params);
-    const poly = membranePolyline(deform, squeezeK, squeezePhi, params);
+    const poly = membranePolyline({ deform, squeezeK, squeezePhi, params, cx, cy, baseR });
     let maxD = 0;
     for (const u of [-0.8, -0.4, 0, 0.4, 0.8]) {
       for (const s of [1, -1]) {
@@ -6513,7 +6470,7 @@ describe("Commit 32a — interiorPoint (interior coupled to wall)", () => {
     const squeezeK = 1;
     const squeezePhi = bodyHeading;
     const ctx = makeCtx(deform, squeezeK, squeezePhi, params);
-    const poly = membranePolyline(deform, squeezeK, squeezePhi, params);
+    const poly = membranePolyline({ deform, squeezeK, squeezePhi, params, cx, cy, baseR });
     let maxD = 0;
     for (const u of [-0.8, -0.4, 0, 0.4, 0.8]) {
       for (const s of [1, -1]) {
@@ -6543,7 +6500,7 @@ describe("Commit 32a — interiorPoint (interior coupled to wall)", () => {
     const squeezeK = 1.3;
     const squeezePhi = 0.4;
     const ctx = makeCtx(deform, squeezeK, squeezePhi, params);
-    const poly = membranePolyline(deform, squeezeK, squeezePhi, params);
+    const poly = membranePolyline({ deform, squeezeK, squeezePhi, params, cx, cy, baseR });
     let maxD = 0;
     for (const u of [-0.8, -0.4, 0, 0.4, 0.8]) {
       for (const s of [1, -1]) {
@@ -6606,7 +6563,7 @@ describe("Commit 32a — interiorPoint (interior coupled to wall)", () => {
     const squeezeK = 1.5;
     const squeezePhi = 0.3;
     const ctx = makeCtx(deform, squeezeK, squeezePhi, params);
-    const poly = membranePolyline(deform, squeezeK, squeezePhi, params);
+    const poly = membranePolyline({ deform, squeezeK, squeezePhi, params, cx, cy, baseR });
     for (const u of [-0.8, -0.4, 0, 0.4, 0.8]) {
       const pt = interiorPoint(u, 1, ctx);
       expect(minDistToPolyline(pt, poly)).toBeLessThan(0.5);
@@ -6676,39 +6633,6 @@ describe("Commit 32b — body-coord granule distribution", () => {
     }
     const Z = acc || 1;
     return 1 - cdfAt0 / Z;
-  }
-
-  function minDistToPolyline(p: [number, number], poly: Array<[number, number]>): number {
-    let best = Infinity;
-    const n = poly.length;
-    for (let i = 0; i < n; i++) {
-      const a = poly[i];
-      const b = poly[(i + 1) % n];
-      const dx = b[0] - a[0];
-      const dy = b[1] - a[1];
-      const len2 = dx * dx + dy * dy;
-      let t = len2 > 0 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2 : 0;
-      t = t < 0 ? 0 : t > 1 ? 1 : t;
-      const qx = a[0] + t * dx;
-      const qy = a[1] + t * dy;
-      const d = Math.hypot(p[0] - qx, p[1] - qy);
-      if (d < best) best = d;
-    }
-    return best;
-  }
-
-  function pointInPolygon(p: [number, number], poly: Array<[number, number]>): boolean {
-    let inside = false;
-    const n = poly.length;
-    for (let i = 0, j = n - 1; i < n; j = i++) {
-      const xi = poly[i][0], yi = poly[i][1];
-      const xj = poly[j][0], yj = poly[j][1];
-      const intersect =
-        yi > p[1] !== yj > p[1] &&
-        p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi;
-      if (intersect) inside = !inside;
-    }
-    return inside;
   }
 
   it("(a) profileCDFInv MONOTONE + RANGE: u in [-1,1], monotone, endpoints", () => {
@@ -7082,33 +7006,6 @@ describe("Commit 32d — food vacuoles on cyclosis loop", () => {
     cyclosisPeriod: 45,
   };
 
-  function pointInPolygon(p: [number, number], poly: Array<[number, number]>): boolean {
-    let inside = false;
-    const n = poly.length;
-    for (let i = 0, j = n - 1; i < n; j = i++) {
-      const xi = poly[i][0], yi = poly[i][1];
-      const xj = poly[j][0], yj = poly[j][1];
-      const intersect =
-        yi > p[1] !== yj > p[1] &&
-        p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi;
-      if (intersect) inside = !inside;
-    }
-    return inside;
-  }
-  function minDistToPolyline(p: [number, number], poly: Array<[number, number]>): number {
-    let best = Infinity;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const a = poly[j], b = poly[i];
-      const dx = b[0] - a[0], dy = b[1] - a[1];
-      const len2 = dx * dx + dy * dy || 1;
-      let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2;
-      t = Math.max(0, Math.min(1, t));
-      const qx = a[0] + t * dx, qy = a[1] + t * dy;
-      best = Math.min(best, Math.hypot(p[0] - qx, p[1] - qy));
-    }
-    return best;
-  }
-
   it("(a) seedInteriorFoodVacuoles: gate-independent pure; count entries in range; 0 -> []; deterministic", () => {
     // gate-independent: works with the interior gate off too (it is just seeding).
     const N = 7;
@@ -7265,57 +7162,6 @@ describe("Commit 32e — wall-anchored nuclei + CVs via interiorPoint", () => {
     bodyVentralBend: 0.18,
   };
 
-  function membranePolygon(
-    deform: number[],
-    squeezeK: number,
-    squeezePhi: number,
-    params: CellParams,
-    ox: number,
-    oy: number,
-  ): Array<[number, number]> {
-    const poly: Array<[number, number]> = [];
-    for (let i = 0; i < deform.length; i++) {
-      const angle = (i / deform.length) * TAU;
-      const r = baseR * (1 + deform[i]);
-      poly.push(
-        affineSqueezePoints(
-          [[ox + r * Math.cos(angle), oy + r * Math.sin(angle)]],
-          squeezeK,
-          squeezePhi,
-          ox,
-          oy,
-          params,
-        )[0],
-      );
-    }
-    return poly;
-  }
-  function pointInPolygon(p: [number, number], poly: Array<[number, number]>): boolean {
-    let inside = false;
-    const n = poly.length;
-    for (let i = 0, j = n - 1; i < n; j = i++) {
-      const xi = poly[i][0], yi = poly[i][1];
-      const xj = poly[j][0], yj = poly[j][1];
-      const intersect =
-        yi > p[1] !== yj > p[1] &&
-        p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi;
-      if (intersect) inside = !inside;
-    }
-    return inside;
-  }
-  function minDistToPolyline(p: [number, number], poly: Array<[number, number]>): number {
-    let best = Infinity;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const a = poly[j], b = poly[i];
-      const dx = b[0] - a[0], dy = b[1] - a[1];
-      const len2 = dx * dx + dy * dy || 1;
-      let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2;
-      t = Math.max(0, Math.min(1, t));
-      const qx = a[0] + t * dx, qy = a[1] + t * dy;
-      best = Math.min(best, Math.hypot(p[0] - qx, p[1] - qy));
-    }
-    return best;
-  }
   // along-body-axis coordinate of a world point (projection onto the heading dir)
   function axial(pt: [number, number], ox: number, oy: number, heading: number): number {
     return (pt[0] - ox) * Math.cos(heading) + (pt[1] - oy) * Math.sin(heading);
@@ -7328,7 +7174,7 @@ describe("Commit 32e — wall-anchored nuclei + CVs via interiorPoint", () => {
       cx, cy, baseR, deform, squeezeK: 1, squeezePhi: bodyHeading, bodyHeading, params: eggParams, profilePts,
     };
     const L = baseR * Math.sqrt(eggParams.bodyAspect ?? 3);
-    const poly = membranePolygon(deform, 1, bodyHeading, eggParams, cx, cy);
+    const poly = membranePolyline({ deform, squeezeK: 1, squeezePhi: bodyHeading, params: eggParams, cx, cy, baseR });
 
     const macro = interiorPoint(
       eggParams.macronucleusU ?? -0.05, eggParams.macronucleusS ?? 0.1, ctx,
@@ -7411,7 +7257,7 @@ describe("Commit 32e — wall-anchored nuclei + CVs via interiorPoint", () => {
         const ctx: InteriorCtx = {
           cx, cy, baseR, deform, squeezeK: 1, squeezePhi, bodyHeading, params, profilePts,
         };
-        const poly = membranePolygon(deform, 1, squeezePhi, params, cx, cy);
+        const poly = membranePolyline({ deform, squeezeK: 1, squeezePhi, params, cx, cy, baseR });
         for (const [u, s] of anchors) {
           const pt = interiorPoint(u, s, ctx);
           const ok = pointInPolygon(pt, poly) || minDistToPolyline(pt, poly) < 0.5;
