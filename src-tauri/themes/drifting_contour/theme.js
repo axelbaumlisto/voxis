@@ -618,6 +618,39 @@ function wanderStep(s, dt, width, height, baseR, params, speedOverride) {
   return { x, y, heading, vx, vy, clock };
 }
 
+// src/theme-engine/renderers/cell/body-motion.ts
+function bodyHeadingStep(prev, vx, vy, dt, params) {
+  const sp = Math.hypot(vx, vy);
+  if (sp < 0.000001)
+    return prev;
+  const target = Math.atan2(vy, vx);
+  const tau = params.bodyHeadingTau ?? 0.4;
+  const alpha = 1 - Math.exp(-dt / Math.max(0.000001, tau));
+  let d = target - prev;
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  return prev + d * alpha;
+}
+function prolateAspect(speedNorm, params) {
+  const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
+  const elong = params.bodyElongation ?? 0.13;
+  const floor = params.bodyElongationFloor ?? 0;
+  const base = 1 + elong * Math.max(floor, s);
+  if (!params.enableRestingProlate)
+    return base;
+  const rest = params.prolateRestAspect ?? 1.7;
+  return Math.max(rest, base);
+}
+function helicalOffset(spinPhi, bodyHeading, baseR, params) {
+  const hAmp = params.helicalAmplitude ?? 0;
+  if (hAmp === 0 || spinPhi === 0)
+    return [0, 0];
+  const lateralOffset = hAmp * baseR * Math.sin(spinPhi);
+  return [
+    lateralOffset * -Math.sin(bodyHeading),
+    lateralOffset * Math.cos(bodyHeading)
+  ];
+}
+
 // src/theme-engine/renderers/cell/persistence.ts
 function serializeCellState(s) {
   return JSON.stringify(s);
@@ -817,37 +850,6 @@ function ciliaBeatHzEff(activity, params) {
   const f0 = params.ciliaBeatHz ?? 0.9;
   const f1 = params.ciliaBeatHzActive ?? 1.6;
   return f0 + (f1 - f0) * a;
-}
-function bodyHeadingStep(prev, vx, vy, dt, params) {
-  const sp = Math.hypot(vx, vy);
-  if (sp < 0.000001)
-    return prev;
-  const target = Math.atan2(vy, vx);
-  const tau = params.bodyHeadingTau ?? 0.4;
-  const alpha = 1 - Math.exp(-dt / Math.max(0.000001, tau));
-  let d = target - prev;
-  d = Math.atan2(Math.sin(d), Math.cos(d));
-  return prev + d * alpha;
-}
-function prolateAspect(speedNorm, params) {
-  const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
-  const elong = params.bodyElongation ?? 0.13;
-  const floor = params.bodyElongationFloor ?? 0;
-  const base = 1 + elong * Math.max(floor, s);
-  if (!params.enableRestingProlate)
-    return base;
-  const rest = params.prolateRestAspect ?? 1.7;
-  return Math.max(rest, base);
-}
-function helicalOffset(spinPhi, bodyHeading, baseR, params) {
-  const hAmp = params.helicalAmplitude ?? 0;
-  if (hAmp === 0 || spinPhi === 0)
-    return [0, 0];
-  const lateralOffset = hAmp * baseR * Math.sin(spinPhi);
-  return [
-    lateralOffset * -Math.sin(bodyHeading),
-    lateralOffset * Math.cos(bodyHeading)
-  ];
 }
 function cellRadius(angle, t, energy, params) {
   const dx = Math.cos(angle);
