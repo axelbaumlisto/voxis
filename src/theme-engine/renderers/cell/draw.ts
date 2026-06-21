@@ -34,6 +34,24 @@ export function drawCVVesicle(
   ctx.fill();
 }
 
+export function drawFoodVacuole(
+  ctx: CanvasRenderingContext2D,
+  fx: number,
+  fy: number,
+  drawR: number,
+  fvH: number,
+  fvSat: number,
+  params: CellParams,
+): void {
+  ctx.fillStyle = hsla(fvH, fvSat, 0.5, params.nucleusAlpha * 0.4);
+  ctx.beginPath();
+  ctx.arc(fx, fy, drawR, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = hsla(fvH, fvSat * 1.125, 0.35, params.nucleusAlpha * 0.5);
+  ctx.lineWidth = 0.8;
+  ctx.stroke();
+}
+
 export function drawCVCanals(
   ctx: CanvasRenderingContext2D,
   vx: number,

@@ -1615,6 +1615,15 @@ function drawCVVesicle(ctx, vx, vy, r, cvH, params) {
   ctx.arc(vx, vy, r, 0, TAU);
   ctx.fill();
 }
+function drawFoodVacuole(ctx, fx, fy, drawR, fvH, fvSat, params) {
+  ctx.fillStyle = hsla(fvH, fvSat, 0.5, params.nucleusAlpha * 0.4);
+  ctx.beginPath();
+  ctx.arc(fx, fy, drawR, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = hsla(fvH, fvSat * 1.125, 0.35, params.nucleusAlpha * 0.5);
+  ctx.lineWidth = 0.8;
+  ctx.stroke();
+}
 function drawCVCanals(ctx, vx, vy, r, cvH, params) {
   if (!params.enableCVCanals || r <= 1)
     return;
@@ -2132,13 +2141,7 @@ function createCellRenderer(container, opts) {
               const size = foodVacuoleSize(t, fv.digestPhase, params);
               const drawR = fvSizePx * (0.4 + 0.6 * size);
               const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);
-              ctx.fillStyle = hsla(fvH, fvSat, 0.5, params.nucleusAlpha * 0.4);
-              ctx.beginPath();
-              ctx.arc(fx, fy, drawR, 0, TAU);
-              ctx.fill();
-              ctx.strokeStyle = hsla(fvH, fvSat * 1.125, 0.35, params.nucleusAlpha * 0.5);
-              ctx.lineWidth = 0.8;
-              ctx.stroke();
+              drawFoodVacuole(ctx, fx, fy, drawR, fvH, fvSat, params);
             }
           } else {
             if (!foodVacuoles)
@@ -2152,13 +2155,7 @@ function createCellRenderer(container, opts) {
               const rad = Math.hypot(v.x, v.y);
               const scale = rad > maxRad && rad > 0 ? maxRad / rad : 1;
               const [fx, fy] = affineSqueezePoints([[cx + v.x * scale, cy + v.y * scale]], squeezeK, squeezePhi, cx, cy, params)[0];
-              ctx.fillStyle = hsla(fvH, fvSat, 0.5, params.nucleusAlpha * 0.4);
-              ctx.beginPath();
-              ctx.arc(fx, fy, drawR, 0, TAU);
-              ctx.fill();
-              ctx.strokeStyle = hsla(fvH, fvSat * 1.125, 0.35, params.nucleusAlpha * 0.5);
-              ctx.lineWidth = 0.8;
-              ctx.stroke();
+              drawFoodVacuole(ctx, fx, fy, drawR, fvH, fvSat, params);
             }
           }
         }
