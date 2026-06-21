@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CELL_DEFAULTS } from "../cell/defaults";
 import { aquariumParamsView } from "../cell/aquarium/params";
 import { seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aquarium/layer";
+import { diatomGeometry } from "../cell/aquarium/diatoms";
+import { euglenaPose } from "../cell/aquarium/euglena";
+import { vorticellaGeometry } from "../cell/aquarium/vorticella";
 import type { AquariumFrame, AquariumLayerState } from "../cell/aquarium/types";
 import type { CellParams } from "../cell/types";
 
@@ -138,6 +141,87 @@ describe("seedAquarium", () => {
       expect(point.x).toBeLessThanOrEqual(172);
       expect(point.y).toBeGreaterThanOrEqual(0);
       expect(point.y).toBeLessThanOrEqual(36);
+    }
+  });
+});
+
+describe("aquarium biology geometry contracts", () => {
+  it("vorticellaGeometry clamps contraction and moves the bell toward the anchor", () => {
+    const extended = vorticellaGeometry(-1, { anchorX: 10, anchorY: 4, restLength: 12, directionAngle: 0 });
+    const contracted = vorticellaGeometry(2, { anchorX: 10, anchorY: 4, restLength: 12, directionAngle: 0 });
+
+    expect(extended.contractPhase).toBe(0);
+    expect(contracted.contractPhase).toBe(1);
+    expect(contracted.stalkLength).toBeLessThan(extended.stalkLength);
+    expect(contracted.coilTurns).toBeGreaterThan(extended.coilTurns);
+    expect(contracted.bellCenter.x).toBeLessThan(extended.bellCenter.x);
+    expect(contracted.bellCenter.y).toBeCloseTo(extended.bellCenter.y, 6);
+    expect(contracted.stalkPath.length).toBeGreaterThanOrEqual(2);
+    for (const point of contracted.stalkPath) {
+      expect(Number.isFinite(point.x)).toBe(true);
+      expect(Number.isFinite(point.y)).toBe(true);
+    }
+  });
+
+  it("euglenaPose keeps a tapered spindle with anterior eyespot near the flagellum end", () => {
+    const pose = euglenaPose(0.1, 0.25, { length: 9, baseWidth: 2.4, heading: 0, flagellumLength: 4 });
+    const centerSample = pose.bodySamples.find((sample) => sample.u === 0);
+    const anteriorTip = pose.bodySamples.find((sample) => sample.u === 1);
+    const posteriorTip = pose.bodySamples.find((sample) => sample.u === -1);
+
+    expect(centerSample?.halfWidth).toBeGreaterThan(0.8);
+    expect(anteriorTip?.halfWidth).toBeCloseTo(0, 6);
+    expect(posteriorTip?.halfWidth).toBeCloseTo(0, 6);
+    expect(pose.eyespot.x).toBeGreaterThan(pose.center.x);
+    expect(pose.flagellumEnd.x).toBeGreaterThan(pose.eyespot.x);
+    expect(pose.flagellumEnd.x - pose.eyespot.x).toBeLessThan(5);
+  });
+
+  it("euglenaPose roll changes apparent width and stripe phase without moving the anterior anchor", () => {
+    const a = euglenaPose(0, 0.2, { centerX: 2, centerY: 3, length: 8, baseWidth: 2, heading: 0 });
+    const b = euglenaPose(0.25, 0.2, { centerX: 2, centerY: 3, length: 8, baseWidth: 2, heading: 0 });
+
+    expect(b.apparentWidth).toBeLessThan(a.apparentWidth);
+    expect(b.stripePhase).not.toBe(a.stripePhase);
+    expect(b.eyespot.x).toBeCloseTo(a.eyespot.x, 6);
+    expect(b.flagellumEnd.x).toBeCloseTo(a.flagellumEnd.x, 6);
+  });
+
+  it("diatomGeometry keeps navicula bilateral symmetry with finite scale-aware striae", () => {
+    const small = diatomGeometry("navicula", { length: 4, width: 1.4 });
+    const large = diatomGeometry("navicula", { length: 8, width: 2.8 });
+
+    expect(small.striae.length).toBeGreaterThan(0);
+    expect(large.striae.length).toBeGreaterThan(small.striae.length);
+    for (const stria of large.striae) {
+      expect(Number.isFinite(stria.from.x)).toBe(true);
+      expect(Number.isFinite(stria.from.y)).toBe(true);
+      expect(Number.isFinite(stria.to.x)).toBe(true);
+      expect(Number.isFinite(stria.to.y)).toBe(true);
+      const mirrored = large.striae.find((candidate) =>
+        Math.abs(candidate.from.x + stria.from.x) < 1e-6 && Math.abs(candidate.to.x + stria.to.x) < 1e-6,
+      );
+      expect(mirrored).toBeTruthy();
+    }
+  });
+
+  it("diatomGeometry keeps oval centric symmetry with finite scale-aware radial striae", () => {
+    const tiny = diatomGeometry("ovalCentric", { length: 3, width: 2 });
+    const larger = diatomGeometry("ovalCentric", { length: 8, width: 5 });
+
+    expect(tiny.striae.length).toBeGreaterThanOrEqual(4);
+    expect(larger.striae.length).toBeGreaterThan(tiny.striae.length);
+    for (const point of larger.outline) {
+      const opposite = larger.outline.find((candidate) =>
+        Math.abs(candidate.x + point.x) < 1e-6 && Math.abs(candidate.y + point.y) < 1e-6,
+      );
+      expect(opposite).toBeTruthy();
+    }
+    for (const stria of larger.striae) {
+      expect(Number.isFinite(stria.from.x)).toBe(true);
+      expect(Number.isFinite(stria.from.y)).toBe(true);
+      expect(Number.isFinite(stria.to.x)).toBe(true);
+      expect(Number.isFinite(stria.to.y)).toBe(true);
     }
   });
 });
