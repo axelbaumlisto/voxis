@@ -122,8 +122,11 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       trichocystLineWidth: 1.5,        // thick needles (was 1.0px)
       enableMetachronal: true,          // traveling metachronal wave on cilia
       metachronalWavelength: 20,        // wavelength in cilia count
-      metachronalSpeed: 4.0,            // wave propagation speed rad/s
-      metachronalDepth: 0.6,            // deeper wave crests [0.4, 1.0] (was 0.4)
+      metachronalSpeed: 1.5,            // gentle wave (was 4.0 = frantic)
+      metachronalDepth: 0.35,           // subtle wave [0.65, 1.0] (was 0.6 = jumpy)
+      ciliaBeatHz: 0.5,                 // slower idle beat (was 0.9)
+      ciliaBeatHzActive: 0.9,           // calmer recording beat (was 1.6)
+      caudalTuftLength: 1.2,            // shorter posterior tuft (default 1.7)
       nucleusIndent: 0.3,               // kidney-shaped macronucleus concavity
       foodVacuoleSat: 0.25,             // warmer amber food vacuoles (was 0.10)
       enableCyclosis: true,          // cytoplasmic streaming + granules (Commit 27)
