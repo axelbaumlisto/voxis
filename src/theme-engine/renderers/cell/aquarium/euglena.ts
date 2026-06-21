@@ -510,6 +510,18 @@ export function updateEuglena(
           nextY += (mvy / need) * step;
         }
       }
+      // organic turn-aside: when near the hero (out to ~1.3× the exclusion),
+      // ease the heading toward the tangent so the euglena actively swims AROUND
+      // the paramecium instead of merely sliding along the cushion.
+      if (qd < 1.69 && qd > 1e-9) {
+        const factor = Math.min(1, (1.69 - qd) / 0.69);
+        const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+        const awayAng = Math.atan2(dy, dx);
+        const t1 = awayAng + Math.PI / 2;
+        const t2 = awayAng - Math.PI / 2;
+        const target = Math.abs(wrapPi(t1 - heading)) < Math.abs(wrapPi(t2 - heading)) ? t1 : t2;
+        heading += wrapPi(target - heading) * Math.min(1, 1.8 * factor * dt);
+      }
     }
 
     const rollDelta = Math.max(0, finite(cell.rollRate, 0)) * act * dt;
