@@ -513,6 +513,23 @@ function cellReach(baseR, params) {
   return Math.max(membraneOuter, ciliaOuter) + startleMaxPx;
 }
 
+// src/theme-engine/renderers/cell/startle.ts
+function startleOffset(prevMag, level, baseline, sensitivity, decay) {
+  const edge = Math.max(0, (level - baseline) * sensitivity);
+  const decayed = prevMag * Math.max(0, Math.min(1, decay));
+  return Math.max(0, Math.min(1, Math.max(decayed, edge)));
+}
+function startleHeadingKick(startle, prevStartle, t, params) {
+  const rising = startle - prevStartle;
+  if (rising <= (params.startleKickThreshold ?? 0.12))
+    return 0;
+  return noise2D(811.3, t * 1.7) * (params.startleKickMax ?? 1.2);
+}
+function startleBurstSpeed(startle, baseR, params) {
+  const s = startle < 0 ? 0 : startle > 1 ? 1 : startle;
+  return s * (params.startleBurstFrac ?? 0.5) * baseR;
+}
+
 // src/theme-engine/renderers/cell/persistence.ts
 function serializeCellState(s) {
   return JSON.stringify(s);
@@ -955,21 +972,6 @@ function ciliaPath(cx, cy, baseR, t, energy, growth, params, motion) {
     out.push({ points: pts, width: hairWidth });
   }
   return out;
-}
-function startleOffset(prevMag, level, baseline, sensitivity, decay) {
-  const edge = Math.max(0, (level - baseline) * sensitivity);
-  const decayed = prevMag * Math.max(0, Math.min(1, decay));
-  return Math.max(0, Math.min(1, Math.max(decayed, edge)));
-}
-function startleHeadingKick(startle, prevStartle, t, params) {
-  const rising = startle - prevStartle;
-  if (rising <= (params.startleKickThreshold ?? 0.12))
-    return 0;
-  return noise2D(811.3, t * 1.7) * (params.startleKickMax ?? 1.2);
-}
-function startleBurstSpeed(startle, baseR, params) {
-  const s = startle < 0 ? 0 : startle > 1 ? 1 : startle;
-  return s * (params.startleBurstFrac ?? 0.5) * baseR;
 }
 function idleMorph(sampleCount, t, params) {
   const out = [];
