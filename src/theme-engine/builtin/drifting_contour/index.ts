@@ -60,9 +60,9 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       growthAttack: 0.05,
       growthRelease: 0.012,
       baseRadiusPx: 17,
-      driftSpeed: 0.08,              // resting cell still glides visibly (was 0.03)
-      idleSwimFrac: 0.30,            // 30% of peak swim even at idle — cell always drifts
-      idleDriftMin: 0.70,            // wander position 70% visible even in idle
+      driftSpeed: 0.03,              // gentle glide (was 0.08)
+      idleSwimFrac: 0.12,            // 12% of peak swim at idle — slow drift (was 0.30)
+      idleDriftMin: 0.40,            // subtle wander (was 0.70)
       driftMargin: 30,
       idleMorphAmplitude: 0.16,
       idleMorphSpeed: 0.22,
