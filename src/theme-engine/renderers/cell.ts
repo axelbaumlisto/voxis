@@ -974,18 +974,33 @@ export function prolateAspect(speedNorm: number, params: CellParams): number {
  *   rate = axialSpinMax * clamp01(speedNorm)   (rad/s, bounded, ZERO at rest)
  *   phase = -rate * simTime                     (LEFT-handed => negative sign)
  *
- * `phase = rate*simTime` is an APPROXIMATION of integral(rate dt) when speed
- * varies, but it is PURE, MEMORYLESS and dt-independent (depends only on simTime
- * + current speedNorm) — the plan explicitly forbids a separate oscillator
- * accumulator (KISS). Gated OFF by default (returns 0 => squeezePhi unchanged);
- * also returns 0 at rest even when the gate is ON. Deterministic: no Date.now /
- * performance.now / Math.random.
+ * This pure helper is retained for compatibility/tests. The live renderer uses
+ * `advanceAxialSpinPhase`, because activity-dependent `rate * simTime` creates
+ * phase spikes when speed changes after a long elapsed time.
  */
 export function axialSpin(simTime: number, speedNorm: number, params: CellParams): number {
   if (!params.enableAxialSpin) return 0;
   const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm; // clamp01
   const rate = (params.axialSpinMax ?? 0) * s; // rad/s, proportional to speed
   return -rate * simTime; // LEFT-handed spin => negative
+}
+
+/**
+ * Step A+B: dt-integrated axial spin phase for the live render loop.
+ * Unlike `axialSpin(simTime, speedNorm)`, the increment depends only on the
+ * current frame's bounded rate and dt, so speed/activity changes cannot multiply
+ * by the renderer's total elapsed time.
+ */
+export function advanceAxialSpinPhase(
+  prevPhase: number,
+  dt: number,
+  speedNorm: number,
+  params: CellParams,
+): number {
+  if (!params.enableAxialSpin) return 0;
+  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
+  const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
+  return prevPhase - (params.axialSpinMax ?? 0) * s * safeDt;
 }
 
 /**
@@ -1176,9 +1191,22 @@ export function ciliaBeatPhase(
   params: CellParams,
 ): number {
   const hz = params.ciliaBeatHz ?? 0.9;
+  return ciliaBeatPhaseAtCycle(t * hz, index, params);
+}
+
+/**
+ * Step A+B: ciliary beat phase from an already-integrated base cycle count.
+ * Keeps the pure asymmetric/metachronal mapping, but lets the render loop
+ * advance `baseCycles += hz(activity) * dt` instead of `hz(activity) * simTime`.
+ */
+export function ciliaBeatPhaseAtCycle(
+  baseCycles: number,
+  index: number,
+  params: CellParams,
+): number {
   const lag = (params.ciliaMetachronal ?? 0) * index;
   // Linear phase advance + metachronal offset, wrapped to [0,1).
-  const lin = (t * hz + lag / TAU) % 1;
+  const lin = (baseCycles + lag / TAU) % 1;
   const u = ((lin % 1) + 1) % 1; // guard negatives
   const a = Math.max(0, Math.min(0.95, params.ciliaAsymmetry ?? 0));
   if (a === 0) return u;
@@ -1198,6 +1226,12 @@ export function ciliaBeatPhase(
   return ((phase % 1) + 1) % 1; // keep in [0,1) against FP drift
 }
 
+export function advanceCiliaBeatCycles(prevCycles: number, dt: number, hz: number): number {
+  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
+  const next = prevCycles + Math.max(0, Number.isFinite(hz) ? hz : 0) * safeDt;
+  return ((next % 1) + 1) % 1;
+}
+
 /**
  * D2 motion basis for cilia drag-lean. When the cell swims, viscous drag bends
  * the whole crown REARWARD (opposite the travel tangent), more on the leading
@@ -1213,6 +1247,9 @@ export interface CiliaMotion {
   /** F4/G3: global stroke-axis coherence weight [0,1] (= strokeAxisStrength(a)).
    * 0 => per-hair local azimuth (identity). Optional; defaults to 0. */
   axisStrength?: number;
+  /** Step A+B: integrated cilia beat base cycles. When absent, ciliaPath keeps
+   * legacy pure `t * ciliaBeatHz` behaviour for helper compatibility. */
+  beatCycles?: number;
   /** Commit 21c: the live membrane contour the cilia should anchor on. When
    * present AND params.enableCiliaOnContour, each hair base sits on the deformed
    * (deform[]) + affine-squeezed (squeezeK,squeezePhi) contour and grows along
@@ -1542,7 +1579,9 @@ export function ciliaPath(
     // (metaIdx blends the crown index k -> axial index by speedNorm); at rest it
     // is exactly k (today's around-the-crown wave).
     const metaIdx = metachronalIndex(baseAngle, k, mSpeed, strokeAxis, gap, axisEngaged);
-    const phase = ciliaBeatPhase(t + r01 * 0.6, metaIdx, params);
+    const phase = motion?.beatCycles !== undefined
+      ? ciliaBeatPhaseAtCycle(motion.beatCycles + r01 * 0.6 * (params.ciliaBeatHz ?? 0.9), metaIdx, params)
+      : ciliaBeatPhase(t + r01 * 0.6, metaIdx, params);
     // F3: smooth the recovery envelope instead of a hard {0.35,1} step at
     // phase=0.5. smoothstep((phase-0.35)/0.3) ramps 0->1 over phase in
     // [0.35,0.65], Lipschitz and C1, so the bend amplitude no longer jumps.
@@ -2781,13 +2820,31 @@ export function cyclosisLoopPoint(
 ): { u: number; s: number } {
   const T = Math.max(0.1, params.cyclosisPeriod ?? 45);
   const sense = (params.cyclosisSense ?? 1) >= 0 ? 1 : -1;
-  const phi = g.phi0 + sense * (TAU / T) * simTime; // frame-rate independent (simTime)
+  return cyclosisLoopPointAtPhase(g, sense * (TAU / T) * simTime);
+}
+
+/**
+ * Step A+B: cyclosis loop from an integrated phase offset (radians). The seeded
+ * `phi0` remains per-granule; the renderer accumulates only the shared offset.
+ */
+export function cyclosisLoopPointAtPhase(
+  g: { q: number; phi0: number },
+  phase: number,
+): { u: number; s: number } {
+  const phi = g.phi0 + phase;
   // nested loop amplitude from the loop label q in [0, 1]; sqrt biases outward
   // so some granules ride the OUTER loop near the cortex/poles.
   const amp = 0.3 + 0.68 * Math.sqrt(Math.max(0, Math.min(1, g.q))); // [0.30, 0.98]
   const u = amp * Math.sin(phi);
   const s = amp * Math.sin(phi + Math.PI / 2); // = amp*cos(phi); delta=pi/2 -> elliptical loop
   return { u, s };
+}
+
+export function advanceCyclosisPhase(prevPhase: number, dt: number, params: CellParams): number {
+  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
+  const T = Math.max(0.1, params.cyclosisPeriod ?? 45);
+  const sense = (params.cyclosisSense ?? 1) >= 0 ? 1 : -1;
+  return prevPhase + sense * (TAU / T) * safeDt;
 }
 
 /**
@@ -3500,6 +3557,12 @@ export function createCellRenderer(
   // so a backgrounded tab resuming with one huge frame can no longer desync
   // position from phase. Clamp only the per-frame dt, never this accumulator.
   let simTime = 0;
+  // Step A+B: activity-dependent visual phases must be integrated by dt. Do not
+  // compute `rate(currentActivity) * simTime`, because a rate change after long
+  // uptime creates a visible phase spike proportional to elapsed time.
+  let axialSpinPhase = 0;
+  let cyclosisPhase = 0;
+  let ciliaBeatCycles = 0;
 
   // Persistence: restore state from localStorage for continuity across restarts.
   // M5: key is namespaced by tank size so a pose saved for one overlay geometry
@@ -3598,6 +3661,7 @@ export function createCellRenderer(
       const cyclParams: CellParams = params.cyclosisActivityBoost
         ? { ...params, cyclosisPeriod: cyclPeriod }
         : params; // no boost => reuse original (zero allocation)
+      cyclosisPhase = advanceCyclosisPhase(cyclosisPhase, dt, cyclParams);
       const effectiveFillAlpha = lerp(
         params.fillAlpha,
         params.fillAlphaActive ?? params.fillAlpha,
@@ -3763,12 +3827,11 @@ export function createCellRenderer(
         : params.enableAffine
           ? prolateAspect(speedNorm, params)
           : 1;
-      // Commit 24: axial spin. A near-rigid spindle SPINS about its long axis as
-      // it swims; rotating the area-preserving (det=1) affine frame by spinPhi
-      // leaves area invariant and produces the apparent foreshorten-breathe.
-      // spinPhi=0 when the gate is off OR at rest, so squeezePhi===bodyHeading
-      // byte-identically there.
-      const spinPhi = axialSpin(simTime, speedNorm, params);
+      // Commit 24 + Step A+B: axial spin. A near-rigid spindle SPINS about its
+      // long axis as it swims. Advance phase by current rate*dt; never use
+      // rate(currentSpeed)*simTime, which spikes at recording onset after uptime.
+      axialSpinPhase = advanceAxialSpinPhase(axialSpinPhase, dt, speedNorm, params);
+      const spinPhi = axialSpinPhase;
       const squeezePhi = bodyHeading + spinPhi;
 
       // v3.8B: helical swimming — lateral sinusoidal offset perpendicular to heading.
@@ -3818,12 +3881,14 @@ export function createCellRenderer(
                 ciliaCurl: baseCiliaParams.ciliaCurl * (1 + 0.3 * activity),
               }
             : (params.enablePerimeterCount ? { ...baseCiliaParams, ciliaCount: effectiveCount } : baseCiliaParams);
+          ciliaBeatCycles = advanceCiliaBeatCycles(ciliaBeatCycles, dt, ciliaParams.ciliaBeatHz ?? 0.9);
           // D2: motion basis so the crown leans rearward while swimming. Tangent
           // is the body heading; speedNorm gates it (0 at rest => identity).
           const ciliaMotion: CiliaMotion = {
             tx: Math.cos(bodyHeading),
             ty: Math.sin(bodyHeading),
             speedNorm,
+            beatCycles: ciliaBeatCycles,
             // F4/G3: how coherently the crown rows toward the heading, gated by
             // activity (idle ~isotropic, active coherent). 0 when activity off.
             axisStrength: params.enableActivity ? strokeAxisStrength(activity, params) : 0,
@@ -4226,7 +4291,7 @@ export function createCellRenderer(
             };
             for (let i = 0; i < interiorGranules.length; i++) {
               const g = interiorGranules[i];
-              const loop = cyclosisLoopPoint(g, t, cyclParams);
+              const loop = cyclosisLoopPointAtPhase(g, cyclosisPhase);
               const [gx, gy] = interiorPoint(loop.u, loop.s, ictx);
               ctx.beginPath();
               ctx.arc(gx, gy, granuleSizePx, 0, TAU);
@@ -4281,7 +4346,7 @@ export function createCellRenderer(
             };
             for (let i = 0; i < interiorFoodVacuoles.length; i++) {
               const fv = interiorFoodVacuoles[i];
-              const loop = cyclosisLoopPoint(fv, t, cyclParams); // rides the SAME loop as granules
+              const loop = cyclosisLoopPointAtPhase(fv, cyclosisPhase); // rides the SAME loop as granules
               const size = foodVacuoleSize(t, fv.digestPhase, params); // digest shrink (reuse)
               const drawR = fvSizePx * (0.4 + 0.6 * size);
               const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);
