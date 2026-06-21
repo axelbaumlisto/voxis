@@ -1659,22 +1659,6 @@ function mix32(n) {
 function seededUnit(seed, index, salt) {
   return mix32(seed ^ Math.imul(index + 1, 2654435761) ^ salt) / 4294967296;
 }
-function seedPoints(count, seed, frame, salt) {
-  if (count <= 0)
-    return [];
-  const points = [];
-  const safeWidth = Math.max(0, frame.width);
-  const safeHeight = Math.max(0, frame.height);
-  for (let i = 0;i < count; i++) {
-    points.push({
-      x: seededUnit(seed, i, salt) * safeWidth,
-      y: seededUnit(seed, i, salt ^ 1374496523) * safeHeight,
-      phase: seededUnit(seed, i, salt ^ 1757159915) * Math.PI * 2,
-      size: 0.5 + seededUnit(seed, i, salt ^ 48610963)
-    });
-  }
-  return points;
-}
 
 // src/theme-engine/renderers/cell/aquarium/diatoms.ts
 function finiteOr2(value, fallback) {
@@ -2089,6 +2073,224 @@ function drawEuglena(ctx, euglena, frame, view) {
   ctx.restore();
 }
 
+// src/theme-engine/renderers/cell/aquarium/vorticella.ts
+function finiteOr4(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+function finite3(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+function clamp012(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
+function wrapUnit2(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  return (value % 1 + 1) % 1;
+}
+var TAU4 = Math.PI * 2;
+var CONTRACT_FRACTION = 0.16;
+function vorticellaContractPhase(cyclePhase) {
+  const phase = wrapUnit2(cyclePhase);
+  if (phase < CONTRACT_FRACTION) {
+    const q2 = phase / CONTRACT_FRACTION;
+    return 1 - Math.pow(1 - q2, 3);
+  }
+  const q = (phase - CONTRACT_FRACTION) / (1 - CONTRACT_FRACTION);
+  return Math.pow(1 - q, 2);
+}
+function vorticellaGeometry(contractPhase, options = {}) {
+  const phase = clamp012(contractPhase);
+  const anchorX = finiteOr4(options.anchorX, 0);
+  const anchorY = finiteOr4(options.anchorY, 0);
+  const restLength = Math.max(0.001, finiteOr4(options.restLength, 10));
+  const minLengthFrac = Math.min(1, Math.max(0.12, finiteOr4(options.minLengthFrac, 0.32)));
+  const angle = finiteOr4(options.directionAngle, Math.PI / 2);
+  const coilTurnsRest = Math.max(0, finiteOr4(options.coilTurnsRest, 0.15));
+  const coilTurnsContracted = Math.max(coilTurnsRest, finiteOr4(options.coilTurnsContracted, 3.2));
+  const sampleCount = Math.max(2, Math.floor(finiteOr4(options.coilSampleCount, 16)));
+  const stalkLength = restLength * (1 - phase * (1 - minLengthFrac));
+  const coilTurns = coilTurnsRest + (coilTurnsContracted - coilTurnsRest) * phase;
+  const ux = Math.cos(angle);
+  const uy = Math.sin(angle);
+  const nx = -uy;
+  const ny = ux;
+  const coilAmplitude = restLength * 0.035 * phase;
+  const stalkPath = [];
+  for (let i = 0;i < sampleCount; i++) {
+    const t = i / (sampleCount - 1);
+    const along = stalkLength * t;
+    const wave = Math.sin(t * coilTurns * TAU4) * coilAmplitude;
+    stalkPath.push({
+      x: anchorX + ux * along + nx * wave,
+      y: anchorY + uy * along + ny * wave
+    });
+  }
+  return {
+    contractPhase: phase,
+    anchor: { x: anchorX, y: anchorY },
+    bellCenter: { x: anchorX + ux * stalkLength, y: anchorY + uy * stalkLength },
+    stalkLength,
+    coilTurns,
+    stalkPath
+  };
+}
+function seedVorticella(count, seed, frame, salt = 117600714) {
+  if (count <= 0)
+    return [];
+  const vorticella = [];
+  const safeWidth = Math.max(0, finite3(frame.width, 0));
+  const safeHeight = Math.max(0, finite3(frame.height, 0));
+  for (let i = 0;i < count; i++) {
+    const side = Math.floor(seededUnit(seed, i, salt ^ 523543229) * 4) % 4;
+    const along = seededUnit(seed, i, salt ^ 1164169887);
+    const inset = 0.5;
+    let anchorX = along * safeWidth;
+    let anchorY = inset;
+    let directionAngle = Math.PI / 2;
+    if (side === 1) {
+      anchorX = safeWidth - inset;
+      anchorY = along * safeHeight;
+      directionAngle = Math.PI;
+    } else if (side === 2) {
+      anchorX = along * safeWidth;
+      anchorY = safeHeight - inset;
+      directionAngle = -Math.PI / 2;
+    } else if (side === 3) {
+      anchorX = inset;
+      anchorY = along * safeHeight;
+      directionAngle = 0;
+    }
+    const restLength = Math.max(5.5, Math.min(12, (7.5 + seededUnit(seed, i, salt ^ 48610963) * 3.5) * Math.min(1, safeHeight / 36)));
+    const cycle = seededUnit(seed, i, salt ^ 1628012333);
+    vorticella.push({
+      x: anchorX,
+      y: anchorY,
+      phase: cycle,
+      size: 0.5 + seededUnit(seed, i, salt ^ 1921111239),
+      anchorX,
+      anchorY,
+      directionAngle,
+      restLength,
+      contractPhase: vorticellaContractPhase(cycle),
+      contractCyclePhase: cycle,
+      oralWreathPhase: seededUnit(seed, i, salt ^ 1757159915),
+      contractRate: 0.055 + seededUnit(seed, i, salt ^ 802853537) * 0.06,
+      oralRate: 0.42 + seededUnit(seed, i, salt ^ 348696353) * 0.18
+    });
+  }
+  return vorticella;
+}
+function updateVorticella(vorticella, frame, view) {
+  if (vorticella.length === 0)
+    return vorticella;
+  const dt = Math.max(0, finite3(frame.dt, 0));
+  const activityMix = clamp012(finite3(frame.activity, 0) * finite3(view.activityBoost, 0));
+  const idleRate = Math.max(0, finite3(view.vorticella.contractRate, 0));
+  const activeRate = Math.max(0, finite3(view.vorticella.contractRateActive, idleRate));
+  const rate = idleRate + (activeRate - idleRate) * activityMix;
+  const modeMul = frame.mode === "recording" ? 1.18 : frame.mode === "transcribing" ? 0.35 : frame.mode === "error" ? 0.15 : 1;
+  const startleBoost = 1 + Math.min(0.35, Math.max(0, finite3(frame.startle, 0)) * 0.35);
+  const cycleRateMul = Math.min(1.45, rate * modeMul * startleBoost);
+  const oralRateMul = frame.mode === "error" ? 0.2 : frame.mode === "transcribing" ? 0.45 : 1 + activityMix * 0.18;
+  return vorticella.map((cell) => {
+    const cyclePhase = wrapUnit2(cell.contractCyclePhase + Math.max(0, finite3(cell.contractRate, 0)) * cycleRateMul * dt);
+    return {
+      ...cell,
+      x: cell.anchorX,
+      y: cell.anchorY,
+      phase: cyclePhase,
+      contractCyclePhase: cyclePhase,
+      contractPhase: vorticellaContractPhase(cyclePhase),
+      oralWreathPhase: wrapUnit2(cell.oralWreathPhase + Math.max(0, finite3(cell.oralRate, 0)) * oralRateMul * dt)
+    };
+  });
+}
+function drawPolyline3(ctx, points, close) {
+  if (points.length === 0)
+    return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1;i < points.length; i++)
+    ctx.lineTo(points[i].x, points[i].y);
+  if (close)
+    ctx.closePath();
+}
+function drawVorticella(ctx, vorticella, frame, view) {
+  if (!view.enabled || vorticella.length === 0 || view.vorticella.count <= 0)
+    return;
+  const alpha = Math.max(0, Math.min(1, view.alpha * 0.62));
+  if (alpha <= 0)
+    return;
+  const scale = Math.max(0.1, finite3(view.vorticella.scale, 1));
+  const hue = finite3(frame.baseHue, 50) + 110;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const cell of vorticella) {
+    const bellRadius = Math.max(2.4, Math.min(6.2, (3.8 + finite3(cell.size, 1) * 1.4) * scale));
+    const restLength = Math.max(5.5, Math.min(12, finite3(cell.restLength, 9) * scale));
+    const geometry = vorticellaGeometry(cell.contractPhase, {
+      anchorX: finite3(cell.anchorX, 0),
+      anchorY: finite3(cell.anchorY, 0),
+      restLength,
+      directionAngle: finite3(cell.directionAngle, Math.PI / 2),
+      minLengthFrac: 0.26,
+      coilSampleCount: 14
+    });
+    const ux = Math.cos(cell.directionAngle);
+    const uy = Math.sin(cell.directionAngle);
+    const nx = -uy;
+    const ny = ux;
+    const bellCx = geometry.bellCenter.x;
+    const bellCy = geometry.bellCenter.y;
+    const cupDepth = bellRadius * 0.88;
+    const cupWidth = bellRadius * (1.18 - cell.contractPhase * 0.18);
+    const cup = [
+      { x: bellCx + nx * -cupWidth * 0.72 - ux * cupDepth * 0.3, y: bellCy + ny * -cupWidth * 0.72 - uy * cupDepth * 0.3 },
+      { x: bellCx + nx * -cupWidth * 0.38 + ux * cupDepth * 0.42, y: bellCy + ny * -cupWidth * 0.38 + uy * cupDepth * 0.42 },
+      { x: bellCx + ux * cupDepth * 0.64, y: bellCy + uy * cupDepth * 0.64 },
+      { x: bellCx + nx * cupWidth * 0.38 + ux * cupDepth * 0.42, y: bellCy + ny * cupWidth * 0.38 + uy * cupDepth * 0.42 },
+      { x: bellCx + nx * cupWidth * 0.72 - ux * cupDepth * 0.3, y: bellCy + ny * cupWidth * 0.72 - uy * cupDepth * 0.3 }
+    ];
+    drawPolyline3(ctx, geometry.stalkPath, false);
+    ctx.strokeStyle = `hsla(${hue}, 20%, 72%, ${alpha * 0.46})`;
+    ctx.lineWidth = 0.44;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(geometry.anchor.x, geometry.anchor.y, 0.65, 0, TAU4);
+    ctx.fillStyle = `hsla(${hue - 12}, 14%, 74%, ${alpha * 0.35})`;
+    ctx.fill();
+    drawPolyline3(ctx, cup, true);
+    ctx.fillStyle = `hsla(${hue}, 18%, 70%, ${alpha * 0.12})`;
+    ctx.strokeStyle = `hsla(${hue + 8}, 22%, 78%, ${alpha * 0.42})`;
+    ctx.lineWidth = 0.48;
+    ctx.fill();
+    ctx.stroke();
+    const mouthX = bellCx - ux * cupDepth * 0.3;
+    const mouthY = bellCy - uy * cupDepth * 0.3;
+    ctx.beginPath();
+    ctx.ellipse(mouthX, mouthY, cupWidth * 0.78, Math.max(0.55, bellRadius * 0.28), cell.directionAngle, 0, TAU4);
+    ctx.strokeStyle = `hsla(${hue + 18}, 18%, 82%, ${alpha * 0.52})`;
+    ctx.lineWidth = 0.36;
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${hue + 20}, 18%, 84%, ${alpha * 0.38})`;
+    ctx.lineWidth = 0.24;
+    for (let i = 0;i < 7; i++) {
+      const q = (i / 7 + cell.oralWreathPhase) % 1;
+      const lateral = (q - 0.5) * cupWidth * 1.35;
+      const beat = Math.sin((q + cell.oralWreathPhase) * TAU4) * bellRadius * 0.12;
+      const base = { x: mouthX + nx * lateral, y: mouthY + ny * lateral };
+      const tip = { x: base.x - ux * (0.85 + beat), y: base.y - uy * (0.85 + beat) };
+      drawPolyline3(ctx, [base, tip], false);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 // src/theme-engine/renderers/cell/aquarium/layer.ts
 function seedAquarium(frame, params) {
   const view = aquariumParamsView(params);
@@ -2097,7 +2299,7 @@ function seedAquarium(frame, params) {
     seed,
     diatoms: seedDiatoms(view.diatoms.count, seed, frame),
     euglena: seedEuglena(view.euglena.count, seed, frame),
-    vorticella: seedPoints(view.vorticella.count, seed, frame, 117600714)
+    vorticella: seedVorticella(view.vorticella.count, seed, frame)
   };
 }
 function updateAquarium(aquarium, frame, params) {
@@ -2106,7 +2308,8 @@ function updateAquarium(aquarium, frame, params) {
     return aquarium;
   const diatoms = view.diatoms.count > 0 ? updateDiatoms(aquarium.diatoms, frame, view) : aquarium.diatoms;
   const euglena = view.euglena.count > 0 ? updateEuglena(aquarium.euglena, frame, view) : aquarium.euglena;
-  return diatoms === aquarium.diatoms && euglena === aquarium.euglena ? aquarium : { ...aquarium, diatoms, euglena };
+  const vorticella = view.vorticella.count > 0 ? updateVorticella(aquarium.vorticella, frame, view) : aquarium.vorticella;
+  return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella ? aquarium : { ...aquarium, diatoms, euglena, vorticella };
 }
 function drawAquariumBackground(ctx, aquarium, frame, params) {
   const view = aquariumParamsView(params);
@@ -2114,6 +2317,7 @@ function drawAquariumBackground(ctx, aquarium, frame, params) {
     return;
   drawDiatoms(ctx, aquarium.diatoms, frame, view);
   drawEuglena(ctx, aquarium.euglena, frame, view);
+  drawVorticella(ctx, aquarium.vorticella, frame, view);
 }
 
 // src/theme-engine/renderers/cell/draw.ts
