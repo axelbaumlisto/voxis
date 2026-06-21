@@ -2263,7 +2263,7 @@ function mount(container, api) {
       enableAffine: true,
       enableCiliaStructure: true,
       enableAxialSpin: true,
-      axialSpinMax: 7,
+      axialSpinMax: 1,
       nucleusAlpha: 0.85,
       enableVacuoles: true,
       enableCVCanals: true,

@@ -94,7 +94,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableAffine: true,            // forced k=1 when profile on (no double-elongate)
       enableCiliaStructure: true,    // oral-groove dip + caudal tuft (Commit 23)
       enableAxialSpin: true,         // spin about long axis while swimming (Commit 24)
-      axialSpinMax: 7,               // ~1.1 rev/s — calmer, closer to bio ~1 rev/s (was 10)
+      axialSpinMax: 1.0,             // ~0.16 rev/s — very gentle roll, interior stable (was 3)
       nucleusAlpha: 0.85,            // nucleus must be visible interior anchor (was 0.72)
       enableVacuoles: true,          // two asynchronous contractile vacuoles (Commit 26)
       enableCVCanals: true,          // radial canal star shape on CVs (v3.6)
@@ -135,7 +135,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // в центре". interiorPoint distributes via the profile, so the legacy
       // disc granuleMaxRadiusFrac/foodVacuoleMaxRadiusFrac no longer apply.
       enableInteriorField: true,     // body-coord interior (not the central disc)
-      cyclosisPeriod: 38,            // back to bio range 30-60s (was 26)
+      cyclosisPeriod: 38,            // bio range 30-60s
       ...userParams,
     },
   });
