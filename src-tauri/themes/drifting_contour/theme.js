@@ -3119,10 +3119,13 @@ function mount(container, api) {
       enableAquarium: true,
       aquariumAlpha: 0.22,
       aquariumActivityBoost: 0.25,
-      diatomCount: 3,
-      diatomAlpha: 0.24,
-      diatomDriftSpeed: 0.55,
-      euglenaCount: 0,
+      diatomCount: 2,
+      diatomAlpha: 0.2,
+      diatomDriftSpeed: 0.45,
+      euglenaCount: 1,
+      euglenaSpeed: 0.75,
+      euglenaSpeedActive: 1,
+      euglenaScale: 0.85,
       vorticellaCount: 0,
       ...userParams
     }

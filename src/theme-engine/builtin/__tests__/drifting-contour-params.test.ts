@@ -36,10 +36,13 @@ const CRITICAL_PARAMS = {
   enableAquarium: true,
   aquariumAlpha: 0.22,
   aquariumActivityBoost: 0.25,
-  diatomCount: 3,
-  diatomAlpha: 0.24,
-  diatomDriftSpeed: 0.55,
-  euglenaCount: 0,
+  diatomCount: 2,
+  diatomAlpha: 0.20,
+  diatomDriftSpeed: 0.45,
+  euglenaCount: 1,
+  euglenaSpeed: 0.75,
+  euglenaSpeedActive: 1.0,
+  euglenaScale: 0.85,
   vorticellaCount: 0,
 } as const;
 
@@ -111,8 +114,8 @@ function expectUserParamsLast(body: string): void {
   expect(body.slice(userParams + "...userParams".length, paramsEnd)).not.toMatch(/\w+\s*:/);
 }
 
-function expectNoLaterAquariumPreviewParams(block: string): void {
-  expect(block).not.toMatch(/\b(?:euglena(?:Speed|SpeedActive|Scale)|vorticella(?:ContractRate|ContractRateActive|Scale))\s*:/i);
+function expectNoVorticellaPreviewParams(block: string): void {
+  expect(block).not.toMatch(/\bvorticella(?:ContractRate|ContractRateActive|Scale)\s*:/i);
 }
 
 describe("drifting_contour v1.0 critical params", () => {
@@ -124,12 +127,12 @@ describe("drifting_contour v1.0 critical params", () => {
     expectCriticalParams(readBundleMountBlock());
   });
 
-  it("opts source theme into Phase 5A diatoms-only aquarium preview", () => {
-    expectNoLaterAquariumPreviewParams(readSourceMountBlock());
+  it("opts source theme into Phase 5B one-Euglena aquarium preview", () => {
+    expectNoVorticellaPreviewParams(readSourceMountBlock());
   });
 
-  it("opts built bundle into Phase 5A diatoms-only aquarium preview", () => {
-    expectNoLaterAquariumPreviewParams(readBundleMountBlock());
+  it("opts built bundle into Phase 5B one-Euglena aquarium preview", () => {
+    expectNoVorticellaPreviewParams(readBundleMountBlock());
   });
 
   it("keeps source theme params before user params so user overrides win", () => {
