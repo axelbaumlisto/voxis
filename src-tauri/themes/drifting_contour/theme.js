@@ -1686,6 +1686,7 @@ function finite(value, fallback) {
 function positive(value, fallback) {
   return Math.max(0.001, finiteOr2(value, fallback));
 }
+var TAU2 = Math.PI * 2;
 function wrap(value, max) {
   if (!(max > 0))
     return 0;
@@ -1793,7 +1794,7 @@ function updateDiatoms(diatoms, frame, view) {
     ...diatom,
     x: wrap(finite(diatom.x, 0) + finite(diatom.driftX, 0) * speed * dt, safeWidth),
     y: wrap(finite(diatom.y, 0) + finite(diatom.driftY, 0) * speed * dt, safeHeight),
-    heading: finite(diatom.heading, 0) + finite(diatom.rotationRate, 0) * dt
+    heading: wrap(finite(diatom.heading, 0) + finite(diatom.rotationRate, 0) * dt, TAU2)
   }));
 }
 function drawPolyline(ctx, points, close) {

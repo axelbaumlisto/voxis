@@ -43,6 +43,8 @@ function positive(value: number | undefined, fallback: number): number {
   return Math.max(0.001, finiteOr(value, fallback));
 }
 
+const TAU = Math.PI * 2;
+
 function wrap(value: number, max: number): number {
   if (!(max > 0)) return 0;
   const wrapped = value % max;
@@ -163,7 +165,7 @@ export function updateDiatoms(
     ...diatom,
     x: wrap(finite(diatom.x, 0) + finite(diatom.driftX, 0) * speed * dt, safeWidth),
     y: wrap(finite(diatom.y, 0) + finite(diatom.driftY, 0) * speed * dt, safeHeight),
-    heading: finite(diatom.heading, 0) + finite(diatom.rotationRate, 0) * dt,
+    heading: wrap(finite(diatom.heading, 0) + finite(diatom.rotationRate, 0) * dt, TAU),
   }));
 }
 
