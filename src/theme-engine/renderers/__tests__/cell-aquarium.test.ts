@@ -619,7 +619,9 @@ describe("aquarium layer Phase 3 euglena", () => {
 
     expect(d1).toBeGreaterThan(d0);
     expect(d2).toBeGreaterThan(d1);
-    expect(d1 - d0).toBeLessThan(1);
+    // soft exponential push: a small fraction of the penetration per frame
+    // (smooth, not a teleport to the boundary)
+    expect(d1 - d0).toBeLessThan(3);
     expect(once.y).toBeGreaterThanOrEqual(0);
     expect(once.y).toBeLessThanOrEqual(36);
   });

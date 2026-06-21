@@ -14,6 +14,11 @@ export interface AquariumFrame {
     readonly x: number;
     readonly y: number;
     readonly radius: number;
+    /** Long-axis heading of the elongated hero body (radians). */
+    readonly heading?: number;
+    /** Hero body semi-major / semi-minor (px) for elliptical exclusion. */
+    readonly halfLen?: number;
+    readonly halfWid?: number;
   };
 }
 

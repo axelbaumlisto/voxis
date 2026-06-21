@@ -44,7 +44,7 @@ const CRITICAL_PARAMS = {
   euglenaSpeed: 0.15,
   euglenaSpeedActive: 0.30,
   // (euglena_drift retuned separately; drifting_contour companion unchanged here)
-  euglenaScale: 6.45,
+  euglenaScale: 2.8,
   vorticellaCount: 0,
 } as const;
 

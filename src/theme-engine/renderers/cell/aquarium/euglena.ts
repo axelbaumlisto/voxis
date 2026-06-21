@@ -479,20 +479,36 @@ export function updateEuglena(
       nextY += (yc - nextY) * Math.min(1, 2 * dt);
     }
 
+    // --- hero exclusion (dormant when no hero, e.g. euglena_drift) ---
+    // Body-frame ELLIPTICAL exclusion hugging the elongated paramecium (~3:1),
+    // grown by the euglena's own half-length so the two outlines never overlap;
+    // soft exponential push = exact discrete solution of ṗ=-k·p, so it is
+    // frame-rate-exact and never glues/orbits/jitters at the rim.
     if (frame.hero) {
       const hx = finite(frame.hero.x, safeWidth / 2);
       const hy = finite(frame.hero.y, safeHeight / 2);
-      const exclusion = Math.max(0, finite(frame.hero.radius, 0)) * 2.2;
+      const hr = Math.max(0, finite(frame.hero.radius, 0));
+      const m = 0.5 * L;
+      const A = Math.max(1e-3, finiteOr(frame.hero.halfLen, hr) + m);
+      const B = Math.max(1e-3, finiteOr(frame.hero.halfWid, hr) + m);
+      const hh = finiteOr(frame.hero.heading, 0);
+      const cphi = Math.cos(hh), sphi = Math.sin(hh);
       const dx = nextX - hx;
       const dy = nextY - hy;
-      const dist = Math.hypot(dx, dy);
-      if (dist < exclusion && exclusion > 0) {
-        const angle = dist > 1e-6 ? Math.atan2(dy, dx) : heading;
-        const penetration = exclusion - dist;
-        const repelSpeed = Math.max(10, finite(frame.hero.radius, 0) * 2.4);
-        const step = Math.min(penetration, repelSpeed * dt);
-        nextX += Math.cos(angle) * step;
-        nextY += Math.sin(angle) * step;
+      const px = dx * cphi + dy * sphi;   // into hero body frame
+      const py = -dx * sphi + dy * cphi;
+      const qd = (px * px) / (A * A) + (py * py) / (B * B);
+      if (qd < 1 && qd > 1e-9) {
+        const f = 1 / Math.sqrt(qd);       // scale-to-boundary (>1 when inside)
+        const tx = px * f, ty = py * f;    // target on ellipse boundary (body frame)
+        const mvx = (tx - px) * cphi - (ty - py) * sphi; // back to world
+        const mvy = (tx - px) * sphi + (ty - py) * cphi;
+        const need = Math.hypot(mvx, mvy);
+        if (need > 1e-6) {
+          const step = need * (1 - Math.exp(-6 * dt));
+          nextX += (mvx / need) * step;
+          nextY += (mvy / need) * step;
+        }
       }
     }
 
@@ -693,13 +709,23 @@ export function drawEuglena(
     // so there are no per-segment round-cap "bead" seams.
     const fp = pose.flagellumPoints;
     if (fp.length >= 2) {
+      // when the euglena is tucked against the hero (its body occluded by the
+      // paramecium drawn on top), fade the protruding whip so it doesn't read as
+      // an orphaned line floating over the hero.
+      let flagFade = 1;
+      if (frame.hero) {
+        const hdx = finite(cell.x, 0) - finite(frame.hero.x, 0);
+        const hdy = finite(cell.y, 0) - finite(frame.hero.y, 0);
+        const reach = Math.max(finiteOr(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) * 1.15;
+        if (Math.hypot(hdx, hdy) < reach) flagFade = 0.45;
+      }
       // soft underglow so the thin whip separates from the dark field
-      ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.30})`;
+      ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.30 * flagFade})`;
       ctx.lineWidth = Math.max(0.9, width * 0.18);
       drawPolyline(ctx, fp, false);
       ctx.stroke();
       // full-length thin tip stroke
-      ctx.strokeStyle = `hsla(${hue + 8}, 34%, 70%, ${alpha * 0.90})`;
+      ctx.strokeStyle = `hsla(${hue + 8}, 34%, 70%, ${alpha * 0.90 * flagFade})`;
       ctx.lineWidth = Math.max(0.5, width * 0.10);
       drawPolyline(ctx, fp, false);
       ctx.stroke();
