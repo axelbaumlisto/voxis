@@ -634,12 +634,12 @@ function prolateAspect(speedNorm, params) {
   const rest = params.prolateRestAspect ?? 1.7;
   return Math.max(rest, base);
 }
-function axialSpin(simTime, speedNorm, params) {
+function advanceAxialSpinPhase(prevPhase, dt, speedNorm, params) {
   if (!params.enableAxialSpin)
     return 0;
+  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
   const s = speedNorm < 0 ? 0 : speedNorm > 1 ? 1 : speedNorm;
-  const rate = (params.axialSpinMax ?? 0) * s;
-  return -rate * simTime;
+  return prevPhase - (params.axialSpinMax ?? 0) * s * safeDt;
 }
 function helicalOffset(spinPhi, bodyHeading, baseR, params) {
   const hAmp = params.helicalAmplitude ?? 0;
@@ -676,8 +676,11 @@ function pseudopodOffset(angle, t, audioLevel, energy, params) {
 }
 function ciliaBeatPhase(t, index, params) {
   const hz = params.ciliaBeatHz ?? 0.9;
+  return ciliaBeatPhaseAtCycle(t * hz, index, params);
+}
+function ciliaBeatPhaseAtCycle(baseCycles, index, params) {
   const lag = (params.ciliaMetachronal ?? 0) * index;
-  const lin = (t * hz + lag / TAU) % 1;
+  const lin = (baseCycles + lag / TAU) % 1;
   const u = (lin % 1 + 1) % 1;
   const a = Math.max(0, Math.min(0.95, params.ciliaAsymmetry ?? 0));
   if (a === 0)
@@ -685,6 +688,11 @@ function ciliaBeatPhase(t, index, params) {
   const A = a;
   const phase = u + A / TAU * (1 - Math.cos(TAU * u));
   return (phase % 1 + 1) % 1;
+}
+function advanceCiliaBeatCycles(prevCycles, dt, hz) {
+  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
+  const next = prevCycles + Math.max(0, Number.isFinite(hz) ? hz : 0) * safeDt;
+  return (next % 1 + 1) % 1;
 }
 function strokeAxisStrength(activity, params) {
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
@@ -833,7 +841,7 @@ function ciliaPath(cx, cy, baseR, t, energy, growth, params, motion) {
     const r01b = noise2D(k * 5.1 + 2.7, 4.9) * 0.5 + 0.5;
     const hairWidth = baseWidth * (0.55 + 0.9 * (0.5 * r01 + 0.5 * r01b));
     const metaIdx = metachronalIndex(baseAngle, k, mSpeed, strokeAxis, gap, axisEngaged);
-    const phase = ciliaBeatPhase(t + r01 * 0.6, metaIdx, params);
+    const phase = motion?.beatCycles !== undefined ? ciliaBeatPhaseAtCycle(motion.beatCycles + r01 * 0.6 * (params.ciliaBeatHz ?? 0.9), metaIdx, params) : ciliaBeatPhase(t + r01 * 0.6, metaIdx, params);
     const recovery = smoothstep((phase - 0.35) / 0.3);
     const pts = [];
     for (let i = 0;i <= seg; i++) {
@@ -1324,14 +1332,18 @@ function seedInteriorGranules(count, seedBase, params) {
   }
   return out;
 }
-function cyclosisLoopPoint(g, simTime, params) {
-  const T = Math.max(0.1, params.cyclosisPeriod ?? 45);
-  const sense = (params.cyclosisSense ?? 1) >= 0 ? 1 : -1;
-  const phi = g.phi0 + sense * (TAU / T) * simTime;
+function cyclosisLoopPointAtPhase(g, phase) {
+  const phi = g.phi0 + phase;
   const amp = 0.3 + 0.68 * Math.sqrt(Math.max(0, Math.min(1, g.q)));
   const u = amp * Math.sin(phi);
   const s = amp * Math.sin(phi + Math.PI / 2);
   return { u, s };
+}
+function advanceCyclosisPhase(prevPhase, dt, params) {
+  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
+  const T = Math.max(0.1, params.cyclosisPeriod ?? 45);
+  const sense = (params.cyclosisSense ?? 1) >= 0 ? 1 : -1;
+  return prevPhase + sense * (TAU / T) * safeDt;
 }
 function contractileVacuole(t, baseR, params) {
   const period = Math.max(0.1, params.vacuolePeriod ?? 7);
@@ -1615,6 +1627,9 @@ function createCellRenderer(container, opts) {
   let flowCx = width / 2, flowCy = height / 2, flowHeading = 0, flowSpeed = 0;
   let lastTickMs = performance.now();
   let simTime = 0;
+  let axialSpinPhase = 0;
+  let cyclosisPhase = 0;
+  let ciliaBeatCycles = 0;
   const PERSIST_KEY = cellPersistKey(width, height);
   let driftPhaseOffset = 0;
   let lastPersist = 0;
@@ -1666,6 +1681,7 @@ function createCellRenderer(container, opts) {
       const activity = cellActivity(energy, growth, params);
       const cyclPeriod = effectiveCyclosisPeriod(activity, params);
       const cyclParams = params.cyclosisActivityBoost ? { ...params, cyclosisPeriod: cyclPeriod } : params;
+      cyclosisPhase = advanceCyclosisPhase(cyclosisPhase, dt, cyclParams);
       const effectiveFillAlpha = lerp(params.fillAlpha, params.fillAlphaActive ?? params.fillAlpha, activity);
       const baseMembraneLightness = params.membraneLightness ?? 0.6;
       const effectiveMembraneLightness = lerp(baseMembraneLightness, params.membraneLightnessActive ?? baseMembraneLightness, activity);
@@ -1750,7 +1766,8 @@ function createCellRenderer(container, opts) {
       flowHeading = bodyHeading;
       flowSpeed = curSpeed;
       const squeezeK = params.enableBodyProfile ? 1 : params.enableAffine ? prolateAspect(speedNorm, params) : 1;
-      const spinPhi = axialSpin(simTime, speedNorm, params);
+      axialSpinPhase = advanceAxialSpinPhase(axialSpinPhase, dt, speedNorm, params);
+      const spinPhi = axialSpinPhase;
       const squeezePhi = bodyHeading + spinPhi;
       const [hdx, hdy] = helicalOffset(spinPhi, bodyHeading, baseR, params);
       if (hdx !== 0 || hdy !== 0) {
@@ -1772,10 +1789,12 @@ function createCellRenderer(container, opts) {
             ciliaBeatHz: ciliaBeatHzEff(activity, params),
             ciliaCurl: baseCiliaParams.ciliaCurl * (1 + 0.3 * activity)
           } : params.enablePerimeterCount ? { ...baseCiliaParams, ciliaCount: effectiveCount } : baseCiliaParams;
+          ciliaBeatCycles = advanceCiliaBeatCycles(ciliaBeatCycles, dt, ciliaParams.ciliaBeatHz ?? 0.9);
           const ciliaMotion = {
             tx: Math.cos(bodyHeading),
             ty: Math.sin(bodyHeading),
             speedNorm,
+            beatCycles: ciliaBeatCycles,
             axisStrength: params.enableActivity ? strokeAxisStrength(activity, params) : 0,
             ...params.enableCiliaOnContour && deform ? { contour: { deform, squeezeK, squeezePhi } } : {}
           };
@@ -2074,7 +2093,7 @@ function createCellRenderer(container, opts) {
             };
             for (let i = 0;i < interiorGranules.length; i++) {
               const g = interiorGranules[i];
-              const loop = cyclosisLoopPoint(g, t, cyclParams);
+              const loop = cyclosisLoopPointAtPhase(g, cyclosisPhase);
               const [gx, gy] = interiorPoint(loop.u, loop.s, ictx);
               ctx.beginPath();
               ctx.arc(gx, gy, granuleSizePx, 0, TAU);
@@ -2116,7 +2135,7 @@ function createCellRenderer(container, opts) {
             };
             for (let i = 0;i < interiorFoodVacuoles.length; i++) {
               const fv = interiorFoodVacuoles[i];
-              const loop = cyclosisLoopPoint(fv, t, cyclParams);
+              const loop = cyclosisLoopPointAtPhase(fv, cyclosisPhase);
               const size = foodVacuoleSize(t, fv.digestPhase, params);
               const drawR = fvSizePx * (0.4 + 0.6 * size);
               const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);
