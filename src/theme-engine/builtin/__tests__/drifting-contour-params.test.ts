@@ -35,7 +35,7 @@ const CRITICAL_PARAMS = {
   canalAlphaMul: 0.25,
   enableAquarium: true,
   aquariumSeed: 5,
-  aquariumAlpha: 0.55,
+  aquariumAlpha: 0.75,
   aquariumActivityBoost: 0.25,
   diatomCount: 0,
   diatomAlpha: 0.16,
@@ -43,7 +43,7 @@ const CRITICAL_PARAMS = {
   euglenaCount: 1,
   euglenaSpeed: 0.75,
   euglenaSpeedActive: 1.0,
-  euglenaScale: 1.60,
+  euglenaScale: 2.60,
   vorticellaCount: 0,
 } as const;
 

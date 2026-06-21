@@ -148,7 +148,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // === Micro-aquarium Phase 5B visibility boost — one readable Euglena, behind hero. ===
       enableAquarium: true,
       aquariumSeed: 5,
-      aquariumAlpha: 0.55,
+      aquariumAlpha: 0.75,
       aquariumActivityBoost: 0.25,
       diatomCount: 0,
       diatomAlpha: 0.16,
@@ -156,7 +156,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       euglenaCount: 1,
       euglenaSpeed: 0.75,
       euglenaSpeedActive: 1.0,
-      euglenaScale: 1.60,
+      euglenaScale: 2.60,
       vorticellaCount: 0,
       ...userParams,
     },

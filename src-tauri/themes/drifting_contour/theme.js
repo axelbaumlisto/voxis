@@ -2036,9 +2036,9 @@ function drawEuglena(ctx, euglena, frame, view) {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   for (const cell of euglena) {
-    const length = Math.max(5, Math.min(10 * scale, (7.2 + finite2(cell.size, 1) * 1.6) * scale));
-    const width = Math.max(1.4, Math.min(3.2 * scale, length * 0.3));
-    const flagellumLength = Math.max(2.2, Math.min(5 * scale, length * 0.5));
+    const length = Math.max(5, Math.min(16 * scale, (7.2 + finite2(cell.size, 1) * 1.6) * scale));
+    const width = Math.max(1.4, Math.min(5.2 * scale, length * 0.32));
+    const flagellumLength = Math.max(2.2, Math.min(7.5 * scale, length * 0.55));
     const heading = finite2(cell.heading, 0);
     const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {
       centerX: finite2(cell.x, 0),
@@ -2053,15 +2053,15 @@ function drawEuglena(ctx, euglena, frame, view) {
     const outline = euglenaBodyOutline(pose, heading);
     const detailCount = length >= 9 ? 3 : length >= 7 ? 2 : 0;
     drawPolyline2(ctx, outline, true);
-    ctx.fillStyle = `hsla(${hue}, 18%, 47%, ${alpha * 0.18})`;
-    ctx.strokeStyle = `hsla(${hue + 8}, 16%, 63%, ${alpha * 0.35})`;
-    ctx.lineWidth = 0.48;
+    ctx.fillStyle = `hsla(${hue}, 24%, 48%, ${alpha * 0.34})`;
+    ctx.strokeStyle = `hsla(${hue + 8}, 22%, 66%, ${alpha * 0.55})`;
+    ctx.lineWidth = Math.max(0.48, Math.min(0.9, width * 0.12));
     ctx.fill();
     ctx.stroke();
     const ux = Math.cos(heading);
     const uy = Math.sin(heading);
     if (detailCount > 0) {
-      ctx.fillStyle = `hsla(${hue - 12}, 24%, 42%, ${alpha * 0.2})`;
+      ctx.fillStyle = `hsla(${hue - 12}, 30%, 42%, ${alpha * 0.34})`;
       for (let i = 0;i < detailCount; i++) {
         const q = i / (detailCount - 1);
         const along = length * (-0.17 + q * 0.34);
@@ -2071,9 +2071,9 @@ function drawEuglena(ctx, euglena, frame, view) {
         ctx.ellipse(p.x, p.y, 0.5, 0.3, heading, 0, TAU3);
         ctx.fill();
       }
-      const stripeAlpha = alpha * 0.18;
-      ctx.strokeStyle = `hsla(${hue - 8}, 20%, 38%, ${stripeAlpha})`;
-      ctx.lineWidth = 0.24;
+      const stripeAlpha = alpha * 0.3;
+      ctx.strokeStyle = `hsla(${hue - 8}, 24%, 36%, ${stripeAlpha})`;
+      ctx.lineWidth = Math.max(0.24, Math.min(0.55, width * 0.08));
       for (let i = 0;i < detailCount; i++) {
         const q = i / (detailCount - 1);
         const bandOffset = -0.16 + q * 0.32;
@@ -2086,18 +2086,18 @@ function drawEuglena(ctx, euglena, frame, view) {
         ctx.stroke();
       }
     }
-    ctx.strokeStyle = `hsla(${hue + 10}, 16%, 66%, ${alpha * 0.34})`;
-    ctx.lineWidth = 0.34;
+    ctx.strokeStyle = `hsla(${hue + 10}, 18%, 70%, ${alpha * 0.48})`;
+    ctx.lineWidth = Math.max(0.34, Math.min(0.65, width * 0.08));
     drawPolyline2(ctx, pose.flagellumPoints, false);
     ctx.stroke();
     if (length >= 7) {
       const reservoir = transform2(pose.center.x, pose.center.y, ux, uy, length * 0.33, -width * 0.11);
-      ctx.fillStyle = `hsla(175, 18%, 78%, ${alpha * 0.36})`;
+      ctx.fillStyle = `hsla(175, 22%, 80%, ${alpha * 0.46})`;
       ctx.beginPath();
       ctx.arc(reservoir.x, reservoir.y, Math.min(0.8, Math.max(0.34, width * 0.18)), 0, TAU3);
       ctx.fill();
     }
-    ctx.fillStyle = `hsla(20, 40%, 48%, ${alpha * 0.62})`;
+    ctx.fillStyle = `hsla(20, 48%, 50%, ${alpha * 0.78})`;
     ctx.beginPath();
     ctx.arc(pose.eyespot.x, pose.eyespot.y, Math.min(1, Math.max(0.45, width * 0.22)), 0, TAU3);
     ctx.fill();
@@ -3118,7 +3118,7 @@ function mount(container, api) {
       cyclosisPeriod: 65,
       enableAquarium: true,
       aquariumSeed: 5,
-      aquariumAlpha: 0.55,
+      aquariumAlpha: 0.75,
       aquariumActivityBoost: 0.25,
       diatomCount: 0,
       diatomAlpha: 0.16,
@@ -3126,7 +3126,7 @@ function mount(container, api) {
       euglenaCount: 1,
       euglenaSpeed: 0.75,
       euglenaSpeedActive: 1,
-      euglenaScale: 1.6,
+      euglenaScale: 2.6,
       vorticellaCount: 0,
       ...userParams
     }
