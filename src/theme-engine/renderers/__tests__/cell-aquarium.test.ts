@@ -23,6 +23,64 @@ function installNoopCanvasContext(): void {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx);
 }
 
+function installCountingCanvasContext(): { readonly ops: string[] } {
+  const ops: string[] = [];
+  const gradient = { addColorStop: () => ops.push("addColorStop") };
+  const ctx = new Proxy({}, {
+    get(_target, prop) {
+      if (prop === "canvas") return document.createElement("canvas");
+      if (prop === "createRadialGradient" || prop === "createLinearGradient") {
+        return () => {
+          ops.push(String(prop));
+          return gradient;
+        };
+      }
+      if (prop === "measureText") return () => ({ width: 0 });
+      return (..._args: unknown[]) => ops.push(String(prop));
+    },
+    set(_target, prop) {
+      ops.push(String(prop));
+      return true;
+    },
+  }) as CanvasRenderingContext2D;
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx);
+  return { ops };
+}
+
+async function renderAquariumOpCount(enableAquarium: boolean): Promise<number> {
+  vi.resetModules();
+  vi.doUnmock("../cell/aquarium/layer");
+  const { ops } = installCountingCanvasContext();
+  const rafCalls: Array<() => void> = [];
+  let now = 1000;
+  vi.stubGlobal("performance", { ["now"]: () => now });
+  vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+    rafCalls.push(cb);
+    return rafCalls.length;
+  });
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+  const { createCellRenderer } = await import("../cell/renderer");
+  const renderer = createCellRenderer(document.createElement("div"), {
+    width: 172,
+    height: 36,
+    baseHue: 50,
+    params: {
+      enableAquarium,
+      aquariumSeed: 17,
+      aquariumAlpha: 0.28,
+      diatomCount: 6,
+      diatomAlpha: 0.35,
+      euglenaCount: 0,
+      vorticellaCount: 0,
+    },
+  });
+  now += 1000 / 60;
+  rafCalls.shift()?.();
+  renderer.destroy();
+  return ops.length;
+}
+
 function frame(overrides: Partial<AquariumFrame> = {}): AquariumFrame {
   return {
     t: 1.25,
@@ -276,6 +334,42 @@ describe("aquarium layer Phase 2 diatoms", () => {
     }
   });
 
+  it("wraps diatom heading to a bounded finite angle over long runtime", () => {
+    const tau = Math.PI * 2;
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      diatomCount: 1,
+      diatomDriftSpeed: 0,
+    };
+    const initial: AquariumLayerState = {
+      seed: 1,
+      euglena: [],
+      vorticella: [],
+      diatoms: [{
+        x: 20,
+        y: 10,
+        phase: 0,
+        size: 1,
+        shape: "navicula",
+        heading: tau - 0.01,
+        driftX: 0,
+        driftY: 0,
+        rotationRate: 0.063,
+      }],
+    };
+    const oneStep = updateAquarium(initial, frame({ dt: 100_000, width: 172, height: 36 }), params);
+    let partitioned = initial;
+    for (let i = 0; i < 10; i++) {
+      partitioned = updateAquarium(partitioned, frame({ dt: 10_000, width: 172, height: 36 }), params);
+    }
+
+    expect(oneStep.diatoms[0].heading).toBeGreaterThanOrEqual(0);
+    expect(oneStep.diatoms[0].heading).toBeLessThan(tau);
+    expect(Number.isFinite(oneStep.diatoms[0].heading)).toBe(true);
+    expect(partitioned.diatoms[0].heading).toBeCloseTo(oneStep.diatoms[0].heading, 10);
+  });
+
   it("drawAquariumBackground draws low-alpha diatoms when enabled and counted", () => {
     const calls: string[] = [];
     const ctx = {
@@ -444,5 +538,16 @@ describe("createCellRenderer aquarium gate", () => {
     }
     expect(update).toHaveBeenCalledWith(state, builtFrame, expect.objectContaining({ enableAquarium: true }));
     expect(draw).toHaveBeenCalledWith(expect.anything(), state, builtFrame, expect.objectContaining({ enableAquarium: true }));
+  });
+
+  it("keeps diatom-only gate-on draw overhead under 1200 ops at 172x36", async () => {
+    const offOps = await renderAquariumOpCount(false);
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.resetModules();
+    const onOps = await renderAquariumOpCount(true);
+
+    expect(onOps - offOps).toBeGreaterThan(0);
+    expect(onOps - offOps).toBeLessThan(1200);
   });
 });
