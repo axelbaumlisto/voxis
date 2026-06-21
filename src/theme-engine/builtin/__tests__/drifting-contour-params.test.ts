@@ -34,7 +34,7 @@ const CRITICAL_PARAMS = {
   cvPosteriorS: 0.52,
   canalAlphaMul: 0.25,
   enableAquarium: true,
-  aquariumSeed: 5,
+  aquariumSeed: 17,
   aquariumAlpha: 0.68,
   aquariumActivityBoost: 0.25,
   diatomCount: 0,
