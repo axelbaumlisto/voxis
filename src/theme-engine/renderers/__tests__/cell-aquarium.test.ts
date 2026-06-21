@@ -4,7 +4,7 @@ import { aquariumParamsView } from "../cell/aquarium/params";
 import { seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aquarium/layer";
 import { diatomGeometry } from "../cell/aquarium/diatoms";
 import { euglenaPose, updateEuglena } from "../cell/aquarium/euglena";
-import { vorticellaGeometry } from "../cell/aquarium/vorticella";
+import { updateVorticella, vorticellaContractPhase, vorticellaGeometry } from "../cell/aquarium/vorticella";
 import type { AquariumFrame, AquariumLayerState } from "../cell/aquarium/types";
 import type { CellParams } from "../cell/types";
 
@@ -47,7 +47,7 @@ function installCountingCanvasContext(): { readonly ops: string[] } {
   return { ops };
 }
 
-async function renderAquariumOpCount(enableAquarium: boolean, euglenaCount = 0): Promise<number> {
+async function renderAquariumOpCount(enableAquarium: boolean, euglenaCount = 0, vorticellaCount = 0): Promise<number> {
   vi.resetModules();
   vi.doUnmock("../cell/aquarium/layer");
   const { ops } = installCountingCanvasContext();
@@ -72,7 +72,7 @@ async function renderAquariumOpCount(enableAquarium: boolean, euglenaCount = 0):
       diatomCount: 6,
       diatomAlpha: 0.35,
       euglenaCount,
-      vorticellaCount: 0,
+      vorticellaCount,
     },
   });
   now += 1000 / 60;
@@ -294,7 +294,7 @@ describe("aquarium layer Phase 2 diatoms", () => {
       diatomCount: 3,
       diatomDriftSpeed: 1.25,
       euglenaCount: 0,
-      vorticellaCount: 1,
+      vorticellaCount: 0,
     };
     const initial = seedAquarium(frame({ width: 172, height: 36 }), params);
     const updated = updateAquarium(initial, frame({ dt: 0.5, width: 172, height: 36 }), params);
@@ -575,6 +575,149 @@ describe("aquarium layer Phase 3 euglena", () => {
   });
 });
 
+describe("aquarium layer Phase 4 vorticella", () => {
+  it("vorticellaContractPhase is bounded with fast contraction and slow extension", () => {
+    const earlyContract = vorticellaContractPhase(0.04);
+    const lateContract = vorticellaContractPhase(0.12);
+    const earlyExtend = vorticellaContractPhase(0.30);
+    const laterExtend = vorticellaContractPhase(0.70);
+
+    for (const phase of [earlyContract, lateContract, earlyExtend, laterExtend]) {
+      expect(phase).toBeGreaterThanOrEqual(0);
+      expect(phase).toBeLessThanOrEqual(1);
+    }
+    expect(lateContract).toBeGreaterThan(earlyContract);
+    expect(earlyExtend).toBeGreaterThan(laterExtend);
+    expect(vorticellaContractPhase(0.08) - vorticellaContractPhase(0.00)).toBeGreaterThan(
+      vorticellaContractPhase(0.58) - vorticellaContractPhase(0.50),
+    );
+  });
+
+  it("vorticellaGeometry is monotonic from extended to contracted", () => {
+    const samples = [0, 0.25, 0.5, 0.75, 1].map((contractPhase) =>
+      vorticellaGeometry(contractPhase, { anchorX: 4, anchorY: 18, restLength: 10, directionAngle: 0 }),
+    );
+
+    for (let i = 1; i < samples.length; i++) {
+      expect(samples[i].stalkLength).toBeLessThanOrEqual(samples[i - 1].stalkLength);
+      expect(samples[i].coilTurns).toBeGreaterThanOrEqual(samples[i - 1].coilTurns);
+      expect(samples[i].bellCenter.x).toBeLessThanOrEqual(samples[i - 1].bellCenter.x);
+      expect(samples[i].bellCenter.y).toBeCloseTo(samples[0].bellCenter.y, 6);
+    }
+  });
+
+  it("updateVorticella is deterministic, anchored, finite, and bounded", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 51,
+      vorticellaCount: 2,
+      vorticellaContractRate: 1.0,
+      vorticellaContractRateActive: 1.4,
+    };
+    const view = aquariumParamsView(params);
+    const initial = seedAquarium(frame({ width: 172, height: 36 }), params).vorticella;
+    const updated = updateVorticella(initial, frame({ dt: 0.5, activity: 0.7, startle: 0.3 }), view);
+    const repeat = updateVorticella(initial, frame({ dt: 0.5, activity: 0.7, startle: 0.3 }), view);
+
+    expect(updated).toEqual(repeat);
+    for (let i = 0; i < updated.length; i++) {
+      expect(updated[i].anchorX).toBe(initial[i].anchorX);
+      expect(updated[i].anchorY).toBe(initial[i].anchorY);
+      expect(updated[i].x).toBe(initial[i].anchorX);
+      expect(updated[i].y).toBe(initial[i].anchorY);
+      for (const value of [updated[i].contractCyclePhase, updated[i].contractPhase, updated[i].oralWreathPhase]) {
+        expect(Number.isFinite(value)).toBe(true);
+        expect(value).toBeGreaterThanOrEqual(0);
+        expect(value).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("updateAquarium updates vorticella without moving diatoms/euglena when only vorticella is counted", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 53,
+      diatomCount: 0,
+      euglenaCount: 0,
+      vorticellaCount: 1,
+    };
+    const initial = seedAquarium(frame({ width: 172, height: 36 }), params);
+    const updated = updateAquarium(initial, frame({ dt: 0.25, width: 172, height: 36 }), params);
+
+    expect(updated).not.toBe(initial);
+    expect(updated.diatoms).toBe(initial.diatoms);
+    expect(updated.euglena).toBe(initial.euglena);
+    expect(updated.vorticella).not.toBe(initial.vorticella);
+    expect(updated.vorticella[0].anchorX).toBe(initial.vorticella[0].anchorX);
+    expect(updated.vorticella[0].anchorY).toBe(initial.vorticella[0].anchorY);
+  });
+
+  it("updateVorticella is dt-partition invariant away from event boundaries", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 57,
+      vorticellaCount: 1,
+      vorticellaContractRate: 0.8,
+      vorticellaContractRateActive: 1.0,
+    };
+    const view = aquariumParamsView(params);
+    const initial = seedAquarium(frame({ width: 172, height: 36 }), params).vorticella;
+    const oneStep = updateVorticella(initial, frame({ dt: 0.12, activity: 0.2 }), view);
+    const halfStep = updateVorticella(initial, frame({ dt: 0.06, activity: 0.2 }), view);
+    const twoSteps = updateVorticella(halfStep, frame({ dt: 0.06, activity: 0.2 }), view);
+
+    expect(twoSteps[0].contractCyclePhase).toBeCloseTo(oneStep[0].contractCyclePhase, 10);
+    expect(twoSteps[0].contractPhase).toBeCloseTo(oneStep[0].contractPhase, 10);
+    expect(twoSteps[0].oralWreathPhase).toBeCloseTo(oneStep[0].oralWreathPhase, 10);
+    expect(twoSteps[0].anchorX).toBe(oneStep[0].anchorX);
+    expect(twoSteps[0].anchorY).toBe(oneStep[0].anchorY);
+  });
+
+  it("drawAquariumBackground draws a low-alpha edge vorticella smoke at 172×36", () => {
+    const calls: string[] = [];
+    const ctx = {
+      save: vi.fn(() => calls.push("save")),
+      restore: vi.fn(() => calls.push("restore")),
+      beginPath: vi.fn(() => calls.push("beginPath")),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      closePath: vi.fn(),
+      fill: vi.fn(() => calls.push("fill")),
+      stroke: vi.fn(() => calls.push("stroke")),
+      ellipse: vi.fn(() => calls.push("ellipse")),
+      arc: vi.fn(() => calls.push("arc")),
+      set lineCap(_value: CanvasLineCap) {},
+      set lineJoin(_value: CanvasLineJoin) {},
+      set fillStyle(value: string | CanvasGradient | CanvasPattern) { calls.push(String(value)); },
+      set strokeStyle(value: string | CanvasGradient | CanvasPattern) { calls.push(String(value)); },
+      set lineWidth(_value: number) {},
+    } as unknown as CanvasRenderingContext2D;
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 59,
+      aquariumAlpha: 0.24,
+      diatomCount: 0,
+      euglenaCount: 0,
+      vorticellaCount: 1,
+    };
+    const state = seedAquarium(frame({ width: 172, height: 36 }), params);
+
+    drawAquariumBackground(ctx, state, frame({ width: 172, height: 36 }), params);
+
+    expect(ctx.save).toHaveBeenCalledTimes(1);
+    expect(ctx.restore).toHaveBeenCalledTimes(1);
+    expect(ctx.fill).toHaveBeenCalled();
+    expect(ctx.stroke).toHaveBeenCalled();
+    expect(ctx.ellipse).toHaveBeenCalled();
+    expect(ctx.arc).toHaveBeenCalled();
+    expect(calls.some((call) => call.includes("hsla(160") && call.includes("0.0"))).toBe(true);
+  });
+});
+
 describe("aquarium layer gate-off no-ops", () => {
   it("updateAquarium returns the same state object when disabled", () => {
     const state = seedAquarium(frame(), {
@@ -700,12 +843,12 @@ describe("createCellRenderer aquarium gate", () => {
     expect(onOps - offOps).toBeLessThan(1200);
   });
 
-  it("keeps combined diatom/euglena gate-on draw overhead under 1200 ops at 172x36", async () => {
-    const offOps = await renderAquariumOpCount(false, 1);
+  it("keeps combined diatom/euglena/vorticella gate-on draw overhead under 1200 ops at 172x36", async () => {
+    const offOps = await renderAquariumOpCount(false, 1, 1);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.resetModules();
-    const onOps = await renderAquariumOpCount(true, 1);
+    const onOps = await renderAquariumOpCount(true, 1, 1);
 
     expect(onOps - offOps).toBeGreaterThan(0);
     expect(onOps - offOps).toBeLessThan(1200);
