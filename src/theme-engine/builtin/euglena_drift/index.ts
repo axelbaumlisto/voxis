@@ -30,11 +30,11 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableAquarium: true,
       aquariumSeed: 17,
       aquariumAlpha: 0.92,
-      aquariumActivityBoost: 0.9,  // strong active:idle speed contrast (~2:1)
+      aquariumActivityBoost: 0.6,  // calmer active:idle speed contrast (~1.8:1)
       diatomCount: 0,
       euglenaCount: 1,
-      euglenaSpeed: 0.19,        // body-lengths/sec (idle) — crosses field in ~12s
-      euglenaSpeedActive: 0.40,  // body-lengths/sec (recording) — ~6s
+      euglenaSpeed: 0.16,        // body-lengths/sec (idle) — calm glide
+      euglenaSpeedActive: 0.34,  // body-lengths/sec (recording)
       euglenaScale: 7.5,
       vorticellaCount: 0,
       ...userParams,
