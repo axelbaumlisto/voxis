@@ -409,7 +409,6 @@ function growthLevel(prevGrowth, audioLevel, mode, attack, release) {
   const raw = prevGrowth + (target - prevGrowth) * rate;
   return Math.max(0, Math.min(1, raw));
 }
-
 // src/theme-engine/renderers/cell/math.ts
 function sanitizeUnit(x) {
   if (!Number.isFinite(x))
@@ -427,7 +426,6 @@ function sanitizeBins(bins) {
     out[i] = sanitizeUnit(bins[i]);
   return out;
 }
-
 // src/theme-engine/renderers/cell/activity.ts
 function cellEnergy(mode, audioLevel, t, idle, levelGain) {
   switch (mode) {
@@ -464,7 +462,6 @@ function effectiveCyclosisPeriod(activity, params) {
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
   return Math.max(0.1, base / (1 + a * boost));
 }
-
 // src/theme-engine/renderers/cell/phases.ts
 function advanceAxialSpinPhase(prevPhase, dt, speedNorm, params) {
   if (!params.enableAxialSpin)
@@ -484,7 +481,6 @@ function advanceCiliaBeatCycles(prevCycles, dt, hz) {
   const next = prevCycles + Math.max(0, Number.isFinite(hz) ? hz : 0) * safeDt;
   return (next % 1 + 1) % 1;
 }
-
 // src/theme-engine/renderers/cell/sizing.ts
 function membraneMaxRadius(width, height) {
   return Math.min(width, height) * 0.46;
@@ -512,7 +508,6 @@ function cellReach(baseR, params) {
   const ciliaOuter = longestAlong * Math.sqrt(1 + 0.25 * gap * gap);
   return Math.max(membraneOuter, ciliaOuter) + startleMaxPx;
 }
-
 // src/theme-engine/renderers/cell/startle.ts
 function startleOffset(prevMag, level, baseline, sensitivity, decay) {
   const edge = Math.max(0, (level - baseline) * sensitivity);
@@ -529,7 +524,6 @@ function startleBurstSpeed(startle, baseR, params) {
   const s = startle < 0 ? 0 : startle > 1 ? 1 : startle;
   return s * (params.startleBurstFrac ?? 0.5) * baseR;
 }
-
 // src/theme-engine/renderers/cell/locomotion.ts
 function swimSpeed(activity, width, height, params) {
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
@@ -617,7 +611,6 @@ function wanderStep(s, dt, width, height, baseR, params, speedOverride) {
   heading = Math.atan2(Math.sin(heading), Math.cos(heading));
   return { x, y, heading, vx, vy, clock };
 }
-
 // src/theme-engine/renderers/cell/body-motion.ts
 function bodyHeadingStep(prev, vx, vy, dt, params) {
   const sp = Math.hypot(vx, vy);
@@ -650,7 +643,6 @@ function helicalOffset(spinPhi, bodyHeading, baseR, params) {
     lateralOffset * Math.cos(bodyHeading)
   ];
 }
-
 // src/theme-engine/renderers/cell/profile.ts
 function bodyHalfWidth(u, params) {
   const c = params.bodyProfileTaper ?? 0.3;
@@ -830,7 +822,6 @@ function profileCDFInv(xi, params) {
   const u = us[lo - 1] + frac * (us[lo] - us[lo - 1]);
   return u < -1 ? -1 : u > 1 ? 1 : u;
 }
-
 // src/theme-engine/renderers/cell/persistence.ts
 function serializeCellState(s) {
   return JSON.stringify(s);
@@ -881,7 +872,6 @@ function wanderPoseFromState(saved, width, height, baseR, params) {
 function cellPersistKey(width, height) {
   return `talri.cell.state.v2.${Math.round(width)}x${Math.round(height)}`;
 }
-
 // src/theme-engine/renderers/cell/contour.ts
 function cellRadius(angle, t, energy, params) {
   const dx = Math.cos(angle);
@@ -1051,7 +1041,6 @@ function bandLimitDeform(deform, params) {
   }
   return out;
 }
-
 // src/theme-engine/renderers/cell/cilia.ts
 function ciliaBeatPhase(t, index, params) {
   const hz = params.ciliaBeatHz ?? 0.9;
@@ -1237,149 +1226,6 @@ function ciliaPath(cx, cy, baseR, t, energy, growth, params, motion) {
   }
   return out;
 }
-
-// src/theme-engine/renderers/cell/defaults.ts
-var CELL_DEFAULTS = {
-  noiseScale: 0.9,
-  octaves: 4,
-  lacunarity: 2.3,
-  gain: 0.55,
-  timeScale: 0.3,
-  membraneAmplitude: 0.35,
-  energyDrive: 0.8,
-  push: 3,
-  sharpness: 4,
-  intentDrift: 0.08,
-  idle: 0.1,
-  levelGain: 0.7,
-  hueSpread: 40,
-  shimmerSpeed: 0.5,
-  hueBoost: 20,
-  fillAlpha: 0.18,
-  tension: 0.15,
-  radiusFraction: 0.34,
-  attack: 0.2,
-  release: 0.005,
-  nucleusRadius: 0.28,
-  nucleusPulse: 0.1,
-  nucleusWander: 0.14,
-  nucleusDrift: 0.12,
-  nucleusAlpha: 0.55,
-  ciliaCount: 18,
-  ciliaLength: 0.45,
-  ciliaGrowthBoost: 0.6,
-  ciliaWave: 0.5,
-  ciliaWaveSpeed: 1.6,
-  ciliaCurl: 0.7,
-  ciliaBeatHz: 0.9,
-  ciliaBeatHzActive: 1.6,
-  ciliaAsymmetry: 0.49,
-  ciliaMetachronal: 1.1,
-  dragCoeff: 0.5,
-  ciliaSegments: 6,
-  ciliaLengthVar: 0.5,
-  ciliaAngleJitter: 0.55,
-  ciliaWidth: 1.6,
-  growthAttack: 0.05,
-  growthRelease: 0.012,
-  growthSwell: 0.22,
-  startleSensitivity: 2.2,
-  startleDecay: 0.86,
-  startleMaxPx: 5,
-  startleBaselineRate: 0.08,
-  enableStartleKick: true,
-  startleKickThreshold: 0.12,
-  startleKickMax: 1.2,
-  startleBurstFrac: 0.5,
-  idleMorphAmplitude: 0.18,
-  idleMorphSpeed: 0.25,
-  idleMorphPeriod: 7,
-  idleMorphFloor: 0.25,
-  driftActivationRate: 0.02,
-  wanderTurnRate: 1.1,
-  wanderFreq: 0.6,
-  swimSpeedMaxFrac: 0.06,
-  activityEnergyWeight: 0.6,
-  activityGrowthWeight: 0.4,
-  bodyHeadingTau: 0.4,
-  bodyElongation: 0.13,
-  bodyElongationFloor: 0,
-  enableRestingProlate: false,
-  prolateRestAspect: 1.7,
-  enableAxialSpin: false,
-  axialSpinMax: 3.5,
-  enableStrokeAxis: true,
-  strokeAxisKnee: 0.5,
-  strokeAxisAlign: 1,
-  enableEnergySmoothing: true,
-  energySmoothTau: 0.08,
-  enableSaturation: true,
-  deformMax: 0.6,
-  enableAreaNorm: true,
-  enableAffine: true,
-  enableActivity: true,
-  enableFlowField: false,
-  flowMoteCount: 0,
-  flowStrength: 300,
-  enableCiliaOnContour: false,
-  enableSomaticCilia: false,
-  somaticCiliaCount: 72,
-  somaticCiliaLength: 0.15,
-  enableCiliaStructure: false,
-  oralGapCenter: 1.2,
-  oralGapWidth: 0.75,
-  oralGapDip: 0.3,
-  caudalTuftWidth: 0.6,
-  caudalTuftLength: 1.7,
-  enableRigidMembrane: false,
-  enableBodyProfile: false,
-  bodyProfileType: "egg",
-  bodyProfileTaper: 0.27,
-  bodyAspect: 3,
-  bodyVentralBend: 0,
-  enableOralGroove: false,
-  oralGrooveDepth: 0.04,
-  oralGrooveAngle: 1.2,
-  oralGrooveWidth: 0.6,
-  enableEctoplasm: false,
-  ectoplasmFrac: 0.85,
-  ectoplasmAlpha: 0.15,
-  enableTrichocysts: false,
-  trichocystCount: 30,
-  trichocystLengthMul: 3,
-  trichocystDecay: 1,
-  trichocystLineWidth: 1.5,
-  enableVacuoles: false,
-  vacuoleAnteriorBearing: 1.9,
-  vacuolePosteriorBearing: -1.9,
-  vacuoleAnteriorPeriod: 9,
-  vacuolePosteriorPeriod: 13,
-  vacuolePairMaxFrac: 0.16,
-  vacuolePosteriorPhase: 0.5,
-  enableCyclosis: false,
-  enableInteriorField: false,
-  cyclosisGranuleCount: 14,
-  cyclosisPeriod: 45,
-  cyclosisSense: 1,
-  granuleMaxRadiusFrac: 0.75,
-  granuleSizePx: 1.3,
-  enableOrganelles: false,
-  foodVacuoleCount: 5,
-  foodVacuolePeriod: 55,
-  foodVacuoleMaxRadiusFrac: 0.62,
-  foodVacuoleSizePx: 3,
-  foodVacuoleDigestPeriod: 30,
-  foodVacuoleSizeMul: 1,
-  micronucleusSizeFrac: 0.2,
-  micronucleusOffsetFrac: 1.15,
-  macronucleusU: -0.05,
-  macronucleusS: 0.1,
-  cvAnteriorU: 0.55,
-  cvAnteriorS: 0.62,
-  cvPosteriorU: -0.55,
-  cvPosteriorS: 0.62
-};
-
 // src/theme-engine/renderers/cell/interior.ts
 function interiorPoint(u, s, ctx) {
   const { cx, cy, baseR, deform, squeezeK, squeezePhi, bodyHeading, params } = ctx;
@@ -1422,7 +1268,6 @@ function cyclosisLoopPointAtPhase(g, phase) {
   const s = amp * Math.sin(phi + Math.PI / 2);
   return { u, s };
 }
-
 // src/theme-engine/renderers/cell/flow.ts
 function dipoleFlowAt(dx, dy, heading, strength) {
   if (strength === 0)
@@ -1609,7 +1454,147 @@ function micronucleusTransform(macroCx, macroCy, macroR, params) {
     r
   };
 }
-
+// src/theme-engine/renderers/cell/defaults.ts
+var CELL_DEFAULTS = {
+  noiseScale: 0.9,
+  octaves: 4,
+  lacunarity: 2.3,
+  gain: 0.55,
+  timeScale: 0.3,
+  membraneAmplitude: 0.35,
+  energyDrive: 0.8,
+  push: 3,
+  sharpness: 4,
+  intentDrift: 0.08,
+  idle: 0.1,
+  levelGain: 0.7,
+  hueSpread: 40,
+  shimmerSpeed: 0.5,
+  hueBoost: 20,
+  fillAlpha: 0.18,
+  tension: 0.15,
+  radiusFraction: 0.34,
+  attack: 0.2,
+  release: 0.005,
+  nucleusRadius: 0.28,
+  nucleusPulse: 0.1,
+  nucleusWander: 0.14,
+  nucleusDrift: 0.12,
+  nucleusAlpha: 0.55,
+  ciliaCount: 18,
+  ciliaLength: 0.45,
+  ciliaGrowthBoost: 0.6,
+  ciliaWave: 0.5,
+  ciliaWaveSpeed: 1.6,
+  ciliaCurl: 0.7,
+  ciliaBeatHz: 0.9,
+  ciliaBeatHzActive: 1.6,
+  ciliaAsymmetry: 0.49,
+  ciliaMetachronal: 1.1,
+  dragCoeff: 0.5,
+  ciliaSegments: 6,
+  ciliaLengthVar: 0.5,
+  ciliaAngleJitter: 0.55,
+  ciliaWidth: 1.6,
+  growthAttack: 0.05,
+  growthRelease: 0.012,
+  growthSwell: 0.22,
+  startleSensitivity: 2.2,
+  startleDecay: 0.86,
+  startleMaxPx: 5,
+  startleBaselineRate: 0.08,
+  enableStartleKick: true,
+  startleKickThreshold: 0.12,
+  startleKickMax: 1.2,
+  startleBurstFrac: 0.5,
+  idleMorphAmplitude: 0.18,
+  idleMorphSpeed: 0.25,
+  idleMorphPeriod: 7,
+  idleMorphFloor: 0.25,
+  driftActivationRate: 0.02,
+  wanderTurnRate: 1.1,
+  wanderFreq: 0.6,
+  swimSpeedMaxFrac: 0.06,
+  activityEnergyWeight: 0.6,
+  activityGrowthWeight: 0.4,
+  bodyHeadingTau: 0.4,
+  bodyElongation: 0.13,
+  bodyElongationFloor: 0,
+  enableRestingProlate: false,
+  prolateRestAspect: 1.7,
+  enableAxialSpin: false,
+  axialSpinMax: 3.5,
+  enableStrokeAxis: true,
+  strokeAxisKnee: 0.5,
+  strokeAxisAlign: 1,
+  enableEnergySmoothing: true,
+  energySmoothTau: 0.08,
+  enableSaturation: true,
+  deformMax: 0.6,
+  enableAreaNorm: true,
+  enableAffine: true,
+  enableActivity: true,
+  enableFlowField: false,
+  flowMoteCount: 0,
+  flowStrength: 300,
+  enableCiliaOnContour: false,
+  enableSomaticCilia: false,
+  somaticCiliaCount: 72,
+  somaticCiliaLength: 0.15,
+  enableCiliaStructure: false,
+  oralGapCenter: 1.2,
+  oralGapWidth: 0.75,
+  oralGapDip: 0.3,
+  caudalTuftWidth: 0.6,
+  caudalTuftLength: 1.7,
+  enableRigidMembrane: false,
+  enableBodyProfile: false,
+  bodyProfileType: "egg",
+  bodyProfileTaper: 0.27,
+  bodyAspect: 3,
+  bodyVentralBend: 0,
+  enableOralGroove: false,
+  oralGrooveDepth: 0.04,
+  oralGrooveAngle: 1.2,
+  oralGrooveWidth: 0.6,
+  enableEctoplasm: false,
+  ectoplasmFrac: 0.85,
+  ectoplasmAlpha: 0.15,
+  enableTrichocysts: false,
+  trichocystCount: 30,
+  trichocystLengthMul: 3,
+  trichocystDecay: 1,
+  trichocystLineWidth: 1.5,
+  enableVacuoles: false,
+  vacuoleAnteriorBearing: 1.9,
+  vacuolePosteriorBearing: -1.9,
+  vacuoleAnteriorPeriod: 9,
+  vacuolePosteriorPeriod: 13,
+  vacuolePairMaxFrac: 0.16,
+  vacuolePosteriorPhase: 0.5,
+  enableCyclosis: false,
+  enableInteriorField: false,
+  cyclosisGranuleCount: 14,
+  cyclosisPeriod: 45,
+  cyclosisSense: 1,
+  granuleMaxRadiusFrac: 0.75,
+  granuleSizePx: 1.3,
+  enableOrganelles: false,
+  foodVacuoleCount: 5,
+  foodVacuolePeriod: 55,
+  foodVacuoleMaxRadiusFrac: 0.62,
+  foodVacuoleSizePx: 3,
+  foodVacuoleDigestPeriod: 30,
+  foodVacuoleSizeMul: 1,
+  micronucleusSizeFrac: 0.2,
+  micronucleusOffsetFrac: 1.15,
+  macronucleusU: -0.05,
+  macronucleusS: 0.1,
+  cvAnteriorU: 0.55,
+  cvAnteriorS: 0.62,
+  cvPosteriorU: -0.55,
+  cvPosteriorS: 0.62
+};
 // src/theme-engine/renderers/cell/draw.ts
 function pathFromPoints(ctx, points) {
   ctx.beginPath();
@@ -1625,7 +1610,7 @@ function clipToCellPath(ctx, splinePoints) {
     ctx.clip();
 }
 
-// src/theme-engine/renderers/cell.ts
+// src/theme-engine/renderers/cell/renderer.ts
 function ciliaBeatHzEff(activity, params) {
   const a = activity < 0 ? 0 : activity > 1 ? 1 : activity;
   const f0 = params.ciliaBeatHz ?? 0.9;
@@ -2271,7 +2256,6 @@ function createCellRenderer(container, opts) {
     }
   };
 }
-
 // src/theme-engine/builtin/drifting_contour/index.ts
 function mount(container, api) {
   const userParams = api.params && typeof api.params === "object" ? api.params : {};
