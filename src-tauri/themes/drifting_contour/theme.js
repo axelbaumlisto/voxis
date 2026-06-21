@@ -485,6 +485,34 @@ function advanceCiliaBeatCycles(prevCycles, dt, hz) {
   return (next % 1 + 1) % 1;
 }
 
+// src/theme-engine/renderers/cell/sizing.ts
+function membraneMaxRadius(width, height) {
+  return Math.min(width, height) * 0.46;
+}
+function resolveBaseRadius(width, height, params, growth) {
+  const fallbackR = Math.min(width, height) * params.radiusFraction;
+  const rawBaseR = params.baseRadiusPx ?? fallbackR;
+  return rawBaseR * (1 + growth * params.growthSwell);
+}
+function perimeterCiliaCount(baseR, params) {
+  const spacing = Math.max(0.5, params.ciliaSpacingPx ?? 8);
+  const n = Math.round(TAU * Math.max(0, baseR) / spacing);
+  const cap = Math.max(1, params.ciliaCount);
+  return Math.max(1, Math.min(cap, n));
+}
+function cellReach(baseR, params) {
+  const ciliaLength = params.ciliaLength ?? 0;
+  const ciliaGrowthBoost = params.ciliaGrowthBoost ?? 0;
+  const startleMaxPx = params.startleMaxPx ?? 0;
+  const membraneOuter = baseR * 1.4;
+  const lenVar = Math.max(0, Math.min(0.95, params.ciliaLengthVar ?? 0));
+  const longestAlong = baseR + baseR * (ciliaLength + ciliaGrowthBoost) * (1 + lenVar);
+  const ciliaCount = params.ciliaCount ?? 0;
+  const gap = ciliaCount > 0 ? TAU / ciliaCount : 0;
+  const ciliaOuter = longestAlong * Math.sqrt(1 + 0.25 * gap * gap);
+  return Math.max(membraneOuter, ciliaOuter) + startleMaxPx;
+}
+
 // src/theme-engine/renderers/cell/defaults.ts
 var CELL_DEFAULTS = {
   noiseScale: 0.9,
@@ -1091,20 +1119,6 @@ function wanderPoseFromState(saved, width, height, baseR, params) {
 function cellPersistKey(width, height) {
   return `talri.cell.state.v2.${Math.round(width)}x${Math.round(height)}`;
 }
-function membraneMaxRadius(width, height) {
-  return Math.min(width, height) * 0.46;
-}
-function resolveBaseRadius(width, height, params, growth) {
-  const fallbackR = Math.min(width, height) * params.radiusFraction;
-  const rawBaseR = params.baseRadiusPx ?? fallbackR;
-  return rawBaseR * (1 + growth * params.growthSwell);
-}
-function perimeterCiliaCount(baseR, params) {
-  const spacing = Math.max(0.5, params.ciliaSpacingPx ?? 8);
-  const n = Math.round(TAU * Math.max(0, baseR) / spacing);
-  const cap = Math.max(1, params.ciliaCount);
-  return Math.max(1, Math.min(cap, n));
-}
 function bandLimitDeform(deform, params) {
   const N = deform.length;
   if (N === 0)
@@ -1507,18 +1521,6 @@ function micronucleusTransform(macroCx, macroCy, macroR, params) {
     cy: macroCy + Math.sin(bearing) * off,
     r
   };
-}
-function cellReach(baseR, params) {
-  const ciliaLength = params.ciliaLength ?? 0;
-  const ciliaGrowthBoost = params.ciliaGrowthBoost ?? 0;
-  const startleMaxPx = params.startleMaxPx ?? 0;
-  const membraneOuter = baseR * 1.4;
-  const lenVar = Math.max(0, Math.min(0.95, params.ciliaLengthVar ?? 0));
-  const longestAlong = baseR + baseR * (ciliaLength + ciliaGrowthBoost) * (1 + lenVar);
-  const ciliaCount = params.ciliaCount ?? 0;
-  const gap = ciliaCount > 0 ? TAU / ciliaCount : 0;
-  const ciliaOuter = longestAlong * Math.sqrt(1 + 0.25 * gap * gap);
-  return Math.max(membraneOuter, ciliaOuter) + startleMaxPx;
 }
 function driftActivation(prev, recording, rate, dt) {
   const target = recording ? 1 : 0;
