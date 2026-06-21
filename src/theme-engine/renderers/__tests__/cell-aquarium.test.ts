@@ -47,7 +47,12 @@ function installCountingCanvasContext(): { readonly ops: string[] } {
   return { ops };
 }
 
-async function renderAquariumOpCount(enableAquarium: boolean, euglenaCount = 0, vorticellaCount = 0): Promise<number> {
+async function renderAquariumOpCount(
+  enableAquarium: boolean,
+  euglenaCount = 0,
+  vorticellaCount = 0,
+  diatomCount = 4,
+): Promise<number> {
   vi.resetModules();
   vi.doUnmock("../cell/aquarium/layer");
   const { ops } = installCountingCanvasContext();
@@ -69,7 +74,7 @@ async function renderAquariumOpCount(enableAquarium: boolean, euglenaCount = 0, 
       enableAquarium,
       aquariumSeed: 17,
       aquariumAlpha: 0.28,
-      diatomCount: 6,
+      diatomCount,
       diatomAlpha: 0.35,
       euglenaCount,
       vorticellaCount,
@@ -751,6 +756,72 @@ describe("aquarium layer gate-off no-ops", () => {
   });
 });
 
+describe("aquarium layer Phase 4.5 combined perf/golden", () => {
+  it("retains seeded identities and anchors across combined multi-frame updates", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 67,
+      diatomCount: 4,
+      euglenaCount: 1,
+      vorticellaCount: 1,
+      diatomDriftSpeed: 0.9,
+      euglenaSpeed: 0.7,
+      euglenaSpeedActive: 1.1,
+      vorticellaContractRate: 0.8,
+      vorticellaContractRateActive: 1.0,
+    };
+    const initial = seedAquarium(frame({ width: 172, height: 36 }), params);
+    let state = initial;
+
+    for (let i = 0; i < 5; i++) {
+      state = updateAquarium(
+        state,
+        frame({ t: 1 + i / 60, dt: 1 / 60, width: 172, height: 36, activity: i % 2 === 0 ? 0.2 : 0.6 }),
+        params,
+      );
+    }
+
+    expect(initial.diatoms).toHaveLength(4);
+    expect(initial.euglena).toHaveLength(1);
+    expect(initial.vorticella).toHaveLength(1);
+    expect(state.diatoms).toHaveLength(initial.diatoms.length);
+    expect(state.euglena).toHaveLength(initial.euglena.length);
+    expect(state.vorticella).toHaveLength(initial.vorticella.length);
+    for (let i = 0; i < initial.diatoms.length; i++) {
+      expect(state.diatoms[i]).toMatchObject({
+        phase: initial.diatoms[i].phase,
+        size: initial.diatoms[i].size,
+        shape: initial.diatoms[i].shape,
+        driftX: initial.diatoms[i].driftX,
+        driftY: initial.diatoms[i].driftY,
+        rotationRate: initial.diatoms[i].rotationRate,
+      });
+    }
+    expect(state.euglena[0]).toMatchObject({
+      size: initial.euglena[0].size,
+      swimSpeed: initial.euglena[0].swimSpeed,
+      rollRate: initial.euglena[0].rollRate,
+      metabolyRate: initial.euglena[0].metabolyRate,
+      flagellumRate: initial.euglena[0].flagellumRate,
+      spiralAmplitude: initial.euglena[0].spiralAmplitude,
+    });
+    expect(state.vorticella[0]).toMatchObject({
+      x: initial.vorticella[0].anchorX,
+      y: initial.vorticella[0].anchorY,
+      anchorX: initial.vorticella[0].anchorX,
+      anchorY: initial.vorticella[0].anchorY,
+      directionAngle: initial.vorticella[0].directionAngle,
+      restLength: initial.vorticella[0].restLength,
+      contractRate: initial.vorticella[0].contractRate,
+      oralRate: initial.vorticella[0].oralRate,
+    });
+
+    const repeat = seedAquarium(frame({ width: 172, height: 36 }), params);
+    expect(repeat).toEqual(initial);
+  });
+});
+
 describe("createCellRenderer aquarium gate", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -843,12 +914,88 @@ describe("createCellRenderer aquarium gate", () => {
     expect(onOps - offOps).toBeLessThan(1200);
   });
 
+  it("does not reseed the aquarium layer across renderer frames", async () => {
+    installNoopCanvasContext();
+    const states: AquariumLayerState[] = [
+      { seed: 1, diatoms: [], euglena: [], vorticella: [] },
+      { seed: 1, diatoms: [{
+        x: 1,
+        y: 2,
+        phase: 0.1,
+        size: 3,
+        shape: "navicula",
+        heading: 0,
+        driftX: 0,
+        driftY: 0,
+        rotationRate: 0,
+      }], euglena: [], vorticella: [] },
+      { seed: 1, diatoms: [{
+        x: 2,
+        y: 2,
+        phase: 0.1,
+        size: 3,
+        shape: "navicula",
+        heading: 0,
+        driftX: 0,
+        driftY: 0,
+        rotationRate: 0,
+      }], euglena: [], vorticella: [] },
+      { seed: 1, diatoms: [{
+        x: 3,
+        y: 2,
+        phase: 0.1,
+        size: 3,
+        shape: "navicula",
+        heading: 0,
+        driftX: 0,
+        driftY: 0,
+        rotationRate: 0,
+      }], euglena: [], vorticella: [] },
+    ];
+    const seed = vi.fn(() => states[0]);
+    const update = vi.fn((_aquarium: AquariumLayerState, _frame: AquariumFrame) => states[update.mock.calls.length]);
+    const draw = vi.fn();
+    vi.doMock("../cell/aquarium/layer", () => ({
+      seedAquarium: seed,
+      updateAquarium: update,
+      drawAquariumBackground: draw,
+    }));
+    const rafCalls: Array<() => void> = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      rafCalls.push(cb);
+      return rafCalls.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const { createCellRenderer } = await import("../cell/renderer");
+    const renderer = createCellRenderer(document.createElement("div"), {
+      width: 172,
+      height: 36,
+      baseHue: 50,
+      params: { enableAquarium: true, aquariumSeed: 67, diatomCount: 4, euglenaCount: 1, vorticellaCount: 1 },
+    });
+    rafCalls.shift()?.();
+    rafCalls.shift()?.();
+    rafCalls.shift()?.();
+    renderer.destroy();
+
+    expect(seed).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledTimes(3);
+    expect(draw).toHaveBeenCalledTimes(3);
+    expect(update.mock.calls[0]?.[0]).toBe(states[0]);
+    expect(update.mock.calls[1]?.[0]).toBe(states[1]);
+    expect(update.mock.calls[2]?.[0]).toBe(states[2]);
+    expect(draw.mock.calls[0]?.[1]).toBe(states[1]);
+    expect(draw.mock.calls[1]?.[1]).toBe(states[2]);
+    expect(draw.mock.calls[2]?.[1]).toBe(states[3]);
+  });
+
   it("keeps combined diatom/euglena/vorticella gate-on draw overhead under 1200 ops at 172x36", async () => {
-    const offOps = await renderAquariumOpCount(false, 1, 1);
+    const offOps = await renderAquariumOpCount(false, 1, 1, 4);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.resetModules();
-    const onOps = await renderAquariumOpCount(true, 1, 1);
+    const onOps = await renderAquariumOpCount(true, 1, 1, 4);
 
     expect(onOps - offOps).toBeGreaterThan(0);
     expect(onOps - offOps).toBeLessThan(1200);
