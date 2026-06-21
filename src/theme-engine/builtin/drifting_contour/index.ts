@@ -62,7 +62,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       baseRadiusPx: 17,
       driftSpeed: 0.03,              // gentle glide (was 0.08)
       idleSwimFrac: 0.12,            // 12% of peak swim at idle — slow drift (was 0.30)
-      bodyHeadingTau: 1.5,             // slow heading response (default 0.4 = too twitchy)
+      bodyHeadingTau: 1.5,             // slow heading response
       idleDriftMin: 0.40,            // subtle wander (was 0.70)
       driftMargin: 30,
       idleMorphAmplitude: 0.16,
