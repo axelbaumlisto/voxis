@@ -2056,7 +2056,7 @@ function drawEuglena(ctx, euglena, frame, view) {
   ctx.lineJoin = "round";
   for (const cell of euglena) {
     const length = Math.max(5, Math.min(16 * scale, (7.2 + finite2(cell.size, 1) * 1.6) * scale));
-    const width = Math.max(1.4, Math.min(5.2 * scale, length * 0.32));
+    const width = Math.max(1.4, Math.min(7.2 * scale, length * 0.45));
     const flagellumLength = Math.max(2.2, Math.min(7.5 * scale, length * 0.55));
     const heading = finite2(cell.heading, 0);
     const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {
@@ -3146,7 +3146,7 @@ function mount(container, api) {
       euglenaCount: 1,
       euglenaSpeed: 0.75,
       euglenaSpeedActive: 1,
-      euglenaScale: 2.05,
+      euglenaScale: 2.15,
       vorticellaCount: 0,
       ...userParams
     }
