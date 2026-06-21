@@ -75,6 +75,10 @@ function wrap(value: number, max: number): number {
   return wrapped < 0 ? wrapped + max : wrapped;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, finite(value, 0)));
 }
@@ -210,13 +214,27 @@ export function updateEuglena(
     const lateralDelta = rollDelta === 0
       ? 0
       : finite(cell.spiralAmplitude, 0) * (Math.cos(oldRoll * TAU) - Math.cos((oldRoll + rollDelta) * TAU)) / TAU;
-    const nextX = finite(cell.x, 0) + ux * swim * dt + nx * lateralDelta;
-    const nextY = finite(cell.y, 0) + uy * swim * dt + ny * lateralDelta;
+    let nextX = finite(cell.x, 0) + ux * swim * dt + nx * lateralDelta;
+    let nextY = finite(cell.y, 0) + uy * swim * dt + ny * lateralDelta;
+
+    if (frame.hero) {
+      const hx = finite(frame.hero.x, safeWidth / 2);
+      const hy = finite(frame.hero.y, safeHeight / 2);
+      const exclusion = Math.max(0, finite(frame.hero.radius, 0)) * 3.8;
+      const dx = nextX - hx;
+      const dy = nextY - hy;
+      const dist = Math.hypot(dx, dy);
+      if (dist < exclusion && exclusion > 0) {
+        const angle = dist > 1e-6 ? Math.atan2(dy, dx) : heading;
+        nextX = hx + Math.cos(angle) * exclusion;
+        nextY = hy + Math.sin(angle) * exclusion;
+      }
+    }
 
     return {
       ...cell,
-      x: wrap(nextX, safeWidth),
-      y: wrap(nextY, safeHeight),
+      x: clamp(wrap(nextX, safeWidth), 0, safeWidth),
+      y: clamp(wrap(nextY, safeHeight), 0, safeHeight),
       phase: heading,
       rollPhase: nextRoll,
       metabolyPhase: wrapUnit(cell.metabolyPhase + Math.max(0, finite(cell.metabolyRate, 0)) * rate * dt),
