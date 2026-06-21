@@ -2185,6 +2185,15 @@ function updateEuglena(euglena, frame, view) {
           nextY += mvy / need * step;
         }
       }
+      if (qd < 1.69 && qd > 0.000000001) {
+        const factor = Math.min(1, (1.69 - qd) / 0.69);
+        const wrapPi2 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+        const awayAng = Math.atan2(dy, dx);
+        const t1 = awayAng + Math.PI / 2;
+        const t2 = awayAng - Math.PI / 2;
+        const target = Math.abs(wrapPi2(t1 - heading)) < Math.abs(wrapPi2(t2 - heading)) ? t1 : t2;
+        heading += wrapPi2(target - heading) * Math.min(1, 1.8 * factor * dt);
+      }
     }
     const rollDelta = Math.max(0, finite2(cell.rollRate, 0)) * act * dt;
     return {
