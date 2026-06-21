@@ -27,8 +27,8 @@ use std::sync::Arc;
 
 /// Fixed 172×36 pill canvas. The panel hosts the React ThemeHost code-theme
 /// overlay, and the theme-engine contract uses this fixed size.
-pub const PILL_WIDTH: u32 = 172;
-pub const PILL_HEIGHT: u32 = 36;
+pub const PILL_WIDTH: u32 = 240;
+pub const PILL_HEIGHT: u32 = 80;
 
 /// Tauri webview label assigned to the overlay panel.
 pub const OVERLAY_PANEL_LABEL: &str = "overlay";
