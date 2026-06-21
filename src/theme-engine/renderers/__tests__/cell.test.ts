@@ -5656,7 +5656,8 @@ describe("Commit 28 — food vacuoles + micronucleus", () => {
     const double = (P.foodVacuoleSizePx ?? 3.0) * 2.0;
     expect(double).toBeCloseTo(6.0, 9);
     // Omitted param defaults to 1.0 (legacy)
-    const noMul = (P.foodVacuoleSizePx ?? 3.0) * (undefined ?? 1.0);
+    const resolveMul = (value?: number) => value ?? 1.0;
+    const noMul = (P.foodVacuoleSizePx ?? 3.0) * resolveMul();
     expect(noMul).toBe(3.0);
   });
 
