@@ -2162,17 +2162,28 @@ function updateEuglena(euglena, frame, view) {
     if (frame.hero) {
       const hx = finite2(frame.hero.x, safeWidth / 2);
       const hy = finite2(frame.hero.y, safeHeight / 2);
-      const exclusion = Math.max(0, finite2(frame.hero.radius, 0)) * 2.2;
+      const hr = Math.max(0, finite2(frame.hero.radius, 0));
+      const m = 0.5 * L;
+      const A = Math.max(0.001, finiteOr3(frame.hero.halfLen, hr) + m);
+      const B = Math.max(0.001, finiteOr3(frame.hero.halfWid, hr) + m);
+      const hh = finiteOr3(frame.hero.heading, 0);
+      const cphi = Math.cos(hh), sphi = Math.sin(hh);
       const dx = nextX - hx;
       const dy = nextY - hy;
-      const dist = Math.hypot(dx, dy);
-      if (dist < exclusion && exclusion > 0) {
-        const angle = dist > 0.000001 ? Math.atan2(dy, dx) : heading;
-        const penetration = exclusion - dist;
-        const repelSpeed = Math.max(10, finite2(frame.hero.radius, 0) * 2.4);
-        const step = Math.min(penetration, repelSpeed * dt);
-        nextX += Math.cos(angle) * step;
-        nextY += Math.sin(angle) * step;
+      const px = dx * cphi + dy * sphi;
+      const py = -dx * sphi + dy * cphi;
+      const qd = px * px / (A * A) + py * py / (B * B);
+      if (qd < 1 && qd > 0.000000001) {
+        const f = 1 / Math.sqrt(qd);
+        const tx = px * f, ty = py * f;
+        const mvx = (tx - px) * cphi - (ty - py) * sphi;
+        const mvy = (tx - px) * sphi + (ty - py) * cphi;
+        const need = Math.hypot(mvx, mvy);
+        if (need > 0.000001) {
+          const step = need * (1 - Math.exp(-6 * dt));
+          nextX += mvx / need * step;
+          nextY += mvy / need * step;
+        }
       }
     }
     const rollDelta = Math.max(0, finite2(cell.rollRate, 0)) * act * dt;
@@ -2337,11 +2348,19 @@ function drawEuglena(ctx, euglena, frame, view) {
     ctx.fill();
     const fp = pose.flagellumPoints;
     if (fp.length >= 2) {
-      ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.3})`;
+      let flagFade = 1;
+      if (frame.hero) {
+        const hdx = finite2(cell.x, 0) - finite2(frame.hero.x, 0);
+        const hdy = finite2(cell.y, 0) - finite2(frame.hero.y, 0);
+        const reach = Math.max(finiteOr3(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) * 1.15;
+        if (Math.hypot(hdx, hdy) < reach)
+          flagFade = 0.45;
+      }
+      ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.3 * flagFade})`;
       ctx.lineWidth = Math.max(0.9, width * 0.18);
       drawPolyline2(ctx, fp, false);
       ctx.stroke();
-      ctx.strokeStyle = `hsla(${hue + 8}, 34%, 70%, ${alpha * 0.9})`;
+      ctx.strokeStyle = `hsla(${hue + 8}, 34%, 70%, ${alpha * 0.9 * flagFade})`;
       ctx.lineWidth = Math.max(0.5, width * 0.1);
       drawPolyline2(ctx, fp, false);
       ctx.stroke();
@@ -2865,7 +2884,10 @@ function createCellRenderer(container, opts) {
           audioLevel,
           startle,
           baseHue,
-          hero: params.enableHero === false ? undefined : { x: cx, y: cy, radius: baseR }
+          hero: params.enableHero === false ? undefined : (() => {
+            const aspect = Math.sqrt(Math.max(1, params.bodyAspect ?? 1));
+            return { x: cx, y: cy, radius: baseR, heading: bodyHeading, halfLen: baseR * aspect, halfWid: baseR / aspect };
+          })()
         };
         aquarium = aquarium ?? seedAquarium(aquariumFrame, params);
         aquarium = updateAquarium(aquarium, aquariumFrame, params);
@@ -3376,7 +3398,7 @@ function mount(container, api) {
       euglenaCount: 1,
       euglenaSpeed: 0.15,
       euglenaSpeedActive: 0.3,
-      euglenaScale: 6.45,
+      euglenaScale: 2.8,
       vorticellaCount: 0,
       ...userParams
     }

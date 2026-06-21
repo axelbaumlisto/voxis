@@ -156,7 +156,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       euglenaCount: 1,
       euglenaSpeed: 0.15,        // body-lengths/sec (idle) — gentle companion drift
       euglenaSpeedActive: 0.30,  // body-lengths/sec (recording)
-      euglenaScale: 6.45,
+      euglenaScale: 2.8,         // companion ~0.4x the paramecium length (correct scale)
       vorticellaCount: 0,
       ...userParams,
     },

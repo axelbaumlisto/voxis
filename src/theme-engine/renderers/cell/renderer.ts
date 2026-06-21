@@ -471,7 +471,10 @@ export function createCellRenderer(
           audioLevel,
           startle,
           baseHue,
-          hero: params.enableHero === false ? undefined : { x: cx, y: cy, radius: baseR },
+          hero: params.enableHero === false ? undefined : (() => {
+            const aspect = Math.sqrt(Math.max(1, params.bodyAspect ?? 1));
+            return { x: cx, y: cy, radius: baseR, heading: bodyHeading, halfLen: baseR * aspect, halfWid: baseR / aspect };
+          })(),
         };
         aquarium = aquarium ?? seedAquarium(aquariumFrame, params);
         aquarium = updateAquarium(aquarium, aquariumFrame, params);
