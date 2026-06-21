@@ -36,7 +36,7 @@ import {
   advectFoodVacuole, micronucleusTransform,
 } from "./organelles";
 import { advectMote, seedMotes, seedGranules, advectGranule } from "./flow";
-import { pathFromPoints, clipToCellPath, drawCVVesicle, drawCVCanals } from "./draw";
+import { pathFromPoints, clipToCellPath, drawCVVesicle, drawCVCanals, drawFoodVacuole } from "./draw";
 
 // ---------------------------------------------------------------------------
 // Cell geometry functions
@@ -935,13 +935,7 @@ export function createCellRenderer(
               const size = foodVacuoleSize(t, fv.digestPhase, params); // digest shrink (reuse)
               const drawR = fvSizePx * (0.4 + 0.6 * size);
               const [fx, fy] = interiorPoint(loop.u, loop.s, ictx);
-              ctx.fillStyle = hsla(fvH, fvSat, 0.5, params.nucleusAlpha * 0.4);
-              ctx.beginPath();
-              ctx.arc(fx, fy, drawR, 0, TAU);
-              ctx.fill();
-              ctx.strokeStyle = hsla(fvH, fvSat * 1.125, 0.35, params.nucleusAlpha * 0.5);
-              ctx.lineWidth = 0.8;
-              ctx.stroke();
+              drawFoodVacuole(ctx, fx, fy, drawR, fvH, fvSat, params);
             }
           } else {
             // LEGACY disc path — VERBATIM (do not tidy), so the deployed look +
@@ -964,13 +958,7 @@ export function createCellRenderer(
                 [[cx + v.x * scale, cy + v.y * scale]], squeezeK, squeezePhi, cx, cy, params,
               )[0];
               // Translucent olive/greenish fill with a slightly darker rim.
-              ctx.fillStyle = hsla(fvH, fvSat, 0.5, params.nucleusAlpha * 0.4);
-              ctx.beginPath();
-              ctx.arc(fx, fy, drawR, 0, TAU);
-              ctx.fill();
-              ctx.strokeStyle = hsla(fvH, fvSat * 1.125, 0.35, params.nucleusAlpha * 0.5);
-              ctx.lineWidth = 0.8;
-              ctx.stroke();
+              drawFoodVacuole(ctx, fx, fy, drawR, fvH, fvSat, params);
             }
           }
         }
