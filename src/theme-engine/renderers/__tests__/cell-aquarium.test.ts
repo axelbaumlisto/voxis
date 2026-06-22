@@ -191,19 +191,20 @@ function euglenaHueSummary(hueOffset: number): GoldenSummary {
 describe("aquarium draw-op golden (Epic 1 P0)", () => {
   it("keeps the three-species CONTRACTED draw byte-stable", () => {
     expect(goldenFor(0.5)).toEqual({
-      // Revalidated for 3D.2 publish-then-consume flip: this golden draws the unchanged seed-state input.
-      hash: "c964ee6b90b8e6bb",
-      opCount: 720,
+      // Rebased for the vorticella detail/anti-flicker pass: new CV refractile bubble
+      // (fill+ring+specular) adds ops; lip-ellipse rotation + palette change the hash.
+      hash: "fc423fbf2fb004d4",
+      opCount: 726,
       counts: {
-        beginPath: 104,
+        beginPath: 106,
         moveTo: 87,
         lineTo: 391,
         closePath: 5,
-        fill: 22,
-        stroke: 88,
+        fill: 23,
+        stroke: 89,
         save: 3,
         ellipse: 7,
-        arc: 10,
+        arc: 12,
         restore: 3,
       },
     });
@@ -211,19 +212,19 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
 
   it("keeps the three-species RESTING draw byte-stable", () => {
     expect(goldenFor(0)).toEqual({
-      // Revalidated for 3D.2 publish-then-consume flip: this golden draws the unchanged seed-state input.
-      hash: "221ae33f4097705f",
-      opCount: 604,
+      // Rebased for the vorticella detail/anti-flicker pass (CV bubble adds ops; palette/lip change hash).
+      hash: "a99568d52f598029",
+      opCount: 610,
       counts: {
-        beginPath: 75,
+        beginPath: 77,
         moveTo: 58,
         lineTo: 362,
         closePath: 5,
-        fill: 22,
-        stroke: 59,
+        fill: 23,
+        stroke: 60,
         save: 3,
         ellipse: 7,
-        arc: 10,
+        arc: 12,
         restore: 3,
       },
     });
@@ -766,7 +767,7 @@ describe("aquarium layer Phase 2 diatoms", () => {
           restLength: 8.697909643291496,
           contractPhase: 0,
           contractCyclePhase: 0.4531427220983897,
-          oralWreathPhase: 0.2442852140907199,
+          oralWreathPhase: 0.42228521409071984,
           contractRate: 0.10650784630794077,
           oralRate: 0.5634912510495633,
           swayPhase: 0.9713883993529016,
@@ -1822,6 +1823,7 @@ describe("aquarium layer Phase 4 vorticella", () => {
       stroke: vi.fn(() => calls.push("stroke")),
       ellipse: vi.fn(() => calls.push("ellipse")),
       arc: vi.fn(() => calls.push("arc")),
+      createLinearGradient: vi.fn(() => ({ addColorStop: (_o: number, color: string) => calls.push(String(color)) })),
       set lineCap(_value: CanvasLineCap) {},
       set lineJoin(_value: CanvasLineJoin) {},
       set fillStyle(value: string | CanvasGradient | CanvasPattern) { calls.push(String(value)); },
@@ -1847,8 +1849,10 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(ctx.stroke).toHaveBeenCalled();
     expect(ctx.ellipse).toHaveBeenCalled();
     expect(ctx.arc).toHaveBeenCalled();
-    // hyaline blue-grey body palette (hue ~200), not pigmented
-    expect(calls.some((call) => /hsla\(20[0-5],/.test(call))).toBe(true);
+    // cool hyaline teal cytoplasm gradient (hue ~168-188) + a warm pigmented
+    // macronucleus (hue ~34-36) so the interior reads with color detail, not flat gray
+    expect(calls.some((call) => /hsla\(1[6-8]\d,/.test(call))).toBe(true);
+    expect(calls.some((call) => /hsla\(3[0-6],/.test(call))).toBe(true);
   });
 });
 

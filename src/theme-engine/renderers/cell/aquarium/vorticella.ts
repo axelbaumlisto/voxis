@@ -239,8 +239,10 @@ export function updateVorticella(
   // cadence = how OFTEN it contracts (theme rate * mode * startle); the collapse
   // SPEED is separate and absolute (T_C on real dt), decoupled from cadence.
   const cadence = Math.max(0.2, Math.min(3.5, rate * modeMul * startleBoost));
-  // oral cilia beat ~20Hz; visual cap 24Hz (>=3 samples/cycle @60fps, anti-shimmer)
-  const oralHz = Math.min(24, (frame.mode === "error" ? 6 : frame.mode === "transcribing" ? 12 : 20) * (1 + activityMix * 0.2));
+  // Real adoral membranelles beat ~20-40Hz, but discrete cilia lines at 60fps strobe
+  // below the Nyquist limit (20Hz -> only 2.5 samples/cycle). Render a STYLIZED
+  // metachronal shimmer at <=6Hz so there are >=10 samples/cycle @60fps (no strobe).
+  const oralHz = Math.min(6, (frame.mode === "error" ? 3 : frame.mode === "transcribing" ? 4 : 5) * (1 + activityMix * 0.2));
   // sway slows a little under load (the zooid stiffens when contracting often)
   const swayMul = frame.mode === "error" ? 0.3 : frame.mode === "transcribing" ? 0.6 : 1;
   return vorticella.map((cell, idx) => {
@@ -385,8 +387,11 @@ export function drawVorticella(
     });
     const neck = geom.bellCenter;           // base of the bell (top of stalk)
     const rimC = { x: neck.x + ux * bellHeight, y: neck.y + uy * bellHeight }; // peristome centre
-    const open = 1 - 0.7 * s;               // peristome closes as it contracts
+    const open = 1 - 0.7 * s;               // peristome closes as it contracts (open in [0.3,1])
     const Rrim = (D / 2) * open;
+    // smooth furl of the feeding crown as it closes — fade out over the last bit of
+    // contraction instead of a hard on/off pop at full contraction (anti-flicker).
+    const crownFade = smoothstep(clamp01((open - 0.30) / 0.18));
 
     const bodyPoint = (along: number, lateral: number): AquariumPoint => ({
       x: neck.x + ux * along + nx * lateral,
@@ -424,7 +429,7 @@ export function drawVorticella(
           ctx.lineWidth = Math.max(0.4, D * (0.05 + 0.05 * near));
         } else {
           ctx.strokeStyle = `hsla(204, 24%, 64%, ${alpha * 0.12 * s})`; // far turns: faint, continuous
-          ctx.lineWidth = Math.max(0.3, D * 0.03);
+          ctx.lineWidth = Math.max(0.75, D * 0.03);
         }
         ctx.stroke();
       }
@@ -432,7 +437,7 @@ export function drawVorticella(
     // faint inner spasmoneme line
     drawPolyline(ctx, geom.stalkPath, false);
     ctx.strokeStyle = `hsla(204, 30%, 70%, ${alpha * 0.3})`;
-    ctx.lineWidth = Math.max(0.3, D * 0.03);
+    ctx.lineWidth = Math.max(0.75, D * 0.03);
     ctx.stroke();
     // floor holdfast (only while anchored)
     if (attach > 0.5) {
@@ -447,15 +452,15 @@ export function drawVorticella(
       const ringR = halfW(0.06) * 1.05;
       const M = Math.max(8, Math.round(D * 1.0));
       const beatBase = wrapUnit(finiteOr(cell.oralWreathPhase, 0));
-      ctx.strokeStyle = `hsla(200, 22%, 86%, ${alpha * 0.5 * band})`;
-      ctx.lineWidth = Math.max(0.25, D * 0.025);
+      ctx.strokeStyle = `hsla(46, 52%, 86%, ${alpha * 0.55 * band})`;
+      ctx.lineWidth = Math.max(0.75, D * 0.025);
       for (let i = 0; i < M; i++) {
         const a = i / M;
         const lateral = Math.cos(a * TAU) * ringR;
         const baseP = bodyPoint(-D * 0.04, lateral);
         const beat = Math.sin((a * 3 - beatBase) * TAU);
-        const len = D * (0.12 + 0.05 * beat);
-        const tip = { x: baseP.x - ux * len + nx * beat * D * 0.04, y: baseP.y - uy * len + ny * beat * D * 0.04 };
+        const len = D * (0.12 + 0.025 * beat); // softer per-cilium swing (anti-strobe)
+        const tip = { x: baseP.x - ux * len + nx * beat * D * 0.02, y: baseP.y - uy * len + ny * beat * D * 0.02 };
         drawPolyline(ctx, [baseP, tip], false);
         ctx.stroke();
       }
@@ -473,56 +478,75 @@ export function drawVorticella(
     }
     const outline = [...left, ...right.reverse()];
     drawPolyline(ctx, outline, true);
-    ctx.fillStyle = `hsla(205, 42%, 79%, ${alpha * 0.34})`; // discernibly cool hyaline (alpha is the key lever over black)
-    ctx.strokeStyle = `hsla(205, 44%, 90%, ${alpha * 0.46})`;
-    ctx.lineWidth = Math.max(0.4, D * 0.05);
+    // living cytoplasm: a vertical gradient (denser/greener endoplasm toward the neck,
+    // paler hyaline ectoplasm toward the rim) instead of a flat gray fill.
+    const cyto = ctx.createLinearGradient(rimC.x, rimC.y, neck.x, neck.y);
+    cyto.addColorStop(0, `hsla(188, 40%, 70%, ${alpha * 0.42})`);
+    cyto.addColorStop(1, `hsla(170, 42%, 54%, ${alpha * 0.56})`);
+    ctx.fillStyle = cyto;
+    ctx.strokeStyle = `hsla(188, 52%, 90%, ${alpha * 0.7})`; // crisp refractile pellicle
+    ctx.lineWidth = Math.max(0.85, D * 0.055);
     ctx.fill();
     ctx.stroke();
 
     // === INTERIOR (subtle, hyaline) ===
     // macronucleus: curved C / horseshoe band lying along the body
     const macPts: AquariumPoint[] = [];
-    const macAlong = bellHeight * 0.50;
-    const macR = D * 0.30; // open horseshoe band (~195deg, never closes into a ring/logo)
+    const macAlong = bellHeight * 0.48;
+    const macR = D * 0.34; // open horseshoe band (~195deg, never closes into a ring/logo)
     for (let i = 0; i <= 14; i++) {
       const th = Math.PI * (0.32 + (i / 14) * 1.08);
-      macPts.push(bodyPoint(macAlong - macR * 1.05 * Math.cos(th), macR * Math.sin(th)));
+      // elongate the C ALONG the body axis (long worm-like horseshoe), not a transverse ring
+      macPts.push(bodyPoint(macAlong - macR * 1.45 * Math.cos(th), macR * 0.92 * Math.sin(th)));
     }
     drawPolyline(ctx, macPts, false);
-    ctx.strokeStyle = `hsla(50, 14%, 72%, ${alpha * 0.3})`;
-    ctx.lineWidth = Math.max(0.6, D * 0.12);
+    // dense, warm macronucleus — the dominant interior organelle, contrasting the cool cytoplasm
+    ctx.strokeStyle = `hsla(36, 48%, 52%, ${alpha * 0.6})`;
+    ctx.lineWidth = Math.max(1.0, D * 0.14);
     ctx.stroke();
     // micronucleus: a tiny dot docked against the OUTER edge of one nuclear arm
     if (D >= 11) {
       const mic = bodyPoint(macAlong - macR * 0.9, macR * 0.5);
       ctx.beginPath();
       ctx.arc(mic.x, mic.y, Math.max(0.4, D * 0.045), 0, TAU);
-      ctx.fillStyle = `hsla(50, 16%, 66%, ${alpha * 0.34})`;
+      ctx.fillStyle = `hsla(34, 52%, 46%, ${alpha * 0.6})`;
       ctx.fill();
     }
 
-    // contractile vacuole: a faint translucent fill (NOT a bright ring — must not
-    // read as an eye), set to one side of the upper body.
+    // contractile vacuole: a crisp refractile clear bubble (pale fill + brighter rim +
+    // a small specular highlight), pulsing on its slow rhythm, off-axis in the upper body.
     if (D >= 10) {
       const cvPulse = 0.5 - 0.5 * Math.cos(TAU * wrapUnit(finite(cell.contractCyclePhase, 0) * 0.5));
       const cv = bodyPoint(bellHeight * 0.66, D * 0.20);
+      const cvR = Math.max(0.6, D * (0.05 + 0.045 * cvPulse));
       ctx.beginPath();
-      ctx.arc(cv.x, cv.y, Math.max(0.4, D * (0.035 + 0.035 * cvPulse)), 0, TAU);
-      ctx.fillStyle = `hsla(198, 22%, 84%, ${alpha * 0.16})`;
+      ctx.arc(cv.x, cv.y, cvR, 0, TAU);
+      ctx.fillStyle = `hsla(186, 30%, 93%, ${alpha * 0.42})`;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cv.x, cv.y, cvR, 0, TAU);
+      ctx.strokeStyle = `hsla(186, 58%, 84%, ${alpha * 0.6})`;
+      ctx.lineWidth = Math.max(0.75, D * 0.025);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cv.x - nx * cvR * 0.35 - ux * cvR * 0.35, cv.y - ny * cvR * 0.35 - uy * cvR * 0.35, Math.max(0.4, cvR * 0.3), 0, TAU);
+      ctx.fillStyle = `hsla(0, 0%, 100%, ${alpha * 0.5})`;
       ctx.fill();
     }
 
     // food vacuoles: a few faint round inclusions mid/lower body
     if (D >= 12) {
-      const fvSeed = (Math.round(anchorX) ^ 0x9e37) >>> 0;
+      // seed from a BIRTH-stable field (restLength), never the live anchorX, so the
+      // inclusions do not teleport while the zooid migrates as a telotroch.
+      const fvSeed = (Math.round(finite(cell.restLength, 10) * 4096) ^ 0x9e37) >>> 0;
       const fvCount = 4;
       for (let j = 0; j < fvCount; j++) {
         const u = 0.30 + seededUnit(fvSeed, j, 0x51bd0e77) * 0.40;
         const lat = (seededUnit(fvSeed, j, 0x2cd9a14b) - 0.5) * 1.2 * halfW(u);
         const fv = bodyPoint(bellHeight * u, lat);
         ctx.beginPath();
-        ctx.arc(fv.x, fv.y, Math.max(0.4, D * (0.05 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.05)), 0, TAU);
-        ctx.fillStyle = `hsla(40, 18%, 74%, ${alpha * 0.18})`;
+        ctx.arc(fv.x, fv.y, Math.max(0.5, D * (0.05 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.05)), 0, TAU);
+        ctx.fillStyle = `hsla(36, 38%, 66%, ${alpha * 0.3})`;
         ctx.fill();
       }
     }
@@ -531,16 +555,18 @@ export function drawVorticella(
     // raised lip: a thin band at the rim, outer Rrim, drawn as an ellipse seen 3/4
     const lipRy = Math.max(0.5, Rrim * 0.34);
     ctx.beginPath();
-    ctx.ellipse(rimC.x, rimC.y, Rrim, lipRy, dir, 0, TAU);
-    ctx.fillStyle = `hsla(195, 16%, 80%, ${alpha * 0.16 * open})`;
+    // rotate by dir + PI/2 so the LARGE radius (Rrim) lies ACROSS the bell (lateral),
+    // giving a wide shallow rim cap seen in 3/4 — NOT a tall vertical lens down the body.
+    ctx.ellipse(rimC.x, rimC.y, Rrim, lipRy, dir + Math.PI / 2, 0, TAU);
+    ctx.fillStyle = `hsla(186, 36%, 88%, ${alpha * 0.22 * open})`;
     ctx.fill();
-    ctx.strokeStyle = `hsla(204, 26%, 88%, ${alpha * 0.45 * open})`;
-    ctx.lineWidth = Math.max(0.4, D * 0.05);
+    ctx.strokeStyle = `hsla(186, 50%, 90%, ${alpha * 0.55 * open})`;
+    ctx.lineWidth = Math.max(0.75, D * 0.05);
     ctx.stroke();
 
     // adoral zone of membranelles (AZM): a CCW spiral on the peristomal disc
     // funnelling to the cytostome — the feeding vortex.
-    if (open > 0.3 && D >= 9) {
+    if (crownFade > 0.02 && D >= 9) {
       const turns = 1.6, N = 30;
       const cytLat = Rrim * 0.30, cytDep = lipRy * 0.30;
       const spiral: AquariumPoint[] = [];
@@ -553,8 +579,8 @@ export function drawVorticella(
         spiral.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline(ctx, spiral, false);
-      ctx.strokeStyle = `hsla(48, 24%, 88%, ${alpha * 0.32 * open})`;
-      ctx.lineWidth = Math.max(0.25, D * 0.03);
+      ctx.strokeStyle = `hsla(46, 50%, 84%, ${alpha * 0.4 * crownFade})`;
+      ctx.lineWidth = Math.max(0.75, D * 0.03);
       ctx.stroke();
       // second, inner membranelle row (phase-offset) so the AZM reads as a
       // layered band driving a feeding vortex, not a single circlet.
@@ -568,21 +594,21 @@ export function drawVorticella(
         spiral2.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline(ctx, spiral2, false);
-      ctx.strokeStyle = `hsla(46, 22%, 84%, ${alpha * 0.22 * open})`;
-      ctx.lineWidth = Math.max(0.2, D * 0.022);
+      ctx.strokeStyle = `hsla(44, 46%, 80%, ${alpha * 0.3 * crownFade})`;
+      ctx.lineWidth = Math.max(0.75, D * 0.022);
       ctx.stroke();
       const cyt = { x: rimC.x + nx * cytLat + ux * cytDep, y: rimC.y + ny * cytLat + uy * cytDep };
       ctx.beginPath();
       ctx.arc(cyt.x, cyt.y, Math.max(0.4, D * 0.05), 0, TAU);
-      ctx.fillStyle = `hsla(205, 26%, 68%, ${alpha * 0.4 * open})`;
+      ctx.fillStyle = `hsla(40, 44%, 58%, ${alpha * 0.5 * crownFade})`;
       ctx.fill();
     }
 
     // oral wreath: short cilia tufts around the rim, metachronal traveling wave
-    if (open > 0.25) {
+    if (crownFade > 0.02) {
       const M = Math.max(8, Math.round(D * 1.1));
-      ctx.strokeStyle = `hsla(48, 22%, 86%, ${alpha * 0.5 * open})`;
-      ctx.lineWidth = Math.max(0.25, D * 0.025);
+      ctx.strokeStyle = `hsla(46, 55%, 86%, ${alpha * 0.6 * crownFade})`;
+      ctx.lineWidth = Math.max(0.75, D * 0.025);
       const oral = wrapUnit(finite(cell.oralWreathPhase, 0));
       for (let i = 0; i < M; i++) {
         const a = (i / M);
@@ -590,12 +616,12 @@ export function drawVorticella(
         const lateral = Math.cos(a * TAU) * Rrim;
         const depth = Math.sin(a * TAU) * lipRy;
         const base = { x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth };
-        // metachronal wave (2 waves around the ring) + beat
+        // metachronal wave (2 waves around the ring) + softer beat (anti-strobe)
         const beat = Math.sin((a * 2 - oral) * TAU);
-        const len = D * (0.14 + 0.06 * beat);
+        const len = D * (0.14 + 0.03 * beat);
         const tip = {
-          x: base.x + ux * len + nx * beat * D * 0.05,
-          y: base.y + uy * len + ny * beat * D * 0.05,
+          x: base.x + ux * len + nx * beat * D * 0.025,
+          y: base.y + uy * len + ny * beat * D * 0.025,
         };
         drawPolyline(ctx, [base, tip], false);
         ctx.stroke();
