@@ -250,9 +250,10 @@ describe("aquariumParamsView", () => {
       euglenaCount: 1,
       euglenaGravitaxis: 0.2,
       euglenaPhototaxis: 0.6,
+      euglenaSeparation: 0.7,
       euglenaRotDiffusion: 0.12,
     });
-    expect(on.euglena.steer).toEqual({ gravitaxis: 0.2, phototaxis: 0.6 });
+    expect(on.euglena.steer).toEqual({ gravitaxis: 0.2, phototaxis: 0.6, separation: 0.7 });
     expect(on.medium).toEqual({ rotDiffusion: 0.12 });
   });
 
@@ -270,6 +271,7 @@ describe("aquariumParamsView", () => {
       euglenaSpeed: 1.1,
       euglenaSpeedActive: 2.4,
       euglenaScale: 0.9,
+      euglenaSeparation: 0.4,
       vorticellaCount: 1,
       vorticellaContractRate: 0.6,
       vorticellaContractRateActive: 1.8,
@@ -282,7 +284,7 @@ describe("aquariumParamsView", () => {
       alpha: 0.25,
       activityBoost: 0.7,
       diatoms: { count: 3, alpha: 0.2, driftSpeed: 0.8 },
-      euglena: { count: 2, speed: 1.1, speedActive: 2.4, scale: 0.9, hueOffset: 42 },
+      euglena: { count: 2, speed: 1.1, speedActive: 2.4, scale: 0.9, hueOffset: 42, steer: { gravitaxis: 0, phototaxis: 0, separation: 0.4 } },
       vorticella: { count: 1, contractRate: 0.6, contractRateActive: 1.8, scale: 1.2, alongFrac: 0.5 },
     });
   });
@@ -1263,6 +1265,7 @@ describe("aquarium layer Phase 3 euglena", () => {
     });
     expect(EUGLENA_STEER.gravitaxis).toBe(0);
     expect(EUGLENA_STEER.phototaxis).toBe(0);
+    expect(EUGLENA_STEER.separation).toBe(0);
     // open water, no wall/hero/startle pressure; new foundation knobs are default no-op
     const initial = [testEuglena({ x: 150, y: 150, heading: 0, swimSpeed: 1, rollPhase: 0.1, metabolyPhase: 0.2, flagellumPhase: 0.3 })];
     const oneStep = updateEuglena(initial, frame({ dt: 0.24, width: 300, height: 300, activity: 0 }), view);
@@ -1305,6 +1308,82 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(twoSteps[0].x).toBeCloseTo(fieldStep[0].x, 10);
     expect(twoSteps[0].y).toBeCloseTo(fieldStep[0].y, 10);
     expect(twoSteps[0].heading).toBeCloseTo(fieldStep[0].heading, 10);
+  });
+
+  it("separation=0 is byte-identical for two euglena and stays dt-partition exact", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 2,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaSeparation: 0,
+      aquariumActivityBoost: 1,
+    });
+    expect(view.euglena.steer).toBeUndefined();
+    expect(EUGLENA_STEER.separation).toBe(0);
+
+    const initial = [
+      testEuglena({ x: 145, y: 150, heading: 0, swimSpeed: 1, rollPhase: 0.1, metabolyPhase: 0.2, flagellumPhase: 0.3, burstRate: 0 }),
+      testEuglena({ x: 155, y: 150, heading: 0, swimSpeed: 1, rollPhase: 0.4, metabolyPhase: 0.5, flagellumPhase: 0.6, burstRate: 0 }),
+    ];
+    const motileField = (cells: readonly EuglenaState[]) => buildField(cells.map((cell, idx) => ({
+      kind: "motile" as const,
+      x: cell.x,
+      y: cell.y,
+      sourceId: sourceId("euglena", idx),
+    })));
+    const fieldFrame = (dt: number, cells = initial) => frame({ dt, width: 300, height: 300, activity: 0, interaction: motileField(cells) });
+    const legacyFrame = (dt: number) => frame({ dt, width: 300, height: 300, activity: 0 });
+
+    const zeroed = updateEuglena(initial, fieldFrame(0.24), view);
+    const legacy = updateEuglena(initial, legacyFrame(0.24), view);
+    expect(zeroed).toEqual(legacy);
+
+    const half = updateEuglena(initial, fieldFrame(0.12), view);
+    const two = updateEuglena(half, fieldFrame(0.12, half), view);
+    expect(two[0].x).toBeCloseTo(zeroed[0].x, 10);
+    expect(two[0].y).toBeCloseTo(zeroed[0].y, 10);
+    expect(two[0].heading).toBeCloseTo(zeroed[0].heading, 10);
+    expect(two[1].x).toBeCloseTo(zeroed[1].x, 10);
+    expect(two[1].y).toBeCloseTo(zeroed[1].y, 10);
+    expect(two[1].heading).toBeCloseTo(zeroed[1].heading, 10);
+  });
+
+  it("enabled separation moves close same-species euglena apart without reacting to hero motiles", () => {
+    const start = [
+      testEuglena({ x: 148, y: 150, heading: 0, swimSpeed: 1, burstRate: 0 }),
+      testEuglena({ x: 152, y: 150, heading: Math.PI, swimSpeed: 1, burstRate: 0 }),
+    ];
+    const dist = (cells: readonly EuglenaState[]) => Math.hypot(cells[1].x - cells[0].x, cells[1].y - cells[0].y);
+    const interaction = buildField([
+      ...start.map((cell, idx) => ({ kind: "motile" as const, x: cell.x, y: cell.y, sourceId: sourceId("euglena", idx) })),
+      { kind: "motile", x: 150, y: 150, sourceId: sourceId("hero", 0) },
+      { kind: "motile", x: 150, y: 151, sourceId: sourceId("vorticella", 0) },
+    ]);
+    const baseParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 2,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      aquariumActivityBoost: 1,
+    };
+    const off = updateEuglena(start, frame({ dt: 0.2, width: 300, height: 300, activity: 0, interaction }), aquariumParamsView(baseParams));
+    const on = updateEuglena(start, frame({ dt: 0.2, width: 300, height: 300, activity: 0, interaction }), aquariumParamsView({
+      ...baseParams,
+      euglenaSeparation: 4,
+    }));
+    const heroOnlyInteraction = buildField([
+      { kind: "motile", x: 150, y: 150, sourceId: sourceId("hero", 0) },
+      { kind: "motile", x: 150, y: 151, sourceId: sourceId("vorticella", 0) },
+    ]);
+    const heroOnly = updateEuglena([start[0]], frame({ dt: 0.2, width: 300, height: 300, activity: 0, interaction: heroOnlyInteraction }), aquariumParamsView({ ...baseParams, euglenaCount: 1, euglenaSeparation: 4 }));
+    const noField = updateEuglena([start[0]], frame({ dt: 0.2, width: 300, height: 300, activity: 0 }), aquariumParamsView({ ...baseParams, euglenaCount: 1, euglenaSeparation: 4 }));
+
+    expect(dist(on)).toBeGreaterThan(dist(off));
+    expect(dist(on) - dist(off)).toBeLessThan(20);
+    expect(heroOnly[0]).toEqual(noField[0]);
   });
 
   it("updateEuglena is dt-partition invariant across phase wrap", () => {

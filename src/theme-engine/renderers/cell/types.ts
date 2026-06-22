@@ -446,6 +446,8 @@ export interface CellParams {
   euglenaGravitaxis?: number;
   /** Euglena phototaxis weight toward the virtual light (0 = off). */
   euglenaPhototaxis?: number;
+  /** Euglena same-species soft separation weight (0 = off). */
+  euglenaSeparation?: number;
   /** Euglena cosmetic rotational jitter, rad/sqrt(s) (0 = off). */
   euglenaRotDiffusion?: number;
   /** Number of vorticella companions. Default 0 = none. */

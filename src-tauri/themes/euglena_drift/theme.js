@@ -1548,6 +1548,7 @@ var CELL_DEFAULTS = {
   euglenaHueOffset: 42,
   euglenaGravitaxis: 0,
   euglenaPhototaxis: 0,
+  euglenaSeparation: 0,
   euglenaRotDiffusion: 0,
   vorticellaCount: 0,
   vorticellaContractRate: 1,
@@ -1652,9 +1653,14 @@ function nonNegative(value, fallback) {
 function euglenaSteerOverride(params) {
   const gravitaxis = nonNegative(params.euglenaGravitaxis, 0);
   const phototaxis = nonNegative(params.euglenaPhototaxis, 0);
-  if (gravitaxis === 0 && phototaxis === 0)
+  const separation = nonNegative(params.euglenaSeparation, 0);
+  if (gravitaxis === 0 && phototaxis === 0 && separation === 0)
     return;
-  return { gravitaxis, phototaxis };
+  return {
+    gravitaxis,
+    phototaxis,
+    ...separation === 0 ? {} : { separation }
+  };
 }
 function mediumOverride(params) {
   const rotDiffusion = nonNegative(params.euglenaRotDiffusion, 0);
@@ -2174,6 +2180,7 @@ var EUGLENA_STEER = {
   hero: 0,
   loiter: 1.1,
   wake: 10,
+  separation: 0,
   startleAway: 3,
   startleDart: 1,
   gravitaxis: 0,
@@ -2196,7 +2203,8 @@ var TUMBLE_MIN_RAD = Math.PI / 6;
 var TUMBLE_MAX_RAD = 5 * Math.PI / 6;
 var TUMBLE_RATE_MIN = 0.045;
 var TUMBLE_RATE_MAX = 0.16;
-var EUGLENA_RELEVANT_FIELDS = new Set(["obstacle", "wake"]);
+var SEPARATION_RANGE_BODY_LENGTHS = 1.6;
+var EUGLENA_RELEVANT_FIELDS = new Set(["obstacle", "wake", "motile"]);
 function euglenaContribute(cell, idx) {
   return [{ kind: "motile", x: cell.x, y: cell.y, sourceId: sourceId("euglena", idx) }];
 }
@@ -2229,6 +2237,7 @@ function updateEuglena(euglena, frame, view) {
     const field = frame.interaction;
     const fieldObstacles = field ? field.obstacles.filter((obstacle) => obstacle.sourceId !== selfId) : undefined;
     const fieldWakes = field ? field.wakes.filter((wake) => wake.sourceId !== selfId) : undefined;
+    const sameSpeciesMotiles = field?.motiles.filter((motile) => motile.sourceId >> 20 === KIND_ID.euglena && motile.sourceId !== selfId);
     const circleObstacles = fieldObstacles?.filter((obstacle) => obstacle.shape === "circle");
     const socialEllipse = fieldObstacles?.find((obstacle) => obstacle.shape === "ellipse" && obstacle.social === true);
     const socialWake = socialEllipse ? fieldWakes?.find((wake) => wake.sourceId === socialEllipse.sourceId) : undefined;
@@ -2309,6 +2318,21 @@ function updateEuglena(euglena, frame, view) {
         sy += ay * wr;
         sx += ax * steer.startleAway * startle;
         sy += ay * steer.startleAway * startle;
+      }
+      const separationW = steer.separation;
+      if (sameSpeciesMotiles && sameSpeciesMotiles.length > 0) {
+        const reach = L * SEPARATION_RANGE_BODY_LENGTHS;
+        for (let mi = 0;mi < sameSpeciesMotiles.length; mi++) {
+          const mdx = px0 - finite(sameSpeciesMotiles[mi].x, 0);
+          const mdy = py0 - finite(sameSpeciesMotiles[mi].y, 0);
+          const md = Math.hypot(mdx, mdy) || 0.000001;
+          if (md < reach) {
+            const prox = (reach - md) / reach;
+            const w = separationW * prox;
+            sx += mdx / md * w;
+            sy += mdy / md * w;
+          }
+        }
       }
       const obstacles = circleObstacles;
       if (obstacles && obstacles.length > 0) {
