@@ -775,9 +775,7 @@ describe("aquarium layer Phase 2 diatoms", () => {
           swayRate: 0.10676003030734138,
           contractLeg: 0,
           contractTimer: 0.6783055094536394,
-          feedInterval: 2.5,
-          eventCount: 0,
-          voiceTimer: 0.05,
+          voiceTimer: 0.07850000000000001,
           migrateState: 0,
           attach: 1,
           migrateTimer: 3.4162731326185165,
@@ -1641,8 +1639,10 @@ describe("aquarium layer Phase 4 vorticella", () => {
     let collapseSteps = Infinity; // steps from first s>0.5 to s>0.95
     let crossed = -1;
     const phases: number[] = [];
+    // recording + loud voice = the mechanical stimulus that fires the startle
+    const recF = frame({ dt, width: 240, height: 80, mode: "recording", activity: 0.9, audioLevel: 0.9 });
     for (let i = 0; i < 600; i++) {
-      cell = updateVorticella(cell, frame({ dt, width: 240, height: 80, activity: 0.6 }), view);
+      cell = updateVorticella(cell, recF, view);
       const s = cell[0].contractPhase;
       phases.push(s);
       peak = Math.max(peak, s);
@@ -1655,16 +1655,20 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(peak).toBeGreaterThan(0.95);
     // BALLISTIC: from half to full collapse in <= ~0.15s (<=3 steps) — a snap, not a ramp
     expect(collapseSteps).toBeLessThanOrEqual(3);
-    // it spends most of the time extended (long feeding dwell): s≈0 majority of frames
-    const extendedFrac = phases.filter((s) => s < 0.05).length / phases.length;
+    // QUIET recording -> startles are rare, so it is extended most of the time
+    let quiet = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
+    const quietPhases: number[] = [];
+    const quietF = frame({ dt, width: 240, height: 80, mode: "recording", activity: 0.0, audioLevel: 0.0 });
+    for (let i = 0; i < 600; i++) { quiet = updateVorticella(quiet, quietF, view); quietPhases.push(quiet[0].contractPhase); }
+    const extendedFrac = quietPhases.filter((s) => s < 0.05).length / quietPhases.length;
     expect(extendedFrac).toBeGreaterThan(0.6);
+    // LOUD recording startles more often than quiet (responsive to the voice)
+    const loudContractions = phases.filter((s) => s > 0.95).length;
+    const quietContractions = quietPhases.filter((s) => s > 0.95).length;
+    expect(loudContractions).toBeGreaterThan(quietContractions);
     // deterministic
-    const again = updateVorticella(
-      seedAquarium(frame({ width: 240, height: 80 }), params).vorticella,
-      frame({ dt, width: 240, height: 80, activity: 0.6 }),
-      view,
-    );
-    expect(again[0].contractPhase).toBe(phases.length ? updateVorticella(seedAquarium(frame({ width: 240, height: 80 }), params).vorticella, frame({ dt, width: 240, height: 80, activity: 0.6 }), view)[0].contractPhase : 0);
+    const again = updateVorticella(seedAquarium(frame({ width: 240, height: 80 }), params).vorticella, recF, view);
+    expect(again[0].contractPhase).toBe(updateVorticella(seedAquarium(frame({ width: 240, height: 80 }), params).vorticella, recF, view)[0].contractPhase);
   });
 
   it("telotroch migration: a vorticella detaches, relocates to a new floor X, and re-anchors", () => {
@@ -1753,7 +1757,7 @@ describe("aquarium layer Phase 4 vorticella", () => {
     const noMotiles = updateVorticella(initial, frame(base), view);
     const emptyField = updateVorticella(initial, frame({ ...base, interaction: buildField([]) }), view);
 
-    for (const key of ["contractPhase", "contractLeg", "contractTimer", "eventCount", "feedInterval"] as const) {
+    for (const key of ["contractPhase", "contractLeg", "contractTimer"] as const) {
       expect(emptyField[0][key]).toBeCloseTo(noMotiles[0][key], 10);
     }
     expect(motileField[0].contractLeg).toBe(1);

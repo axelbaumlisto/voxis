@@ -45,14 +45,6 @@ const T_C = 0.08;    // ballistic collapse (~5 frames @60fps; real <10ms, floore
 const T_HOLD = 0.05; // contracted hold
 const T_E = 2.6;     // slow Ca-reload re-extension
 
-/** Deterministic Poisson-ish feeding dwell (s) before the next contraction.
- *  `cadence` folds in the theme contract-rate + mode + startle (higher = more frequent). */
-function drawFeedInterval(cellSeed: number, eventCount: number, cadence: number): number {
-  const mean = 12 / Math.max(0.2, cadence); // METABOLIC resting cadence; NOT shortened by audio
-  const u = Math.max(1e-4, seededUnit(cellSeed, eventCount, 0x51bd0e77));
-  return clamp(-Math.log(u) * mean, 2.5, 18);
-}
-
 function vorticellaCellSeed(anchorX: number): number {
   return (Math.round(anchorX * 7) ^ 0x070271ca) >>> 0;
 }
@@ -224,8 +216,6 @@ export function seedVorticella(count: number, seed: number, frame: AquariumFrame
       // contraction boundary (timer < 1.5 < min interval) so dt-partition stays exact
       contractLeg: 0,
       contractTimer: seededUnit(seed, i, salt ^ 0x29ab7f15) * 1.5,
-      feedInterval: drawFeedInterval(vorticellaCellSeed(anchorX), 0, 1),
-      eventCount: 0,
       voiceTimer: 0,
       migrateState: 0,
       attach: 1,
@@ -245,13 +235,6 @@ export function updateVorticella(
 ): readonly VorticellaState[] {
   if (vorticella.length === 0) return vorticella;
   const dt = Math.max(0, finite(frame.dt, 0));
-  const idleRate = Math.max(0, finite(view.vorticella.contractRate, 0));
-  // CRITIC FIX: contraction cadence / oral cilia / CV are METABOLIC and must NOT speed
-  // up with the user's voice level or app mode (real cyclosis & beating are not driven
-  // by ambient sound). Cadence/beat are purely metabolic; the ONLY world-coupled trigger
-  // left is the mechanosensitive motile reflex (passing cells) in the leg state machine.
-  const rate = idleRate;
-  const cadence = Math.max(0.2, Math.min(3.5, rate));
   // adoral membranelle shimmer: constant ~5Hz (Nyquist-safe stylization), NOT audio-driven
   const oralHz = 5;
   const swayMul = 1;
@@ -262,19 +245,22 @@ export function updateVorticella(
     // absolute-time contraction state machine (real dt; legs advance with carry)
     let leg = Math.max(0, Math.min(3, Math.floor(finiteOr(cell.contractLeg, 0))));
     let timer = Math.max(0, finiteOr(cell.contractTimer, 0)) + dt;
-    let interval = Math.max(2.5, finiteOr(cell.feedInterval, 6));
-    let evt = Math.max(0, Math.floor(finiteOr(cell.eventCount, 0)));
     let voiceTimer = Math.max(0, finiteOr(cell.voiceTimer, 0));
-    // VOICE = MECHANICAL STIMULUS: while recording, the user's voice perturbs the water,
-    // and Vorticella's signature reflex to a stimulus is to CONTRACT (startle). So it
-    // periodically twitches/balls-up during speech — a biologically honest "recording"
-    // indicator. Louder/more active speech -> shorter interval between startles (the
-    // ~2.6s re-extend physically caps the rate, so no spasm-storm). The metabolic cyclosis
-    // & cilia beat stay decoupled (unchanged); only this discrete reflex is voice-driven.
+    // A SOLITARY zooid with no predator/prey around has NOTHING to react to, so it must
+    // NOT contract on its own (no spontaneous/Poisson firing). The startle reflex fires
+    // ONLY in response to a real stimulus: (a) the user's voice while recording, and
+    // (b) a motile cell passing close (in multi-organism themes). Metabolic cyclosis &
+    // cilia beat stay decoupled/unchanged.
+    // VOICE = MECHANICAL STIMULUS: while recording, the voice perturbs the water and the
+    // zooid twitches/balls-up — a biologically honest "recording is on" indicator.
     if (frame.mode === "recording") {
-      voiceTimer += dt;
-      const act = clamp01(finite(frame.activity, 0));
-      const voiceInterval = 4.5 - 3.0 * act; // ~4.5s quiet -> ~1.5s loud
+      // drive off the INSTANTANEOUS loudness (audioLevel), not the heavily-smoothed
+      // `activity` scalar (which barely moves while speaking -> felt unresponsive).
+      const loud = clamp01(Math.max(finite(frame.audioLevel, 0), finite(frame.activity, 0)));
+      // only accumulate "stimulus" while there is actual sound, so it twitches WHEN you
+      // speak (not on a fixed metronome); louder -> the timer fills faster.
+      voiceTimer += dt * (0.25 + 2.2 * loud);
+      const voiceInterval = 1.6; // stimulus needed to fire a startle (filled fast when loud)
       if (leg === 0 && voiceTimer >= voiceInterval) { leg = 1; timer = 0; voiceTimer = 0; }
     } else {
       voiceTimer = 0;
@@ -292,11 +278,13 @@ export function updateVorticella(
         if (mdx * mdx + mdy * mdy < trigR * trigR) { leg = 1; timer = 0; break; }
       }
     }
+    // advance the contraction legs (1=collapse,2=hold,3=re-extend); leg 0 (extended) only
+    // leaves via a stimulus above (voice / passing cell), never spontaneously.
     for (let guard = 0; guard < 128; guard++) {
-      if (leg === 0) { if (timer >= interval) { timer -= interval; leg = 1; } else break; }
-      else if (leg === 1) { if (timer >= T_C) { timer -= T_C; leg = 2; } else break; }
+      if (leg === 1) { if (timer >= T_C) { timer -= T_C; leg = 2; } else break; }
       else if (leg === 2) { if (timer >= T_HOLD) { timer -= T_HOLD; leg = 3; } else break; }
-      else { if (timer >= T_E) { timer -= T_E; leg = 0; evt += 1; interval = drawFeedInterval(cellSeed, evt, cadence); } else break; }
+      else if (leg === 3) { if (timer >= T_E) { timer -= T_E; leg = 0; } else break; }
+      else break; // leg 0: wait for a stimulus
     }
 
     // --- telotroch migration (rare): a sessile zooid occasionally detaches into a
@@ -344,8 +332,6 @@ export function updateVorticella(
       contractPhase: clamp01(vorticellaLegAmount(leg, timer)),
       contractLeg: leg,
       contractTimer: timer,
-      feedInterval: interval,
-      eventCount: evt,
       voiceTimer,
       oralWreathPhase: wrapUnit(cell.oralWreathPhase + oralHz * dt),
       swayPhase: wrapUnit(finiteOr(cell.swayPhase, 0) + Math.max(0, finiteOr(cell.swayRate, 0.12)) * swayMul * dt),
