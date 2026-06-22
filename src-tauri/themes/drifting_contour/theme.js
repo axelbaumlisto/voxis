@@ -2113,6 +2113,9 @@ var EUGLENA_STEER = {
   startleAway: 3,
   startleDart: 1
 };
+var MEDIUM = {
+  viscosity: 1.6
+};
 var HERO_LOITER_Q = 1.3;
 var HERO_INTEREST_RANGE = 2.2;
 var HERO_WAKE_RANGE = 1.5;
@@ -2131,6 +2134,7 @@ function updateEuglena(euglena, frame, view) {
   const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
   const act = modeView.motionMul * (1 + 0.7 * activityMix);
   const scale = view.euglena.scale;
+  const drag = Math.max(0.1, finite2(MEDIUM.viscosity, 1));
   return euglena.map((cell) => {
     const L = euglenaDisplayLength(finite2(cell.size, 1), scale);
     let heading = finite2(cell.heading, 0);
@@ -2193,7 +2197,8 @@ function updateEuglena(euglena, frame, view) {
       const pressure = Math.hypot(sx - ux * EUGLENA_STEER.forward, sy - uy * EUGLENA_STEER.forward);
       if (pressure > 0.000001) {
         const desired = Math.atan2(sy, sx);
-        heading += wrapPi2(desired - heading) * Math.min(1, (2.5 + 7 * Math.min(1, pressure)) * dt);
+        const turnK = (1 + 2.5 * Math.min(1, pressure)) / drag;
+        heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
         ux = Math.cos(heading);
         uy = Math.sin(heading);
       }
@@ -2206,7 +2211,7 @@ function updateEuglena(euglena, frame, view) {
       const hdx = Math.cos(hd), hdy = Math.sin(hd);
       const behind = Math.max(0, -(ax * hdx + ay * hdy));
       const prox = Math.min(1, (HERO_WAKE_RANGE - heroQ) / (HERO_WAKE_RANGE - 1));
-      const wakeSpeed = EUGLENA_STEER.wake * prox * behind;
+      const wakeSpeed = EUGLENA_STEER.wake * prox * behind / drag;
       nextX += hdx * wakeSpeed * dt;
       nextY += hdy * wakeSpeed * dt;
     }

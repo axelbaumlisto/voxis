@@ -3,7 +3,7 @@ import { CELL_DEFAULTS } from "../cell/defaults";
 import { aquariumParamsView } from "../cell/aquarium/params";
 import { seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aquarium/layer";
 import { diatomGeometry } from "../cell/aquarium/diatoms";
-import { euglenaPose, updateEuglena, EUGLENA_STEER } from "../cell/aquarium/euglena";
+import { euglenaPose, updateEuglena, EUGLENA_STEER, MEDIUM } from "../cell/aquarium/euglena";
 import { updateVorticella, vorticellaContractPhase, vorticellaGeometry } from "../cell/aquarium/vorticella";
 import type { AquariumFrame, AquariumLayerState, EuglenaState } from "../cell/aquarium/types";
 import type { CellParams } from "../cell/types";
@@ -663,6 +663,35 @@ describe("aquarium layer Phase 3 euglena", () => {
     // the bulge is a TRAVELING wave: its peak-width location shifts with phase
     const peaks = [0, 0.33, 0.66].map(euglenaPeakU);
     expect(new Set(peaks).size).toBeGreaterThan(1);
+  });
+
+  it("higher medium viscosity slows reorientation (less turn per time)", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaScale: 3,
+      aquariumActivityBoost: 1,
+    });
+    const run = () => {
+      let cell = testEuglena({ x: 295, y: 150, heading: 0, swimSpeed: 1 }); // driving at the right wall
+      for (let i = 0; i < 6; i++) {
+        cell = updateEuglena([cell], frame({ dt: 0.05, width: 300, height: 300, activity: 0 }), view)[0];
+      }
+      return Math.abs(cell.heading); // how far it turned away from heading 0
+    };
+    const saved = MEDIUM.viscosity;
+    try {
+      MEDIUM.viscosity = 1.0;
+      const thin = run();
+      MEDIUM.viscosity = 4.0;
+      const thick = run();
+      expect(thick).toBeLessThan(thin); // thicker medium → turned less in the same time
+    } finally {
+      MEDIUM.viscosity = saved;
+    }
   });
 
   it("priority steering banks the euglena away from an approaching wall", () => {

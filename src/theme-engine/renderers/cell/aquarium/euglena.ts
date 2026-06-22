@@ -450,6 +450,16 @@ export const EUGLENA_STEER = {
   startleDart: 1.0,
 };
 
+/**
+ * Medium (fluid) properties. `viscosity` is relative to water (1.0); a denser /
+ * more viscous medium damps reorientation and entrainment flows so the cell
+ * banks and drifts more sluggishly. Physically low-Reynolds: angular velocity and
+ * advection scale ~ 1/viscosity. Raise it for thick/syrupy water, lower for thin.
+ */
+export const MEDIUM = {
+  viscosity: 1.6,
+};
+
 // Interaction geometry/timing (q = sqrt(heroQd): normalized elliptical distance,
 // q=1 on the exclusion boundary).
 const HERO_LOITER_Q = 1.30;        // emergent hover distance (attraction == avoidance)
@@ -474,6 +484,7 @@ export function updateEuglena(
   const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
   const act = modeView.motionMul * (1 + 0.7 * activityMix);
   const scale = view.euglena.scale;
+  const drag = Math.max(0.1, finite(MEDIUM.viscosity, 1)); // fluid resistance (water = 1)
 
   return euglena.map((cell) => {
     const L = euglenaDisplayLength(finite(cell.size, 1), scale);
@@ -551,7 +562,11 @@ export function updateEuglena(
       const pressure = Math.hypot(sx - ux * EUGLENA_STEER.forward, sy - uy * EUGLENA_STEER.forward);
       if (pressure > 1e-6) {
         const desired = Math.atan2(sy, sx);
-        heading += wrapPi(desired - heading) * Math.min(1, (2.5 + 7 * Math.min(1, pressure)) * dt);
+        // gentle viscous (low-Reynolds) reorientation: exact exponential approach,
+        // frame-rate independent. The medium viscosity damps the turn rate so the
+        // cell banks slowly through the fluid (angular velocity ~ 1/viscosity).
+        const turnK = (1.0 + 2.5 * Math.min(1, pressure)) / drag; // rad/s relaxation rate
+        heading += wrapPi(desired - heading) * (1 - Math.exp(-turnK * dt));
         ux = Math.cos(heading);
         uy = Math.sin(heading);
       }
@@ -570,7 +585,7 @@ export function updateEuglena(
       const hdx = Math.cos(hd), hdy = Math.sin(hd);
       const behind = Math.max(0, -(ax * hdx + ay * hdy)); // 1 when directly behind the hero
       const prox = Math.min(1, (HERO_WAKE_RANGE - heroQ) / (HERO_WAKE_RANGE - 1));
-      const wakeSpeed = EUGLENA_STEER.wake * prox * behind;
+      const wakeSpeed = (EUGLENA_STEER.wake * prox * behind) / drag; // entrainment slows in thicker medium
       nextX += hdx * wakeSpeed * dt;
       nextY += hdy * wakeSpeed * dt;
     }
