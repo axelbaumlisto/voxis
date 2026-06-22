@@ -728,9 +728,11 @@ export function drawEuglena(
       if (frame.hero) {
         const hdx = finite(cell.x, 0) - finite(frame.hero.x, 0);
         const hdy = finite(cell.y, 0) - finite(frame.hero.y, 0);
-        const reach = Math.max(finiteOr(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) * 1.7;
+        // hide the flagellum entirely near the hero (no green may touch the
+        // paramecium); ramp back in only well clear of it.
+        const reach = (Math.max(finiteOr(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) + flagellumLength) * 1.05;
         const hdist = Math.hypot(hdx, hdy);
-        if (hdist < reach) flagFade = clamp(0.12 + 0.6 * (hdist / reach), 0.12, 0.7);
+        flagFade = hdist >= reach ? 1 : clamp((hdist / reach - 0.45) / 0.5, 0, 1);
       }
       // soft underglow so the thin whip separates from the dark field
       ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.30 * flagFade})`;

@@ -2361,10 +2361,9 @@ function drawEuglena(ctx, euglena, frame, view) {
       if (frame.hero) {
         const hdx = finite2(cell.x, 0) - finite2(frame.hero.x, 0);
         const hdy = finite2(cell.y, 0) - finite2(frame.hero.y, 0);
-        const reach = Math.max(finiteOr3(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) * 1.7;
+        const reach = (Math.max(finiteOr3(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) + flagellumLength) * 1.05;
         const hdist = Math.hypot(hdx, hdy);
-        if (hdist < reach)
-          flagFade = clamp(0.12 + 0.6 * (hdist / reach), 0.12, 0.7);
+        flagFade = hdist >= reach ? 1 : clamp((hdist / reach - 0.45) / 0.5, 0, 1);
       }
       ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.3 * flagFade})`;
       ctx.lineWidth = Math.max(0.9, width * 0.18);
