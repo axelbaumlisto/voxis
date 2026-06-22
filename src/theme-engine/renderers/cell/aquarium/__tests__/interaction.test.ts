@@ -4,7 +4,7 @@ import { euglenaContribute, EUGLENA_RELEVANT_FIELDS } from "../euglena";
 import { heroConsumeObstacles } from "../hero";
 import { buildField, KIND_ID, sourceId } from "../interaction";
 import type { FieldContribution, ObstacleCircle } from "../interaction";
-import { buildEuglenaInteractionField, buildVorticellaInteractionField, heroContribute, seedAquarium, updateAquarium } from "../layer";
+import { buildAquariumInteractionField, heroContribute, seedAquarium, updateAquarium } from "../layer";
 import type { AquariumFrame } from "../types";
 import { vorticellaContribute, vorticellaObstacle, VORTICELLA_RELEVANT_FIELDS } from "../vorticella";
 import type { CellParams } from "../../types";
@@ -208,7 +208,7 @@ describe("aquarium interaction field vocabulary", () => {
     }
   });
 
-  it("generic staged builders match hand-built filtered references", () => {
+  it("single snapshot builder publishes all pre-update participant fields", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,
       enableAquarium: true,
@@ -234,31 +234,31 @@ describe("aquarium interaction field vocabulary", () => {
     const hero = { x: 118, y: 42, radius: 11, heading: 0.35, halfLen: 18, halfWid: 7 };
     const seedFrame = frame({ t: 4, dt: 1 / 60, mode: "recording", activity: 0.6, audioLevel: 0.4, hero });
     const initial = seedAquarium(seedFrame, params);
-
-    const euglenaReferenceContribs: FieldContribution[] = [
-      ...initial.vorticella.flatMap((v, i) => vorticellaContribute(v, 1.2, seedFrame.height, i)),
-      ...heroContribute(seedFrame.hero),
-    ].filter((contrib) => EUGLENA_RELEVANT_FIELDS.has(contrib.kind));
-    const euglenaField = buildEuglenaInteractionField(initial.vorticella, seedFrame.hero, 1.2, seedFrame.height);
-
-    expect(euglenaField).toEqual(buildField(euglenaReferenceContribs));
-    expect(euglenaReferenceContribs.map((contrib) => contrib.kind)).toEqual(["obstacle", "obstacle", "obstacle", "wake"]);
-    expect(euglenaField.motiles).toEqual([]);
-
     const next = updateAquarium(initial, { ...seedFrame, t: 4.25, dt: 0.05 }, params);
-    const vorticellaReferenceContribs: FieldContribution[] = [
-      ...heroContribute(seedFrame.hero),
-      ...next.euglena.flatMap((e, i) => euglenaContribute(e, i)),
-    ].filter((contrib) => VORTICELLA_RELEVANT_FIELDS.has(contrib.kind));
-    const vorticellaField = buildVorticellaInteractionField(seedFrame.hero, next.euglena);
 
-    expect(vorticellaField).toEqual(buildField(vorticellaReferenceContribs));
-    expect(vorticellaReferenceContribs.map((contrib) => contrib.sourceId)).toEqual([
+    const referenceContribs: FieldContribution[] = [
+      ...initial.vorticella.flatMap((v, i) => vorticellaContribute(v, 1.2, seedFrame.height, i)),
+      ...initial.euglena.flatMap((e, i) => euglenaContribute(e, i)),
+      ...heroContribute(seedFrame.hero),
+    ];
+    const field = buildAquariumInteractionField(initial.euglena, initial.vorticella, seedFrame.hero, 1.2, seedFrame.height);
+
+    expect(field).toEqual(buildField(referenceContribs));
+    expect(field.obstacles.map((contrib) => contrib.sourceId)).toEqual([
+      sourceId("vorticella", 0),
+      sourceId("vorticella", 1),
       sourceId("hero", 0),
+    ]);
+    expect(field.wakes.map((contrib) => contrib.sourceId)).toEqual([sourceId("hero", 0)]);
+    expect(field.motiles.map((contrib) => contrib.sourceId)).toEqual([
       sourceId("euglena", 0),
       sourceId("euglena", 1),
+      sourceId("hero", 0),
     ]);
-    expect(vorticellaField.obstacles).toEqual([]);
-    expect(vorticellaField.wakes).toEqual([]);
+    expect(field.motiles[0].x).toBe(initial.euglena[0].x);
+    expect(field.motiles[0].y).toBe(initial.euglena[0].y);
+    expect(field.motiles[0].x).not.toBe(next.euglena[0].x);
+    expect(field.obstacles.filter((contrib) => EUGLENA_RELEVANT_FIELDS.has(contrib.kind))).toHaveLength(3);
+    expect(field.motiles.filter((contrib) => VORTICELLA_RELEVANT_FIELDS.has(contrib.kind))).toHaveLength(3);
   });
 });
