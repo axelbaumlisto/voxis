@@ -25,20 +25,22 @@ export function updateAquarium(
 ): AquariumLayerState {
   const view = aquariumParamsView(params);
   if (!view.enabled) return aquarium;
-  const diatoms = view.diatoms.count > 0 ? REGISTRY.diatom.update(aquarium.diatoms, frame, view) : aquarium.diatoms;
+  const scene = sceneFromParams(params);
+  const cfgBySpecies = Object.fromEntries(scene.instances.map((instance) => [instance.species, instance.cfg]));
+  const diatoms = view.diatoms.count > 0 ? REGISTRY.diatom.update(aquarium.diatoms, frame, cfgBySpecies.diatom) : aquarium.diatoms;
   // sessile vorticella act as static obstacles the euglena must swim around
   const obstacles = view.vorticella.count > 0 && aquarium.vorticella.length > 0
     ? aquarium.vorticella.map((v) => vorticellaObstacle(v, view.vorticella.scale, frame.height))
     : undefined;
   const euglenaFrame = obstacles ? { ...frame, obstacles } : frame;
-  const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, euglenaFrame, view) : aquarium.euglena;
+  const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, euglenaFrame, cfgBySpecies.euglena) : aquarium.euglena;
   // motile cells (hero + euglena) can mechanically disturb a sessile vorticella
   let vorticella = aquarium.vorticella;
   if (view.vorticella.count > 0) {
     const motiles: { x: number; y: number }[] = [];
     if (frame.hero) motiles.push({ x: frame.hero.x, y: frame.hero.y });
     for (const e of euglena) motiles.push({ x: e.x, y: e.y });
-    vorticella = REGISTRY.vorticella.update(aquarium.vorticella, motiles.length > 0 ? { ...frame, motiles } : frame, view);
+    vorticella = REGISTRY.vorticella.update(aquarium.vorticella, motiles.length > 0 ? { ...frame, motiles } : frame, cfgBySpecies.vorticella);
   }
   return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella
     ? aquarium
@@ -54,12 +56,10 @@ export function drawAquariumBackground(
   const view = aquariumParamsView(params);
   if (!view.enabled) return;
   const scene = sceneFromParams(params);
-  const speciesByZ = [...scene.instances]
-    .map((instance) => instance.species)
-    .sort((a, b) => REGISTRY[a].z - REGISTRY[b].z);
+  const instancesByZ = [...scene.instances].sort((a, b) => REGISTRY[a.species].z - REGISTRY[b.species].z);
 
-  for (const species of speciesByZ) {
-    const entry = REGISTRY[species];
-    entry.draw(ctx, aquarium[entry.slot] as never, frame, view);
+  for (const instance of instancesByZ) {
+    const entry = REGISTRY[instance.species];
+    entry.draw(ctx, aquarium[entry.slot] as never, frame, instance.cfg);
   }
 }

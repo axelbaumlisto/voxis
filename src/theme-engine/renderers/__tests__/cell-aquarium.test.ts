@@ -616,6 +616,133 @@ describe("aquarium layer Phase 2 diatoms", () => {
     expect(ctx.fill).not.toHaveBeenCalled();
     expect(ctx.stroke).not.toHaveBeenCalled();
   });
+
+  it("keeps the multi-organism update next-state byte-identical through per-instance cfg dispatch", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 67,
+      aquariumAlpha: 0.55,
+      aquariumActivityBoost: 0.8,
+      diatomCount: 3,
+      diatomAlpha: 0.35,
+      diatomDriftSpeed: 0.42,
+      euglenaCount: 1,
+      euglenaSpeed: 0.2,
+      euglenaSpeedActive: 1.5,
+      euglenaScale: 1.4,
+      euglenaGravitaxis: 0.2,
+      euglenaPhototaxis: 0.6,
+      euglenaRotDiffusion: 0.12,
+      vorticellaCount: 1,
+      vorticellaContractRate: 1.2,
+      vorticellaContractRateActive: 1.5,
+      vorticellaScale: 1.2,
+      vorticellaAlongFrac: 0.16,
+    };
+    const hero = { x: 118, y: 42, radius: 11, heading: 0.35, halfLen: 18, halfWid: 7 };
+    const seedFrame = frame({ t: 4, dt: 1 / 60, width: 240, height: 80, mode: "recording", activity: 0.6, audioLevel: 0.4, hero });
+    const initial = seedAquarium(seedFrame, params);
+    const next = updateAquarium(initial, { ...seedFrame, t: 4.25, dt: 0.05 }, params);
+
+    expect(next).toEqual({
+      seed: 67,
+      diatoms: [
+        {
+          x: 185.5590404548048,
+          y: 71.91272966605092,
+          phase: 3.3116758177791366,
+          size: 0.798184517538175,
+          shape: "ovalCentric",
+          heading: 3.313995455629913,
+          driftX: -0.6381902297387546,
+          driftY: 0.09783944755539821,
+          rotationRate: 0.04639275701553561,
+        },
+        {
+          x: 189.72959523552748,
+          y: 10.456023962897893,
+          phase: 6.047110503842159,
+          size: 1.0322810034267604,
+          shape: "navicula",
+          heading: 6.0451511322203455,
+          driftX: -0.5807144400180535,
+          driftY: -0.36358825730730027,
+          rotationRate: -0.0391874324362725,
+        },
+        {
+          x: 60.09761353741906,
+          y: 45.63280887641962,
+          phase: 6.272857107002878,
+          size: 1.0896277173887938,
+          shape: "navicula",
+          heading: 6.271424933518547,
+          driftX: -0.25499799619505475,
+          driftY: 0.32631667996941766,
+          rotationRate: -0.028643469686619936,
+        },
+      ],
+      euglena: [
+        {
+          x: 234.10969899096312,
+          y: 3.877698712877496,
+          phase: 0.19308608700911375,
+          size: 1.2283867616206408,
+          heading: 0.19308608700911375,
+          swimSpeed: 1.0744810068747028,
+          rollPhase: 0.38560447917176877,
+          metabolyPhase: 0.16642074462644874,
+          flagellumPhase: 0.3708668104294035,
+          rollRate: 0.47428053175099194,
+          metabolyRate: 0.10880362844560296,
+          flagellumRate: 4.21480342419818,
+          spiralAmplitude: 0.13494399678893387,
+          cvPhase: 0.3587615130166184,
+          cvRate: 0.03837136438582093,
+          burstPhase: 0.15361223071124552,
+          burstRate: 0.0806029460579157,
+          turnProgress: 2,
+          turnFrom: -0.02407782175578177,
+          turnTo: -0.02407782175578177,
+          tumbleIndex: 0,
+          tumbleFrom: -0.02407782175578177,
+          tumbleTo: -0.02407782175578177,
+          tumbleProgress: 1,
+          startle: 0,
+          noiseSeed: 1649603361,
+        },
+      ],
+      vorticella: [
+        {
+          x: 38.4,
+          y: 79.5,
+          phase: 0.4531427220983897,
+          size: 1.3921901939902455,
+          anchorX: 38.4,
+          anchorY: 79.5,
+          directionAngle: -1.5707963267948966,
+          restLength: 8.697909643291496,
+          contractPhase: 0,
+          contractCyclePhase: 0.4531427220983897,
+          oralWreathPhase: 0.2442852140907199,
+          contractRate: 0.10650784630794077,
+          oralRate: 0.5634912510495633,
+          swayPhase: 0.9713883993529016,
+          swayRate: 0.10676003030734138,
+          contractLeg: 0,
+          contractTimer: 0.6783055094536394,
+          feedInterval: 2.5,
+          eventCount: 0,
+          migrateState: 0,
+          attach: 1,
+          migrateTimer: 3.4162731326185165,
+          migrateInterval: 12,
+          migrateTargetX: 38.4,
+          migrateCount: 0,
+        },
+      ],
+    });
+  });
 });
 
 describe("aquarium layer Phase 3 euglena", () => {

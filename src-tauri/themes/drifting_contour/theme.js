@@ -3080,30 +3080,64 @@ function drawVorticella(ctx, vorticella, frame, view) {
 }
 
 // src/theme-engine/renderers/cell/aquarium/registry.ts
+function viewForDiatom(cfg) {
+  return {
+    enabled: true,
+    seed: cfg.seed,
+    alpha: cfg.aquariumAlpha,
+    activityBoost: cfg.activityBoost,
+    diatoms: cfg,
+    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1 },
+    vorticella: { count: 0, contractRate: 0, contractRateActive: 0, scale: 1, alongFrac: 0.5 }
+  };
+}
+function viewForEuglena(cfg) {
+  return {
+    enabled: true,
+    seed: cfg.seed,
+    alpha: cfg.aquariumAlpha,
+    activityBoost: cfg.activityBoost,
+    medium: cfg.medium,
+    diatoms: { count: 0, alpha: 0, driftSpeed: 0 },
+    euglena: cfg,
+    vorticella: { count: 0, contractRate: 0, contractRateActive: 0, scale: 1, alongFrac: 0.5 }
+  };
+}
+function viewForVorticella(cfg) {
+  return {
+    enabled: true,
+    seed: cfg.seed,
+    alpha: cfg.aquariumAlpha,
+    activityBoost: cfg.activityBoost,
+    diatoms: { count: 0, alpha: 0, driftSpeed: 0 },
+    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1 },
+    vorticella: cfg
+  };
+}
 var REGISTRY = {
   diatom: {
     salt: 219836621,
     z: 0,
     slot: "diatoms",
     seed: (count, seed, frame) => seedDiatoms(count, seed, frame),
-    update: updateDiatoms,
-    draw: drawDiatoms
+    update: (states, frame, cfg) => updateDiatoms(states, frame, viewForDiatom(cfg)),
+    draw: (ctx, states, frame, cfg) => drawDiatoms(ctx, states, frame, viewForDiatom(cfg))
   },
   euglena: {
     salt: 235478698,
     z: 1,
     slot: "euglena",
     seed: (count, seed, frame) => seedEuglena(count, seed, frame),
-    update: updateEuglena,
-    draw: drawEuglena
+    update: (states, frame, cfg) => updateEuglena(states, frame, viewForEuglena(cfg)),
+    draw: (ctx, states, frame, cfg) => drawEuglena(ctx, states, frame, viewForEuglena(cfg))
   },
   vorticella: {
     salt: 117600714,
     z: 2,
     slot: "vorticella",
     seed: (count, seed, frame, cfg) => seedVorticella(count, seed, frame, cfg.alongFrac),
-    update: updateVorticella,
-    draw: drawVorticella
+    update: (states, frame, cfg) => updateVorticella(states, frame, viewForVorticella(cfg)),
+    draw: (ctx, states, frame, cfg) => drawVorticella(ctx, states, frame, viewForVorticella(cfg))
   }
 };
 function sceneFromParams(params) {
@@ -3112,13 +3146,31 @@ function sceneFromParams(params) {
   if (!view.enabled)
     return { seed: view.seed | 0, instances };
   if (view.diatoms.count > 0) {
-    instances.push({ species: "diatom", count: view.diatoms.count, cfg: view.diatoms });
+    instances.push({
+      species: "diatom",
+      count: view.diatoms.count,
+      cfg: { ...view.diatoms, seed: view.seed, aquariumAlpha: view.alpha, activityBoost: view.activityBoost }
+    });
   }
   if (view.euglena.count > 0) {
-    instances.push({ species: "euglena", count: view.euglena.count, cfg: { ...view.euglena, medium: view.medium } });
+    instances.push({
+      species: "euglena",
+      count: view.euglena.count,
+      cfg: {
+        ...view.euglena,
+        medium: view.medium,
+        seed: view.seed,
+        aquariumAlpha: view.alpha,
+        activityBoost: view.activityBoost
+      }
+    });
   }
   if (view.vorticella.count > 0) {
-    instances.push({ species: "vorticella", count: view.vorticella.count, cfg: view.vorticella });
+    instances.push({
+      species: "vorticella",
+      count: view.vorticella.count,
+      cfg: { ...view.vorticella, seed: view.seed, aquariumAlpha: view.alpha, activityBoost: view.activityBoost }
+    });
   }
   return { seed: view.seed | 0, instances };
 }
@@ -3137,10 +3189,12 @@ function updateAquarium(aquarium, frame, params) {
   const view = aquariumParamsView(params);
   if (!view.enabled)
     return aquarium;
-  const diatoms = view.diatoms.count > 0 ? REGISTRY.diatom.update(aquarium.diatoms, frame, view) : aquarium.diatoms;
+  const scene = sceneFromParams(params);
+  const cfgBySpecies = Object.fromEntries(scene.instances.map((instance) => [instance.species, instance.cfg]));
+  const diatoms = view.diatoms.count > 0 ? REGISTRY.diatom.update(aquarium.diatoms, frame, cfgBySpecies.diatom) : aquarium.diatoms;
   const obstacles = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella.map((v) => vorticellaObstacle(v, view.vorticella.scale, frame.height)) : undefined;
   const euglenaFrame = obstacles ? { ...frame, obstacles } : frame;
-  const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, euglenaFrame, view) : aquarium.euglena;
+  const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, euglenaFrame, cfgBySpecies.euglena) : aquarium.euglena;
   let vorticella = aquarium.vorticella;
   if (view.vorticella.count > 0) {
     const motiles = [];
@@ -3148,7 +3202,7 @@ function updateAquarium(aquarium, frame, params) {
       motiles.push({ x: frame.hero.x, y: frame.hero.y });
     for (const e of euglena)
       motiles.push({ x: e.x, y: e.y });
-    vorticella = REGISTRY.vorticella.update(aquarium.vorticella, motiles.length > 0 ? { ...frame, motiles } : frame, view);
+    vorticella = REGISTRY.vorticella.update(aquarium.vorticella, motiles.length > 0 ? { ...frame, motiles } : frame, cfgBySpecies.vorticella);
   }
   return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella ? aquarium : { ...aquarium, diatoms, euglena, vorticella };
 }
@@ -3157,10 +3211,10 @@ function drawAquariumBackground(ctx, aquarium, frame, params) {
   if (!view.enabled)
     return;
   const scene = sceneFromParams(params);
-  const speciesByZ = [...scene.instances].map((instance) => instance.species).sort((a, b) => REGISTRY[a].z - REGISTRY[b].z);
-  for (const species of speciesByZ) {
-    const entry = REGISTRY[species];
-    entry.draw(ctx, aquarium[entry.slot], frame, view);
+  const instancesByZ = [...scene.instances].sort((a, b) => REGISTRY[a.species].z - REGISTRY[b.species].z);
+  for (const instance of instancesByZ) {
+    const entry = REGISTRY[instance.species];
+    entry.draw(ctx, aquarium[entry.slot], frame, instance.cfg);
   }
 }
 
