@@ -1,7 +1,7 @@
 import type { AquariumFrame, AquariumParamsView, VorticellaState } from "./types";
 import { sourceId } from "./interaction";
 import type { FieldContribution, FieldKind } from "./interaction";
-import { seededUnit } from "./seeds";
+import { seededUnit, noise2D } from "./seeds";
 import { TAU, clamp, clamp01, finite, finiteOr, smoothstep, wrapUnit } from "./util";
 
 export interface VorticellaGeometryOptions {
@@ -47,8 +47,8 @@ const T_E = 2.6;     // slow Ca-reload re-extension
 
 /** Deterministic Poisson-ish feeding dwell (s) before the next contraction.
  *  `cadence` folds in the theme contract-rate + mode + startle (higher = more frequent). */
-function drawFeedInterval(cellSeed: number, eventCount: number, activityMix: number, cadence: number): number {
-  const mean = (9 - 6 * clamp01(activityMix)) / Math.max(0.2, cadence); // ~9s idle -> shorter when active/loud
+function drawFeedInterval(cellSeed: number, eventCount: number, _activityMix: number, cadence: number): number {
+  const mean = 12 / Math.max(0.2, cadence); // METABOLIC resting cadence; NOT shortened by audio
   const u = Math.max(1e-4, seededUnit(cellSeed, eventCount, 0x51bd0e77));
   return clamp(-Math.log(u) * mean, 2.5, 18);
 }
@@ -241,19 +241,15 @@ export function updateVorticella(
   const dt = Math.max(0, finite(frame.dt, 0));
   const activityMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
   const idleRate = Math.max(0, finite(view.vorticella.contractRate, 0));
-  const activeRate = Math.max(0, finite(view.vorticella.contractRateActive, idleRate));
-  const rate = idleRate + (activeRate - idleRate) * activityMix;
-  const modeMul = frame.mode === "recording" ? 1.18 : frame.mode === "transcribing" ? 0.35 : frame.mode === "error" ? 0.15 : 1;
-  const startleBoost = 1 + Math.min(0.35, Math.max(0, finite(frame.startle, 0)) * 0.35);
-  // cadence = how OFTEN it contracts (theme rate * mode * startle); the collapse
-  // SPEED is separate and absolute (T_C on real dt), decoupled from cadence.
-  const cadence = Math.max(0.2, Math.min(3.5, rate * modeMul * startleBoost));
-  // Real adoral membranelles beat ~20-40Hz, but discrete cilia lines at 60fps strobe
-  // below the Nyquist limit (20Hz -> only 2.5 samples/cycle). Render a STYLIZED
-  // metachronal shimmer at <=6Hz so there are >=10 samples/cycle @60fps (no strobe).
-  const oralHz = Math.min(6, (frame.mode === "error" ? 3 : frame.mode === "transcribing" ? 4 : 5) * (1 + activityMix * 0.2));
-  // sway slows a little under load (the zooid stiffens when contracting often)
-  const swayMul = frame.mode === "error" ? 0.3 : frame.mode === "transcribing" ? 0.6 : 1;
+  // CRITIC FIX: contraction cadence / oral cilia / CV are METABOLIC and must NOT speed
+  // up with the user's voice level or app mode (real cyclosis & beating are not driven
+  // by ambient sound). Decouple from activityMix + mode; the ONLY world-coupled trigger
+  // left is the mechanosensitive motile reflex (passing cells) in the leg state machine.
+  const rate = idleRate;
+  const cadence = Math.max(0.2, Math.min(3.5, rate));
+  // adoral membranelle shimmer: constant ~5Hz (Nyquist-safe stylization), NOT audio-driven
+  const oralHz = 5;
+  const swayMul = 1;
   return vorticella.map((cell, idx) => {
     // CV pulses on its own slow rhythm, independent of contraction events
     const cvClock = wrapUnit(finite(cell.contractCyclePhase, 0) + Math.max(0, finite(cell.contractRate, 0)) * dt);
@@ -384,7 +380,6 @@ export function drawVorticella(
     // seeded per-cell asymmetry + continuous-life params (deterministic, birth-stable).
     // Every motion term is a pure function of frame.t -> byte-stable at fixed t, fps-free.
     const tt = finite(frame.t, 0);
-    const actMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
     const aSeed = (Math.round(finite(cell.restLength, 10) * 1024) ^ 0x3af1c5) >>> 0;
     const asymA = (seededUnit(aSeed, 0, 0x11) - 0.5) * 0.24;   // +/-12% left/right wall imbalance
     const skewAmt = (seededUnit(aSeed, 7, 0x88) - 0.5) * 0.55;  // lateral CURVE of the body axis -> visibly lopsided, not a clean mirror
@@ -444,7 +439,9 @@ export function drawVorticella(
       // everted-lip taper as a SMOOTH gate over u in [0.82,1] (math-review fix: was a
       // hard C0 -31% step at u=0.9 when contracted).
       const lipGate = 1 - (1 - (0.55 + 0.45 * open)) * smoothstep((u - 0.82) / 0.18);
-      return D * base * lipGate;
+      // CRITIC FIX (contraction rounding): the bell fattens/rounds toward a sphere as it
+      // contracts (s->1), instead of keeping a fixed urn aspect.
+      return D * base * lipGate * (1 + 0.45 * s);
     };
 
     // === STALK (spasmoneme) — straight at rest, tight HELIX when contracted ===
@@ -524,8 +521,9 @@ export function drawVorticella(
     // hyaline (near-colorless) cytoplasm: pale grey-blue ectoplasm at the rim, a touch
     // denser/warmer granular endoplasm toward the neck — NOT a saturated teal wash.
     const cyto = ctx.createLinearGradient(rimC.x, rimC.y, neck.x, neck.y);
-    cyto.addColorStop(0, `hsla(205, 12%, 82%, ${alpha * 0.30})`);
-    cyto.addColorStop(1, `hsla(205, 16%, 64%, ${alpha * 0.50})`);
+    // darkfield idiom (organism glows on the dark overlay): a touch more luminous/translucent
+    cyto.addColorStop(0, `hsla(200, 14%, 87%, ${alpha * 0.34})`);
+    cyto.addColorStop(1, `hsla(202, 18%, 72%, ${alpha * 0.5})`);
     ctx.fillStyle = cyto;
     ctx.fill();
     // granular endoplasm + soft DIC-style relief, CLIPPED to the bell, so the body reads
@@ -552,7 +550,7 @@ export function drawVorticella(
       // vacuoles) so the whole endoplasm streams rather than sitting as painted dots.
       const gphi = seededUnit(gSeed, k, 0x3d1f77) * TAU;
       const gamp = 0.18 + 0.7 * Math.sqrt(seededUnit(gSeed, k, 0x1b3a7d));
-      const gph = (TAU / 130) * tt * 0.7 + gphi; // slow creep (~130s loop), not a fast carousel
+      const gph = (TAU / 46) * tt + gphi + 0.5 * noise2D(gSeed, gphi * 3.3 + k, tt * 0.045); // constant ~46s, NOT audio-driven, aperiodic
       const gu = 0.5 + 0.44 * gamp * Math.sin(gph);
       const glat = gamp * Math.cos(gph) * 0.72 * halfW(gu) * breathMod(gu);
       const gp = bodyPoint(bellHeight * gu, glat);
@@ -570,7 +568,7 @@ export function drawVorticella(
     for (let k = 0; k < gCount2; k++) {
       const p2 = seededUnit(gSeed, k, 0x55aa3b) * TAU;
       const a2 = 0.12 + 0.78 * Math.sqrt(seededUnit(gSeed, k, 0x2c7f91));
-      const ph2 = (TAU / 150) * tt * 0.5 + p2; // even slower fine-grain drift
+      const ph2 = (TAU / 60) * tt + p2 + 0.4 * noise2D(gSeed, p2 * 2.7 + k, tt * 0.04); // constant ~60s, aperiodic
       const u2 = 0.5 + 0.46 * a2 * Math.sin(ph2);
       const l2 = a2 * Math.cos(ph2) * 0.72 * halfW(u2) * breathMod(u2);
       const fp = bodyPoint(bellHeight * u2, l2);
@@ -585,7 +583,7 @@ export function drawVorticella(
     // luminous-body-with-dark-base tonality (instead of a flat washed-out white).
     const baseHeel = bodyPoint(bellHeight * 0.14, 0);
     const basal = ctx.createRadialGradient(baseHeel.x, baseHeel.y, 1, baseHeel.x, baseHeel.y, bellHeight * 0.5);
-    basal.addColorStop(0, `hsla(208, 18%, 42%, ${alpha * 0.30})`);
+    basal.addColorStop(0, `hsla(208, 18%, 46%, ${alpha * 0.14})`); // softened: a hard dark heel muddies the cell on the dark field
     basal.addColorStop(1, `hsla(208, 18%, 42%, 0)`);
     ctx.fillStyle = basal;
     drawPolyline(ctx, outline, true);
@@ -672,16 +670,18 @@ export function drawVorticella(
       // seed from a BIRTH-stable field (restLength), never the live anchorX, so the
       // inclusions do not teleport while the zooid migrates as a telotroch.
       const fvSeed = (Math.round(finite(cell.restLength, 10) * 4096) ^ 0x9e37) >>> 0;
-      const fvCount = 13; // numerous scattered inclusions (real cells carry ~10-20), not a 6-bead ring
+      const fvCount = 8; // scattered inclusions that must NOT outshine the macronucleus
       for (let j = 0; j < fvCount; j++) {
         // spread across the lower-mid granular endoplasm so they read as DISCRETE
         // spheres (not a clump): wide axial range, tighter lateral, smaller radii.
         // CYCLOSIS: each vacuole rides a divergence-free wall-tangent gyre psi=(1-ua^2)(1-sv^2),
         // phase from frame.t -> streams in life, byte-stable at a fixed t. Period 40s idle.
-        const cycT = Math.max(20, 95 + seededUnit(fvSeed, j, 0x13b7) * 60 - 30 * actMix); // SLOW per-vacuole period (~95-155s) so circulation is a gentle creep, not fast
+        // CONSTANT realistic cyclosis (~34-48s loop ~= a few um/s); NOT coupled to audio.
+        const cycT = 34 + seededUnit(fvSeed, j, 0x13b7) * 14;
         const phi0 = seededUnit(fvSeed, j, 0x51bd0e77) * TAU;
         const amp = 0.28 + 0.6 * Math.sqrt(seededUnit(fvSeed, j, 0x2cd9a14b));
-        const ph = (TAU / cycT) * tt + phi0;
+        // + slow aperiodic noise so the loop never repeats byte-for-byte (alive, not a screensaver)
+        const ph = (TAU / cycT) * tt + phi0 + 0.6 * noise2D(fvSeed, phi0 * 5.1 + j, tt * 0.05);
         const u = 0.5 + 0.42 * amp * Math.sin(ph);
         const lat = amp * Math.cos(ph) * 0.72 * halfW(u) * breathMod(u);
         const fv = bodyPoint(bellHeight * u, lat);
@@ -696,7 +696,7 @@ export function drawVorticella(
         const ru = -0.4 * (Math.sin(hj) + Math.cos(hj));
         const fgx = fv.x + nx * rn * fr + ux * ru * fr, fgy = fv.y + ny * rn * fr + uy * ru * fr;
         const fg = ctx.createRadialGradient(fgx, fgy, fr * 0.1, fv.x, fv.y, fr * 1.12);
-        fg.addColorStop(0, warm ? `hsla(40, 34%, 74%, ${alpha * 0.55})` : `hsla(40, 18%, 72%, ${alpha * 0.5})`);
+        fg.addColorStop(0, warm ? `hsla(40, 28%, 76%, ${alpha * 0.46})` : `hsla(42, 14%, 76%, ${alpha * 0.42})`);
         fg.addColorStop(0.5, warm ? `hsla(32, 32%, 50%, ${alpha * 0.56})` : `hsla(34, 15%, 52%, ${alpha * 0.5})`);
         fg.addColorStop(0.84, `hsla(28, 22%, 42%, ${alpha * 0.42})`);
         fg.addColorStop(1, `hsla(26, 28%, 30%, 0)`);
