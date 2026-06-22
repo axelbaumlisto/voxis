@@ -296,7 +296,9 @@ describe("aquarium biology geometry contracts", () => {
     expect(b.apparentWidth).toBeLessThan(a.apparentWidth);
     expect(b.stripePhase).not.toBe(a.stripePhase);
     expect(b.eyespot.x).toBeCloseTo(a.eyespot.x, 6);
-    expect(b.flagellumEnd.x).toBeCloseTo(a.flagellumEnd.x, 6);
+    // the flagellum ANCHOR (anterior pole) does not move with roll; the tip may
+    // shift slightly with phase due to the non-planar lasso curl.
+    expect(b.flagellumPoints[0].x).toBeCloseTo(a.flagellumPoints[0].x, 6);
   });
 
   it("diatomGeometry keeps navicula bilateral symmetry with finite scale-aware striae", () => {

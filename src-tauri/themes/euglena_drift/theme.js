@@ -1973,9 +1973,11 @@ function euglenaPose(rollPhase, metabolyPhase, options = {}) {
   const flagellumPoints = [anterior];
   for (let i = 1;i <= segs; i++) {
     const q = i / segs;
-    const along = halfLength + flagellumLength * q;
     const env = 0.25 + 0.75 * Math.pow(q, 1.2);
-    const lateral = clamp(ampTip * env * Math.sin(TAU3 * flagellum - waves * TAU3 * q), -maxLat, maxLat);
+    const ph = TAU3 * flagellum - waves * TAU3 * q;
+    const lateral = clamp(ampTip * env * (Math.sin(ph) + 0.28 * Math.sin(2 * ph + Math.PI / 2)), -maxLat, maxLat);
+    const curl = ampTip * env * 0.3 * Math.cos(ph);
+    const along = halfLength + flagellumLength * q + curl;
     flagellumPoints.push(transform2(cx, cy, ux, uy, along, lateral));
   }
   const flagellumEnd = flagellumPoints[flagellumPoints.length - 1];
@@ -2196,6 +2198,9 @@ function updateEuglena(euglena, frame, view) {
       }
     }
     const rollDelta = Math.max(0, finite2(cell.rollRate, 0)) * act * dt;
+    const bphase = wrapUnit(finiteOr3(cell.burstPhase, 0));
+    const flick = bphase < 0.08 ? Math.sin(bphase / 0.08 * Math.PI) : 0;
+    const beatBoost = 1 + 1.3 * flick;
     return {
       ...cell,
       x: clamp(wrap2(nextX, safeWidth), 0, safeWidth),
@@ -2207,7 +2212,7 @@ function updateEuglena(euglena, frame, view) {
       turnTo,
       rollPhase: wrapUnit(finite2(cell.rollPhase, 0) + rollDelta),
       metabolyPhase: wrapUnit(finite2(cell.metabolyPhase, 0) + Math.max(0, finite2(cell.metabolyRate, 0)) * act * dt),
-      flagellumPhase: wrapUnit(finite2(cell.flagellumPhase, 0) + Math.max(0, finite2(cell.flagellumRate, 0)) * act * dt),
+      flagellumPhase: wrapUnit(finite2(cell.flagellumPhase, 0) + Math.max(0, finite2(cell.flagellumRate, 0)) * act * beatBoost * dt),
       cvPhase: wrapUnit(finiteOr3(cell.cvPhase, 0) + Math.max(0, finiteOr3(cell.cvRate, 0)) * act * dt),
       burstPhase: wrapUnit(finiteOr3(cell.burstPhase, 0) + Math.max(0, finiteOr3(cell.burstRate, 0)) * act * dt)
     };
@@ -2271,7 +2276,8 @@ function drawEuglena(ctx, euglena, frame, view) {
     const cyr = finite2(cell.y, 0) + ny * lateral;
     const bp = wrapUnit(finiteOr3(cell.burstPhase, 0));
     const hh = finite2(cell.heading, 0);
-    const vigour = 0.8 + 0.12 * Math.sin(TAU3 * bp + hh) + 0.08 * Math.sin(TAU3 * bp * 2.7 + hh * 1.7);
+    const flick = bp < 0.08 ? Math.sin(bp / 0.08 * Math.PI) : 0;
+    const vigour = 0.8 + 0.12 * Math.sin(TAU3 * bp + hh) + 0.08 * Math.sin(TAU3 * bp * 2.7 + hh * 1.7) + 0.3 * flick;
     const ampTip = clamp(length * 0.22, 2, 0.4 * H) * vigour;
     const env = metabolyEnvelope(finiteOr3(cell.burstPhase, 0));
     const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {
@@ -2302,6 +2308,14 @@ function drawEuglena(ctx, euglena, frame, view) {
     ctx.lineWidth = Math.max(0.5, Math.min(0.9, width * 0.08));
     ctx.fill();
     ctx.stroke();
+    if (length >= 12) {
+      const gx = cxr + ux * length * 0.33;
+      const gy = cyr + uy * length * 0.33;
+      ctx.fillStyle = `hsla(188, 16%, 84%, ${alpha * 0.2})`;
+      ctx.beginPath();
+      ctx.ellipse(gx, gy, length * 0.26, width * 0.4, heading, 0, TAU3);
+      ctx.fill();
+    }
     if (pose.pellicleStrips.length > 0) {
       ctx.strokeStyle = `hsla(${hue - 6}, 22%, 76%, ${alpha * 0.4})`;
       ctx.lineWidth = Math.max(0.35, Math.min(0.55, width * 0.06));

@@ -259,13 +259,17 @@ export function euglenaPose(
   const flagellumPoints: AquariumPoint[] = [anterior];
   for (let i = 1; i <= segs; i++) {
     const q = i / segs;
-    const along = halfLength + flagellumLength * q;
     const env = 0.25 + 0.75 * Math.pow(q, 1.2); // proximal floor + tip-amplified whip
+    const ph = TAU * flagellum - waves * TAU * q;
+    // non-planar "spinning lasso": a 2nd harmonic + a 90° along-axis curl so the
+    // tip traces a loop in projection rather than a flat planar sine.
     const lateral = clamp(
-      ampTip * env * Math.sin(TAU * flagellum - waves * TAU * q),
+      ampTip * env * (Math.sin(ph) + 0.28 * Math.sin(2 * ph + Math.PI / 2)),
       -maxLat,
       maxLat,
     );
+    const curl = ampTip * env * 0.30 * Math.cos(ph);
+    const along = halfLength + flagellumLength * q + curl;
     flagellumPoints.push(transform(cx, cy, ux, uy, along, lateral));
   }
   const flagellumEnd = flagellumPoints[flagellumPoints.length - 1];
@@ -525,6 +529,11 @@ export function updateEuglena(
     }
 
     const rollDelta = Math.max(0, finite(cell.rollRate, 0)) * act * dt;
+    // occasional discrete "turning beat" flick: a brief faster, stronger stroke
+    // once per burst cycle (real activity = beat-pattern switching, not a ramp).
+    const bphase = wrapUnit(finiteOr(cell.burstPhase, 0));
+    const flick = bphase < 0.08 ? Math.sin((bphase / 0.08) * Math.PI) : 0;
+    const beatBoost = 1 + 1.3 * flick;
     return {
       ...cell,
       x: clamp(wrap(nextX, safeWidth), 0, safeWidth),
@@ -536,7 +545,7 @@ export function updateEuglena(
       turnTo,
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + rollDelta),
       metabolyPhase: wrapUnit(finite(cell.metabolyPhase, 0) + Math.max(0, finite(cell.metabolyRate, 0)) * act * dt),
-      flagellumPhase: wrapUnit(finite(cell.flagellumPhase, 0) + Math.max(0, finite(cell.flagellumRate, 0)) * act * dt),
+      flagellumPhase: wrapUnit(finite(cell.flagellumPhase, 0) + Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost * dt),
       cvPhase: wrapUnit(finiteOr(cell.cvPhase, 0) + Math.max(0, finiteOr(cell.cvRate, 0)) * act * dt),
       burstPhase: wrapUnit(finiteOr(cell.burstPhase, 0) + Math.max(0, finiteOr(cell.burstRate, 0)) * act * dt),
     };
@@ -618,9 +627,12 @@ export function drawEuglena(
     // incommensurate slow components so there is no single clean period.
     const bp = wrapUnit(finiteOr(cell.burstPhase, 0));
     const hh = finite(cell.heading, 0);
+    // discrete turning-beat flick (matches updateEuglena) surges the whip wider
+    const flick = bp < 0.08 ? Math.sin((bp / 0.08) * Math.PI) : 0;
     const vigour = 0.80
       + 0.12 * Math.sin(TAU * bp + hh)
-      + 0.08 * Math.sin(TAU * bp * 2.7 + hh * 1.7);
+      + 0.08 * Math.sin(TAU * bp * 2.7 + hh * 1.7)
+      + 0.30 * flick;
     const ampTip = clamp(length * 0.22, 2, 0.40 * H) * vigour;
     const env = metabolyEnvelope(finiteOr(cell.burstPhase, 0));
 
@@ -654,6 +666,17 @@ export function drawEuglena(
     ctx.lineWidth = Math.max(0.5, Math.min(0.9, width * 0.08));
     ctx.fill();
     ctx.stroke();
+
+    // anterior "gullet" clearing — the reservoir/canal region is COLORLESS, not
+    // green, so the cell is not uniformly green: a pale clear wash over the front.
+    if (length >= 12) {
+      const gx = cxr + ux * length * 0.33;
+      const gy = cyr + uy * length * 0.33;
+      ctx.fillStyle = `hsla(188, 16%, 84%, ${alpha * 0.20})`;
+      ctx.beginPath();
+      ctx.ellipse(gx, gy, length * 0.26, width * 0.40, heading, 0, TAU);
+      ctx.fill();
+    }
 
     // pellicle striae (cool sheen lines, helical)
     if (pose.pellicleStrips.length > 0) {
