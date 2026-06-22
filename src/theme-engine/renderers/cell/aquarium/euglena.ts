@@ -449,7 +449,7 @@ export function updateEuglena(
     // before contact (lookahead ~2.4 body-lengths), so it banks around the edge
     // instead of ramming it. No 180-degree flip, no jerk — a smooth continuous turn. ---
     {
-      const look = Math.max(L * 2.4, Math.min(safeWidth, safeHeight) * 0.5);
+      const look = L * 2.4; // anticipate ~2.4 body-lengths ahead of every wall
       let avoidX = 0;
       let avoidY = 0;
       if (ux < 0 && px0 < look) avoidX += 1 - px0 / look;                       // heading at left wall → push right

@@ -4,7 +4,7 @@
   "name": "Euglena Drift",
   "description": "A single Euglena glides across the field — green chloroplasts, red eyespot, whipping flagellum. No paramecium; the euglena is the whole organism.",
   "api_version": 1,
-  "overlay_width": 160,
+  "overlay_width": 320,
   "overlay_height": 160,
   "entry": "theme.js"
 }
