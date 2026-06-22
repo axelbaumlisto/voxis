@@ -13,6 +13,8 @@ export interface AquariumFrame {
   readonly baseHue: number;
   /** Static obstacles other organisms should swim around (e.g. a sessile vorticella). */
   readonly obstacles?: readonly { readonly x: number; readonly y: number; readonly radius: number }[];
+  /** Positions of motile cells that can mechanically disturb a sessile vorticella (trigger contraction). */
+  readonly motiles?: readonly { readonly x: number; readonly y: number }[];
   readonly hero?: {
     readonly x: number;
     readonly y: number;

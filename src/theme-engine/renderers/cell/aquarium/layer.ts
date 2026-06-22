@@ -30,7 +30,14 @@ export function updateAquarium(
     : undefined;
   const euglenaFrame = obstacles ? { ...frame, obstacles } : frame;
   const euglena = view.euglena.count > 0 ? updateEuglena(aquarium.euglena, euglenaFrame, view) : aquarium.euglena;
-  const vorticella = view.vorticella.count > 0 ? updateVorticella(aquarium.vorticella, frame, view) : aquarium.vorticella;
+  // motile cells (hero + euglena) can mechanically disturb a sessile vorticella
+  let vorticella = aquarium.vorticella;
+  if (view.vorticella.count > 0) {
+    const motiles: { x: number; y: number }[] = [];
+    if (frame.hero) motiles.push({ x: frame.hero.x, y: frame.hero.y });
+    for (const e of euglena) motiles.push({ x: e.x, y: e.y });
+    vorticella = updateVorticella(aquarium.vorticella, motiles.length > 0 ? { ...frame, motiles } : frame, view);
+  }
   return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella
     ? aquarium
     : { ...aquarium, diatoms, euglena, vorticella };

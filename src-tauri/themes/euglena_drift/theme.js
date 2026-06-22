@@ -2757,6 +2757,20 @@ function updateVorticella(vorticella, frame, view) {
     let timer = Math.max(0, finiteOr4(cell.contractTimer, 0)) + dt;
     let interval = Math.max(2.5, finiteOr4(cell.feedInterval, 6));
     let evt = Math.max(0, Math.floor(finiteOr4(cell.eventCount, 0)));
+    const motiles = frame.motiles;
+    if (motiles && motiles.length > 0 && leg === 0 && timer > 1) {
+      const obs = vorticellaObstacle(cell, view.vorticella.scale, frame.height);
+      const trigR = obs.radius * 1.25;
+      for (let mi = 0;mi < motiles.length; mi++) {
+        const mdx = finite3(motiles[mi].x, 0) - obs.x;
+        const mdy = finite3(motiles[mi].y, 0) - obs.y;
+        if (mdx * mdx + mdy * mdy < trigR * trigR) {
+          leg = 1;
+          timer = 0;
+          break;
+        }
+      }
+    }
     for (let guard = 0;guard < 128; guard++) {
       if (leg === 0) {
         if (timer >= interval) {
@@ -3030,7 +3044,15 @@ function updateAquarium(aquarium, frame, params) {
   const obstacles = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella.map((v) => vorticellaObstacle(v, view.vorticella.scale, frame.height)) : undefined;
   const euglenaFrame = obstacles ? { ...frame, obstacles } : frame;
   const euglena = view.euglena.count > 0 ? updateEuglena(aquarium.euglena, euglenaFrame, view) : aquarium.euglena;
-  const vorticella = view.vorticella.count > 0 ? updateVorticella(aquarium.vorticella, frame, view) : aquarium.vorticella;
+  let vorticella = aquarium.vorticella;
+  if (view.vorticella.count > 0) {
+    const motiles = [];
+    if (frame.hero)
+      motiles.push({ x: frame.hero.x, y: frame.hero.y });
+    for (const e of euglena)
+      motiles.push({ x: e.x, y: e.y });
+    vorticella = updateVorticella(aquarium.vorticella, motiles.length > 0 ? { ...frame, motiles } : frame, view);
+  }
   return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella ? aquarium : { ...aquarium, diatoms, euglena, vorticella };
 }
 function drawAquariumBackground(ctx, aquarium, frame, params) {

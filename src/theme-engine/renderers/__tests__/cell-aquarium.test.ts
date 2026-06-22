@@ -4,7 +4,7 @@ import { aquariumParamsView } from "../cell/aquarium/params";
 import { seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aquarium/layer";
 import { diatomGeometry } from "../cell/aquarium/diatoms";
 import { euglenaPose, updateEuglena, EUGLENA_STEER, MEDIUM } from "../cell/aquarium/euglena";
-import { updateVorticella, vorticellaContractPhase, vorticellaGeometry } from "../cell/aquarium/vorticella";
+import { updateVorticella, vorticellaContractPhase, vorticellaGeometry, vorticellaObstacle } from "../cell/aquarium/vorticella";
 import { noise2D } from "../cell/aquarium/seeds";
 import type { AquariumFrame, AquariumLayerState, EuglenaState } from "../cell/aquarium/types";
 import type { CellParams } from "../cell/types";
@@ -1291,6 +1291,37 @@ describe("aquarium layer Phase 4 vorticella", () => {
       view,
     );
     expect(again[0].contractPhase).toBe(phases.length ? updateVorticella(seedAquarium(frame({ width: 240, height: 80 }), params).vorticella, frame({ dt, width: 240, height: 80, activity: 0.6 }), view)[0].contractPhase : 0);
+  });
+
+  it("mechanosensitive reflex: a motile cell near the bell triggers contraction sooner", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 51,
+      vorticellaCount: 1,
+      vorticellaContractRate: 1.0,
+      vorticellaContractRateActive: 1.6,
+    };
+    const view = aquariumParamsView(params);
+    const seeded = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
+    const obs = vorticellaObstacle(seeded[0], view.vorticella.scale, 80);
+    const stepsTo90 = (withMotile: boolean): number => {
+      let cell = seeded;
+      const f = withMotile
+        ? frame({ dt: 0.05, width: 240, height: 80, activity: 0.2, motiles: [{ x: obs.x, y: obs.y }] })
+        : frame({ dt: 0.05, width: 240, height: 80, activity: 0.2 });
+      for (let i = 0; i < 200; i++) {
+        cell = updateVorticella(cell, f, view);
+        if (cell[0].contractPhase > 0.9) return i;
+      }
+      return Infinity;
+    };
+    const withM = stepsTo90(true);
+    const without = stepsTo90(false);
+    expect(withM).toBeLessThan(without);    // the near cell triggers a contraction sooner
+    expect(withM).toBeLessThanOrEqual(40);  // ~within refractory(1s)+collapse
+    // deterministic
+    expect(stepsTo90(true)).toBe(withM);
   });
 
   it("updateVorticella is dt-partition invariant away from event boundaries", () => {

@@ -236,6 +236,19 @@ export function updateVorticella(
     let timer = Math.max(0, finiteOr(cell.contractTimer, 0)) + dt;
     let interval = Math.max(2.5, finiteOr(cell.feedInterval, 6));
     let evt = Math.max(0, Math.floor(finiteOr(cell.eventCount, 0)));
+    // MECHANOSENSITIVE reflex: a motile cell passing close to the bell triggers a
+    // contraction (the iconic Vorticella startle). Only while extended and past a
+    // short refractory, so a lingering cell does not cause a spasm storm.
+    const motiles = frame.motiles;
+    if (motiles && motiles.length > 0 && leg === 0 && timer > 1.0) {
+      const obs = vorticellaObstacle(cell, view.vorticella.scale, frame.height);
+      const trigR = obs.radius * 1.25;
+      for (let mi = 0; mi < motiles.length; mi++) {
+        const mdx = finite(motiles[mi].x, 0) - obs.x;
+        const mdy = finite(motiles[mi].y, 0) - obs.y;
+        if (mdx * mdx + mdy * mdy < trigR * trigR) { leg = 1; timer = 0; break; }
+      }
+    }
     for (let guard = 0; guard < 128; guard++) {
       if (leg === 0) { if (timer >= interval) { timer -= interval; leg = 1; } else break; }
       else if (leg === 1) { if (timer >= T_C) { timer -= T_C; leg = 2; } else break; }
