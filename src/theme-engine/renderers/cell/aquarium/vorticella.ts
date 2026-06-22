@@ -61,7 +61,7 @@ function vorticellaBellMetrics(cell: VorticellaState, scale: number, H: number):
   const Hc = Math.max(1, finite(H, 80));
   const Sc = Math.max(0.1, finite(scale, 1));
   const D = clamp((8 + finite(cell.size, 1) * 4) * Sc, 6, Hc * 0.40);
-  const bellHeight = 1.25 * D;
+  const bellHeight = 1.5 * D;
   // longer stalk + headroom reserved for the upward crown cilia (~D*0.34 above the
   // rim) so the zooid fills the frame and the crown never clips the top edge.
   // Math-review fix: cap with min() (no D*1.3 floor) so the clamp can never INVERT
@@ -399,9 +399,9 @@ export function drawVorticella(
     const neck = geom.bellCenter;           // base of the bell (top of stalk)
     const rimC = { x: neck.x + ux * bellHeight, y: neck.y + uy * bellHeight }; // peristome centre
     const open = 1 - 0.7 * s;               // peristome closes as it contracts (open in [0.3,1])
-    // everted collar: the peristomial rim flares WIDER than the body (~1.4D) like a
-    // rolled brim (real peristome is 1.25-1.45x the body width), not a narrow flat lid.
-    const Rrim = 0.56 * D * 1.28 * open;
+    // everted collar: a rolled rim only slightly wider than the shoulder (~1.28D body-max
+    // 1.16D -> ~10% overhang) so it reads CONTINUOUS with the bell, not a floating saucer.
+    const Rrim = 0.64 * D * open;
     // smooth furl of the feeding crown as it closes — fade out over the last bit of
     // contraction instead of a hard on/off pop at full contraction (anti-flicker).
     const crownFade = smoothstep(clamp01((open - 0.30) / 0.18));
@@ -415,9 +415,9 @@ export function drawVorticella(
     // campanulate bell: FULL neck (not a needle), convex bulging shoulders,
     // widest just below the everted lip, easing in slightly to the rim.
     const halfW = (u: number): number => {
-      const um = 0.72, w0 = 0.28, wMax = 0.56, wRim = 0.50; // campanulate: full convex shoulders, widest ~0.72, easing in to the rim
+      const um = 0.85, w0 = 0.20, wMax = 0.58, wRim = 0.58; // campanulate: narrow neck, widest HIGH (~0.85), flaring CONTINUOUSLY into the collar (no rim pinch)
       const base = u <= um
-        ? w0 + (wMax - w0) * Math.pow(smoothstep(u / um), 0.55) // strong convex bulge
+        ? w0 + (wMax - w0) * Math.pow(smoothstep(u / um), 0.58) // strong convex bulge
         : wMax + (wRim - wMax) * smoothstep((u - um) / (1 - um));
       // everted-lip taper as a SMOOTH gate over u in [0.82,1] (math-review fix: was a
       // hard C0 -31% step at u=0.9 when contracted).
@@ -499,8 +499,8 @@ export function drawVorticella(
     // hyaline (near-colorless) cytoplasm: pale grey-blue ectoplasm at the rim, a touch
     // denser/warmer granular endoplasm toward the neck — NOT a saturated teal wash.
     const cyto = ctx.createLinearGradient(rimC.x, rimC.y, neck.x, neck.y);
-    cyto.addColorStop(0, `hsla(200, 12%, 84%, ${alpha * 0.24})`);
-    cyto.addColorStop(1, `hsla(46, 13%, 68%, ${alpha * 0.42})`);
+    cyto.addColorStop(0, `hsla(205, 12%, 82%, ${alpha * 0.30})`);
+    cyto.addColorStop(1, `hsla(205, 16%, 64%, ${alpha * 0.50})`);
     ctx.fillStyle = cyto;
     ctx.fill();
     // granular endoplasm + soft DIC-style relief, CLIPPED to the bell, so the body reads
@@ -512,9 +512,9 @@ export function drawVorticella(
       bodyPoint(bellHeight * 0.55, -D).x, bodyPoint(bellHeight * 0.55, -D).y,
       bodyPoint(bellHeight * 0.45, D).x, bodyPoint(bellHeight * 0.45, D).y,
     );
-    relief.addColorStop(0, `hsla(0, 0%, 100%, ${alpha * 0.13})`);
+    relief.addColorStop(0, `hsla(0, 0%, 100%, ${alpha * 0.20})`);
     relief.addColorStop(0.5, `hsla(0, 0%, 100%, 0)`);
-    relief.addColorStop(1, `hsla(210, 14%, 30%, ${alpha * 0.16})`);
+    relief.addColorStop(1, `hsla(208, 16%, 28%, ${alpha * 0.24})`);
     ctx.fillStyle = relief;
     drawPolyline(ctx, outline, true);
     ctx.fill();
@@ -522,22 +522,37 @@ export function drawVorticella(
     const gSeed = (Math.round(finite(cell.restLength, 10) * 8192) ^ 0x6e3a) >>> 0;
     const gCount = Math.round(clamp(D * 2.0, 18, 64));
     for (let k = 0; k < gCount; k++) {
-      const gu = 0.08 + seededUnit(gSeed, k, 0x1b3a7d) * 0.86;
+      // density biased toward the posterior base (oil-droplet pooling); higher contrast
+      const gu = 0.06 + Math.pow(seededUnit(gSeed, k, 0x1b3a7d), 1.5) * 0.78;
       const glat = (seededUnit(gSeed, k, 0x2f5d11) - 0.5) * 1.7 * halfW(gu);
       const gp = bodyPoint(bellHeight * gu, glat);
-      const gr = 0.4 + seededUnit(gSeed, k, 0x77c1a3) * 0.8;
+      const gr = 0.4 + seededUnit(gSeed, k, 0x77c1a3) * 0.9;
       ctx.beginPath();
       ctx.arc(gp.x, gp.y, gr, 0, TAU);
       ctx.fillStyle = seededUnit(gSeed, k, 0x9d11ef) > 0.5
-        ? `hsla(48, 12%, 92%, ${alpha * 0.18})`   // refractile highlight
-        : `hsla(210, 10%, 40%, ${alpha * 0.16})`; // shadowed granule
+        ? `hsla(48, 14%, 94%, ${alpha * 0.30})`   // refractile highlight
+        : `hsla(210, 12%, 38%, ${alpha * 0.26})`; // shadowed granule
       ctx.fill();
     }
-    ctx.restore();
-    // thin, soft, translucent pellicle (no bold cartoon contour line)
+    // dark basal pooling: the dense oil-droplet heel that gives a live cell its
+    // luminous-body-with-dark-base tonality (instead of a flat washed-out white).
+    const baseHeel = bodyPoint(bellHeight * 0.14, 0);
+    const basal = ctx.createRadialGradient(baseHeel.x, baseHeel.y, 1, baseHeel.x, baseHeel.y, bellHeight * 0.5);
+    basal.addColorStop(0, `hsla(208, 18%, 42%, ${alpha * 0.30})`);
+    basal.addColorStop(1, `hsla(208, 18%, 42%, 0)`);
+    ctx.fillStyle = basal;
     drawPolyline(ctx, outline, true);
-    ctx.strokeStyle = `hsla(202, 12%, 74%, ${alpha * 0.32})`;
+    ctx.fill();
+    ctx.restore();
+    // soft translucent pellicle + a brighter refractile rim-light (the membrane edge
+    // catches light in every micrograph) — no bold cartoon contour.
+    drawPolyline(ctx, outline, true);
+    ctx.strokeStyle = `hsla(205, 12%, 72%, ${alpha * 0.30})`;
     ctx.lineWidth = Math.max(0.5, D * 0.03);
+    ctx.stroke();
+    drawPolyline(ctx, outline, true);
+    ctx.strokeStyle = `hsla(200, 10%, 96%, ${alpha * 0.40})`;
+    ctx.lineWidth = Math.max(0.4, D * 0.016);
     ctx.stroke();
 
     // === INTERIOR (subtle, hyaline) ===
@@ -550,11 +565,15 @@ export function drawVorticella(
       // elongate the C ALONG the body axis (long worm-like horseshoe), not a transverse ring
       macPts.push(bodyPoint(macAlong - macR * 1.35 * Math.cos(th), macR * 0.95 * Math.sin(th)));
     }
+    // long low-contrast translucent horseshoe seen THROUGH the cytoplasm: a soft wide
+    // underglow + a thin near-neutral core (never a dark muddy blob or a bright logo).
     drawPolyline(ctx, macPts, false);
-    // large, dense but PALE/near-neutral macronucleus seen through the hyaline cytoplasm
-    // (unstained in life it is low-contrast grey-tan, NOT a bright amber logo).
-    ctx.strokeStyle = `hsla(42, 14%, 58%, ${alpha * 0.4})`;
-    ctx.lineWidth = Math.max(1.2, D * 0.20);
+    ctx.strokeStyle = `hsla(205, 8%, 60%, ${alpha * 0.15})`;
+    ctx.lineWidth = Math.max(1.6, D * 0.22);
+    ctx.stroke();
+    drawPolyline(ctx, macPts, false);
+    ctx.strokeStyle = `hsla(44, 9%, 60%, ${alpha * 0.24})`;
+    ctx.lineWidth = Math.max(1.0, D * 0.11);
     ctx.stroke();
     // micronucleus: a tiny dot docked against the OUTER edge of one nuclear arm
     if (D >= 11) {
@@ -579,15 +598,20 @@ export function drawVorticella(
       const cvR = Math.max(0.8, D * (0.03 + 0.15 * cvPulse));
       ctx.beginPath();
       ctx.arc(cv.x, cv.y, cvR, 0, TAU);
-      ctx.fillStyle = `hsla(200, 10%, 95%, ${alpha * 0.36})`;
+      // refractile water bubble: bright watery core -> thin dark refractile ring -> feather,
+      // + a lit specular toward the light (radial gradient = a 3-D bubble, not a flat disc).
+      const cgx = cv.x - nx * cvR * 0.4 - ux * cvR * 0.4, cgy = cv.y - ny * cvR * 0.4 - uy * cvR * 0.4;
+      const cg = ctx.createRadialGradient(cgx, cgy, cvR * 0.1, cv.x, cv.y, cvR * 1.12);
+      cg.addColorStop(0, `hsla(200, 14%, 98%, ${alpha * 0.34})`);
+      cg.addColorStop(0.7, `hsla(200, 12%, 93%, ${alpha * 0.2})`);
+      cg.addColorStop(0.88, `hsla(205, 26%, 56%, ${alpha * 0.5})`);
+      cg.addColorStop(1, `hsla(205, 26%, 48%, 0)`);
+      ctx.beginPath();
+      ctx.arc(cv.x, cv.y, cvR * 1.12, 0, TAU);
+      ctx.fillStyle = cg;
       ctx.fill();
       ctx.beginPath();
-      ctx.arc(cv.x, cv.y, cvR, 0, TAU);
-      ctx.strokeStyle = `hsla(200, 18%, 88%, ${alpha * 0.68})`; // soft refractile rim
-      ctx.lineWidth = Math.max(0.9, D * 0.03);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(cv.x - nx * cvR * 0.34 - ux * cvR * 0.34, cv.y - ny * cvR * 0.34 - uy * cvR * 0.34, Math.max(0.4, cvR * 0.32), 0, TAU);
+      ctx.arc(cgx, cgy, Math.max(0.4, cvR * 0.3), 0, TAU);
       ctx.fillStyle = `hsla(0, 0%, 100%, ${alpha * 0.85})`;
       ctx.fill();
     }
@@ -604,25 +628,30 @@ export function drawVorticella(
         const u = 0.18 + seededUnit(fvSeed, j, 0x51bd0e77) * 0.44;
         const lat = (seededUnit(fvSeed, j, 0x2cd9a14b) - 0.5) * 0.95 * halfW(u);
         const fv = bodyPoint(bellHeight * u, lat);
-        const fr = Math.max(0.8, D * (0.045 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.05));
+        const fr = Math.max(0.8, D * (0.045 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.06));
+        // refractile ingested-prey sphere: lit cap -> body -> dark Becke rim -> feather,
+        // + specular (radial gradient = a 3-D bead, not a flat polka-dot with a hard ring).
+        const warm = j === 0;
+        const fgx = fv.x - nx * fr * 0.4 - ux * fr * 0.4, fgy = fv.y - ny * fr * 0.4 - uy * fr * 0.4;
+        const fg = ctx.createRadialGradient(fgx, fgy, fr * 0.1, fv.x, fv.y, fr * 1.12);
+        fg.addColorStop(0, warm ? `hsla(40, 34%, 74%, ${alpha * 0.55})` : `hsla(40, 18%, 72%, ${alpha * 0.5})`);
+        fg.addColorStop(0.5, warm ? `hsla(32, 32%, 50%, ${alpha * 0.56})` : `hsla(34, 15%, 52%, ${alpha * 0.5})`);
+        fg.addColorStop(0.84, `hsla(26, 30%, 32%, ${alpha * 0.56})`);
+        fg.addColorStop(1, `hsla(26, 28%, 30%, 0)`);
         ctx.beginPath();
-        ctx.arc(fv.x, fv.y, fr, 0, TAU);
-        // ingested prey vary: mostly grey-brown food vacuoles, an occasional algal-green one
-        ctx.fillStyle = j === 0
-          ? `hsla(34, 34%, 52%, ${alpha * 0.5})`
-          : `hsla(38, 14%, 54%, ${alpha * 0.46})`;
+        ctx.arc(fv.x, fv.y, fr * 1.12, 0, TAU);
+        ctx.fillStyle = fg;
         ctx.fill();
         ctx.beginPath();
-        ctx.arc(fv.x, fv.y, fr, 0, TAU);
-        ctx.strokeStyle = `hsla(34, 20%, 38%, ${alpha * 0.34})`;
-        ctx.lineWidth = Math.max(0.75, D * 0.014);
-        ctx.stroke();
+        ctx.arc(fgx, fgy, Math.max(0.3, fr * 0.26), 0, TAU);
+        ctx.fillStyle = `hsla(40, 40%, 96%, ${alpha * 0.7})`;
+        ctx.fill();
       }
     }
 
     // === PERISTOME lip + oral ciliary wreath (the feeding crown) ===
     // raised lip: a thin band at the rim, outer Rrim, drawn as an ellipse seen 3/4
-    const lipRy = Math.max(0.5, Rrim * 0.34);
+    const lipRy = Math.max(0.5, Rrim * 0.24); // shallow rolled rim, not a deep flat plate
     ctx.beginPath();
     // rotate by dir + PI/2 so the LARGE radius (Rrim) lies ACROSS the bell (lateral),
     // giving a wide shallow rim cap seen in 3/4 — NOT a tall vertical lens down the body.

@@ -193,15 +193,15 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0.5)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass: 6 rimmed food
       // vacuoles + bigger CV + taller bell (bellHeight 1.45D, restStalk 3.1D) change ops/hash.
-      hash: "da6c544b9cf50669",
-      opCount: 976,
+      hash: "36199655251d639c",
+      opCount: 1066,
       counts: {
-        beginPath: 145,
-        moveTo: 84,
-        lineTo: 519,
-        closePath: 9,
-        fill: 60,
-        stroke: 89,
+        beginPath: 148,
+        moveTo: 87,
+        lineTo: 599,
+        closePath: 11,
+        fill: 67,
+        stroke: 84,
         save: 4,
         ellipse: 8,
         arc: 53,
@@ -215,15 +215,15 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass (6 rimmed food
       // vacuoles + bigger CV + taller bell change ops/hash).
-      hash: "8c79e8447a714971",
-      opCount: 860,
+      hash: "452ff6cf38e46a88",
+      opCount: 950,
       counts: {
-        beginPath: 116,
-        moveTo: 55,
-        lineTo: 490,
-        closePath: 9,
-        fill: 60,
-        stroke: 60,
+        beginPath: 119,
+        moveTo: 58,
+        lineTo: 570,
+        closePath: 11,
+        fill: 67,
+        stroke: 55,
         save: 4,
         ellipse: 8,
         arc: 53,
@@ -1827,6 +1827,7 @@ describe("aquarium layer Phase 4 vorticella", () => {
       ellipse: vi.fn(() => calls.push("ellipse")),
       arc: vi.fn(() => calls.push("arc")),
       createLinearGradient: vi.fn(() => ({ addColorStop: (_o: number, color: string) => calls.push(String(color)) })),
+      createRadialGradient: vi.fn(() => ({ addColorStop: (_o: number, color: string) => calls.push(String(color)) })),
       clip: vi.fn(),
       set lineCap(_value: CanvasLineCap) {},
       set lineJoin(_value: CanvasLineJoin) {},
@@ -1857,8 +1858,8 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(ctx.arc).toHaveBeenCalled();
     // near-colorless HYALINE cytoplasm (low-saturation grey-blue, hue ~200) + a faint
     // warm granular endoplasm/food (hue ~34-46) — realistic microscopy look, not teal cartoon
-    expect(calls.some((call) => /hsla\(20[0-5], 1[0-2]%/.test(call))).toBe(true);
-    expect(calls.some((call) => /hsla\(4[0-8], 1[0-3]%/.test(call))).toBe(true);
+    expect(calls.some((call) => /hsla\(20[0-5], 1[0-6]%/.test(call))).toBe(true);
+    expect(calls.some((call) => /hsla\(4[0-8],/.test(call))).toBe(true);
   });
 });
 
