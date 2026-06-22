@@ -2668,8 +2668,8 @@ function vorticellaBellMetrics(cell, scale, H) {
   const Hc = Math.max(1, finite(H, 80));
   const Sc = Math.max(0.1, finite(scale, 1));
   const D = clamp((8 + finite(cell.size, 1) * 4) * Sc, 6, Hc * 0.4);
-  const bellHeight = 1.35 * D;
-  const restStalk = clamp(D * 2.8, D * 1.3, Hc - bellHeight - 3);
+  const bellHeight = 1.45 * D;
+  const restStalk = clamp(D * 3.1, D * 1.3, Hc - bellHeight - Math.max(10, D * 0.34));
   return { D, bellHeight, restStalk };
 }
 var MIG_DETACH = 0.6;
@@ -3060,8 +3060,8 @@ function drawVorticella(ctx, vorticella, frame, view) {
     ctx.fill();
     ctx.stroke();
     const macPts = [];
-    const macAlong = bellHeight * 0.48;
-    const macR = D * 0.34;
+    const macAlong = bellHeight * 0.52;
+    const macR = D * 0.31;
     for (let i = 0;i <= 14; i++) {
       const th = Math.PI * (0.32 + i / 14 * 1.08);
       macPts.push(bodyPoint(macAlong - macR * 1.45 * Math.cos(th), macR * 0.92 * Math.sin(th)));
@@ -3079,33 +3079,39 @@ function drawVorticella(ctx, vorticella, frame, view) {
     }
     if (D >= 10) {
       const cvPulse = 0.5 - 0.5 * Math.cos(TAU2 * wrapUnit(finite(cell.contractCyclePhase, 0) * 0.5));
-      const cv = bodyPoint(bellHeight * 0.66, D * 0.2);
-      const cvR = Math.max(0.6, D * (0.05 + 0.045 * cvPulse));
+      const cv = bodyPoint(bellHeight * 0.7, -D * 0.24);
+      const cvR = Math.max(1.2, D * (0.07 + 0.1 * cvPulse));
       ctx.beginPath();
       ctx.arc(cv.x, cv.y, cvR, 0, TAU2);
-      ctx.fillStyle = `hsla(186, 30%, 93%, ${alpha * 0.42})`;
+      ctx.fillStyle = `hsla(186, 30%, 94%, ${alpha * 0.4})`;
       ctx.fill();
       ctx.beginPath();
       ctx.arc(cv.x, cv.y, cvR, 0, TAU2);
-      ctx.strokeStyle = `hsla(186, 58%, 84%, ${alpha * 0.6})`;
-      ctx.lineWidth = Math.max(0.75, D * 0.025);
+      ctx.strokeStyle = `hsla(186, 70%, 90%, ${alpha * 0.8})`;
+      ctx.lineWidth = Math.max(0.9, D * 0.03);
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(cv.x - nx * cvR * 0.35 - ux * cvR * 0.35, cv.y - ny * cvR * 0.35 - uy * cvR * 0.35, Math.max(0.4, cvR * 0.3), 0, TAU2);
-      ctx.fillStyle = `hsla(0, 0%, 100%, ${alpha * 0.5})`;
+      ctx.arc(cv.x - nx * cvR * 0.34 - ux * cvR * 0.34, cv.y - ny * cvR * 0.34 - uy * cvR * 0.34, Math.max(0.4, cvR * 0.32), 0, TAU2);
+      ctx.fillStyle = `hsla(0, 0%, 100%, ${alpha * 0.85})`;
       ctx.fill();
     }
     if (D >= 12) {
       const fvSeed = (Math.round(finite(cell.restLength, 10) * 4096) ^ 40503) >>> 0;
-      const fvCount = 4;
+      const fvCount = 6;
       for (let j = 0;j < fvCount; j++) {
-        const u = 0.3 + seededUnit(fvSeed, j, 1371344503) * 0.4;
-        const lat = (seededUnit(fvSeed, j, 752460107) - 0.5) * 1.2 * halfW(u);
+        const u = 0.22 + seededUnit(fvSeed, j, 1371344503) * 0.3;
+        const lat = (seededUnit(fvSeed, j, 752460107) - 0.5) * 1.25 * halfW(u);
         const fv = bodyPoint(bellHeight * u, lat);
+        const fr = Math.max(0.8, D * (0.06 + seededUnit(fvSeed, j, 2117754257) * 0.06));
         ctx.beginPath();
-        ctx.arc(fv.x, fv.y, Math.max(0.5, D * (0.05 + seededUnit(fvSeed, j, 2117754257) * 0.05)), 0, TAU2);
-        ctx.fillStyle = `hsla(36, 38%, 66%, ${alpha * 0.3})`;
+        ctx.arc(fv.x, fv.y, fr, 0, TAU2);
+        ctx.fillStyle = j % 3 === 0 ? `hsla(74, 30%, 48%, ${alpha * 0.5})` : `hsla(30, 26%, 52%, ${alpha * 0.52})`;
         ctx.fill();
+        ctx.beginPath();
+        ctx.arc(fv.x, fv.y, fr, 0, TAU2);
+        ctx.strokeStyle = `hsla(28, 38%, 34%, ${alpha * 0.4})`;
+        ctx.lineWidth = Math.max(0.75, D * 0.014);
+        ctx.stroke();
       }
     }
     const lipRy = Math.max(0.5, Rrim * 0.34);

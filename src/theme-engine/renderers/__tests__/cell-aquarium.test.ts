@@ -191,20 +191,20 @@ function euglenaHueSummary(hueOffset: number): GoldenSummary {
 describe("aquarium draw-op golden (Epic 1 P0)", () => {
   it("keeps the three-species CONTRACTED draw byte-stable", () => {
     expect(goldenFor(0.5)).toEqual({
-      // Rebased for the vorticella detail/anti-flicker pass: new CV refractile bubble
-      // (fill+ring+specular) adds ops; lip-ellipse rotation + palette change the hash.
-      hash: "fc423fbf2fb004d4",
-      opCount: 726,
+      // Rebased for the vorticella framing + organelle-readability pass: 6 rimmed food
+      // vacuoles + bigger CV + taller bell (bellHeight 1.45D, restStalk 3.1D) change ops/hash.
+      hash: "d4ac5e86103fb24c",
+      opCount: 750,
       counts: {
-        beginPath: 106,
+        beginPath: 114,
         moveTo: 87,
         lineTo: 391,
         closePath: 5,
-        fill: 23,
-        stroke: 89,
+        fill: 25,
+        stroke: 95,
         save: 3,
         ellipse: 7,
-        arc: 12,
+        arc: 20,
         restore: 3,
       },
     });
@@ -212,19 +212,20 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
 
   it("keeps the three-species RESTING draw byte-stable", () => {
     expect(goldenFor(0)).toEqual({
-      // Rebased for the vorticella detail/anti-flicker pass (CV bubble adds ops; palette/lip change hash).
-      hash: "a99568d52f598029",
-      opCount: 610,
+      // Rebased for the vorticella framing + organelle-readability pass (6 rimmed food
+      // vacuoles + bigger CV + taller bell change ops/hash).
+      hash: "e89fe3a9881173d0",
+      opCount: 634,
       counts: {
-        beginPath: 77,
+        beginPath: 85,
         moveTo: 58,
         lineTo: 362,
         closePath: 5,
-        fill: 23,
-        stroke: 60,
+        fill: 25,
+        stroke: 66,
         save: 3,
         ellipse: 7,
-        arc: 12,
+        arc: 20,
         restore: 3,
       },
     });

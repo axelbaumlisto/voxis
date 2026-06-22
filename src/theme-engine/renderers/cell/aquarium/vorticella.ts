@@ -61,8 +61,10 @@ function vorticellaBellMetrics(cell: VorticellaState, scale: number, H: number):
   const Hc = Math.max(1, finite(H, 80));
   const Sc = Math.max(0.1, finite(scale, 1));
   const D = clamp((8 + finite(cell.size, 1) * 4) * Sc, 6, Hc * 0.40);
-  const bellHeight = 1.35 * D;
-  const restStalk = clamp(D * 2.8, D * 1.3, Hc - bellHeight - 3);
+  const bellHeight = 1.45 * D;
+  // longer stalk + headroom reserved for the upward crown cilia (~D*0.34 above the
+  // rim) so the zooid fills the frame and the crown never clips the top edge.
+  const restStalk = clamp(D * 3.1, D * 1.3, Hc - bellHeight - Math.max(10, D * 0.34));
   return { D, bellHeight, restStalk };
 }
 
@@ -492,8 +494,8 @@ export function drawVorticella(
     // === INTERIOR (subtle, hyaline) ===
     // macronucleus: curved C / horseshoe band lying along the body
     const macPts: AquariumPoint[] = [];
-    const macAlong = bellHeight * 0.48;
-    const macR = D * 0.34; // open horseshoe band (~195deg, never closes into a ring/logo)
+    const macAlong = bellHeight * 0.52;
+    const macR = D * 0.31; // open horseshoe band (~195deg, never closes into a ring/logo)
     for (let i = 0; i <= 14; i++) {
       const th = Math.PI * (0.32 + (i / 14) * 1.08);
       // elongate the C ALONG the body axis (long worm-like horseshoe), not a transverse ring
@@ -517,20 +519,22 @@ export function drawVorticella(
     // a small specular highlight), pulsing on its slow rhythm, off-axis in the upper body.
     if (D >= 10) {
       const cvPulse = 0.5 - 0.5 * Math.cos(TAU * wrapUnit(finite(cell.contractCyclePhase, 0) * 0.5));
-      const cv = bodyPoint(bellHeight * 0.66, D * 0.20);
-      const cvR = Math.max(0.6, D * (0.05 + 0.045 * cvPulse));
+      // beside the vestibule (oral pole), on the side CLEAR of the macronucleus C so
+      // the refractile bubble is not occluded; visibly fills (diastole) then empties.
+      const cv = bodyPoint(bellHeight * 0.70, -D * 0.24);
+      const cvR = Math.max(1.2, D * (0.07 + 0.10 * cvPulse));
       ctx.beginPath();
       ctx.arc(cv.x, cv.y, cvR, 0, TAU);
-      ctx.fillStyle = `hsla(186, 30%, 93%, ${alpha * 0.42})`;
+      ctx.fillStyle = `hsla(186, 30%, 94%, ${alpha * 0.4})`;
       ctx.fill();
       ctx.beginPath();
       ctx.arc(cv.x, cv.y, cvR, 0, TAU);
-      ctx.strokeStyle = `hsla(186, 58%, 84%, ${alpha * 0.6})`;
-      ctx.lineWidth = Math.max(0.75, D * 0.025);
+      ctx.strokeStyle = `hsla(186, 70%, 90%, ${alpha * 0.8})`; // bright refractile rim
+      ctx.lineWidth = Math.max(0.9, D * 0.03);
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(cv.x - nx * cvR * 0.35 - ux * cvR * 0.35, cv.y - ny * cvR * 0.35 - uy * cvR * 0.35, Math.max(0.4, cvR * 0.3), 0, TAU);
-      ctx.fillStyle = `hsla(0, 0%, 100%, ${alpha * 0.5})`;
+      ctx.arc(cv.x - nx * cvR * 0.34 - ux * cvR * 0.34, cv.y - ny * cvR * 0.34 - uy * cvR * 0.34, Math.max(0.4, cvR * 0.32), 0, TAU);
+      ctx.fillStyle = `hsla(0, 0%, 100%, ${alpha * 0.85})`;
       ctx.fill();
     }
 
@@ -539,15 +543,25 @@ export function drawVorticella(
       // seed from a BIRTH-stable field (restLength), never the live anchorX, so the
       // inclusions do not teleport while the zooid migrates as a telotroch.
       const fvSeed = (Math.round(finite(cell.restLength, 10) * 4096) ^ 0x9e37) >>> 0;
-      const fvCount = 4;
+      const fvCount = 6;
       for (let j = 0; j < fvCount; j++) {
-        const u = 0.30 + seededUnit(fvSeed, j, 0x51bd0e77) * 0.40;
-        const lat = (seededUnit(fvSeed, j, 0x2cd9a14b) - 0.5) * 1.2 * halfW(u);
+        // lower-mid granular endoplasm, clear of the macronucleus band; mixed sizes
+        const u = 0.22 + seededUnit(fvSeed, j, 0x51bd0e77) * 0.30;
+        const lat = (seededUnit(fvSeed, j, 0x2cd9a14b) - 0.5) * 1.25 * halfW(u);
         const fv = bodyPoint(bellHeight * u, lat);
+        const fr = Math.max(0.8, D * (0.06 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.06));
         ctx.beginPath();
-        ctx.arc(fv.x, fv.y, Math.max(0.5, D * (0.05 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.05)), 0, TAU);
-        ctx.fillStyle = `hsla(36, 38%, 66%, ${alpha * 0.3})`;
+        ctx.arc(fv.x, fv.y, fr, 0, TAU);
+        // ingested prey vary: mostly grey-brown food vacuoles, an occasional algal-green one
+        ctx.fillStyle = j % 3 === 0
+          ? `hsla(74, 30%, 48%, ${alpha * 0.5})`
+          : `hsla(30, 26%, 52%, ${alpha * 0.52})`;
         ctx.fill();
+        ctx.beginPath();
+        ctx.arc(fv.x, fv.y, fr, 0, TAU);
+        ctx.strokeStyle = `hsla(28, 38%, 34%, ${alpha * 0.4})`;
+        ctx.lineWidth = Math.max(0.75, D * 0.014);
+        ctx.stroke();
       }
     }
 

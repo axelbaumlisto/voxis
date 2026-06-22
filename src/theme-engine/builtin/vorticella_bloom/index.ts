@@ -28,7 +28,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       vorticellaCount: 1,
       vorticellaContractRate: 1.2,        // occasional contraction (~9s idle period)
       vorticellaContractRateActive: 1.5,
-      vorticellaScale: 3.0,        // ~45% smaller than 5.5 so the bell + stalk fit the 240x240 overlay without clipping
+      vorticellaScale: 3.6,        // fills the 240x240 overlay (crown near the top, no clip) without being oversized
       ...userParams,
     },
   });
