@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CELL_DEFAULTS } from "../cell/defaults";
 import { aquariumParamsView } from "../cell/aquarium/params";
+import { buildField, sourceId } from "../cell/aquarium/interaction";
 import { seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aquarium/layer";
 import { diatomGeometry } from "../cell/aquarium/diatoms";
 import { euglenaPose, updateEuglena, drawEuglena, EUGLENA_STEER, MEDIUM } from "../cell/aquarium/euglena";
@@ -1270,6 +1271,36 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(twoSteps[0].rollPhase).toBeCloseTo(oneStep[0].rollPhase, 10);
     expect(twoSteps[0].metabolyPhase).toBeCloseTo(oneStep[0].metabolyPhase, 10);
     expect(twoSteps[0].flagellumPhase).toBeCloseTo(oneStep[0].flagellumPhase, 10);
+  });
+
+  it("updateEuglena treats an empty EFFECTIVE field as the legacy pure-forward path", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      aquariumActivityBoost: 1,
+    });
+    const initial = [testEuglena({ x: 150, y: 150, heading: 0, swimSpeed: 1, rollPhase: 0.1, metabolyPhase: 0.2, flagellumPhase: 0.3 })];
+    const interaction = buildField([{ kind: "motile", x: 150, y: 150, sourceId: sourceId("euglena", 0) }]);
+    const fieldFrame = (dt: number) => frame({ dt, width: 300, height: 300, activity: 0, interaction });
+    const legacyFrame = (dt: number) => frame({ dt, width: 300, height: 300, activity: 0 });
+
+    const fieldStep = updateEuglena(initial, fieldFrame(0.24), view);
+    const legacyStep = updateEuglena(initial, legacyFrame(0.24), view);
+    expect(fieldStep[0].x).toBeCloseTo(legacyStep[0].x, 10);
+    expect(fieldStep[0].y).toBeCloseTo(legacyStep[0].y, 10);
+    expect(fieldStep[0].heading).toBeCloseTo(legacyStep[0].heading, 10);
+    expect(fieldStep[0].rollPhase).toBeCloseTo(legacyStep[0].rollPhase, 10);
+    expect(fieldStep[0].metabolyPhase).toBeCloseTo(legacyStep[0].metabolyPhase, 10);
+    expect(fieldStep[0].flagellumPhase).toBeCloseTo(legacyStep[0].flagellumPhase, 10);
+
+    const halfStep = updateEuglena(initial, fieldFrame(0.12), view);
+    const twoSteps = updateEuglena(halfStep, fieldFrame(0.12), view);
+    expect(twoSteps[0].x).toBeCloseTo(fieldStep[0].x, 10);
+    expect(twoSteps[0].y).toBeCloseTo(fieldStep[0].y, 10);
+    expect(twoSteps[0].heading).toBeCloseTo(fieldStep[0].heading, 10);
   });
 
   it("updateEuglena is dt-partition invariant across phase wrap", () => {
