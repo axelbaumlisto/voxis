@@ -1872,12 +1872,6 @@ function wrapUnit(value) {
     return 0;
   return (value % 1 + 1) % 1;
 }
-function wrap2(value, max) {
-  if (!(max > 0))
-    return 0;
-  const wrapped = value % max;
-  return wrapped < 0 ? wrapped + max : wrapped;
-}
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -2126,8 +2120,8 @@ function updateEuglena(euglena, frame, view) {
   const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
   const act = modeView.motionMul * (1 + 0.7 * activityMix);
   const scale = view.euglena.scale;
-  const turnTime = 2.6;
-  const margin = Math.max(8, safeWidth * 0.07);
+  const turnTime = 1.3;
+  const margin = Math.max(8, safeWidth * 0.1);
   return euglena.map((cell) => {
     const L = euglenaDisplayLength(finite2(cell.size, 1), scale);
     let heading = finite2(cell.heading, 0);
@@ -2145,7 +2139,8 @@ function updateEuglena(euglena, frame, view) {
     } else {
       const ux0 = Math.cos(heading);
       const lead = finite2(cell.x, 0) + ux0 * (L / 2);
-      if (ux0 > 0 && lead > safeWidth - margin || ux0 < 0 && lead < margin) {
+      const turnMargin = Math.max(margin, L * 1.4);
+      if (ux0 > 0 && lead > safeWidth - turnMargin || ux0 < 0 && lead < turnMargin) {
         turnProgress = 0;
         turnFrom = heading;
         turnTo = heading + Math.PI;
@@ -2158,8 +2153,8 @@ function updateEuglena(euglena, frame, view) {
     let nextX = finite2(cell.x, 0) + ux * vPx * dt;
     let nextY = finite2(cell.y, 0) + uy * vPx * dt;
     const yc = safeHeight / 2;
-    if (safeHeight > 0 && Math.abs(nextY - yc) > 0.35 * safeHeight) {
-      nextY += (yc - nextY) * Math.min(1, 2 * dt);
+    if (safeHeight > 0 && Math.abs(nextY - yc) > 0.28 * safeHeight) {
+      nextY += (yc - nextY) * Math.min(1, 4 * dt);
     }
     if (frame.hero) {
       const hx = finite2(frame.hero.x, safeWidth / 2);
@@ -2202,13 +2197,15 @@ function updateEuglena(euglena, frame, view) {
     const flick = bphase < 0.08 ? Math.sin(bphase / 0.08 * Math.PI) : 0;
     const beatBoost = 1 + 1.3 * flick;
     if (turnProgress >= 1 && flick > 0) {
-      const turnSign = finite2(cell.size, 1) % 0.5 < 0.25 ? 1 : -1;
-      heading += turnSign * 0.7 * flick * dt;
+      const wrapPi2 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+      const toCenter = Math.atan2(safeHeight / 2 - finite2(cell.y, 0), safeWidth / 2 - finite2(cell.x, 0));
+      const turnSign = wrapPi2(toCenter - heading) >= 0 ? 1 : -1;
+      heading += turnSign * 0.9 * flick * dt;
     }
     const fEff = Math.min(13, Math.max(0, finite2(cell.flagellumRate, 0)) * act * beatBoost);
     return {
       ...cell,
-      x: clamp(wrap2(nextX, safeWidth), 0, safeWidth),
+      x: clamp(nextX, 0, safeWidth),
       y: clamp(nextY, 0, safeHeight),
       phase: heading,
       heading,
@@ -3482,13 +3479,13 @@ function mount(container, api) {
       enableAquarium: true,
       aquariumSeed: 17,
       aquariumAlpha: 0.68,
-      aquariumActivityBoost: 0.25,
+      aquariumActivityBoost: 1,
       diatomCount: 0,
       diatomAlpha: 0.16,
       diatomDriftSpeed: 0.35,
       euglenaCount: 1,
-      euglenaSpeed: 0.15,
-      euglenaSpeedActive: 0.3,
+      euglenaSpeed: 0.2,
+      euglenaSpeedActive: 1.5,
       euglenaScale: 2.8,
       vorticellaCount: 0,
       ...userParams

@@ -116,12 +116,6 @@ function wrapUnit(value: number): number {
   return ((value % 1) + 1) % 1;
 }
 
-function wrap(value: number, max: number): number {
-  if (!(max > 0)) return 0;
-  const wrapped = value % max;
-  return wrapped < 0 ? wrapped + max : wrapped;
-}
-
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -443,8 +437,8 @@ export function updateEuglena(
   const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
   const act = modeView.motionMul * (1 + 0.7 * activityMix);
   const scale = view.euglena.scale;
-  const turnTime = 2.6;
-  const margin = Math.max(8, safeWidth * 0.07);
+  const turnTime = 1.3; // faster reversal so a fast active swimmer doesn't bang the wall
+  const margin = Math.max(8, safeWidth * 0.10);
 
   return euglena.map((cell) => {
     const L = euglenaDisplayLength(finite(cell.size, 1), scale);
@@ -463,7 +457,8 @@ export function updateEuglena(
     } else {
       const ux0 = Math.cos(heading);
       const lead = finite(cell.x, 0) + ux0 * (L / 2);
-      if ((ux0 > 0 && lead > safeWidth - margin) || (ux0 < 0 && lead < margin)) {
+      const turnMargin = Math.max(margin, L * 1.4); // begin the turn earlier for a fast swimmer
+      if ((ux0 > 0 && lead > safeWidth - turnMargin) || (ux0 < 0 && lead < turnMargin)) {
         turnProgress = 0;
         turnFrom = heading;
         turnTo = heading + Math.PI;
@@ -479,8 +474,8 @@ export function updateEuglena(
     let nextY = finite(cell.y, 0) + uy * vPx * dt;
 
     const yc = safeHeight / 2;
-    if (safeHeight > 0 && Math.abs(nextY - yc) > 0.35 * safeHeight) {
-      nextY += (yc - nextY) * Math.min(1, 2 * dt);
+    if (safeHeight > 0 && Math.abs(nextY - yc) > 0.28 * safeHeight) {
+      nextY += (yc - nextY) * Math.min(1, 4 * dt); // keep it in the mid-band; no top/bottom banging
     }
 
     // --- hero exclusion (dormant when no hero, e.g. euglena_drift) ---
@@ -534,17 +529,20 @@ export function updateEuglena(
     const bphase = wrapUnit(finiteOr(cell.burstPhase, 0));
     const flick = bphase < 0.08 ? Math.sin((bphase / 0.08) * Math.PI) : 0;
     const beatBoost = 1 + 1.3 * flick;
-    // the spinning/turning beat must actually REORIENT the cell (run-and-tumble):
-    // a small deterministic heading kick during the flick, when not wall-turning.
+    // the spinning/turning beat REORIENTS the cell (run-and-tumble): a brief
+    // heading kick during the flick, steered toward open water (tank centre) so
+    // it swims AWAY from walls instead of persistently curving off to one side.
     if (turnProgress >= 1 && flick > 0) {
-      const turnSign = (finite(cell.size, 1) % 0.5) < 0.25 ? 1 : -1;
-      heading += turnSign * 0.7 * flick * dt;
+      const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+      const toCenter = Math.atan2(safeHeight / 2 - finite(cell.y, 0), safeWidth / 2 - finite(cell.x, 0));
+      const turnSign = wrapPi(toCenter - heading) >= 0 ? 1 : -1;
+      heading += turnSign * 0.9 * flick * dt;
     }
     // cap effective beat freq so the 2nd lasso harmonic (2f) stays < 30Hz Nyquist
     const fEff = Math.min(13, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
     return {
       ...cell,
-      x: clamp(wrap(nextX, safeWidth), 0, safeWidth),
+      x: clamp(nextX, 0, safeWidth), // clamp, never wrap (wrapping teleported it across the tank)
       y: clamp(nextY, 0, safeHeight),
       phase: heading,
       heading,
