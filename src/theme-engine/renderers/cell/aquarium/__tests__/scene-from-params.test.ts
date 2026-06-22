@@ -1,8 +1,13 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PARAMECIUM_CELL_PARAMS } from "../../../../builtin/_shared/paramecium";
 import { CELL_DEFAULTS } from "../../defaults";
 import type { CellParams } from "../../types";
+import { seedAquarium } from "../layer";
+import { seedEuglena } from "../euglena";
 import { REGISTRY, sceneFromParams } from "../registry";
+import type { AquariumFrame, AquariumLayerState } from "../types";
 
 function driftingContourParams(): CellParams {
   return {
@@ -68,13 +73,102 @@ function vorticellaBloomParams(): CellParams {
   };
 }
 
+function multiOrganismParams(): CellParams {
+  return {
+    ...CELL_DEFAULTS,
+    enableAquarium: true,
+    aquariumSeed: 23,
+    diatomCount: 2,
+    euglenaCount: 1,
+    vorticellaCount: 1,
+    diatomAlpha: 0.16,
+    diatomDriftSpeed: 0.35,
+    euglenaSpeed: 0.2,
+    euglenaSpeedActive: 1.5,
+    euglenaScale: 2.8,
+    vorticellaContractRate: 1.2,
+    vorticellaContractRateActive: 1.5,
+    vorticellaScale: 1.2,
+    vorticellaAlongFrac: 0.16,
+  };
+}
+
+const registryFrame: AquariumFrame = {
+  t: 0,
+  dt: 1 / 60,
+  width: 240,
+  height: 80,
+  mode: "idle",
+  activity: 0,
+  audioLevel: 0,
+  startle: 0,
+  baseHue: 50,
+};
+
 describe("aquarium scene registry", () => {
   it("freezes current species salts and draw z-order", () => {
-    expect(REGISTRY).toEqual({
-      diatom: { salt: 0x0d1a70cd, z: 0 },
-      euglena: { salt: 0x0e091eaa, z: 1 },
-      vorticella: { salt: 0x070271ca, z: 2 },
+    expect(Object.fromEntries(Object.entries(REGISTRY).map(([species, entry]) => [species, entry.salt]))).toEqual({
+      diatom: 0x0d1a70cd,
+      euglena: 0x0e091eaa,
+      vorticella: 0x070271ca,
     });
+    expect(Object.fromEntries(Object.entries(REGISTRY).map(([species, entry]) => [species, entry.z]))).toEqual({
+      diatom: 0,
+      euglena: 1,
+      vorticella: 2,
+    });
+    expect(Object.fromEntries(Object.entries(REGISTRY).map(([species, entry]) => [species, entry.slot]))).toEqual({
+      diatom: "diatoms",
+      euglena: "euglena",
+      vorticella: "vorticella",
+    });
+  });
+
+  it("keeps euglena seed streams isolated from registry composition", () => {
+    const direct = seedEuglena(2, 17, registryFrame);
+    const viaRegistry = REGISTRY.euglena.seed(2, 17, registryFrame, undefined);
+    const withExtraSpecies = {
+      ghost: {
+        salt: 0x12345678,
+        z: 99,
+        seed: (count: number) => Array.from({ length: count }, (_, i) => ({ i })),
+        update: (states: readonly { i: number }[]) => states,
+        draw: () => undefined,
+      },
+      ...REGISTRY,
+    };
+
+    expect(REGISTRY.euglena.salt).toBe(0x0e091eaa);
+    expect(viaRegistry).toEqual(direct);
+    expect(withExtraSpecies.euglena.seed(2, 17, registryFrame, undefined)).toEqual(direct);
+  });
+
+  it("keeps production seed/draw dispatch data-driven for non-interacting organisms", () => {
+    const validSlots = new Set(["diatoms", "euglena", "vorticella"]);
+    for (const entry of Object.values(REGISTRY)) {
+      expect(validSlots.has(entry.slot)).toBe(true);
+      expect(entry.seed).toEqual(expect.any(Function));
+      expect(entry.update).toEqual(expect.any(Function));
+      expect(entry.draw).toEqual(expect.any(Function));
+    }
+
+    const scene = sceneFromParams(multiOrganismParams());
+    const expected: AquariumLayerState = { seed: scene.seed, diatoms: [], euglena: [], vorticella: [] };
+    for (const instance of scene.instances) {
+      const entry = REGISTRY[instance.species];
+      expected[entry.slot] = entry.seed(instance.count, scene.seed, registryFrame, instance.cfg) as never;
+    }
+
+    expect(seedAquarium(registryFrame, multiOrganismParams())).toEqual(expected);
+
+    const layerSource = readFileSync(resolve(process.cwd(), "src/theme-engine/renderers/cell/aquarium/layer.ts"), "utf8");
+    const seedBody = layerSource.slice(
+      layerSource.indexOf("export function seedAquarium"),
+      layerSource.indexOf("export function updateAquarium"),
+    );
+    const drawBody = layerSource.slice(layerSource.indexOf("export function drawAquariumBackground"));
+    expect(seedBody).not.toMatch(/if\s*\([^)]*species|switch\s*\([^)]*species|species\s*===/);
+    expect(drawBody).not.toMatch(/if\s*\([^)]*species|switch\s*\([^)]*species|species\s*===/);
   });
 });
 

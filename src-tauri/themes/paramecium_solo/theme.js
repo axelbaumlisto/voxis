@@ -3079,25 +3079,68 @@ function drawVorticella(ctx, vorticella, frame, view) {
   ctx.restore();
 }
 
+// src/theme-engine/renderers/cell/aquarium/registry.ts
+var REGISTRY = {
+  diatom: {
+    salt: 219836621,
+    z: 0,
+    slot: "diatoms",
+    seed: (count, seed, frame) => seedDiatoms(count, seed, frame),
+    update: updateDiatoms,
+    draw: drawDiatoms
+  },
+  euglena: {
+    salt: 235478698,
+    z: 1,
+    slot: "euglena",
+    seed: (count, seed, frame) => seedEuglena(count, seed, frame),
+    update: updateEuglena,
+    draw: drawEuglena
+  },
+  vorticella: {
+    salt: 117600714,
+    z: 2,
+    slot: "vorticella",
+    seed: (count, seed, frame, cfg) => seedVorticella(count, seed, frame, cfg.alongFrac),
+    update: updateVorticella,
+    draw: drawVorticella
+  }
+};
+function sceneFromParams(params) {
+  const view = aquariumParamsView(params);
+  const instances = [];
+  if (!view.enabled)
+    return { seed: view.seed | 0, instances };
+  if (view.diatoms.count > 0) {
+    instances.push({ species: "diatom", count: view.diatoms.count, cfg: view.diatoms });
+  }
+  if (view.euglena.count > 0) {
+    instances.push({ species: "euglena", count: view.euglena.count, cfg: { ...view.euglena, medium: view.medium } });
+  }
+  if (view.vorticella.count > 0) {
+    instances.push({ species: "vorticella", count: view.vorticella.count, cfg: view.vorticella });
+  }
+  return { seed: view.seed | 0, instances };
+}
+
 // src/theme-engine/renderers/cell/aquarium/layer.ts
 function seedAquarium(frame, params) {
-  const view = aquariumParamsView(params);
-  const seed = view.seed | 0;
-  return {
-    seed,
-    diatoms: seedDiatoms(view.diatoms.count, seed, frame),
-    euglena: seedEuglena(view.euglena.count, seed, frame),
-    vorticella: seedVorticella(view.vorticella.count, seed, frame, view.vorticella.alongFrac)
-  };
+  const scene = sceneFromParams(params);
+  const state = { seed: scene.seed, diatoms: [], euglena: [], vorticella: [] };
+  for (const instance of scene.instances) {
+    const entry = REGISTRY[instance.species];
+    state[entry.slot] = entry.seed(instance.count, scene.seed, frame, instance.cfg);
+  }
+  return state;
 }
 function updateAquarium(aquarium, frame, params) {
   const view = aquariumParamsView(params);
   if (!view.enabled)
     return aquarium;
-  const diatoms = view.diatoms.count > 0 ? updateDiatoms(aquarium.diatoms, frame, view) : aquarium.diatoms;
+  const diatoms = view.diatoms.count > 0 ? REGISTRY.diatom.update(aquarium.diatoms, frame, view) : aquarium.diatoms;
   const obstacles = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella.map((v) => vorticellaObstacle(v, view.vorticella.scale, frame.height)) : undefined;
   const euglenaFrame = obstacles ? { ...frame, obstacles } : frame;
-  const euglena = view.euglena.count > 0 ? updateEuglena(aquarium.euglena, euglenaFrame, view) : aquarium.euglena;
+  const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, euglenaFrame, view) : aquarium.euglena;
   let vorticella = aquarium.vorticella;
   if (view.vorticella.count > 0) {
     const motiles = [];
@@ -3105,7 +3148,7 @@ function updateAquarium(aquarium, frame, params) {
       motiles.push({ x: frame.hero.x, y: frame.hero.y });
     for (const e of euglena)
       motiles.push({ x: e.x, y: e.y });
-    vorticella = updateVorticella(aquarium.vorticella, motiles.length > 0 ? { ...frame, motiles } : frame, view);
+    vorticella = REGISTRY.vorticella.update(aquarium.vorticella, motiles.length > 0 ? { ...frame, motiles } : frame, view);
   }
   return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella ? aquarium : { ...aquarium, diatoms, euglena, vorticella };
 }
@@ -3113,9 +3156,12 @@ function drawAquariumBackground(ctx, aquarium, frame, params) {
   const view = aquariumParamsView(params);
   if (!view.enabled)
     return;
-  drawDiatoms(ctx, aquarium.diatoms, frame, view);
-  drawEuglena(ctx, aquarium.euglena, frame, view);
-  drawVorticella(ctx, aquarium.vorticella, frame, view);
+  const scene = sceneFromParams(params);
+  const speciesByZ = [...scene.instances].map((instance) => instance.species).sort((a, b) => REGISTRY[a].z - REGISTRY[b].z);
+  for (const species of speciesByZ) {
+    const entry = REGISTRY[species];
+    entry.draw(ctx, aquarium[entry.slot], frame, view);
+  }
 }
 
 // src/theme-engine/renderers/cell/draw.ts
