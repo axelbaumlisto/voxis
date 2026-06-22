@@ -1,0 +1,10 @@
+{
+  "manifest_version": 2,
+  "id": "paramecium_solo",
+  "name": "Paramecium Solo",
+  "description": "A single Paramecium — the detailed ciliate hero alone (somatic cilia, oral groove, contractile vacuoles, cyclosis). No companions; just the slipper animalcule.",
+  "api_version": 1,
+  "overlay_width": 240,
+  "overlay_height": 120,
+  "entry": "theme.js"
+}
