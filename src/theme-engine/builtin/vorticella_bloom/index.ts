@@ -28,7 +28,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       vorticellaCount: 1,
       vorticellaContractRate: 1.2,        // occasional contraction (~9s idle period)
       vorticellaContractRateActive: 1.5,
-      vorticellaScale: 5.5,        // big solo hero (~3x): D~66 on the tall 240x240 overlay
+      vorticellaScale: 3.0,        // ~45% smaller than 5.5 so the bell + stalk fit the 240x240 overlay without clipping
       ...userParams,
     },
   });
