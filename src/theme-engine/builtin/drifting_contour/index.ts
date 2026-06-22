@@ -44,7 +44,6 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       vorticellaCount: 1,
       vorticellaScale: 2.6,
       vorticellaContractRate: 1.2,
-      vorticellaContractRateActive: 1.5,
       ...userParams,
     },
   });

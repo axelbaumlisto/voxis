@@ -454,10 +454,8 @@ export interface CellParams {
   vorticellaCount?: number;
   /** Horizontal floor placement of a single vorticella (0=left..1=right). Default 0.5. */
   vorticellaAlongFrac?: number;
-  /** Vorticella idle contraction rate scalar. */
+  /** Vorticella contraction cadence scalar (metabolic; not audio-coupled). */
   vorticellaContractRate?: number;
-  /** Vorticella active contraction rate scalar. */
-  vorticellaContractRateActive?: number;
   /** Vorticella size scalar. */
   vorticellaScale?: number;
   /** H4 (OPT, default off): advect ambient motes by the body's dipolar wake so a

@@ -25,7 +25,6 @@ export const EUGLENA_SPECIES: Record<string, EuglenaSpecies> = {
 export interface VorticellaSpecies {
   readonly scale?: number;
   readonly contractRate?: number;
-  readonly contractRateActive?: number;
   readonly palette?: { readonly hueOffset?: number };
 }
 
@@ -33,7 +32,6 @@ export const VORTICELLA_SPECIES: Record<string, VorticellaSpecies> = {
   default: {
     scale: 5.5,
     contractRate: 1.2,
-    contractRateActive: 1.5,
     palette: { hueOffset: 200 },
   },
 };

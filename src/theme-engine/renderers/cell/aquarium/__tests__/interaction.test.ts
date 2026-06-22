@@ -227,7 +227,6 @@ describe("aquarium interaction field vocabulary", () => {
       euglenaRotDiffusion: 0.12,
       vorticellaCount: 2,
       vorticellaContractRate: 1.2,
-      vorticellaContractRateActive: 1.5,
       vorticellaScale: 1.2,
       vorticellaAlongFrac: 0.16,
     };

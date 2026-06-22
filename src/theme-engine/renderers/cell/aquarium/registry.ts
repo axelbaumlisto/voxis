@@ -70,7 +70,7 @@ function viewForDiatom(cfg: DiatomCfg): AquariumParamsView {
     activityBoost: cfg.activityBoost,
     diatoms: cfg,
     euglena: { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 },
-    vorticella: { count: 0, contractRate: 0, contractRateActive: 0, scale: 1, alongFrac: 0.5 },
+    vorticella: { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 },
   };
 }
 
@@ -83,7 +83,7 @@ function viewForEuglena(cfg: EuglenaCfg): AquariumParamsView {
     medium: cfg.medium,
     diatoms: { count: 0, alpha: 0, driftSpeed: 0 },
     euglena: cfg,
-    vorticella: { count: 0, contractRate: 0, contractRateActive: 0, scale: 1, alongFrac: 0.5 },
+    vorticella: { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 },
   };
 }
 
