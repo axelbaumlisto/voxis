@@ -381,7 +381,23 @@ export function drawVorticella(
     const wobble = arrestT >= 0 && arrestT < 0.7
       ? 0.10 * Math.exp(-0.45 * TAU * 6 * arrestT) * Math.sin(TAU * 6 * 0.8932 * arrestT)
       : 0;
-    const dir = baseDir + sway + wobble;
+    // seeded per-cell asymmetry + continuous-life params (deterministic, birth-stable).
+    // Every motion term is a pure function of frame.t -> byte-stable at fixed t, fps-free.
+    const tt = finite(frame.t, 0);
+    const actMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
+    const aSeed = (Math.round(finite(cell.restLength, 10) * 1024) ^ 0x3af1c5) >>> 0;
+    const asymA = (seededUnit(aSeed, 0, 0x11) - 0.5) * 0.14;   // +/-7% left/right wall imbalance
+    const periOff = (seededUnit(aSeed, 1, 0x22) - 0.5) * 0.12; // +/-6% D peristome lateral offset
+    const lean = (seededUnit(aSeed, 2, 0x33) - 0.5) * 0.11;    // ~+/-3deg fixed body lean vs the stalk
+    const bp0 = seededUnit(aSeed, 3, 0x44) * TAU, bp1 = seededUnit(aSeed, 4, 0x55) * TAU;
+    const lobePhase = seededUnit(aSeed, 5, 0x66) * TAU;
+    // secondary bell nod (slow, smaller than sway, incommensurate freq) -> alive, not rigid
+    const nod = 0.035 * Math.sin(TAU * 0.06 * tt + seededUnit(aSeed, 6, 0x77) * TAU);
+    // gentle asymmetric peristaltic breathing of the wall (<=6% width, <=0.12Hz, Nyquist-safe)
+    const breathMod = (u: number): number => 1
+      + 0.035 * Math.sin(TAU * 0.075 * tt + bp0 + 2.4 * u)
+      + 0.025 * Math.sin(TAU * 0.115 * tt + bp1);
+    const dir = baseDir + lean + sway + wobble + nod;
     const ux = Math.cos(dir), uy = Math.sin(dir);
     const nx = -uy, ny = ux;
     const anchorX = finite(cell.anchorX, 0);
@@ -397,7 +413,7 @@ export function drawVorticella(
       minLengthFrac: 0.32, coilSampleCount: 30, coilTurnsContracted: 3.0, coilRadius: D * 0.24,
     });
     const neck = geom.bellCenter;           // base of the bell (top of stalk)
-    const rimC = { x: neck.x + ux * bellHeight, y: neck.y + uy * bellHeight }; // peristome centre
+    const rimC = { x: neck.x + ux * bellHeight + nx * periOff * D, y: neck.y + uy * bellHeight + ny * periOff * D }; // peristome centre, slightly off-axis
     const open = 1 - 0.7 * s;               // peristome closes as it contracts (open in [0.3,1])
     // everted collar: a rolled rim only slightly wider than the shoulder (~1.28D body-max
     // 1.16D -> ~10% overhang) so it reads CONTINUOUS with the bell, not a floating saucer.
@@ -483,14 +499,16 @@ export function drawVorticella(
     }
 
     // === BELL BODY (hyaline) ===
-    const SAMP = 16;
+    const SAMP = 22;
     const left: AquariumPoint[] = [];
     const right: AquariumPoint[] = [];
     for (let i = 0; i <= SAMP; i++) {
       const u = i / SAMP;
-      const hw = halfW(u);
-      left.push(bodyPoint(bellHeight * u, -hw));
-      right.push(bodyPoint(bellHeight * u, hw));
+      const hwB = halfW(u) * breathMod(u);
+      // gentle irregular lobing (~3.5% of width) so the silhouette is not a clean mirror
+      const lobe = 1 + 0.035 * Math.sin(Math.PI * u * 1.5 + lobePhase);
+      left.push(bodyPoint(bellHeight * u, -hwB * lobe * (1 - asymA)));
+      right.push(bodyPoint(bellHeight * u, hwB * lobe * (1 + asymA)));
     }
     const outline = [...left, ...right.reverse()];
     drawPolyline(ctx, outline, true);
@@ -523,8 +541,13 @@ export function drawVorticella(
     const gCount = Math.round(clamp(D * 2.0, 18, 64));
     for (let k = 0; k < gCount; k++) {
       // density biased toward the posterior base (oil-droplet pooling); higher contrast
-      const gu = 0.06 + Math.pow(seededUnit(gSeed, k, 0x1b3a7d), 1.5) * 0.78;
-      const glat = (seededUnit(gSeed, k, 0x2f5d11) - 0.5) * 1.7 * halfW(gu);
+      // CYCLOSIS: granules shear slowly on the same wall-tangent gyre (slower than the
+      // vacuoles) so the whole endoplasm streams rather than sitting as painted dots.
+      const gphi = seededUnit(gSeed, k, 0x3d1f77) * TAU;
+      const gamp = 0.18 + 0.7 * Math.sqrt(seededUnit(gSeed, k, 0x1b3a7d));
+      const gph = (TAU / 52) * tt * 0.7 + gphi;
+      const gu = 0.5 + 0.44 * gamp * Math.sin(gph);
+      const glat = gamp * Math.cos(gph) * 0.86 * halfW(gu) * breathMod(gu);
       const gp = bodyPoint(bellHeight * gu, glat);
       const gr = 0.4 + seededUnit(gSeed, k, 0x77c1a3) * 0.9;
       ctx.beginPath();
@@ -568,11 +591,11 @@ export function drawVorticella(
     // long low-contrast translucent horseshoe seen THROUGH the cytoplasm: a soft wide
     // underglow + a thin near-neutral core (never a dark muddy blob or a bright logo).
     drawPolyline(ctx, macPts, false);
-    ctx.strokeStyle = `hsla(205, 8%, 60%, ${alpha * 0.15})`;
+    ctx.strokeStyle = `hsla(205, 8%, 58%, ${alpha * 0.20})`;
     ctx.lineWidth = Math.max(1.6, D * 0.22);
     ctx.stroke();
     drawPolyline(ctx, macPts, false);
-    ctx.strokeStyle = `hsla(44, 9%, 60%, ${alpha * 0.24})`;
+    ctx.strokeStyle = `hsla(44, 10%, 56%, ${alpha * 0.34})`;
     ctx.lineWidth = Math.max(1.0, D * 0.11);
     ctx.stroke();
     // micronucleus: a tiny dot docked against the OUTER edge of one nuclear arm
@@ -625,8 +648,14 @@ export function drawVorticella(
       for (let j = 0; j < fvCount; j++) {
         // spread across the lower-mid granular endoplasm so they read as DISCRETE
         // spheres (not a clump): wide axial range, tighter lateral, smaller radii.
-        const u = 0.18 + seededUnit(fvSeed, j, 0x51bd0e77) * 0.44;
-        const lat = (seededUnit(fvSeed, j, 0x2cd9a14b) - 0.5) * 0.95 * halfW(u);
+        // CYCLOSIS: each vacuole rides a divergence-free wall-tangent gyre psi=(1-ua^2)(1-sv^2),
+        // phase from frame.t -> streams in life, byte-stable at a fixed t. Period 40s idle.
+        const cycT = Math.max(8, 34 + seededUnit(fvSeed, j, 0x13b7) * 18 - 14 * actMix); // per-vacuole period -> the ring shears/tumbles, not a rigid rotating necklace
+        const phi0 = seededUnit(fvSeed, j, 0x51bd0e77) * TAU;
+        const amp = 0.28 + 0.6 * Math.sqrt(seededUnit(fvSeed, j, 0x2cd9a14b));
+        const ph = (TAU / cycT) * tt + phi0;
+        const u = 0.5 + 0.42 * amp * Math.sin(ph);
+        const lat = amp * Math.cos(ph) * 0.82 * halfW(u) * breathMod(u);
         const fv = bodyPoint(bellHeight * u, lat);
         const fr = Math.max(0.8, D * (0.045 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.06));
         // refractile ingested-prey sphere: lit cap -> body -> dark Becke rim -> feather,
