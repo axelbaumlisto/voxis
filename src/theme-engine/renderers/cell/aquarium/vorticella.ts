@@ -153,6 +153,8 @@ export function seedVorticella(count: number, seed: number, frame: AquariumFrame
       oralWreathPhase: seededUnit(seed, i, salt ^ 0x68bc21eb),
       contractRate: 0.06 + seededUnit(seed, i, salt ^ 0x2fda92a1) * 0.05,
       oralRate: 0.42 + seededUnit(seed, i, salt ^ 0x14c8af21) * 0.18,
+      swayPhase: seededUnit(seed, i, salt ^ 0x3b91ce07),
+      swayRate: 0.10 + seededUnit(seed, i, salt ^ 0x5a2f81b3) * 0.07, // ~0.10-0.17 Hz gentle sway
     });
   }
   return vorticella;
@@ -175,6 +177,8 @@ export function updateVorticella(
   // oral cilia beat ~20Hz, capped < 30Hz Nyquist; faster when active
   const oralHz = Math.min(28, (frame.mode === "error" ? 6 : frame.mode === "transcribing" ? 12 : 20) * (1 + activityMix * 0.2));
 
+  // sway slows a little under load (the zooid stiffens when contracting often)
+  const swayMul = frame.mode === "error" ? 0.3 : frame.mode === "transcribing" ? 0.6 : 1;
   return vorticella.map((cell) => {
     const cyclePhase = wrapUnit(cell.contractCyclePhase + Math.max(0, finite(cell.contractRate, 0)) * cycleRateMul * dt);
     return {
@@ -185,6 +189,7 @@ export function updateVorticella(
       contractCyclePhase: cyclePhase,
       contractPhase: vorticellaContractPhase(cyclePhase),
       oralWreathPhase: wrapUnit(cell.oralWreathPhase + oralHz * dt),
+      swayPhase: wrapUnit(finiteOr(cell.swayPhase, 0) + Math.max(0, finiteOr(cell.swayRate, 0.12)) * swayMul * dt),
     };
   });
 }
@@ -214,20 +219,24 @@ export function drawVorticella(
   ctx.lineJoin = "round";
   for (const cell of vorticella) {
     const s = clamp01(finite(cell.contractPhase, 0));
-    const dir = finite(cell.directionAngle, -Math.PI / 2);
+    const baseDir = finite(cell.directionAngle, -Math.PI / 2);
+    // idle sway: the slender stalk flexes gently so the zooid is alive at rest;
+    // sway eases out as it contracts (the coiled spasmoneme is short and stiff).
+    const sway = 0.07 * (1 - 0.8 * s) * Math.sin(TAU * wrapUnit(finiteOr(cell.swayPhase, 0)));
+    const dir = baseDir + sway;
     const ux = Math.cos(dir), uy = Math.sin(dir);
     const nx = -uy, ny = ux;
     const anchorX = finite(cell.anchorX, 0);
     const anchorY = finite(cell.anchorY, 0);
 
-    // --- bell diameter D and a stalk length that fits the canvas with the bell ---
-    const D = clamp((8 + finite(cell.size, 1) * 4) * scale, 6, H * 0.42);
+    // --- modest bell + a longer stalk so it reads as a stalked, leggy zooid ---
+    const D = clamp((8 + finite(cell.size, 1) * 4) * scale, 6, H * 0.40);
     const bellHeight = 1.35 * D;
-    const restStalk = clamp(D * 2.4, D, H - bellHeight - 3);
+    const restStalk = clamp(D * 2.8, D * 1.3, H - bellHeight - 3);
 
     const geom = vorticellaGeometry(s, {
       anchorX, anchorY, restLength: restStalk, directionAngle: dir,
-      minLengthFrac: 0.35, coilSampleCount: 26, coilRadius: D * 0.5,
+      minLengthFrac: 0.32, coilSampleCount: 28, coilRadius: D * 0.32,
     });
     const neck = geom.bellCenter;           // base of the bell (top of stalk)
     const rimC = { x: neck.x + ux * bellHeight, y: neck.y + uy * bellHeight }; // peristome centre
@@ -238,22 +247,29 @@ export function drawVorticella(
       x: neck.x + ux * along + nx * lateral,
       y: neck.y + uy * along + ny * lateral,
     });
-    // inverted-bell half-width: narrow neck → bulge → flared rim
-    const halfW = (u: number): number => (0.10 * D + 0.40 * D * smoothstep(u)) * (u > 0.9 ? open : 1);
+    // convex urn/bell silhouette: narrow neck, bulges to widest just below the
+    // everted peristomial lip, then eases in slightly to the rim (NOT a straight cone).
+    const halfW = (u: number): number => {
+      const um = 0.74, w0 = 0.18, wMax = 0.50, wRim = 0.45;
+      const base = u <= um
+        ? w0 + (wMax - w0) * smoothstep(u / um)
+        : wMax + (wRim - wMax) * smoothstep((u - um) / (1 - um));
+      return D * base * (u > 0.9 ? 0.55 + 0.45 * open : 1);
+    };
 
     // === STALK (spasmoneme) — straight at rest, tight helix when contracted ===
     drawPolyline(ctx, geom.stalkPath, false);
-    ctx.strokeStyle = `hsla(200, 12%, 84%, ${alpha * 0.42})`;
+    ctx.strokeStyle = `hsla(202, 26%, 84%, ${alpha * 0.42})`;
     ctx.lineWidth = Math.max(0.6, D * 0.07);
     ctx.stroke();
     // faint inner spasmoneme line
-    ctx.strokeStyle = `hsla(200, 16%, 70%, ${alpha * 0.3})`;
+    ctx.strokeStyle = `hsla(204, 30%, 72%, ${alpha * 0.32})`;
     ctx.lineWidth = Math.max(0.3, D * 0.03);
     ctx.stroke();
     // floor holdfast
     ctx.beginPath();
     ctx.arc(anchorX, anchorY, Math.max(0.8, D * 0.16), 0, TAU);
-    ctx.fillStyle = `hsla(200, 12%, 76%, ${alpha * 0.4})`;
+    ctx.fillStyle = `hsla(202, 24%, 76%, ${alpha * 0.4})`;
     ctx.fill();
 
     // === BELL BODY (hyaline) ===
@@ -268,8 +284,8 @@ export function drawVorticella(
     }
     const outline = [...left, ...right.reverse()];
     drawPolyline(ctx, outline, true);
-    ctx.fillStyle = `hsla(200, 10%, 82%, ${alpha * 0.14})`;
-    ctx.strokeStyle = `hsla(200, 16%, 90%, ${alpha * 0.4})`;
+    ctx.fillStyle = `hsla(202, 26%, 80%, ${alpha * 0.15})`;
+    ctx.strokeStyle = `hsla(204, 28%, 90%, ${alpha * 0.42})`;
     ctx.lineWidth = Math.max(0.4, D * 0.05);
     ctx.fill();
     ctx.stroke();
@@ -288,15 +304,15 @@ export function drawVorticella(
     ctx.lineWidth = Math.max(0.6, D * 0.12);
     ctx.stroke();
 
-    // contractile vacuole: clear ring near the peristome (upper third)
+    // contractile vacuole: a faint translucent fill (NOT a bright ring — must not
+    // read as an eye), set to one side of the upper body.
     if (D >= 10) {
       const cvPulse = 0.5 - 0.5 * Math.cos(TAU * wrapUnit(finite(cell.contractCyclePhase, 0) * 0.5));
-      const cv = bodyPoint(bellHeight * 0.78, -D * 0.18);
+      const cv = bodyPoint(bellHeight * 0.66, D * 0.20);
       ctx.beginPath();
-      ctx.arc(cv.x, cv.y, Math.max(0.5, D * (0.05 + 0.05 * cvPulse)), 0, TAU);
-      ctx.strokeStyle = `hsla(190, 30%, 86%, ${alpha * 0.4})`;
-      ctx.lineWidth = Math.max(0.3, D * 0.03);
-      ctx.stroke();
+      ctx.arc(cv.x, cv.y, Math.max(0.4, D * (0.035 + 0.035 * cvPulse)), 0, TAU);
+      ctx.fillStyle = `hsla(198, 22%, 84%, ${alpha * 0.16})`;
+      ctx.fill();
     }
 
     // food vacuoles: a few faint round inclusions mid/lower body
@@ -321,9 +337,34 @@ export function drawVorticella(
     ctx.ellipse(rimC.x, rimC.y, Rrim, lipRy, dir, 0, TAU);
     ctx.fillStyle = `hsla(195, 16%, 80%, ${alpha * 0.16 * open})`;
     ctx.fill();
-    ctx.strokeStyle = `hsla(200, 16%, 88%, ${alpha * 0.45 * open})`;
+    ctx.strokeStyle = `hsla(204, 26%, 88%, ${alpha * 0.45 * open})`;
     ctx.lineWidth = Math.max(0.4, D * 0.05);
     ctx.stroke();
+
+    // adoral zone of membranelles (AZM): a CCW spiral on the peristomal disc
+    // funnelling to the cytostome — the feeding vortex.
+    if (open > 0.3 && D >= 9) {
+      const turns = 1.6, N = 30;
+      const cytLat = Rrim * 0.30, cytDep = lipRy * 0.30;
+      const spiral: AquariumPoint[] = [];
+      for (let i = 0; i <= N; i++) {
+        const t = i / N;
+        const rr = 1 - t;
+        const a = -t * turns * TAU; // CCW inward
+        const lateral = Math.cos(a) * Rrim * rr + cytLat * t;
+        const depth = Math.sin(a) * lipRy * rr + cytDep * t;
+        spiral.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
+      }
+      drawPolyline(ctx, spiral, false);
+      ctx.strokeStyle = `hsla(48, 24%, 88%, ${alpha * 0.32 * open})`;
+      ctx.lineWidth = Math.max(0.25, D * 0.03);
+      ctx.stroke();
+      const cyt = { x: rimC.x + nx * cytLat + ux * cytDep, y: rimC.y + ny * cytLat + uy * cytDep };
+      ctx.beginPath();
+      ctx.arc(cyt.x, cyt.y, Math.max(0.4, D * 0.05), 0, TAU);
+      ctx.fillStyle = `hsla(205, 26%, 68%, ${alpha * 0.4 * open})`;
+      ctx.fill();
+    }
 
     // oral wreath: short cilia tufts around the rim, metachronal traveling wave
     if (open > 0.25) {

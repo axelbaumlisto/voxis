@@ -105,6 +105,10 @@ export interface VorticellaState extends AquariumSeedPoint {
   readonly oralWreathPhase: number;
   readonly contractRate: number;
   readonly oralRate: number;
+  /** Slow idle-sway phase of the stalk (alive at rest). */
+  readonly swayPhase?: number;
+  /** Per-cell idle-sway rate (Hz). */
+  readonly swayRate?: number;
 }
 
 export interface AquariumLayerState {

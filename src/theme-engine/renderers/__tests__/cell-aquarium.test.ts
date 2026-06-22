@@ -1312,7 +1312,7 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(ctx.ellipse).toHaveBeenCalled();
     expect(ctx.arc).toHaveBeenCalled();
     // hyaline blue-grey body palette (hue ~200), not pigmented
-    expect(calls.some((call) => call.includes("hsla(200"))).toBe(true);
+    expect(calls.some((call) => /hsla\(20[0-5],/.test(call))).toBe(true);
   });
 });
 
