@@ -1659,6 +1659,29 @@ function mix32(n) {
 function seededUnit(seed, index, salt) {
   return mix32(seed ^ Math.imul(index + 1, 2654435761) ^ salt) / 4294967296;
 }
+function smoothstep01(t) {
+  const x = Math.max(0, Math.min(1, t));
+  return x * x * (3 - 2 * x);
+}
+function lerp2(a, b, t) {
+  return a + (b - a) * t;
+}
+function latticeUnit(seed, ix, iy) {
+  return mix32(seed ^ Math.imul(ix | 0, 2654435761) ^ Math.imul(iy | 0, 2246822507)) / 4294967296;
+}
+function noise2D2(seed, x, y) {
+  const fx = Number.isFinite(x) ? x : 0;
+  const fy = Number.isFinite(y) ? y : 0;
+  const x0 = Math.floor(fx);
+  const y0 = Math.floor(fy);
+  const tx = smoothstep01(fx - x0);
+  const ty = smoothstep01(fy - y0);
+  const v00 = latticeUnit(seed, x0, y0);
+  const v10 = latticeUnit(seed, x0 + 1, y0);
+  const v01 = latticeUnit(seed, x0, y0 + 1);
+  const v11 = latticeUnit(seed, x0 + 1, y0 + 1);
+  return lerp2(lerp2(v00, v10, tx), lerp2(v01, v11, tx), ty);
+}
 
 // src/theme-engine/renderers/cell/aquarium/diatoms.ts
 function finiteOr2(value, fallback) {
@@ -2099,6 +2122,10 @@ function seedEuglena(count, seed, frame, salt = 235478698) {
       turnProgress: 2,
       turnFrom: heading,
       turnTo: heading,
+      tumbleIndex: 0,
+      tumbleFrom: heading,
+      tumbleTo: heading,
+      tumbleProgress: 1,
       startle: 0,
       noiseSeed: mix32(seed ^ Math.imul(i + 1, 2654435761) ^ 24301) >>> 0
     });
@@ -2126,6 +2153,12 @@ var HERO_INTEREST_RANGE = 2.2;
 var HERO_WAKE_RANGE = 1.5;
 var STARTLE_TRIGGER_Q = 1.12;
 var STARTLE_TAU = 0.6;
+var TUMBLE_WINDOW = 0.08;
+var TUMBLE_SECONDS = 1;
+var TUMBLE_MIN_RAD = Math.PI / 6;
+var TUMBLE_MAX_RAD = 5 * Math.PI / 6;
+var TUMBLE_RATE_MIN = 0.045;
+var TUMBLE_RATE_MAX = 0.16;
 function updateEuglena(euglena, frame, view) {
   if (euglena.length === 0)
     return euglena;
@@ -2181,6 +2214,7 @@ function updateEuglena(euglena, frame, view) {
       startle = 1;
     if (finite2(frame.startle, 0) > 0.5)
       startle = 1;
+    let priorityPressure = 0;
     {
       let sx = ux * steer.forward;
       let sy = uy * steer.forward;
@@ -2202,6 +2236,7 @@ function updateEuglena(euglena, frame, view) {
         sy += ay * steer.startleAway * startle;
       }
       const pressure = Math.hypot(sx - ux * steer.forward, sy - uy * steer.forward);
+      priorityPressure = pressure;
       if (pressure > 0.000001) {
         const desired = Math.atan2(sy, sx);
         const turnK = (1 + 2.5 * Math.min(1, pressure)) / drag;
@@ -2242,13 +2277,43 @@ function updateEuglena(euglena, frame, view) {
       }
     }
     const rollDelta = Math.max(0, finite2(cell.rollRate, 0)) * act * dt;
+    const noiseSeed = finiteOr3(cell.noiseSeed, 0) | 0;
     const bphase = wrapUnit(finiteOr3(cell.burstPhase, 0));
-    const flick = bphase < 0.08 ? Math.sin(bphase / 0.08 * Math.PI) : 0;
-    const beatBoost = 1 + 1.3 * flick;
-    if (flick > 0) {
-      const toCenter = Math.atan2(safeHeight / 2 - py0, safeWidth / 2 - px0);
-      const turnSign = wrapPi2(toCenter - heading) >= 0 ? 1 : -1;
-      heading += turnSign * 0.9 * flick * dt;
+    const burstBase = Math.max(0, finiteOr3(cell.burstRate, 0));
+    let tumbleIndex = Math.max(0, Math.floor(finiteOr3(cell.tumbleIndex, 0)));
+    let tumbleFrom = finiteOr3(cell.tumbleFrom, heading);
+    let tumbleTo = finiteOr3(cell.tumbleTo, heading);
+    let tumbleProgress = clamp01(finiteOr3(cell.tumbleProgress, 1));
+    const runU = Math.max(0.02, noise2D2(noiseSeed ^ 1821285621, tumbleIndex + 0.17, 0.31));
+    const intervalScale = clamp(Math.pow(runU, -0.85), 0.6, 3.6);
+    const effectiveBurstRate = burstBase > 0 ? clamp(burstBase / intervalScale, TUMBLE_RATE_MIN, TUMBLE_RATE_MAX) : 0;
+    const newBurstPhase = wrapUnit(bphase + effectiveBurstRate * act * dt);
+    const firedTumble = effectiveBurstRate > 0 && newBurstPhase < bphase;
+    if (firedTumble) {
+      tumbleIndex += 1;
+      const sign = noise2D2(noiseSeed ^ 2050968865, tumbleIndex, 0.23) < 0.5 ? -1 : 1;
+      const magU = noise2D2(noiseSeed ^ 791783381, tumbleIndex, 0.71);
+      const magnitude = TUMBLE_MIN_RAD + (TUMBLE_MAX_RAD - TUMBLE_MIN_RAD) * magU;
+      tumbleFrom = heading;
+      tumbleTo = heading + sign * magnitude;
+      tumbleProgress = 0;
+    }
+    const flick = effectiveBurstRate > 0 && (bphase < TUMBLE_WINDOW || tumbleProgress < 1) ? Math.sin(Math.min(1, tumbleProgress) * Math.PI) : 0;
+    const beatBoost = 1 + 1.3 * Math.max(0, flick);
+    if (tumbleProgress < 1) {
+      const nextProgress = Math.min(1, tumbleProgress + dt / TUMBLE_SECONDS);
+      if (priorityPressure < 0.9) {
+        const turnK = 5 / drag;
+        heading += wrapPi2(tumbleTo - heading) * (1 - Math.exp(-turnK * dt));
+        if (nextProgress >= 1)
+          heading = tumbleTo;
+      }
+      tumbleProgress = nextProgress;
+    }
+    const rotDiffusion = Math.max(0, finite2(medium.rotDiffusion, 0));
+    if (rotDiffusion > 0 && dt > 0) {
+      const jitter = (noise2D2(noiseSeed ^ 5370206, px0 * 0.037, finite2(frame.t, 0) * 0.73) * 2 - 1) * rotDiffusion * Math.sqrt(dt);
+      heading += jitter;
     }
     const fEff = Math.min(13, Math.max(0, finite2(cell.flagellumRate, 0)) * act * beatBoost);
     return {
@@ -2260,12 +2325,16 @@ function updateEuglena(euglena, frame, view) {
       turnProgress: finiteOr3(cell.turnProgress, 2),
       turnFrom: finiteOr3(cell.turnFrom, heading),
       turnTo: finiteOr3(cell.turnTo, heading),
+      tumbleIndex,
+      tumbleFrom,
+      tumbleTo,
+      tumbleProgress,
       startle: startle * Math.exp(-dt / STARTLE_TAU),
       rollPhase: wrapUnit(finite2(cell.rollPhase, 0) + rollDelta),
       metabolyPhase: wrapUnit(finite2(cell.metabolyPhase, 0) + Math.max(0, finite2(cell.metabolyRate, 0)) * act * dt),
       flagellumPhase: wrapUnit(finite2(cell.flagellumPhase, 0) + fEff * dt),
       cvPhase: wrapUnit(finiteOr3(cell.cvPhase, 0) + Math.max(0, finiteOr3(cell.cvRate, 0)) * act * dt),
-      burstPhase: wrapUnit(finiteOr3(cell.burstPhase, 0) + Math.max(0, finiteOr3(cell.burstRate, 0)) * act * dt)
+      burstPhase: newBurstPhase
     };
   });
 }

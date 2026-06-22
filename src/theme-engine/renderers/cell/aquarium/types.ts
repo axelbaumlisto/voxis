@@ -81,6 +81,14 @@ export interface EuglenaState extends AquariumSeedPoint {
   readonly turnProgress?: number;
   readonly turnFrom?: number;
   readonly turnTo?: number;
+  /** Discrete beat-switch tumble cycle index (deterministic run-and-tumble state). */
+  readonly tumbleIndex?: number;
+  /** Heading at the start of the current tumble. */
+  readonly tumbleFrom?: number;
+  /** Target heading for the current tumble. */
+  readonly tumbleTo?: number;
+  /** Progress [0,1] through the current ~1s beat-switch tumble. */
+  readonly tumbleProgress?: number;
   /** Decaying escape state [0,1] for the startle-dart interaction. */
   readonly startle?: number;
   /** Stable per-cell deterministic noise key for future stochastic behaviours. */

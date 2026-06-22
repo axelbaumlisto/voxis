@@ -1,6 +1,6 @@
 import type { ThemeState } from "../../../contract";
 import type { AquariumFrame, AquariumParamsView, EuglenaState } from "./types";
-import { mix32, seededUnit } from "./seeds";
+import { mix32, noise2D, seededUnit } from "./seeds";
 
 export interface EuglenaPoseOptions {
   readonly centerX?: number;
@@ -411,6 +411,10 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
       turnProgress: 2,
       turnFrom: heading,
       turnTo: heading,
+      tumbleIndex: 0,
+      tumbleFrom: heading,
+      tumbleTo: heading,
+      tumbleProgress: 1,
       startle: 0,
       noiseSeed: mix32(seed ^ Math.imul(i + 1, 0x9e3779b1) ^ 0x5eed) >>> 0,
     });
@@ -490,6 +494,12 @@ const HERO_INTEREST_RANGE = 2.2;   // beyond this q the hero is ignored
 const HERO_WAKE_RANGE = 1.5;       // entrainment is NEAR-FIELD only (~one half-width)
 const STARTLE_TRIGGER_Q = 1.12;    // contact this close -> startle escape
 const STARTLE_TAU = 0.6;           // s; escape decay time-constant
+const TUMBLE_WINDOW = 0.08;         // burst-phase window; existing beat-switch gate
+const TUMBLE_SECONDS = 1.0;         // reorientation duration (~1s, not instant)
+const TUMBLE_MIN_RAD = Math.PI / 6; // 30°
+const TUMBLE_MAX_RAD = (5 * Math.PI) / 6; // 150°
+const TUMBLE_RATE_MIN = 0.045;      // heavy-tail clamped slow end: ~22s max cycle
+const TUMBLE_RATE_MAX = 0.16;       // fast end: ~6.25s min cycle
 
 export function updateEuglena(
   euglena: readonly EuglenaState[],
@@ -560,6 +570,7 @@ export function updateEuglena(
     if (heroParams && heroQ > 1e-4 && heroQ < STARTLE_TRIGGER_Q) startle = 1;
     if (finite(frame.startle, 0) > 0.5) startle = 1;
 
+    let priorityPressure = 0;
     // === priority-weighted steering (tunable interaction arbitration) ===
     // Every behaviour adds a world-space direction vector scaled by its weight.
     // `forward` carries the current heading (short-way turns, minimal reverse);
@@ -585,6 +596,7 @@ export function updateEuglena(
         sy += ay * steer.startleAway * startle;
       }
       const pressure = Math.hypot(sx - ux * steer.forward, sy - uy * steer.forward);
+      priorityPressure = pressure;
       if (pressure > 1e-6) {
         const desired = Math.atan2(sy, sx);
         // gentle viscous (low-Reynolds) reorientation: exact exponential approach,
@@ -639,18 +651,56 @@ export function updateEuglena(
     }
 
     const rollDelta = Math.max(0, finite(cell.rollRate, 0)) * act * dt;
-    // occasional discrete "turning beat" flick: a brief faster, stronger stroke
-    // once per burst cycle (real activity = beat-pattern switching, not a ramp).
+
+    // Discrete beat-switch tumble (run-and-tumble), NOT Brownian diffusion.
+    // The existing burstPhase gate still triggers the event, but each cycle uses
+    // a deterministic heavy-tailed interval and a polygonal 30-150° target turn.
+    // Hand-built tests with burstRate=0/undefined keep this path inert.
+    const noiseSeed = finiteOr(cell.noiseSeed, 0) | 0;
     const bphase = wrapUnit(finiteOr(cell.burstPhase, 0));
-    const flick = bphase < 0.08 ? Math.sin((bphase / 0.08) * Math.PI) : 0;
-    const beatBoost = 1 + 1.3 * flick;
-    // the spinning/turning beat REORIENTS the cell (run-and-tumble): a brief
-    // heading kick during the flick, steered toward open water (tank centre) so
-    // it swims AWAY from walls instead of persistently curving off to one side.
-    if (flick > 0) {
-      const toCenter = Math.atan2(safeHeight / 2 - py0, safeWidth / 2 - px0);
-      const turnSign = wrapPi(toCenter - heading) >= 0 ? 1 : -1;
-      heading += turnSign * 0.9 * flick * dt;
+    const burstBase = Math.max(0, finiteOr(cell.burstRate, 0));
+    let tumbleIndex = Math.max(0, Math.floor(finiteOr(cell.tumbleIndex, 0)));
+    let tumbleFrom = finiteOr(cell.tumbleFrom, heading);
+    let tumbleTo = finiteOr(cell.tumbleTo, heading);
+    let tumbleProgress = clamp01(finiteOr(cell.tumbleProgress, 1));
+    const runU = Math.max(0.02, noise2D(noiseSeed ^ 0x6c8e9cf5, tumbleIndex + 0.17, 0.31));
+    const intervalScale = clamp(Math.pow(runU, -0.85), 0.6, 3.6); // Levy-ish long runs from small u
+    const effectiveBurstRate = burstBase > 0
+      ? clamp(burstBase / intervalScale, TUMBLE_RATE_MIN, TUMBLE_RATE_MAX)
+      : 0;
+    const newBurstPhase = wrapUnit(bphase + effectiveBurstRate * act * dt);
+    const firedTumble = effectiveBurstRate > 0 && newBurstPhase < bphase;
+    if (firedTumble) {
+      tumbleIndex += 1;
+      const sign = noise2D(noiseSeed ^ 0x7a3f4d21, tumbleIndex, 0.23) < 0.5 ? -1 : 1;
+      const magU = noise2D(noiseSeed ^ 0x2f31a7d5, tumbleIndex, 0.71);
+      const magnitude = TUMBLE_MIN_RAD + (TUMBLE_MAX_RAD - TUMBLE_MIN_RAD) * magU;
+      tumbleFrom = heading;
+      tumbleTo = heading + sign * magnitude;
+      tumbleProgress = 0;
+    }
+    const flick = (effectiveBurstRate > 0 && (bphase < TUMBLE_WINDOW || tumbleProgress < 1))
+      ? Math.sin(Math.min(1, tumbleProgress) * Math.PI)
+      : 0;
+    const beatBoost = 1 + 1.3 * Math.max(0, flick);
+    if (tumbleProgress < 1) {
+      const nextProgress = Math.min(1, tumbleProgress + dt / TUMBLE_SECONDS);
+      // Keep priority steering intact: the tumble is a low-priority reorientation
+      // and is skipped while strong wall/hero/startle pressure is active.
+      if (priorityPressure < 0.9) {
+        const turnK = 5.0 / drag; // ~1s smooth beat-switch reorientation
+        heading += wrapPi(tumbleTo - heading) * (1 - Math.exp(-turnK * dt));
+        if (nextProgress >= 1) heading = tumbleTo;
+      }
+      tumbleProgress = nextProgress;
+    }
+    const rotDiffusion = Math.max(0, finite(medium.rotDiffusion, 0));
+    if (rotDiffusion > 0 && dt > 0) {
+      // Optional cosmetic active-noise, NOT thermal Brownian diffusion. Default 0
+      // so exact partition tests stay unchanged.
+      const jitter = (noise2D(noiseSeed ^ 0x51f15e, px0 * 0.037, finite(frame.t, 0) * 0.73) * 2 - 1)
+        * rotDiffusion * Math.sqrt(dt);
+      heading += jitter;
     }
     // cap effective beat freq so the 2nd lasso harmonic (2f) stays < 30Hz Nyquist
     const fEff = Math.min(13, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
@@ -663,12 +713,16 @@ export function updateEuglena(
       turnProgress: finiteOr(cell.turnProgress, 2),
       turnFrom: finiteOr(cell.turnFrom, heading),
       turnTo: finiteOr(cell.turnTo, heading),
+      tumbleIndex,
+      tumbleFrom,
+      tumbleTo,
+      tumbleProgress,
       startle: startle * Math.exp(-dt / STARTLE_TAU),
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + rollDelta),
       metabolyPhase: wrapUnit(finite(cell.metabolyPhase, 0) + Math.max(0, finite(cell.metabolyRate, 0)) * act * dt),
       flagellumPhase: wrapUnit(finite(cell.flagellumPhase, 0) + fEff * dt),
       cvPhase: wrapUnit(finiteOr(cell.cvPhase, 0) + Math.max(0, finiteOr(cell.cvRate, 0)) * act * dt),
-      burstPhase: wrapUnit(finiteOr(cell.burstPhase, 0) + Math.max(0, finiteOr(cell.burstRate, 0)) * act * dt),
+      burstPhase: newBurstPhase,
     };
   });
 }
