@@ -15,6 +15,11 @@ const THEME_PATHS = {
     bundle: join(process.cwd(), "src-tauri/themes/paramecium_solo/theme.js"),
     marker: "// src/theme-engine/builtin/paramecium_solo/index.ts",
   },
+  duo_aquarium: {
+    source: join(process.cwd(), "src/theme-engine/builtin/duo_aquarium/index.ts"),
+    bundle: join(process.cwd(), "src-tauri/themes/duo_aquarium/theme.js"),
+    marker: "// src/theme-engine/builtin/duo_aquarium/index.ts",
+  },
 } as const;
 
 type ThemeName = keyof typeof THEME_PATHS;
@@ -48,6 +53,29 @@ const BASE_CRITICAL = {
 } as const;
 
 const AQUARIUM_CRITICAL = {
+  enableAquarium: true,
+  aquariumSeed: 17,
+  aquariumAlpha: 0.68,
+  aquariumActivityBoost: 1.0,
+  diatomCount: 0,
+  diatomAlpha: 0.16,
+  diatomDriftSpeed: 0.35,
+  euglenaCount: 1,
+  euglenaSpeed: 0.20,
+  euglenaSpeedActive: 1.5,
+  euglenaScale: 2.8,
+  euglenaGravitaxis: 0.2,
+  euglenaPhototaxis: 0.6,
+  euglenaRotDiffusion: 0.12,
+  // drifting_contour is the 3-hero (trio) aquarium: paramecium + euglena + vorticella
+  vorticellaCount: 1,
+  vorticellaScale: 2.6,
+  vorticellaContractRate: 1.2,
+  vorticellaContractRateActive: 1.5,
+} as const;
+
+// duo_aquarium is the 2-hero counterpart: paramecium + euglena, no sessile vorticella
+const DUO_AQUARIUM_CRITICAL = {
   enableAquarium: true,
   aquariumSeed: 17,
   aquariumAlpha: 0.68,
@@ -205,6 +233,14 @@ describe("drifting_contour v1.0 critical params", () => {
     expectParams(readBundleMountBlock("drifting_contour"), AQUARIUM_CRITICAL);
   });
 
+  it("freezes duo_aquarium source aquarium params inline", () => {
+    expectParams(readSourceMountBlock("duo_aquarium"), DUO_AQUARIUM_CRITICAL);
+  });
+
+  it("freezes duo_aquarium built bundle aquarium params inline", () => {
+    expectParams(readBundleMountBlock("duo_aquarium"), DUO_AQUARIUM_CRITICAL);
+  });
+
   it("freezes built bundle shared SoT critical values statically", () => {
     for (const theme of Object.keys(THEME_PATHS) as ThemeName[]) {
       const bundle = bundleText(theme);
@@ -213,13 +249,13 @@ describe("drifting_contour v1.0 critical params", () => {
     }
   });
 
-  it("keeps the duo theme free of vorticella preview params", () => {
-    expectNoVorticellaPreviewParams(readSourceMountBlock("drifting_contour"));
+  it("keeps the duo_aquarium theme free of vorticella preview params", () => {
+    expectNoVorticellaPreviewParams(readSourceMountBlock("duo_aquarium"));
   });
 
-  it("keeps the built bundle duo free of vorticella preview params", () => {
-    const bundle = bundleText("drifting_contour");
+  it("keeps the built bundle duo_aquarium free of vorticella preview params", () => {
+    const bundle = bundleText("duo_aquarium");
     expectNoVorticellaPreviewParams(sliceBundledVarObject(bundle, "PARAMECIUM_CELL_PARAMS"));
-    expectNoVorticellaPreviewParams(readBundleMountBlock("drifting_contour"));
+    expectNoVorticellaPreviewParams(readBundleMountBlock("duo_aquarium"));
   });
 });

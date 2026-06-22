@@ -131,7 +131,21 @@ const EXPECTED_DRIFTING_CONTOUR_PARAMS = {
   euglenaGravitaxis: 0.2,
   euglenaPhototaxis: 0.6,
   euglenaRotDiffusion: 0.12,
+  vorticellaCount: 1,
+  vorticellaScale: 2.6,
+  vorticellaContractRate: 1.2,
+  vorticellaContractRateActive: 1.5,
+} as const;
+
+// duo_aquarium = the 2-hero counterpart: identical to drifting_contour minus the
+// sessile vorticella (no vorticella* preview params at all; toEqual ignores the
+// undefined-valued keys, asserting the duo mount omits them).
+const EXPECTED_DUO_AQUARIUM_PARAMS = {
+  ...EXPECTED_DRIFTING_CONTOUR_PARAMS,
   vorticellaCount: 0,
+  vorticellaScale: undefined,
+  vorticellaContractRate: undefined,
+  vorticellaContractRateActive: undefined,
 } as const;
 
 const EXPECTED_PARAMECIUM_SOLO_PARAMS = {
@@ -258,14 +272,19 @@ function fakeApi(params: Record<string, unknown> = {}): ThemeApi {
   };
 }
 
-async function importTheme(themeName: "drifting_contour" | "paramecium_solo"): Promise<ThemeModule> {
+type ParityTheme = "drifting_contour" | "paramecium_solo" | "duo_aquarium";
+
+async function importTheme(themeName: ParityTheme): Promise<ThemeModule> {
   if (themeName === "drifting_contour") {
     return import("../drifting_contour");
+  }
+  if (themeName === "duo_aquarium") {
+    return import("../duo_aquarium");
   }
   return import("../paramecium_solo");
 }
 
-async function mountTheme(themeName: "drifting_contour" | "paramecium_solo", params: Record<string, unknown> = {}) {
+async function mountTheme(themeName: ParityTheme, params: Record<string, unknown> = {}) {
   const rendererSpy = vi.mocked(createCellRenderer);
   rendererSpy.mockClear();
   const theme = await importTheme(themeName);
@@ -284,6 +303,10 @@ describe("paramecium theme merged params parity", () => {
 
   it("freezes paramecium_solo merged params from source mount", async () => {
     await expect(mountTheme("paramecium_solo")).resolves.toEqual(EXPECTED_PARAMECIUM_SOLO_PARAMS);
+  });
+
+  it("freezes duo_aquarium merged params from source mount", async () => {
+    await expect(mountTheme("duo_aquarium")).resolves.toEqual(EXPECTED_DUO_AQUARIUM_PARAMS);
   });
 
   it("keeps user params last so overrides win", async () => {

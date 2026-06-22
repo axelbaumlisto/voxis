@@ -1,0 +1,10 @@
+{
+  "manifest_version": 2,
+  "id": "duo_aquarium",
+  "name": "Duo Aquarium",
+  "description": "Two heroes — paramecium + euglena sharing the tank, warm amber palette",
+  "api_version": 1,
+  "overlay_width": 320,
+  "overlay_height": 160,
+  "entry": "theme.js"
+}
