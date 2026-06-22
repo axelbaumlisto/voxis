@@ -2103,6 +2103,11 @@ function seedEuglena(count, seed, frame, salt = 235478698) {
   }
   return euglena;
 }
+var EUGLENA_STEER = {
+  forward: 1,
+  wall: 2,
+  hero: 1.2
+};
 function updateEuglena(euglena, frame, view) {
   if (euglena.length === 0)
     return euglena;
@@ -2125,28 +2130,8 @@ function updateEuglena(euglena, frame, view) {
     let ux = Math.cos(heading);
     let uy = Math.sin(heading);
     const vPx = Math.max(0, finite2(cell.swimSpeed, 0)) * vBL * L;
-    {
-      const look = L * 2.4;
-      let avoidX = 0;
-      let avoidY = 0;
-      if (ux < 0 && px0 < look)
-        avoidX += 1 - px0 / look;
-      if (ux > 0 && safeWidth - px0 < look)
-        avoidX -= 1 - (safeWidth - px0) / look;
-      if (uy < 0 && py0 < look)
-        avoidY += 1 - py0 / look;
-      if (uy > 0 && safeHeight - py0 < look)
-        avoidY -= 1 - (safeHeight - py0) / look;
-      if (avoidX !== 0 || avoidY !== 0) {
-        const urgency = Math.min(1, Math.hypot(avoidX, avoidY));
-        const desired = Math.atan2(uy + 2 * avoidY, ux + 2 * avoidX);
-        heading += wrapPi2(desired - heading) * Math.min(1, (3 + 6 * urgency) * dt);
-        ux = Math.cos(heading);
-        uy = Math.sin(heading);
-      }
-    }
-    let nextX = px0 + ux * vPx * dt;
-    let nextY = py0 + uy * vPx * dt;
+    let heroParams = null;
+    let heroQd = Infinity;
     if (frame.hero) {
       const hx = finite2(frame.hero.x, safeWidth / 2);
       const hy = finite2(frame.hero.y, safeHeight / 2);
@@ -2155,9 +2140,45 @@ function updateEuglena(euglena, frame, view) {
       const A = Math.max(0.001, finiteOr3(frame.hero.halfLen, hr) + m);
       const B = Math.max(0.001, finiteOr3(frame.hero.halfWid, hr) + m);
       const hh = finiteOr3(frame.hero.heading, 0);
-      const cphi = Math.cos(hh), sphi = Math.sin(hh);
-      const dx = nextX - hx;
-      const dy = nextY - hy;
+      heroParams = { hx, hy, A, B, cphi: Math.cos(hh), sphi: Math.sin(hh) };
+      const dx = px0 - hx, dy = py0 - hy;
+      const px = dx * heroParams.cphi + dy * heroParams.sphi;
+      const py = -dx * heroParams.sphi + dy * heroParams.cphi;
+      heroQd = px * px / (A * A) + py * py / (B * B);
+    }
+    {
+      let sx = ux * EUGLENA_STEER.forward;
+      let sy = uy * EUGLENA_STEER.forward;
+      const look = L * 2.4;
+      if (px0 < look)
+        sx += (1 - px0 / look) * EUGLENA_STEER.wall;
+      if (safeWidth - px0 < look)
+        sx -= (1 - (safeWidth - px0) / look) * EUGLENA_STEER.wall;
+      if (py0 < look)
+        sy += (1 - py0 / look) * EUGLENA_STEER.wall;
+      if (safeHeight - py0 < look)
+        sy -= (1 - (safeHeight - py0) / look) * EUGLENA_STEER.wall;
+      if (heroParams && heroQd < 1.69 && heroQd > 0.000000001) {
+        const dxh = px0 - heroParams.hx;
+        const dyh = py0 - heroParams.hy;
+        const dh = Math.hypot(dxh, dyh) || 0.000001;
+        const prox = Math.min(1, (1.69 - heroQd) / 0.69);
+        sx += dxh / dh * EUGLENA_STEER.hero * prox;
+        sy += dyh / dh * EUGLENA_STEER.hero * prox;
+      }
+      const pressure = Math.hypot(sx - ux * EUGLENA_STEER.forward, sy - uy * EUGLENA_STEER.forward);
+      if (pressure > 0.000001) {
+        const desired = Math.atan2(sy, sx);
+        heading += wrapPi2(desired - heading) * Math.min(1, (2.5 + 7 * Math.min(1, pressure)) * dt);
+        ux = Math.cos(heading);
+        uy = Math.sin(heading);
+      }
+    }
+    let nextX = px0 + ux * vPx * dt;
+    let nextY = py0 + uy * vPx * dt;
+    if (heroParams) {
+      const { hx, hy, A, B, cphi, sphi } = heroParams;
+      const dx = nextX - hx, dy = nextY - hy;
       const px = dx * cphi + dy * sphi;
       const py = -dx * sphi + dy * cphi;
       const qd = px * px / (A * A) + py * py / (B * B);
@@ -2172,15 +2193,6 @@ function updateEuglena(euglena, frame, view) {
           nextX += mvx / need * step;
           nextY += mvy / need * step;
         }
-      }
-      if (qd < 1.69 && qd > 0.000000001) {
-        const factor = Math.min(1, (1.69 - qd) / 0.69);
-        const wrapPi3 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
-        const awayAng = Math.atan2(dy, dx);
-        const t1 = awayAng + Math.PI / 2;
-        const t2 = awayAng - Math.PI / 2;
-        const target = Math.abs(wrapPi3(t1 - heading)) < Math.abs(wrapPi3(t2 - heading)) ? t1 : t2;
-        heading += wrapPi3(target - heading) * Math.min(1, 1.8 * factor * dt);
       }
     }
     const rollDelta = Math.max(0, finite2(cell.rollRate, 0)) * act * dt;

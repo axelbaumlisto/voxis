@@ -416,6 +416,23 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
   return euglena;
 }
 
+/**
+ * Priority-weighted steering behaviour for the euglena. Each weight is the
+ * PRIORITY of that behaviour; the heading eases toward the weighted sum of the
+ * behaviours' direction vectors. Tune these to manage behaviour:
+ *  - forward: momentum / minimal-reverse bias (keeps the current heading so the
+ *    cell turns the short way and rarely flips backward).
+ *  - wall:    avoid the impassable tank walls — highest priority.
+ *  - hero:    avoid the hero (paramecium); set NEGATIVE to PURSUE/chase it.
+ * More behaviours (other organisms, food, light) can be added as extra
+ * weighted vectors in the same accumulator.
+ */
+export const EUGLENA_STEER = {
+  forward: 1.0,
+  wall: 2.0,
+  hero: 1.2,
+};
+
 export function updateEuglena(
   euglena: readonly EuglenaState[],
   frame: AquariumFrame,
@@ -444,35 +461,11 @@ export function updateEuglena(
     let uy = Math.sin(heading);
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L;
 
-    // --- anticipatory wall avoidance: the tank edges are impassable obstacles.
-    // Steer the heading AWAY from any wall the cell is swimming TOWARD, well
-    // before contact (lookahead ~2.4 body-lengths), so it banks around the edge
-    // instead of ramming it. No 180-degree flip, no jerk — a smooth continuous turn. ---
-    {
-      const look = L * 2.4; // anticipate ~2.4 body-lengths ahead of every wall
-      let avoidX = 0;
-      let avoidY = 0;
-      if (ux < 0 && px0 < look) avoidX += 1 - px0 / look;                       // heading at left wall → push right
-      if (ux > 0 && safeWidth - px0 < look) avoidX -= 1 - (safeWidth - px0) / look; // heading at right wall → push left
-      if (uy < 0 && py0 < look) avoidY += 1 - py0 / look;                       // heading at top → push down
-      if (uy > 0 && safeHeight - py0 < look) avoidY -= 1 - (safeHeight - py0) / look; // heading at bottom → push up
-      if (avoidX !== 0 || avoidY !== 0) {
-        const urgency = Math.min(1, Math.hypot(avoidX, avoidY));
-        const desired = Math.atan2(uy + 2.0 * avoidY, ux + 2.0 * avoidX);
-        heading += wrapPi(desired - heading) * Math.min(1, (3 + 6 * urgency) * dt);
-        ux = Math.cos(heading);
-        uy = Math.sin(heading);
-      }
-    }
-
-    let nextX = px0 + ux * vPx * dt;
-    let nextY = py0 + uy * vPx * dt;
-
-    // --- hero exclusion (dormant when no hero, e.g. euglena_drift) ---
+    // hero ellipse params (shared by the behavioural steer AND the hard push).
     // Body-frame ELLIPTICAL exclusion hugging the elongated paramecium (~3:1),
-    // grown by the euglena's own half-length so the two outlines never overlap;
-    // soft exponential push = exact discrete solution of ṗ=-k·p, so it is
-    // frame-rate-exact and never glues/orbits/jitters at the rim.
+    // grown by the euglena's own half-length so the two outlines never overlap.
+    let heroParams: { hx: number; hy: number; A: number; B: number; cphi: number; sphi: number } | null = null;
+    let heroQd = Infinity;
     if (frame.hero) {
       const hx = finite(frame.hero.x, safeWidth / 2);
       const hy = finite(frame.hero.y, safeHeight / 2);
@@ -481,9 +474,53 @@ export function updateEuglena(
       const A = Math.max(1e-3, finiteOr(frame.hero.halfLen, hr) + m);
       const B = Math.max(1e-3, finiteOr(frame.hero.halfWid, hr) + m);
       const hh = finiteOr(frame.hero.heading, 0);
-      const cphi = Math.cos(hh), sphi = Math.sin(hh);
-      const dx = nextX - hx;
-      const dy = nextY - hy;
+      heroParams = { hx, hy, A, B, cphi: Math.cos(hh), sphi: Math.sin(hh) };
+      const dx = px0 - hx, dy = py0 - hy;
+      const px = dx * heroParams.cphi + dy * heroParams.sphi;
+      const py = -dx * heroParams.sphi + dy * heroParams.cphi;
+      heroQd = (px * px) / (A * A) + (py * py) / (B * B);
+    }
+
+    // === priority-weighted steering (tunable behaviour arbitration) ===
+    // Every behaviour adds a world-space direction vector scaled by its weight
+    // (= priority). `forward` carries the current heading so the cell turns the
+    // SHORT way and minimizes reversing; walls win over the hero; a negative
+    // hero weight would make it PURSUE the hero instead of avoiding.
+    {
+      let sx = ux * EUGLENA_STEER.forward;
+      let sy = uy * EUGLENA_STEER.forward;
+      const look = L * 2.4; // anticipate ~2.4 body-lengths ahead of every wall
+      if (px0 < look) sx += (1 - px0 / look) * EUGLENA_STEER.wall;
+      if (safeWidth - px0 < look) sx -= (1 - (safeWidth - px0) / look) * EUGLENA_STEER.wall;
+      if (py0 < look) sy += (1 - py0 / look) * EUGLENA_STEER.wall;
+      if (safeHeight - py0 < look) sy -= (1 - (safeHeight - py0) / look) * EUGLENA_STEER.wall;
+      if (heroParams && heroQd < 1.69 && heroQd > 1e-9) {
+        const dxh = px0 - heroParams.hx;
+        const dyh = py0 - heroParams.hy;
+        const dh = Math.hypot(dxh, dyh) || 1e-6;
+        const prox = Math.min(1, (1.69 - heroQd) / 0.69);
+        sx += (dxh / dh) * EUGLENA_STEER.hero * prox; // >0 steer away (avoid); <0 steer toward (pursue)
+        sy += (dyh / dh) * EUGLENA_STEER.hero * prox;
+      }
+      // pressure = strength of the non-forward (avoid/pursue) demand
+      const pressure = Math.hypot(sx - ux * EUGLENA_STEER.forward, sy - uy * EUGLENA_STEER.forward);
+      if (pressure > 1e-6) {
+        const desired = Math.atan2(sy, sx);
+        heading += wrapPi(desired - heading) * Math.min(1, (2.5 + 7 * Math.min(1, pressure)) * dt);
+        ux = Math.cos(heading);
+        uy = Math.sin(heading);
+      }
+    }
+
+    let nextX = px0 + ux * vPx * dt;
+    let nextY = py0 + uy * vPx * dt;
+
+    // hard non-overlap push (safety net, independent of the soft steer above):
+    // soft exponential push = exact discrete solution of ṗ=-k·p, so it is
+    // frame-rate-exact and never glues/orbits/jitters at the rim.
+    if (heroParams) {
+      const { hx, hy, A, B, cphi, sphi } = heroParams;
+      const dx = nextX - hx, dy = nextY - hy;
       const px = dx * cphi + dy * sphi;   // into hero body frame
       const py = -dx * sphi + dy * cphi;
       const qd = (px * px) / (A * A) + (py * py) / (B * B);
@@ -498,18 +535,6 @@ export function updateEuglena(
           nextX += (mvx / need) * step;
           nextY += (mvy / need) * step;
         }
-      }
-      // organic turn-aside: when near the hero (out to ~1.3× the exclusion),
-      // ease the heading toward the tangent so the euglena actively swims AROUND
-      // the paramecium instead of merely sliding along the cushion.
-      if (qd < 1.69 && qd > 1e-9) {
-        const factor = Math.min(1, (1.69 - qd) / 0.69);
-        const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
-        const awayAng = Math.atan2(dy, dx);
-        const t1 = awayAng + Math.PI / 2;
-        const t2 = awayAng - Math.PI / 2;
-        const target = Math.abs(wrapPi(t1 - heading)) < Math.abs(wrapPi(t2 - heading)) ? t1 : t2;
-        heading += wrapPi(target - heading) * Math.min(1, 1.8 * factor * dt);
       }
     }
 

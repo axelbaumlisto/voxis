@@ -3,7 +3,7 @@ import { CELL_DEFAULTS } from "../cell/defaults";
 import { aquariumParamsView } from "../cell/aquarium/params";
 import { seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aquarium/layer";
 import { diatomGeometry } from "../cell/aquarium/diatoms";
-import { euglenaPose, updateEuglena } from "../cell/aquarium/euglena";
+import { euglenaPose, updateEuglena, EUGLENA_STEER } from "../cell/aquarium/euglena";
 import { updateVorticella, vorticellaContractPhase, vorticellaGeometry } from "../cell/aquarium/vorticella";
 import type { AquariumFrame, AquariumLayerState, EuglenaState } from "../cell/aquarium/types";
 import type { CellParams } from "../cell/types";
@@ -665,6 +665,53 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(new Set(peaks).size).toBeGreaterThan(1);
   });
 
+  it("priority steering banks the euglena away from an approaching wall", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaScale: 3,
+      aquariumActivityBoost: 1,
+    });
+    // swimming straight at the right wall, close to it → heading must rotate away
+    const initial = [testEuglena({ x: 290, y: 150, heading: 0, swimSpeed: 1 })];
+    let cell = initial[0];
+    for (let i = 0; i < 30; i++) {
+      cell = updateEuglena([cell], frame({ dt: 0.05, width: 300, height: 300, activity: 0 }), view)[0];
+    }
+    // it banked away from the wall (no longer heading straight right) and never crossed it
+    expect(Math.cos(cell.heading)).toBeLessThan(0.85);
+    expect(cell.x).toBeLessThanOrEqual(300);
+  });
+
+  it("a negative hero weight makes the euglena PURSUE the hero instead of avoiding", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaScale: 3,
+      aquariumActivityBoost: 1,
+    });
+    const hero = { x: 150, y: 150, radius: 18 };
+    const start = testEuglena({ x: 150, y: 185, heading: -Math.PI / 2, swimSpeed: 1 }); // just below, heading up toward hero
+    const saved = EUGLENA_STEER.hero;
+    try {
+      EUGLENA_STEER.hero = -1.2; // pursue
+      let chase = start;
+      for (let i = 0; i < 8; i++) {
+        chase = updateEuglena([chase], frame({ dt: 0.05, width: 300, height: 300, hero }), view)[0];
+      }
+      // pursuing keeps it pointed at the hero (heading stays roughly upward)
+      expect(Math.sin(chase.heading)).toBeLessThan(-0.5); // still heading up toward hero
+    } finally {
+      EUGLENA_STEER.hero = saved;
+    }
+  });
+
   it("updateEuglena is dt-partition invariant across phase wrap", () => {
     const view = aquariumParamsView({
       ...CELL_DEFAULTS,
@@ -674,10 +721,11 @@ describe("aquarium layer Phase 3 euglena", () => {
       euglenaSpeedActive: 1,
       aquariumActivityBoost: 1,
     });
-    const initial = [testEuglena({ rollPhase: 0.98, metabolyPhase: 0.99, flagellumPhase: 0.97 })];
-    const oneStep = updateEuglena(initial, frame({ dt: 0.4, width: 172, height: 36, activity: 0 }), view);
-    const halfStep = updateEuglena(initial, frame({ dt: 0.2, width: 172, height: 36, activity: 0 }), view);
-    const twoSteps = updateEuglena(halfStep, frame({ dt: 0.2, width: 172, height: 36, activity: 0 }), view);
+    // far from every wall so no steering engages — isolates the phase-wrap math
+    const initial = [testEuglena({ x: 150, y: 150, rollPhase: 0.98, metabolyPhase: 0.99, flagellumPhase: 0.97 })];
+    const oneStep = updateEuglena(initial, frame({ dt: 0.4, width: 300, height: 300, activity: 0 }), view);
+    const halfStep = updateEuglena(initial, frame({ dt: 0.2, width: 300, height: 300, activity: 0 }), view);
+    const twoSteps = updateEuglena(halfStep, frame({ dt: 0.2, width: 300, height: 300, activity: 0 }), view);
 
     expect(twoSteps[0].x).toBeCloseTo(oneStep[0].x, 10);
     expect(twoSteps[0].y).toBeCloseTo(oneStep[0].y, 10);
