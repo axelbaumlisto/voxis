@@ -584,6 +584,13 @@ export function updateEuglena(
       if (safeWidth - px0 < look) sx -= (1 - (safeWidth - px0) / look) * steer.wall;
       if (py0 < look) sy += (1 - py0 / look) * steer.wall;
       if (safeHeight - py0 < look) sy -= (1 - (safeHeight - py0) / look) * steer.wall;
+      // Negative gravitaxis: ACTIVE sensory up-bias, NOT buoyancy/density.
+      // Short-tank fade prevents pinning: when the wall lookahead spans most of
+      // the tank height, top-wall avoidance must dominate and the up-bias fades
+      // out (0 at height<=3L, 1 at height>=5L). Default weight is 0, so the
+      // partition-exact open-water path stays unchanged.
+      const gravFade = clamp01((safeHeight / Math.max(1e-6, L) - 3) / 2);
+      sy -= steer.gravitaxis * gravFade;
       if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 1e-4) {
         const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
         // radial weight: >0 repels (too close), <0 attracts (too far). The `loiter`
