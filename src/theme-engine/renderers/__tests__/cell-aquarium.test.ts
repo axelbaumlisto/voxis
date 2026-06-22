@@ -777,6 +777,7 @@ describe("aquarium layer Phase 2 diatoms", () => {
           contractTimer: 0.6783055094536394,
           feedInterval: 2.5,
           eventCount: 0,
+          voiceTimer: 0.05,
           migrateState: 0,
           attach: 1,
           migrateTimer: 3.4162731326185165,
@@ -1758,6 +1759,34 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(motileField[0].contractLeg).toBe(1);
     expect(motileField[0].contractTimer).toBe(0);
     expect(emptyField).toEqual(noMotiles);
+  });
+
+  it("voice startle: recording makes the vorticella contract; idle never accumulates voiceTimer", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 51,
+      vorticellaCount: 1,
+      vorticellaContractRate: 1.0,
+    };
+    const view = aquariumParamsView(params);
+    const seeded = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
+    const peakRecording = (activity: number): number => {
+      let cell = seeded;
+      let peak = 0;
+      const f = frame({ dt: 0.05, width: 240, height: 80, mode: "recording", activity });
+      for (let i = 0; i < 200; i++) { cell = updateVorticella(cell, f, view); peak = Math.max(peak, cell[0].contractPhase); }
+      return peak;
+    };
+    // recording (loud) -> the voice-stimulus reflex fires a full contraction
+    expect(peakRecording(0.9)).toBeGreaterThan(0.95);
+    // idle at the SAME activity -> the voice path is OFF (voiceTimer never accumulates)
+    let idleCell = seeded;
+    const idleF = frame({ dt: 0.05, width: 240, height: 80, mode: "idle", activity: 0.9 });
+    for (let i = 0; i < 30; i++) idleCell = updateVorticella(idleCell, idleF, view);
+    expect(idleCell[0].voiceTimer ?? 0).toBe(0);
+    // deterministic
+    expect(peakRecording(0.9)).toBe(peakRecording(0.9));
   });
 
   it("mechanosensitive field self-excludes this vorticella source id", () => {

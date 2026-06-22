@@ -226,6 +226,7 @@ export function seedVorticella(count: number, seed: number, frame: AquariumFrame
       contractTimer: seededUnit(seed, i, salt ^ 0x29ab7f15) * 1.5,
       feedInterval: drawFeedInterval(vorticellaCellSeed(anchorX), 0, 1),
       eventCount: 0,
+      voiceTimer: 0,
       migrateState: 0,
       attach: 1,
       migrateTimer: seededUnit(seed, i, salt ^ 0x71fa9c3d) * 6, // staggered start
@@ -263,6 +264,21 @@ export function updateVorticella(
     let timer = Math.max(0, finiteOr(cell.contractTimer, 0)) + dt;
     let interval = Math.max(2.5, finiteOr(cell.feedInterval, 6));
     let evt = Math.max(0, Math.floor(finiteOr(cell.eventCount, 0)));
+    let voiceTimer = Math.max(0, finiteOr(cell.voiceTimer, 0));
+    // VOICE = MECHANICAL STIMULUS: while recording, the user's voice perturbs the water,
+    // and Vorticella's signature reflex to a stimulus is to CONTRACT (startle). So it
+    // periodically twitches/balls-up during speech — a biologically honest "recording"
+    // indicator. Louder/more active speech -> shorter interval between startles (the
+    // ~2.6s re-extend physically caps the rate, so no spasm-storm). The metabolic cyclosis
+    // & cilia beat stay decoupled (unchanged); only this discrete reflex is voice-driven.
+    if (frame.mode === "recording") {
+      voiceTimer += dt;
+      const act = clamp01(finite(frame.activity, 0));
+      const voiceInterval = 4.5 - 3.0 * act; // ~4.5s quiet -> ~1.5s loud
+      if (leg === 0 && voiceTimer >= voiceInterval) { leg = 1; timer = 0; voiceTimer = 0; }
+    } else {
+      voiceTimer = 0;
+    }
     // MECHANOSENSITIVE reflex: a motile cell passing close to the bell triggers a
     // contraction (the iconic Vorticella startle). Only while extended and past a
     // short refractory, so a lingering cell does not cause a spasm storm.
@@ -330,6 +346,7 @@ export function updateVorticella(
       contractTimer: timer,
       feedInterval: interval,
       eventCount: evt,
+      voiceTimer,
       oralWreathPhase: wrapUnit(cell.oralWreathPhase + oralHz * dt),
       swayPhase: wrapUnit(finiteOr(cell.swayPhase, 0) + Math.max(0, finiteOr(cell.swayRate, 0.12)) * swayMul * dt),
       migrateState,

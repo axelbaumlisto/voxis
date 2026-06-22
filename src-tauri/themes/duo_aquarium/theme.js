@@ -2797,6 +2797,7 @@ function seedVorticella(count, seed, frame, alongFrac = 0.5, salt = 117600714) {
       contractTimer: seededUnit(seed, i, salt ^ 699105045) * 1.5,
       feedInterval: drawFeedInterval(vorticellaCellSeed(anchorX), 0, 1),
       eventCount: 0,
+      voiceTimer: 0,
       migrateState: 0,
       attach: 1,
       migrateTimer: seededUnit(seed, i, salt ^ 1912249405) * 6,
@@ -2823,6 +2824,19 @@ function updateVorticella(vorticella, frame, view) {
     let timer = Math.max(0, finiteOr(cell.contractTimer, 0)) + dt;
     let interval = Math.max(2.5, finiteOr(cell.feedInterval, 6));
     let evt = Math.max(0, Math.floor(finiteOr(cell.eventCount, 0)));
+    let voiceTimer = Math.max(0, finiteOr(cell.voiceTimer, 0));
+    if (frame.mode === "recording") {
+      voiceTimer += dt;
+      const act = clamp01(finite(frame.activity, 0));
+      const voiceInterval = 4.5 - 3 * act;
+      if (leg === 0 && voiceTimer >= voiceInterval) {
+        leg = 1;
+        timer = 0;
+        voiceTimer = 0;
+      }
+    } else {
+      voiceTimer = 0;
+    }
     const motiles = frame.interaction?.motiles.filter((motile) => motile.sourceId !== sourceId("vorticella", idx));
     if (motiles && motiles.length > 0 && leg === 0 && timer > 1) {
       const obs = vorticellaObstacle(cell, view.vorticella.scale, frame.height);
@@ -2919,6 +2933,7 @@ function updateVorticella(vorticella, frame, view) {
       contractTimer: timer,
       feedInterval: interval,
       eventCount: evt,
+      voiceTimer,
       oralWreathPhase: wrapUnit(cell.oralWreathPhase + oralHz * dt),
       swayPhase: wrapUnit(finiteOr(cell.swayPhase, 0) + Math.max(0, finiteOr(cell.swayRate, 0.12)) * swayMul * dt),
       migrateState,

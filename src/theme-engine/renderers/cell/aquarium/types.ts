@@ -120,6 +120,8 @@ export interface VorticellaState extends AquariumSeedPoint {
   readonly feedInterval?: number;
   /** Contraction event counter (advances the seeded Poisson draw). */
   readonly eventCount?: number;
+  /** Seconds of voice/recording stimulus accumulated since the last voice-startle. */
+  readonly voiceTimer?: number;
   /** Telotroch migration: 0=anchored,1=detaching,2=swimming,3=reattaching. */
   readonly migrateState?: number;
   /** Stalk attachment 1=fully anchored .. 0=free telotroch. */
