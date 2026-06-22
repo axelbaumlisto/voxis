@@ -1,5 +1,6 @@
 import type { CellParams } from "../types";
 import type { AquariumParamsView } from "./types";
+import type { EuglenaSteer, Medium } from "./euglena";
 
 function finiteOr(value: number | undefined, fallback: number): number {
   return Number.isFinite(value) ? (value as number) : fallback;
@@ -11,6 +12,21 @@ function nonNegativeInt(value: number | undefined, fallback: number): number {
 
 function nonNegative(value: number | undefined, fallback: number): number {
   return Math.max(0, finiteOr(value, fallback));
+}
+
+/** Build a partial steering override from theme params (undefined = use module defaults). */
+function euglenaSteerOverride(params: CellParams): Partial<EuglenaSteer> | undefined {
+  const gravitaxis = nonNegative(params.euglenaGravitaxis, 0);
+  const phototaxis = nonNegative(params.euglenaPhototaxis, 0);
+  if (gravitaxis === 0 && phototaxis === 0) return undefined;
+  return { gravitaxis, phototaxis };
+}
+
+/** Build a partial medium override from theme params (undefined = use module defaults). */
+function mediumOverride(params: CellParams): Partial<Medium> | undefined {
+  const rotDiffusion = nonNegative(params.euglenaRotDiffusion, 0);
+  if (rotDiffusion === 0) return undefined;
+  return { rotDiffusion };
 }
 
 export function aquariumParamsView(params: CellParams): AquariumParamsView {
@@ -29,7 +45,9 @@ export function aquariumParamsView(params: CellParams): AquariumParamsView {
       speed: nonNegative(params.euglenaSpeed, 1.0),
       speedActive: nonNegative(params.euglenaSpeedActive, 2.0),
       scale: nonNegative(params.euglenaScale, 1.0),
+      steer: euglenaSteerOverride(params),
     },
+    medium: mediumOverride(params),
     vorticella: {
       count: nonNegativeInt(params.vorticellaCount, 0),
       contractRate: nonNegative(params.vorticellaContractRate, 1.0),

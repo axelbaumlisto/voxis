@@ -440,6 +440,12 @@ export interface CellParams {
   euglenaSpeedActive?: number;
   /** Euglena size scalar. */
   euglenaScale?: number;
+  /** Euglena negative-gravitaxis up-bias weight (0 = off). */
+  euglenaGravitaxis?: number;
+  /** Euglena phototaxis weight toward the virtual light (0 = off). */
+  euglenaPhototaxis?: number;
+  /** Euglena cosmetic rotational jitter, rad/sqrt(s) (0 = off). */
+  euglenaRotDiffusion?: number;
   /** Number of vorticella companions. Default 0 = none. */
   vorticellaCount?: number;
   /** Vorticella idle contraction rate scalar. */

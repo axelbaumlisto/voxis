@@ -28,7 +28,7 @@ export interface AquariumParamsView {
   readonly seed: number;
   readonly alpha: number;
   readonly activityBoost: number;
-  readonly medium?: Medium;
+  readonly medium?: Partial<Medium>;
   readonly diatoms: {
     readonly count: number;
     readonly alpha: number;
@@ -39,7 +39,7 @@ export interface AquariumParamsView {
     readonly speed: number;
     readonly speedActive: number;
     readonly scale: number;
-    readonly steer?: EuglenaSteer;
+    readonly steer?: Partial<EuglenaSteer>;
   };
   readonly vorticella: {
     readonly count: number;

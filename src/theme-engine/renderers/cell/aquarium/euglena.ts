@@ -517,8 +517,8 @@ export function updateEuglena(
   const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
   const act = modeView.motionMul * (1 + 0.7 * activityMix);
   const scale = view.euglena.scale;
-  const steer = view.euglena.steer ?? EUGLENA_STEER;
-  const medium = view.medium ?? MEDIUM;
+  const steer = view.euglena.steer ? { ...EUGLENA_STEER, ...view.euglena.steer } : EUGLENA_STEER;
+  const medium = view.medium ? { ...MEDIUM, ...view.medium } : MEDIUM;
   const drag = Math.max(0.1, finite(medium.viscosity, 1)); // fluid resistance (water = 1)
 
   return euglena.map((cell) => {

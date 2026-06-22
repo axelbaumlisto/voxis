@@ -103,6 +103,22 @@ function frame(overrides: Partial<AquariumFrame> = {}): AquariumFrame {
 }
 
 describe("aquariumParamsView", () => {
+  it("builds euglena steer + medium overrides only when taxis/jitter params are set", () => {
+    const none = aquariumParamsView({ ...CELL_DEFAULTS, enableAquarium: true, euglenaCount: 1 });
+    expect(none.euglena.steer).toBeUndefined(); // 0 weights => module defaults
+    expect(none.medium).toBeUndefined();
+    const on = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaGravitaxis: 0.2,
+      euglenaPhototaxis: 0.4,
+      euglenaRotDiffusion: 0.12,
+    });
+    expect(on.euglena.steer).toEqual({ gravitaxis: 0.2, phototaxis: 0.4 });
+    expect(on.medium).toEqual({ rotDiffusion: 0.12 });
+  });
+
   it("derives an internal grouped view from flat cell params", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,

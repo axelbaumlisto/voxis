@@ -1545,6 +1545,9 @@ var CELL_DEFAULTS = {
   euglenaSpeed: 1,
   euglenaSpeedActive: 2,
   euglenaScale: 1,
+  euglenaGravitaxis: 0,
+  euglenaPhototaxis: 0,
+  euglenaRotDiffusion: 0,
   vorticellaCount: 0,
   vorticellaContractRate: 1,
   vorticellaContractRateActive: 2,
@@ -1620,6 +1623,19 @@ function nonNegativeInt(value, fallback) {
 function nonNegative(value, fallback) {
   return Math.max(0, finiteOr(value, fallback));
 }
+function euglenaSteerOverride(params) {
+  const gravitaxis = nonNegative(params.euglenaGravitaxis, 0);
+  const phototaxis = nonNegative(params.euglenaPhototaxis, 0);
+  if (gravitaxis === 0 && phototaxis === 0)
+    return;
+  return { gravitaxis, phototaxis };
+}
+function mediumOverride(params) {
+  const rotDiffusion = nonNegative(params.euglenaRotDiffusion, 0);
+  if (rotDiffusion === 0)
+    return;
+  return { rotDiffusion };
+}
 function aquariumParamsView(params) {
   return {
     enabled: params.enableAquarium === true,
@@ -1635,8 +1651,10 @@ function aquariumParamsView(params) {
       count: nonNegativeInt(params.euglenaCount, 0),
       speed: nonNegative(params.euglenaSpeed, 1),
       speedActive: nonNegative(params.euglenaSpeedActive, 2),
-      scale: nonNegative(params.euglenaScale, 1)
+      scale: nonNegative(params.euglenaScale, 1),
+      steer: euglenaSteerOverride(params)
     },
+    medium: mediumOverride(params),
     vorticella: {
       count: nonNegativeInt(params.vorticellaCount, 0),
       contractRate: nonNegative(params.vorticellaContractRate, 1),
@@ -2172,8 +2190,8 @@ function updateEuglena(euglena, frame, view) {
   const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
   const act = modeView.motionMul * (1 + 0.7 * activityMix);
   const scale = view.euglena.scale;
-  const steer = view.euglena.steer ?? EUGLENA_STEER;
-  const medium = view.medium ?? MEDIUM;
+  const steer = view.euglena.steer ? { ...EUGLENA_STEER, ...view.euglena.steer } : EUGLENA_STEER;
+  const medium = view.medium ? { ...MEDIUM, ...view.medium } : MEDIUM;
   const drag = Math.max(0.1, finite2(medium.viscosity, 1));
   return euglena.map((cell) => {
     const L = euglenaDisplayLength(finite2(cell.size, 1), scale);
@@ -3620,6 +3638,9 @@ function mount(container, api) {
       euglenaSpeed: 0.2,
       euglenaSpeedActive: 1.5,
       euglenaScale: 2.8,
+      euglenaGravitaxis: 0.2,
+      euglenaPhototaxis: 0.4,
+      euglenaRotDiffusion: 0.12,
       vorticellaCount: 0,
       ...userParams
     }
