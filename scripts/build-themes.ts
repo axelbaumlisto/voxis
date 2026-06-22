@@ -12,7 +12,7 @@ const BUILTIN_DIR = path.join(ROOT, "src/theme-engine/builtin");
 const OUT_DIR = path.join(ROOT, "src-tauri/themes");
 
 const ids = fs.readdirSync(BUILTIN_DIR, { withFileTypes: true })
-  .filter((e) => e.isDirectory() && !e.name.startsWith("__"))
+  .filter((e) => e.isDirectory() && !e.name.startsWith("__") && !e.name.startsWith("_"))
   .map((e) => e.name);
 
 for (const id of ids) {
