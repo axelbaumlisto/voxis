@@ -150,7 +150,22 @@ export function vorticellaGeometry(
   };
 }
 
-export function seedVorticella(count: number, seed: number, frame: AquariumFrame, salt = 0x070271ca): VorticellaState[] {
+export function vorticellaObstacle(
+  cell: VorticellaState,
+  scale: number,
+  frameHeight: number,
+): { x: number; y: number; radius: number } {
+  const H = Math.max(1, finite(frameHeight, 80));
+  const D = clamp((8 + finite(cell.size, 1) * 4) * Math.max(0.1, finite(scale, 1)), 6, H * 0.40);
+  const bellHeight = 1.35 * D;
+  const restStalk = clamp(D * 2.8, D * 1.3, H - bellHeight - 3);
+  const ax = finite(cell.anchorX, 0);
+  const ay = finite(cell.anchorY, 0);
+  // direction is UP (-y); bell mid sits above the neck (top of the rest stalk)
+  return { x: ax, y: ay - (restStalk + bellHeight * 0.5), radius: 1.1 * D };
+}
+
+export function seedVorticella(count: number, seed: number, frame: AquariumFrame, alongFrac = 0.5, salt = 0x070271ca): VorticellaState[] {
   if (count <= 0) return [];
   const vorticella: VorticellaState[] = [];
   const safeWidth = Math.max(0, finite(frame.width, 0));
@@ -158,8 +173,8 @@ export function seedVorticella(count: number, seed: number, frame: AquariumFrame
   const inset = 0.5;
   for (let i = 0; i < count; i++) {
     // Vorticella is sessile on the substrate → anchor along the FLOOR, stalk up.
-    // A single hero is centred; multiple companions spread across the floor.
-    const along = count === 1 ? 0.5 : seededUnit(seed, i, salt ^ 0x4563d29f);
+    // A single hero uses the configured placement; companions spread across the floor.
+    const along = count === 1 ? clamp01(alongFrac) : seededUnit(seed, i, salt ^ 0x4563d29f);
     const anchorX = along * safeWidth;
     const anchorY = safeHeight - inset;
     const directionAngle = -Math.PI / 2; // up

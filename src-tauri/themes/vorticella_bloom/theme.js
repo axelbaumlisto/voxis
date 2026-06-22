@@ -1552,6 +1552,7 @@ var CELL_DEFAULTS = {
   vorticellaContractRate: 1,
   vorticellaContractRateActive: 2,
   vorticellaScale: 1,
+  vorticellaAlongFrac: 0.5,
   enableFlowField: false,
   flowMoteCount: 0,
   flowStrength: 300,
@@ -1659,7 +1660,8 @@ function aquariumParamsView(params) {
       count: nonNegativeInt(params.vorticellaCount, 0),
       contractRate: nonNegative(params.vorticellaContractRate, 1),
       contractRateActive: nonNegative(params.vorticellaContractRateActive, 2),
-      scale: nonNegative(params.vorticellaScale, 1)
+      scale: nonNegative(params.vorticellaScale, 1),
+      alongFrac: Math.min(1, Math.max(0, finiteOr(params.vorticellaAlongFrac, 0.5)))
     }
   };
 }
@@ -2159,7 +2161,8 @@ var EUGLENA_STEER = {
   startleAway: 3,
   startleDart: 1,
   gravitaxis: 0,
-  phototaxis: 0
+  phototaxis: 0,
+  obstacle: 1.8
 };
 var MEDIUM = {
   viscosity: 1.6,
@@ -2268,6 +2271,22 @@ function updateEuglena(euglena, frame, view) {
         sx += ax * steer.startleAway * startle;
         sy += ay * steer.startleAway * startle;
       }
+      const obstacles = frame.obstacles;
+      if (obstacles && obstacles.length > 0) {
+        for (let oi = 0;oi < obstacles.length; oi++) {
+          const ox = finite2(obstacles[oi].x, 0);
+          const oy = finite2(obstacles[oi].y, 0);
+          const orad = Math.max(1, finite2(obstacles[oi].radius, 1));
+          const odx = px0 - ox, ody = py0 - oy;
+          const od = Math.hypot(odx, ody) || 0.000001;
+          const reach = orad + L * 1.8;
+          if (od < reach) {
+            const prox = (reach - od) / reach;
+            sx += odx / od * steer.obstacle * prox;
+            sy += ody / od * steer.obstacle * prox;
+          }
+        }
+      }
       const pressure = Math.hypot(sx - ux * steer.forward, sy - uy * steer.forward);
       priorityPressure = pressure;
       if (pressure > 0.000001) {
@@ -2306,6 +2325,21 @@ function updateEuglena(euglena, frame, view) {
           const step = need * (1 - Math.exp(-6 * dt));
           nextX += mvx / need * step;
           nextY += mvy / need * step;
+        }
+      }
+    }
+    const obstacles2 = frame.obstacles;
+    if (obstacles2 && obstacles2.length > 0) {
+      for (let oi = 0;oi < obstacles2.length; oi++) {
+        const ox = finite2(obstacles2[oi].x, 0);
+        const oy = finite2(obstacles2[oi].y, 0);
+        const minD = Math.max(1, finite2(obstacles2[oi].radius, 1)) + 0.4 * L;
+        const odx = nextX - ox, ody = nextY - oy;
+        const od = Math.hypot(odx, ody);
+        if (od < minD && od > 0.000001) {
+          const push = (minD - od) * (1 - Math.exp(-6 * dt));
+          nextX += odx / od * push;
+          nextY += ody / od * push;
         }
       }
     }
@@ -2656,7 +2690,16 @@ function vorticellaGeometry(contractPhase, options = {}) {
     stalkPath
   };
 }
-function seedVorticella(count, seed, frame, salt = 117600714) {
+function vorticellaObstacle(cell, scale, frameHeight) {
+  const H = Math.max(1, finite3(frameHeight, 80));
+  const D = clamp2((8 + finite3(cell.size, 1) * 4) * Math.max(0.1, finite3(scale, 1)), 6, H * 0.4);
+  const bellHeight = 1.35 * D;
+  const restStalk = clamp2(D * 2.8, D * 1.3, H - bellHeight - 3);
+  const ax = finite3(cell.anchorX, 0);
+  const ay = finite3(cell.anchorY, 0);
+  return { x: ax, y: ay - (restStalk + bellHeight * 0.5), radius: 1.1 * D };
+}
+function seedVorticella(count, seed, frame, alongFrac = 0.5, salt = 117600714) {
   if (count <= 0)
     return [];
   const vorticella = [];
@@ -2664,7 +2707,7 @@ function seedVorticella(count, seed, frame, salt = 117600714) {
   const safeHeight = Math.max(0, finite3(frame.height, 0));
   const inset = 0.5;
   for (let i = 0;i < count; i++) {
-    const along = count === 1 ? 0.5 : seededUnit(seed, i, salt ^ 1164169887);
+    const along = count === 1 ? clamp012(alongFrac) : seededUnit(seed, i, salt ^ 1164169887);
     const anchorX = along * safeWidth;
     const anchorY = safeHeight - inset;
     const directionAngle = -Math.PI / 2;
@@ -2976,7 +3019,7 @@ function seedAquarium(frame, params) {
     seed,
     diatoms: seedDiatoms(view.diatoms.count, seed, frame),
     euglena: seedEuglena(view.euglena.count, seed, frame),
-    vorticella: seedVorticella(view.vorticella.count, seed, frame)
+    vorticella: seedVorticella(view.vorticella.count, seed, frame, view.vorticella.alongFrac)
   };
 }
 function updateAquarium(aquarium, frame, params) {
@@ -2984,7 +3027,9 @@ function updateAquarium(aquarium, frame, params) {
   if (!view.enabled)
     return aquarium;
   const diatoms = view.diatoms.count > 0 ? updateDiatoms(aquarium.diatoms, frame, view) : aquarium.diatoms;
-  const euglena = view.euglena.count > 0 ? updateEuglena(aquarium.euglena, frame, view) : aquarium.euglena;
+  const obstacles = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella.map((v) => vorticellaObstacle(v, view.vorticella.scale, frame.height)) : undefined;
+  const euglenaFrame = obstacles ? { ...frame, obstacles } : frame;
+  const euglena = view.euglena.count > 0 ? updateEuglena(aquarium.euglena, euglenaFrame, view) : aquarium.euglena;
   const vorticella = view.vorticella.count > 0 ? updateVorticella(aquarium.vorticella, frame, view) : aquarium.vorticella;
   return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella ? aquarium : { ...aquarium, diatoms, euglena, vorticella };
 }

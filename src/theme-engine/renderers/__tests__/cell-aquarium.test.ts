@@ -146,7 +146,7 @@ describe("aquariumParamsView", () => {
       activityBoost: 0.7,
       diatoms: { count: 3, alpha: 0.2, driftSpeed: 0.8 },
       euglena: { count: 2, speed: 1.1, speedActive: 2.4, scale: 0.9 },
-      vorticella: { count: 1, contractRate: 0.6, contractRateActive: 1.8, scale: 1.2 },
+      vorticella: { count: 1, contractRate: 0.6, contractRateActive: 1.8, scale: 1.2, alongFrac: 0.5 },
     });
   });
 

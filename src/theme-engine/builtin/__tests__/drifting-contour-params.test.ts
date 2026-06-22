@@ -45,7 +45,7 @@ const CRITICAL_PARAMS = {
   euglenaSpeedActive: 1.5,
   // (euglena_drift retuned separately; drifting_contour companion unchanged here)
   euglenaScale: 2.8,
-  vorticellaCount: 0,
+  vorticellaCount: 1,
 } as const;
 
 type CriticalParamName = keyof typeof CRITICAL_PARAMS;
@@ -116,8 +116,10 @@ function expectUserParamsLast(body: string): void {
   expect(body.slice(userParams + "...userParams".length, paramsEnd)).not.toMatch(/\w+\s*:/);
 }
 
-function expectNoVorticellaPreviewParams(block: string): void {
-  expect(block).not.toMatch(/\bvorticella(?:ContractRate|ContractRateActive|Scale)\s*:/i);
+function expectVorticellaConfigured(block: string): void {
+  // the trio now includes a sessile vorticella as the third organism
+  expect(block).toMatch(/\bvorticellaScale\s*:/i);
+  expect(block).toMatch(/\bvorticellaAlongFrac\s*:/i);
 }
 
 describe("drifting_contour v1.0 critical params", () => {
@@ -129,12 +131,12 @@ describe("drifting_contour v1.0 critical params", () => {
     expectCriticalParams(readBundleMountBlock());
   });
 
-  it("opts source theme into Phase 5B one-Euglena aquarium preview", () => {
-    expectNoVorticellaPreviewParams(readSourceMountBlock());
+  it("configures the third-organism vorticella in the source theme", () => {
+    expectVorticellaConfigured(readSourceMountBlock());
   });
 
-  it("opts built bundle into Phase 5B one-Euglena aquarium preview", () => {
-    expectNoVorticellaPreviewParams(readBundleMountBlock());
+  it("configures the third-organism vorticella in the built bundle", () => {
+    expectVorticellaConfigured(readBundleMountBlock());
   });
 
   it("keeps source theme params before user params so user overrides win", () => {

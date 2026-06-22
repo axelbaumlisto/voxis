@@ -1552,6 +1552,7 @@ var CELL_DEFAULTS = {
   vorticellaContractRate: 1,
   vorticellaContractRateActive: 2,
   vorticellaScale: 1,
+  vorticellaAlongFrac: 0.5,
   enableFlowField: false,
   flowMoteCount: 0,
   flowStrength: 300,
@@ -1659,7 +1660,8 @@ function aquariumParamsView(params) {
       count: nonNegativeInt(params.vorticellaCount, 0),
       contractRate: nonNegative(params.vorticellaContractRate, 1),
       contractRateActive: nonNegative(params.vorticellaContractRateActive, 2),
-      scale: nonNegative(params.vorticellaScale, 1)
+      scale: nonNegative(params.vorticellaScale, 1),
+      alongFrac: Math.min(1, Math.max(0, finiteOr(params.vorticellaAlongFrac, 0.5)))
     }
   };
 }
@@ -2159,7 +2161,8 @@ var EUGLENA_STEER = {
   startleAway: 3,
   startleDart: 1,
   gravitaxis: 0,
-  phototaxis: 0
+  phototaxis: 0,
+  obstacle: 1.8
 };
 var MEDIUM = {
   viscosity: 1.6,
@@ -2268,6 +2271,22 @@ function updateEuglena(euglena, frame, view) {
         sx += ax * steer.startleAway * startle;
         sy += ay * steer.startleAway * startle;
       }
+      const obstacles = frame.obstacles;
+      if (obstacles && obstacles.length > 0) {
+        for (let oi = 0;oi < obstacles.length; oi++) {
+          const ox = finite2(obstacles[oi].x, 0);
+          const oy = finite2(obstacles[oi].y, 0);
+          const orad = Math.max(1, finite2(obstacles[oi].radius, 1));
+          const odx = px0 - ox, ody = py0 - oy;
+          const od = Math.hypot(odx, ody) || 0.000001;
+          const reach = orad + L * 1.8;
+          if (od < reach) {
+            const prox = (reach - od) / reach;
+            sx += odx / od * steer.obstacle * prox;
+            sy += ody / od * steer.obstacle * prox;
+          }
+        }
+      }
       const pressure = Math.hypot(sx - ux * steer.forward, sy - uy * steer.forward);
       priorityPressure = pressure;
       if (pressure > 0.000001) {
@@ -2306,6 +2325,21 @@ function updateEuglena(euglena, frame, view) {
           const step = need * (1 - Math.exp(-6 * dt));
           nextX += mvx / need * step;
           nextY += mvy / need * step;
+        }
+      }
+    }
+    const obstacles2 = frame.obstacles;
+    if (obstacles2 && obstacles2.length > 0) {
+      for (let oi = 0;oi < obstacles2.length; oi++) {
+        const ox = finite2(obstacles2[oi].x, 0);
+        const oy = finite2(obstacles2[oi].y, 0);
+        const minD = Math.max(1, finite2(obstacles2[oi].radius, 1)) + 0.4 * L;
+        const odx = nextX - ox, ody = nextY - oy;
+        const od = Math.hypot(odx, ody);
+        if (od < minD && od > 0.000001) {
+          const push = (minD - od) * (1 - Math.exp(-6 * dt));
+          nextX += odx / od * push;
+          nextY += ody / od * push;
         }
       }
     }
@@ -2577,9 +2611,33 @@ function smoothstep2(x) {
   return t * t * (3 - 2 * t);
 }
 var TAU4 = Math.PI * 2;
-var VC_CONTRACT = 0.05;
+var VC_CONTRACT = 0.02;
 var VC_HOLD = 0.02;
 var VC_RELAX = 0.33;
+var T_C = 0.08;
+var T_HOLD = 0.05;
+var T_E = 2.6;
+function drawFeedInterval(cellSeed, eventCount, activityMix, cadence) {
+  const mean = (9 - 6 * clamp012(activityMix)) / Math.max(0.2, cadence);
+  const u = Math.max(0.0001, seededUnit(cellSeed, eventCount, 1371344503));
+  return clamp2(-Math.log(u) * mean, 2.5, 18);
+}
+function vorticellaCellSeed(anchorX) {
+  return (Math.round(anchorX * 7) ^ 117600714) >>> 0;
+}
+function vorticellaLegAmount(leg, timer) {
+  if (leg === 1) {
+    const u = clamp012(timer / T_C);
+    return 1 - Math.pow(1 - u, 3);
+  }
+  if (leg === 2)
+    return 1;
+  if (leg === 3) {
+    const u = clamp012(timer / T_E);
+    return Math.exp(-Math.pow(u * 1.9, 1.4));
+  }
+  return 0;
+}
 function vorticellaContractPhase(cyclePhase) {
   const phase = wrapUnit2(cyclePhase);
   if (phase < VC_CONTRACT) {
@@ -2632,7 +2690,16 @@ function vorticellaGeometry(contractPhase, options = {}) {
     stalkPath
   };
 }
-function seedVorticella(count, seed, frame, salt = 117600714) {
+function vorticellaObstacle(cell, scale, frameHeight) {
+  const H = Math.max(1, finite3(frameHeight, 80));
+  const D = clamp2((8 + finite3(cell.size, 1) * 4) * Math.max(0.1, finite3(scale, 1)), 6, H * 0.4);
+  const bellHeight = 1.35 * D;
+  const restStalk = clamp2(D * 2.8, D * 1.3, H - bellHeight - 3);
+  const ax = finite3(cell.anchorX, 0);
+  const ay = finite3(cell.anchorY, 0);
+  return { x: ax, y: ay - (restStalk + bellHeight * 0.5), radius: 1.1 * D };
+}
+function seedVorticella(count, seed, frame, alongFrac = 0.5, salt = 117600714) {
   if (count <= 0)
     return [];
   const vorticella = [];
@@ -2640,7 +2707,7 @@ function seedVorticella(count, seed, frame, salt = 117600714) {
   const safeHeight = Math.max(0, finite3(frame.height, 0));
   const inset = 0.5;
   for (let i = 0;i < count; i++) {
-    const along = count === 1 ? 0.5 : seededUnit(seed, i, salt ^ 1164169887);
+    const along = count === 1 ? clamp012(alongFrac) : seededUnit(seed, i, salt ^ 1164169887);
     const anchorX = along * safeWidth;
     const anchorY = safeHeight - inset;
     const directionAngle = -Math.PI / 2;
@@ -2659,7 +2726,13 @@ function seedVorticella(count, seed, frame, salt = 117600714) {
       contractCyclePhase: cycle,
       oralWreathPhase: seededUnit(seed, i, salt ^ 1757159915),
       contractRate: 0.06 + seededUnit(seed, i, salt ^ 802853537) * 0.05,
-      oralRate: 0.42 + seededUnit(seed, i, salt ^ 348696353) * 0.18
+      oralRate: 0.42 + seededUnit(seed, i, salt ^ 348696353) * 0.18,
+      swayPhase: seededUnit(seed, i, salt ^ 999411207),
+      swayRate: 0.1 + seededUnit(seed, i, salt ^ 1513062835) * 0.07,
+      contractLeg: 0,
+      contractTimer: seededUnit(seed, i, salt ^ 699105045) * 1.5,
+      feedInterval: drawFeedInterval(vorticellaCellSeed(anchorX), 0, 0, 1),
+      eventCount: 0
     });
   }
   return vorticella;
@@ -2674,18 +2747,58 @@ function updateVorticella(vorticella, frame, view) {
   const rate = idleRate + (activeRate - idleRate) * activityMix;
   const modeMul = frame.mode === "recording" ? 1.18 : frame.mode === "transcribing" ? 0.35 : frame.mode === "error" ? 0.15 : 1;
   const startleBoost = 1 + Math.min(0.35, Math.max(0, finite3(frame.startle, 0)) * 0.35);
-  const cycleRateMul = Math.min(1.45, rate * modeMul * startleBoost);
-  const oralHz = Math.min(28, (frame.mode === "error" ? 6 : frame.mode === "transcribing" ? 12 : 20) * (1 + activityMix * 0.2));
+  const cadence = Math.max(0.2, Math.min(3.5, rate * modeMul * startleBoost));
+  const oralHz = Math.min(24, (frame.mode === "error" ? 6 : frame.mode === "transcribing" ? 12 : 20) * (1 + activityMix * 0.2));
+  const swayMul = frame.mode === "error" ? 0.3 : frame.mode === "transcribing" ? 0.6 : 1;
   return vorticella.map((cell) => {
-    const cyclePhase = wrapUnit2(cell.contractCyclePhase + Math.max(0, finite3(cell.contractRate, 0)) * cycleRateMul * dt);
+    const cvClock = wrapUnit2(finite3(cell.contractCyclePhase, 0) + Math.max(0, finite3(cell.contractRate, 0)) * dt);
+    const cellSeed = vorticellaCellSeed(finite3(cell.anchorX, 0));
+    let leg = Math.max(0, Math.min(3, Math.floor(finiteOr4(cell.contractLeg, 0))));
+    let timer = Math.max(0, finiteOr4(cell.contractTimer, 0)) + dt;
+    let interval = Math.max(2.5, finiteOr4(cell.feedInterval, 6));
+    let evt = Math.max(0, Math.floor(finiteOr4(cell.eventCount, 0)));
+    for (let guard = 0;guard < 128; guard++) {
+      if (leg === 0) {
+        if (timer >= interval) {
+          timer -= interval;
+          leg = 1;
+        } else
+          break;
+      } else if (leg === 1) {
+        if (timer >= T_C) {
+          timer -= T_C;
+          leg = 2;
+        } else
+          break;
+      } else if (leg === 2) {
+        if (timer >= T_HOLD) {
+          timer -= T_HOLD;
+          leg = 3;
+        } else
+          break;
+      } else {
+        if (timer >= T_E) {
+          timer -= T_E;
+          leg = 0;
+          evt += 1;
+          interval = drawFeedInterval(cellSeed, evt, activityMix, cadence);
+        } else
+          break;
+      }
+    }
     return {
       ...cell,
       x: cell.anchorX,
       y: cell.anchorY,
-      phase: cyclePhase,
-      contractCyclePhase: cyclePhase,
-      contractPhase: vorticellaContractPhase(cyclePhase),
-      oralWreathPhase: wrapUnit2(cell.oralWreathPhase + oralHz * dt)
+      phase: cvClock,
+      contractCyclePhase: cvClock,
+      contractPhase: clamp012(vorticellaLegAmount(leg, timer)),
+      contractLeg: leg,
+      contractTimer: timer,
+      feedInterval: interval,
+      eventCount: evt,
+      oralWreathPhase: wrapUnit2(cell.oralWreathPhase + oralHz * dt),
+      swayPhase: wrapUnit2(finiteOr4(cell.swayPhase, 0) + Math.max(0, finiteOr4(cell.swayRate, 0.12)) * swayMul * dt)
     };
   });
 }
@@ -2712,22 +2825,28 @@ function drawVorticella(ctx, vorticella, frame, view) {
   ctx.lineJoin = "round";
   for (const cell of vorticella) {
     const s = clamp012(finite3(cell.contractPhase, 0));
-    const dir = finite3(cell.directionAngle, -Math.PI / 2);
+    const baseDir = finite3(cell.directionAngle, -Math.PI / 2);
+    const sway = 0.07 * (1 - 0.8 * s) * Math.sin(TAU4 * wrapUnit2(finiteOr4(cell.swayPhase, 0)));
+    const vleg = Math.floor(finiteOr4(cell.contractLeg, 0));
+    const arrestT = vleg === 2 ? Math.max(0, finiteOr4(cell.contractTimer, 0)) : vleg === 3 ? T_HOLD + Math.max(0, finiteOr4(cell.contractTimer, 0)) : -1;
+    const wobble = arrestT >= 0 && arrestT < 0.7 ? 0.1 * Math.exp(-0.45 * TAU4 * 6 * arrestT) * Math.cos(TAU4 * 6 * 0.8932 * arrestT) : 0;
+    const dir = baseDir + sway + wobble;
     const ux = Math.cos(dir), uy = Math.sin(dir);
     const nx = -uy, ny = ux;
     const anchorX = finite3(cell.anchorX, 0);
     const anchorY = finite3(cell.anchorY, 0);
-    const D = clamp2((8 + finite3(cell.size, 1) * 4) * scale, 6, H * 0.42);
+    const D = clamp2((8 + finite3(cell.size, 1) * 4) * scale, 6, H * 0.4);
     const bellHeight = 1.35 * D;
-    const restStalk = clamp2(D * 2.4, D, H - bellHeight - 3);
+    const restStalk = clamp2(D * 2.8, D * 1.3, H - bellHeight - 3);
     const geom = vorticellaGeometry(s, {
       anchorX,
       anchorY,
       restLength: restStalk,
       directionAngle: dir,
-      minLengthFrac: 0.35,
-      coilSampleCount: 26,
-      coilRadius: D * 0.5
+      minLengthFrac: 0.32,
+      coilSampleCount: 30,
+      coilTurnsContracted: 3,
+      coilRadius: D * 0.24
     });
     const neck = geom.bellCenter;
     const rimC = { x: neck.x + ux * bellHeight, y: neck.y + uy * bellHeight };
@@ -2737,17 +2856,38 @@ function drawVorticella(ctx, vorticella, frame, view) {
       x: neck.x + ux * along + nx * lateral,
       y: neck.y + uy * along + ny * lateral
     });
-    const halfW = (u) => (0.1 * D + 0.4 * D * smoothstep2(u)) * (u > 0.9 ? open : 1);
+    const halfW = (u) => {
+      const um = 0.82, w0 = 0.24, wMax = 0.54, wRim = 0.54;
+      const base = u <= um ? w0 + (wMax - w0) * Math.pow(smoothstep2(u / um), 0.72) : wMax + (wRim - wMax) * smoothstep2((u - um) / (1 - um));
+      return D * base * (u > 0.9 ? 0.55 + 0.45 * open : 1);
+    };
     drawPolyline3(ctx, geom.stalkPath, false);
-    ctx.strokeStyle = `hsla(200, 12%, 84%, ${alpha * 0.42})`;
+    ctx.strokeStyle = `hsla(202, 26%, 80%, ${alpha * 0.34})`;
     ctx.lineWidth = Math.max(0.6, D * 0.07);
     ctx.stroke();
-    ctx.strokeStyle = `hsla(200, 16%, 70%, ${alpha * 0.3})`;
+    if (s > 0.05 && geom.stalkPath.length > 2) {
+      const n = geom.stalkPath.length;
+      for (let i = 1;i < n; i++) {
+        const t = i / (n - 1);
+        const near = Math.cos(t * geom.coilTurns * TAU4);
+        drawPolyline3(ctx, [geom.stalkPath[i - 1], geom.stalkPath[i]], false);
+        if (near > 0) {
+          ctx.strokeStyle = `hsla(204, 32%, 90%, ${alpha * (0.18 + 0.34 * near) * s})`;
+          ctx.lineWidth = Math.max(0.4, D * (0.05 + 0.05 * near));
+        } else {
+          ctx.strokeStyle = `hsla(204, 24%, 64%, ${alpha * 0.12 * s})`;
+          ctx.lineWidth = Math.max(0.3, D * 0.03);
+        }
+        ctx.stroke();
+      }
+    }
+    drawPolyline3(ctx, geom.stalkPath, false);
+    ctx.strokeStyle = `hsla(204, 30%, 70%, ${alpha * 0.3})`;
     ctx.lineWidth = Math.max(0.3, D * 0.03);
     ctx.stroke();
     ctx.beginPath();
     ctx.arc(anchorX, anchorY, Math.max(0.8, D * 0.16), 0, TAU4);
-    ctx.fillStyle = `hsla(200, 12%, 76%, ${alpha * 0.4})`;
+    ctx.fillStyle = `hsla(202, 24%, 76%, ${alpha * 0.4})`;
     ctx.fill();
     const SAMP = 16;
     const left = [];
@@ -2760,30 +2900,36 @@ function drawVorticella(ctx, vorticella, frame, view) {
     }
     const outline = [...left, ...right.reverse()];
     drawPolyline3(ctx, outline, true);
-    ctx.fillStyle = `hsla(200, 10%, 82%, ${alpha * 0.14})`;
-    ctx.strokeStyle = `hsla(200, 16%, 90%, ${alpha * 0.4})`;
+    ctx.fillStyle = `hsla(205, 42%, 79%, ${alpha * 0.34})`;
+    ctx.strokeStyle = `hsla(205, 44%, 90%, ${alpha * 0.46})`;
     ctx.lineWidth = Math.max(0.4, D * 0.05);
     ctx.fill();
     ctx.stroke();
     const macPts = [];
-    const macAlong = bellHeight * 0.52;
-    const macR = D * 0.24;
-    for (let i = 0;i <= 12; i++) {
-      const th = Math.PI * (0.3 + i / 12 * 1.4);
-      macPts.push(bodyPoint(macAlong - macR * 0.7 * Math.cos(th), macR * Math.sin(th)));
+    const macAlong = bellHeight * 0.5;
+    const macR = D * 0.3;
+    for (let i = 0;i <= 14; i++) {
+      const th = Math.PI * (0.32 + i / 14 * 1.08);
+      macPts.push(bodyPoint(macAlong - macR * 1.05 * Math.cos(th), macR * Math.sin(th)));
     }
     drawPolyline3(ctx, macPts, false);
     ctx.strokeStyle = `hsla(50, 14%, 72%, ${alpha * 0.3})`;
     ctx.lineWidth = Math.max(0.6, D * 0.12);
     ctx.stroke();
+    if (D >= 11) {
+      const mic = bodyPoint(macAlong - macR * 0.9, macR * 0.5);
+      ctx.beginPath();
+      ctx.arc(mic.x, mic.y, Math.max(0.4, D * 0.045), 0, TAU4);
+      ctx.fillStyle = `hsla(50, 16%, 66%, ${alpha * 0.34})`;
+      ctx.fill();
+    }
     if (D >= 10) {
       const cvPulse = 0.5 - 0.5 * Math.cos(TAU4 * wrapUnit2(finite3(cell.contractCyclePhase, 0) * 0.5));
-      const cv = bodyPoint(bellHeight * 0.78, -D * 0.18);
+      const cv = bodyPoint(bellHeight * 0.66, D * 0.2);
       ctx.beginPath();
-      ctx.arc(cv.x, cv.y, Math.max(0.5, D * (0.05 + 0.05 * cvPulse)), 0, TAU4);
-      ctx.strokeStyle = `hsla(190, 30%, 86%, ${alpha * 0.4})`;
-      ctx.lineWidth = Math.max(0.3, D * 0.03);
-      ctx.stroke();
+      ctx.arc(cv.x, cv.y, Math.max(0.4, D * (0.035 + 0.035 * cvPulse)), 0, TAU4);
+      ctx.fillStyle = `hsla(198, 22%, 84%, ${alpha * 0.16})`;
+      ctx.fill();
     }
     if (D >= 12) {
       const fvSeed = (Math.round(anchorX) ^ 40503) >>> 0;
@@ -2803,9 +2949,44 @@ function drawVorticella(ctx, vorticella, frame, view) {
     ctx.ellipse(rimC.x, rimC.y, Rrim, lipRy, dir, 0, TAU4);
     ctx.fillStyle = `hsla(195, 16%, 80%, ${alpha * 0.16 * open})`;
     ctx.fill();
-    ctx.strokeStyle = `hsla(200, 16%, 88%, ${alpha * 0.45 * open})`;
+    ctx.strokeStyle = `hsla(204, 26%, 88%, ${alpha * 0.45 * open})`;
     ctx.lineWidth = Math.max(0.4, D * 0.05);
     ctx.stroke();
+    if (open > 0.3 && D >= 9) {
+      const turns = 1.6, N = 30;
+      const cytLat = Rrim * 0.3, cytDep = lipRy * 0.3;
+      const spiral = [];
+      for (let i = 0;i <= N; i++) {
+        const t = i / N;
+        const rr = 1 - t;
+        const a = -t * turns * TAU4;
+        const lateral = Math.cos(a) * Rrim * rr + cytLat * t;
+        const depth = Math.sin(a) * lipRy * rr + cytDep * t;
+        spiral.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
+      }
+      drawPolyline3(ctx, spiral, false);
+      ctx.strokeStyle = `hsla(48, 24%, 88%, ${alpha * 0.32 * open})`;
+      ctx.lineWidth = Math.max(0.25, D * 0.03);
+      ctx.stroke();
+      const spiral2 = [];
+      for (let i = 0;i <= N; i++) {
+        const t = i / N;
+        const rr = (1 - t) * 0.7;
+        const a = -t * turns * TAU4 + 0.6;
+        const lateral = Math.cos(a) * Rrim * rr + cytLat * t;
+        const depth = Math.sin(a) * lipRy * rr + cytDep * t;
+        spiral2.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
+      }
+      drawPolyline3(ctx, spiral2, false);
+      ctx.strokeStyle = `hsla(46, 22%, 84%, ${alpha * 0.22 * open})`;
+      ctx.lineWidth = Math.max(0.2, D * 0.022);
+      ctx.stroke();
+      const cyt = { x: rimC.x + nx * cytLat + ux * cytDep, y: rimC.y + ny * cytLat + uy * cytDep };
+      ctx.beginPath();
+      ctx.arc(cyt.x, cyt.y, Math.max(0.4, D * 0.05), 0, TAU4);
+      ctx.fillStyle = `hsla(205, 26%, 68%, ${alpha * 0.4 * open})`;
+      ctx.fill();
+    }
     if (open > 0.25) {
       const M = Math.max(8, Math.round(D * 1.1));
       ctx.strokeStyle = `hsla(48, 22%, 86%, ${alpha * 0.5 * open})`;
@@ -2838,7 +3019,7 @@ function seedAquarium(frame, params) {
     seed,
     diatoms: seedDiatoms(view.diatoms.count, seed, frame),
     euglena: seedEuglena(view.euglena.count, seed, frame),
-    vorticella: seedVorticella(view.vorticella.count, seed, frame)
+    vorticella: seedVorticella(view.vorticella.count, seed, frame, view.vorticella.alongFrac)
   };
 }
 function updateAquarium(aquarium, frame, params) {
@@ -2846,7 +3027,9 @@ function updateAquarium(aquarium, frame, params) {
   if (!view.enabled)
     return aquarium;
   const diatoms = view.diatoms.count > 0 ? updateDiatoms(aquarium.diatoms, frame, view) : aquarium.diatoms;
-  const euglena = view.euglena.count > 0 ? updateEuglena(aquarium.euglena, frame, view) : aquarium.euglena;
+  const obstacles = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella.map((v) => vorticellaObstacle(v, view.vorticella.scale, frame.height)) : undefined;
+  const euglenaFrame = obstacles ? { ...frame, obstacles } : frame;
+  const euglena = view.euglena.count > 0 ? updateEuglena(aquarium.euglena, euglenaFrame, view) : aquarium.euglena;
   const vorticella = view.vorticella.count > 0 ? updateVorticella(aquarium.vorticella, frame, view) : aquarium.vorticella;
   return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella ? aquarium : { ...aquarium, diatoms, euglena, vorticella };
 }
@@ -3641,7 +3824,11 @@ function mount(container, api) {
       euglenaGravitaxis: 0.2,
       euglenaPhototaxis: 0.6,
       euglenaRotDiffusion: 0.12,
-      vorticellaCount: 0,
+      vorticellaCount: 1,
+      vorticellaScale: 1.2,
+      vorticellaAlongFrac: 0.16,
+      vorticellaContractRate: 0.9,
+      vorticellaContractRateActive: 1.6,
       ...userParams
     }
   });

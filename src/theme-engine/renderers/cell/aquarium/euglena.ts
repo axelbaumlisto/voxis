@@ -455,6 +455,7 @@ export interface EuglenaSteer {
   startleDart: number;
   gravitaxis: number;
   phototaxis: number;
+  obstacle: number;
 }
 
 export const EUGLENA_STEER: EuglenaSteer = {
@@ -467,6 +468,7 @@ export const EUGLENA_STEER: EuglenaSteer = {
   startleDart: 1.0,
   gravitaxis: 0,
   phototaxis: 0,
+  obstacle: 1.8,
 };
 
 /**
@@ -619,6 +621,24 @@ export function updateEuglena(
         sx += ax * steer.startleAway * startle; // escape burst pushes straight away
         sy += ay * steer.startleAway * startle;
       }
+      // static obstacles (e.g. a sessile vorticella): steer AROUND them, well
+      // before contact, scaled by proximity. (Hard non-overlap push below.)
+      const obstacles = frame.obstacles;
+      if (obstacles && obstacles.length > 0) {
+        for (let oi = 0; oi < obstacles.length; oi++) {
+          const ox = finite(obstacles[oi].x, 0);
+          const oy = finite(obstacles[oi].y, 0);
+          const orad = Math.max(1, finite(obstacles[oi].radius, 1));
+          const odx = px0 - ox, ody = py0 - oy;
+          const od = Math.hypot(odx, ody) || 1e-6;
+          const reach = orad + L * 1.8;
+          if (od < reach) {
+            const prox = (reach - od) / reach;
+            sx += (odx / od) * steer.obstacle * prox;
+            sy += (ody / od) * steer.obstacle * prox;
+          }
+        }
+      }
       const pressure = Math.hypot(sx - ux * steer.forward, sy - uy * steer.forward);
       priorityPressure = pressure;
       if (pressure > 1e-6) {
@@ -670,6 +690,23 @@ export function updateEuglena(
           const step = need * (1 - Math.exp(-6 * dt));
           nextX += (mvx / need) * step;
           nextY += (mvy / need) * step;
+        }
+      }
+    }
+
+    // hard non-overlap push out of any static obstacle circle (sessile vorticella)
+    const obstacles2 = frame.obstacles;
+    if (obstacles2 && obstacles2.length > 0) {
+      for (let oi = 0; oi < obstacles2.length; oi++) {
+        const ox = finite(obstacles2[oi].x, 0);
+        const oy = finite(obstacles2[oi].y, 0);
+        const minD = Math.max(1, finite(obstacles2[oi].radius, 1)) + 0.4 * L;
+        const odx = nextX - ox, ody = nextY - oy;
+        const od = Math.hypot(odx, ody);
+        if (od < minD && od > 1e-6) {
+          const push = (minD - od) * (1 - Math.exp(-6 * dt));
+          nextX += (odx / od) * push;
+          nextY += (ody / od) * push;
         }
       }
     }

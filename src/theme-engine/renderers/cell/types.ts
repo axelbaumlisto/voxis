@@ -448,6 +448,8 @@ export interface CellParams {
   euglenaRotDiffusion?: number;
   /** Number of vorticella companions. Default 0 = none. */
   vorticellaCount?: number;
+  /** Horizontal floor placement of a single vorticella (0=left..1=right). Default 0.5. */
+  vorticellaAlongFrac?: number;
   /** Vorticella idle contraction rate scalar. */
   vorticellaContractRate?: number;
   /** Vorticella active contraction rate scalar. */

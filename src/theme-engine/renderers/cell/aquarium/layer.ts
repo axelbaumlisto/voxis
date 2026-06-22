@@ -2,7 +2,7 @@ import type { CellParams } from "../types";
 import { aquariumParamsView } from "./params";
 import { seedDiatoms, updateDiatoms, drawDiatoms } from "./diatoms";
 import { seedEuglena, updateEuglena, drawEuglena } from "./euglena";
-import { seedVorticella, updateVorticella, drawVorticella } from "./vorticella";
+import { seedVorticella, updateVorticella, drawVorticella, vorticellaObstacle } from "./vorticella";
 import type { AquariumFrame, AquariumLayerState } from "./types";
 
 export function seedAquarium(frame: AquariumFrame, params: CellParams): AquariumLayerState {
@@ -12,7 +12,7 @@ export function seedAquarium(frame: AquariumFrame, params: CellParams): Aquarium
     seed,
     diatoms: seedDiatoms(view.diatoms.count, seed, frame),
     euglena: seedEuglena(view.euglena.count, seed, frame),
-    vorticella: seedVorticella(view.vorticella.count, seed, frame),
+    vorticella: seedVorticella(view.vorticella.count, seed, frame, view.vorticella.alongFrac),
   };
 }
 
@@ -24,7 +24,12 @@ export function updateAquarium(
   const view = aquariumParamsView(params);
   if (!view.enabled) return aquarium;
   const diatoms = view.diatoms.count > 0 ? updateDiatoms(aquarium.diatoms, frame, view) : aquarium.diatoms;
-  const euglena = view.euglena.count > 0 ? updateEuglena(aquarium.euglena, frame, view) : aquarium.euglena;
+  // sessile vorticella act as static obstacles the euglena must swim around
+  const obstacles = view.vorticella.count > 0 && aquarium.vorticella.length > 0
+    ? aquarium.vorticella.map((v) => vorticellaObstacle(v, view.vorticella.scale, frame.height))
+    : undefined;
+  const euglenaFrame = obstacles ? { ...frame, obstacles } : frame;
+  const euglena = view.euglena.count > 0 ? updateEuglena(aquarium.euglena, euglenaFrame, view) : aquarium.euglena;
   const vorticella = view.vorticella.count > 0 ? updateVorticella(aquarium.vorticella, frame, view) : aquarium.vorticella;
   return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella
     ? aquarium

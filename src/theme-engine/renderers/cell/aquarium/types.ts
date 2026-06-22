@@ -11,6 +11,8 @@ export interface AquariumFrame {
   readonly audioLevel: number;
   readonly startle: number;
   readonly baseHue: number;
+  /** Static obstacles other organisms should swim around (e.g. a sessile vorticella). */
+  readonly obstacles?: readonly { readonly x: number; readonly y: number; readonly radius: number }[];
   readonly hero?: {
     readonly x: number;
     readonly y: number;
@@ -46,6 +48,7 @@ export interface AquariumParamsView {
     readonly contractRate: number;
     readonly contractRateActive: number;
     readonly scale: number;
+    readonly alongFrac: number;
   };
 }
 

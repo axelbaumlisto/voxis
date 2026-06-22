@@ -53,6 +53,7 @@ export function aquariumParamsView(params: CellParams): AquariumParamsView {
       contractRate: nonNegative(params.vorticellaContractRate, 1.0),
       contractRateActive: nonNegative(params.vorticellaContractRateActive, 2.0),
       scale: nonNegative(params.vorticellaScale, 1.0),
+      alongFrac: Math.min(1, Math.max(0, finiteOr(params.vorticellaAlongFrac, 0.5))),
     },
   };
 }
