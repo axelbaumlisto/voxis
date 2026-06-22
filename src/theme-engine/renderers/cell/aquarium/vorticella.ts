@@ -557,6 +557,23 @@ export function drawVorticella(
         : `hsla(210, 12%, 38%, ${alpha * 0.18})`; // shadowed granule
       ctx.fill();
     }
+    // second, FINER micro-grain layer filling between the coarse granules so the
+    // endoplasm reads foamy edge-to-edge (tiny, very faint, slow independent drift).
+    const gCount2 = Math.round(clamp(D * 3.0, 24, 96));
+    for (let k = 0; k < gCount2; k++) {
+      const p2 = seededUnit(gSeed, k, 0x55aa3b) * TAU;
+      const a2 = 0.12 + 0.78 * Math.sqrt(seededUnit(gSeed, k, 0x2c7f91));
+      const ph2 = (TAU / 68) * tt * 0.5 + p2;
+      const u2 = 0.5 + 0.46 * a2 * Math.sin(ph2);
+      const l2 = a2 * Math.cos(ph2) * 0.9 * halfW(u2) * breathMod(u2);
+      const fp = bodyPoint(bellHeight * u2, l2);
+      ctx.beginPath();
+      ctx.arc(fp.x, fp.y, 0.3 + seededUnit(gSeed, k, 0x6b1d2f) * 0.4, 0, TAU);
+      ctx.fillStyle = seededUnit(gSeed, k, 0x9911cd) > 0.5
+        ? `hsla(46, 12%, 90%, ${alpha * 0.12})`
+        : `hsla(208, 12%, 42%, ${alpha * 0.12})`;
+      ctx.fill();
+    }
     // dark basal pooling: the dense oil-droplet heel that gives a live cell its
     // luminous-body-with-dark-base tonality (instead of a flat washed-out white).
     const baseHeel = bodyPoint(bellHeight * 0.14, 0);
@@ -595,8 +612,8 @@ export function drawVorticella(
     ctx.lineWidth = Math.max(1.6, D * 0.24);
     ctx.stroke();
     drawPolyline(ctx, macPts, false);
-    ctx.strokeStyle = `hsla(42, 12%, 52%, ${alpha * 0.52})`;
-    ctx.lineWidth = Math.max(1.0, D * 0.11);
+    ctx.strokeStyle = `hsla(40, 16%, 50%, ${alpha * 0.6})`;
+    ctx.lineWidth = Math.max(1.0, D * 0.12);
     ctx.stroke();
     // micronucleus: a tiny dot docked against the OUTER edge of one nuclear arm
     if (D >= 11) {
@@ -661,7 +678,12 @@ export function drawVorticella(
         // refractile ingested-prey sphere: lit cap -> body -> dark Becke rim -> feather,
         // + specular (radial gradient = a 3-D bead, not a flat polka-dot with a hard ring).
         const warm = j === 0;
-        const fgx = fv.x - nx * fr * 0.4 - ux * fr * 0.4, fgy = fv.y - ny * fr * 0.4 - uy * fr * 0.4;
+        // per-vacuole highlight DIRECTION jitter (around the base upper-left) so they
+        // don't all share one identical rendered light cap.
+        const hj = (seededUnit(fvSeed, j, 0x5c1d2b) - 0.5) * 1.7;
+        const rn = 0.4 * (Math.sin(hj) - Math.cos(hj));
+        const ru = -0.4 * (Math.sin(hj) + Math.cos(hj));
+        const fgx = fv.x + nx * rn * fr + ux * ru * fr, fgy = fv.y + ny * rn * fr + uy * ru * fr;
         const fg = ctx.createRadialGradient(fgx, fgy, fr * 0.1, fv.x, fv.y, fr * 1.12);
         fg.addColorStop(0, warm ? `hsla(40, 34%, 74%, ${alpha * 0.55})` : `hsla(40, 18%, 72%, ${alpha * 0.5})`);
         fg.addColorStop(0.5, warm ? `hsla(32, 32%, 50%, ${alpha * 0.56})` : `hsla(34, 15%, 52%, ${alpha * 0.5})`);
@@ -681,19 +703,27 @@ export function drawVorticella(
     // === PERISTOME lip + oral ciliary wreath (the feeding crown) ===
     // raised lip: a thin band at the rim, outer Rrim, drawn as an ellipse seen 3/4
     const lipRy = Math.max(0.5, Rrim * 0.24); // shallow rolled rim, not a deep flat plate
-    ctx.beginPath();
-    // rotate by dir + PI/2 so the LARGE radius (Rrim) lies ACROSS the bell (lateral),
-    // giving a wide shallow rim cap seen in 3/4 — NOT a tall vertical lens down the body.
-    ctx.ellipse(rimC.x, rimC.y, Rrim, lipRy, dir + Math.PI / 2, 0, TAU);
+    // amorphous everted rim + peristomial disc (slightly IRREGULAR, not machined
+    // concentric ellipses): wobble each ring with low-frequency seeded noise.
+    const ringPath = (rl: number, rd: number, wob: number): AquariumPoint[] => {
+      const pts: AquariumPoint[] = [];
+      for (let i = 0; i <= 24; i++) {
+        const a = (i / 24) * TAU;
+        const w = 1 + wob * (0.6 * Math.sin(a * 3 + lobePhase) + 0.4 * Math.sin(a * 2 - bp0));
+        const lateral = Math.cos(a) * rl * w;
+        const depth = Math.sin(a) * rd * w;
+        pts.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
+      }
+      return pts;
+    };
+    drawPolyline(ctx, ringPath(Rrim, lipRy, 0.05), true);
     ctx.fillStyle = `hsla(186, 36%, 88%, ${alpha * 0.22 * open})`;
     ctx.fill();
     ctx.strokeStyle = `hsla(186, 50%, 90%, ${alpha * 0.55 * open})`;
     ctx.lineWidth = Math.max(0.75, D * 0.05);
     ctx.stroke();
-    // convex peristomial disc capping the bell mouth (a slightly domed translucent
-    // surface, NOT an open hollow cup) — the AZM/oral wreath ring its margin.
-    ctx.beginPath();
-    ctx.ellipse(rimC.x, rimC.y, Rrim * 0.9, lipRy * 0.9, dir + Math.PI / 2, 0, TAU);
+    // convex peristomial disc capping the bell mouth (amorphous, slightly domed)
+    drawPolyline(ctx, ringPath(Rrim * 0.9, lipRy * 0.9, 0.07), true);
     ctx.fillStyle = `hsla(200, 12%, 84%, ${alpha * 0.26 * open})`;
     ctx.fill();
 
