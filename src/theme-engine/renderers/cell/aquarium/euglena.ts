@@ -1,6 +1,7 @@
 import type { ThemeState } from "../../../contract";
 import type { AquariumFrame, AquariumParamsView, EuglenaState } from "./types";
 import { mix32, noise2D, seededUnit } from "./seeds";
+import { TAU, clamp, clamp01, finite, finiteOr, positive, wrapUnit } from "./util";
 
 export interface EuglenaPoseOptions {
   readonly centerX?: number;
@@ -74,19 +75,6 @@ export interface EuglenaPose {
   readonly pellicleStrips: readonly (readonly AquariumPoint[])[];
 }
 
-function finiteOr(value: number | undefined, fallback: number): number {
-  return Number.isFinite(value) ? (value as number) : fallback;
-}
-
-function finite(value: number, fallback: number): number {
-  return Number.isFinite(value) ? value : fallback;
-}
-
-function positive(value: number | undefined, fallback: number): number {
-  return Math.max(0.001, finiteOr(value, fallback));
-}
-
-const TAU = Math.PI * 2;
 const METABOLY_AMP = 0.16; // local traveling-bulge amplitude (was a 0.045 global breathe)
 const METABOLY_K = 1.3; // ~1.3 wavelengths along the body
 const STRIAE_TURNS = 1.25; // helical turns of a pellicle stria over the body
@@ -109,19 +97,6 @@ function euglenaModeView(mode: ThemeState["mode"]): EuglenaModeView {
     default:
       return { motionMul: 1.00, alphaMul: 1.00 };
   }
-}
-
-function wrapUnit(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return ((value % 1) + 1) % 1;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, finite(value, 0)));
 }
 
 function point(cx: number, cy: number, ux: number, uy: number, along: number): AquariumPoint {

@@ -1,6 +1,7 @@
 import type { AquariumFrame, DiatomState } from "./types";
 import type { AquariumParamsView } from "./types";
 import { seededUnit } from "./seeds";
+import { TAU, finite, finiteOr, positive } from "./util";
 
 export type DiatomShape = "navicula" | "ovalCentric";
 
@@ -30,20 +31,6 @@ export interface DiatomGeometry {
   readonly raphe: readonly AquariumPoint[];
   readonly striae: readonly DiatomStria[];
 }
-
-function finiteOr(value: number | undefined, fallback: number): number {
-  return Number.isFinite(value) ? (value as number) : fallback;
-}
-
-function finite(value: number, fallback: number): number {
-  return Number.isFinite(value) ? value : fallback;
-}
-
-function positive(value: number | undefined, fallback: number): number {
-  return Math.max(0.001, finiteOr(value, fallback));
-}
-
-const TAU = Math.PI * 2;
 
 function wrap(value: number, max: number): number {
   if (!(max > 0)) return 0;

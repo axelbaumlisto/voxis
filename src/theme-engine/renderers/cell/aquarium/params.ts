@@ -1,10 +1,7 @@
 import type { CellParams } from "../types";
 import type { AquariumParamsView } from "./types";
 import type { EuglenaSteer, Medium } from "./euglena";
-
-function finiteOr(value: number | undefined, fallback: number): number {
-  return Number.isFinite(value) ? (value as number) : fallback;
-}
+import { finiteOr } from "./util";
 
 function nonNegativeInt(value: number | undefined, fallback: number): number {
   return Math.max(0, Math.floor(finiteOr(value, fallback)));

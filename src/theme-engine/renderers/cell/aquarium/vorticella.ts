@@ -1,5 +1,6 @@
 import type { AquariumFrame, AquariumParamsView, VorticellaState } from "./types";
 import { seededUnit } from "./seeds";
+import { TAU, clamp, clamp01, finite, finiteOr, smoothstep, wrapUnit } from "./util";
 
 export interface VorticellaGeometryOptions {
   readonly anchorX?: number;
@@ -27,34 +28,6 @@ export interface VorticellaGeometry {
   readonly stalkPath: readonly AquariumPoint[];
 }
 
-function finiteOr(value: number | undefined, fallback: number): number {
-  return Number.isFinite(value) ? (value as number) : fallback;
-}
-
-function finite(value: number, fallback: number): number {
-  return Number.isFinite(value) ? value : fallback;
-}
-
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return value < 0 ? 0 : value > 1 ? 1 : value;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function wrapUnit(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return ((value % 1) + 1) % 1;
-}
-
-function smoothstep(x: number): number {
-  const t = clamp01(x);
-  return t * t * (3 - 2 * t);
-}
-
-const TAU = Math.PI * 2;
 
 // Asymmetric, mostly-extended duty: a FAST ease-out contraction, a brief hold,
 // a SLOW sigmoid re-extension, then a long extended/feeding dwell (s=0). This
