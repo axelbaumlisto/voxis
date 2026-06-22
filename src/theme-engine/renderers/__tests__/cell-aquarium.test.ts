@@ -700,10 +700,10 @@ describe("aquarium layer Phase 3 euglena", () => {
     // start well outside the startle zone, below the hero, heading up toward it
     const start = testEuglena({ x: 150, y: 220, heading: -Math.PI / 2, swimSpeed: 1 });
     const savedHero = EUGLENA_STEER.hero;
-    const savedCuriosity = EUGLENA_STEER.curiosity;
+    const savedLoiter = EUGLENA_STEER.loiter;
     try {
       EUGLENA_STEER.hero = -1.2;     // pure pursue
-      EUGLENA_STEER.curiosity = 0;   // disable the approach-then-retreat spring
+      EUGLENA_STEER.loiter = 0;   // disable the approach-then-retreat spring
       let chase = start;
       for (let i = 0; i < 8; i++) {
         chase = updateEuglena([chase], frame({ dt: 0.05, width: 300, height: 300, hero }), view)[0];
@@ -712,7 +712,7 @@ describe("aquarium layer Phase 3 euglena", () => {
       expect(Math.sin(chase.heading)).toBeLessThan(-0.5);
     } finally {
       EUGLENA_STEER.hero = savedHero;
-      EUGLENA_STEER.curiosity = savedCuriosity;
+      EUGLENA_STEER.loiter = savedLoiter;
     }
   });
 

@@ -2107,14 +2107,15 @@ function seedEuglena(count, seed, frame, salt = 235478698) {
 var EUGLENA_STEER = {
   forward: 1,
   wall: 2,
-  hero: 0.35,
-  curiosity: 1.1,
-  wake: 16,
+  hero: 0,
+  loiter: 1.1,
+  wake: 10,
   startleAway: 3,
-  startleDart: 1.6
+  startleDart: 1
 };
-var HERO_STANDOFF = 1.3;
+var HERO_LOITER_Q = 1.3;
 var HERO_INTEREST_RANGE = 2.2;
+var HERO_WAKE_RANGE = 1.5;
 var STARTLE_TRIGGER_Q = 1.12;
 var STARTLE_TAU = 0.6;
 function updateEuglena(euglena, frame, view) {
@@ -2183,7 +2184,7 @@ function updateEuglena(euglena, frame, view) {
         sy -= (1 - (safeHeight - py0) / look) * EUGLENA_STEER.wall;
       if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 0.0001) {
         const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
-        const wr = (EUGLENA_STEER.hero + EUGLENA_STEER.curiosity * interest * (HERO_STANDOFF - heroQ)) * falloff;
+        const wr = (EUGLENA_STEER.hero + EUGLENA_STEER.loiter * interest * (HERO_LOITER_Q - heroQ)) * falloff;
         sx += ax * wr;
         sy += ay * wr;
         sx += ax * EUGLENA_STEER.startleAway * startle;
@@ -2200,11 +2201,11 @@ function updateEuglena(euglena, frame, view) {
     const vPxEff = vPx * (1 + EUGLENA_STEER.startleDart * startle);
     let nextX = px0 + ux * vPxEff * dt;
     let nextY = py0 + uy * vPxEff * dt;
-    if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 0.0001) {
+    if (heroParams && heroQ < HERO_WAKE_RANGE && heroQ > 0.0001) {
       const hd = finiteOr3(frame.hero?.heading, 0);
       const hdx = Math.cos(hd), hdy = Math.sin(hd);
       const behind = Math.max(0, -(ax * hdx + ay * hdy));
-      const prox = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
+      const prox = Math.min(1, (HERO_WAKE_RANGE - heroQ) / (HERO_WAKE_RANGE - 1));
       const wakeSpeed = EUGLENA_STEER.wake * prox * behind;
       nextX += hdx * wakeSpeed * dt;
       nextY += hdy * wakeSpeed * dt;
