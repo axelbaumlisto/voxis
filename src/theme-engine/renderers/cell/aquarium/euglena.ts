@@ -259,16 +259,16 @@ export function euglenaPose(
   const flagellumPoints: AquariumPoint[] = [anterior];
   for (let i = 1; i <= segs; i++) {
     const q = i / segs;
-    const env = 0.25 + 0.75 * Math.pow(q, 1.2); // proximal floor + tip-amplified whip
+    const env = 0.18 + 0.82 * Math.pow(q, 1.5); // stiffer base, whip-crack tip (torsion wave)
     const ph = TAU * flagellum - waves * TAU * q;
-    // non-planar "spinning lasso": a 2nd harmonic + a 90° along-axis curl so the
-    // tip traces a loop in projection rather than a flat planar sine.
+    // non-planar "spinning lasso": a 2nd harmonic + a near-equal along-axis curl
+    // (90° quadrature) so the tip traces a ROUND loop in projection, not a flat sine.
     const lateral = clamp(
       ampTip * env * (Math.sin(ph) + 0.28 * Math.sin(2 * ph + Math.PI / 2)),
       -maxLat,
       maxLat,
     );
-    const curl = ampTip * env * 0.30 * Math.cos(ph);
+    const curl = ampTip * env * 0.55 * Math.cos(ph);
     const along = halfLength + flagellumLength * q + curl;
     flagellumPoints.push(transform(cx, cy, ux, uy, along, lateral));
   }
@@ -534,6 +534,14 @@ export function updateEuglena(
     const bphase = wrapUnit(finiteOr(cell.burstPhase, 0));
     const flick = bphase < 0.08 ? Math.sin((bphase / 0.08) * Math.PI) : 0;
     const beatBoost = 1 + 1.3 * flick;
+    // the spinning/turning beat must actually REORIENT the cell (run-and-tumble):
+    // a small deterministic heading kick during the flick, when not wall-turning.
+    if (turnProgress >= 1 && flick > 0) {
+      const turnSign = (finite(cell.size, 1) % 0.5) < 0.25 ? 1 : -1;
+      heading += turnSign * 0.7 * flick * dt;
+    }
+    // cap effective beat freq so the 2nd lasso harmonic (2f) stays < 30Hz Nyquist
+    const fEff = Math.min(13, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
     return {
       ...cell,
       x: clamp(wrap(nextX, safeWidth), 0, safeWidth),
@@ -545,7 +553,7 @@ export function updateEuglena(
       turnTo,
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + rollDelta),
       metabolyPhase: wrapUnit(finite(cell.metabolyPhase, 0) + Math.max(0, finite(cell.metabolyRate, 0)) * act * dt),
-      flagellumPhase: wrapUnit(finite(cell.flagellumPhase, 0) + Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost * dt),
+      flagellumPhase: wrapUnit(finite(cell.flagellumPhase, 0) + fEff * dt),
       cvPhase: wrapUnit(finiteOr(cell.cvPhase, 0) + Math.max(0, finiteOr(cell.cvRate, 0)) * act * dt),
       burstPhase: wrapUnit(finiteOr(cell.burstPhase, 0) + Math.max(0, finiteOr(cell.burstRate, 0)) * act * dt),
     };
