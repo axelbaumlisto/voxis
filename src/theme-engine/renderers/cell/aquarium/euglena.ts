@@ -423,31 +423,39 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
  * the behaviours' direction vectors. Tune these to manage behaviour:
  *  - forward:   momentum / minimal-reverse bias (turns the short way, rarely flips back).
  *  - wall:      avoid the impassable tank walls — highest priority.
- *  - hero:      constant bias toward the hero (>0 keep clear / AVOID, <0 PURSUE/chase).
- *  - curiosity: approach-then-retreat SPRING toward a preferred standoff distance
- *               (>0 makes it orbit/investigate the hero; 0 disables the spring).
- *  - wake:      hydrodynamic drafting — advection (px/s) along the hero's heading
- *               when the euglena sits in its wake (the two "swim together").
- *  - startleAway/startleDart: extra away-steer / speed burst while startled.
+ *  - hero:      constant bias toward the hero (>0 keep clear / AVOID, <0 PURSUE).
+ *               NOTE: pursue (<0) is a generic engine knob — it is NOT biological
+ *               for Euglena→Paramecium (a phototroph does not hunt a ciliate);
+ *               use it only for genuine predator pairs.
+ *  - loiter:    EMERGENT standoff — a weak near-field hydrodynamic attraction
+ *               balanced against the contact-avoidance below, so the cell hovers
+ *               at the distance where the two cancel (not a teleological target).
+ *  - wake:      near-field hydrodynamic entrainment — a brief advective tug (px/s)
+ *               along the hero's heading while the euglena trails in its wake.
+ *  - startleAway/startleDart: escape REORIENTATION (away-turn, beat-switch tumble)
+ *               + small speed bump when contact is too close.
  *
- * Behaviour recipes: pure AVOID = {hero:+, curiosity:0}; pure PURSUE = {hero:negative,
- * curiosity:0}; INVESTIGATE/orbit = {hero:small+, curiosity:+}.
+ * Behaviour recipes: AVOID = {hero:+, loiter:0}; PURSUE = {hero:negative,
+ * loiter:0} (predator pairs only); LOITER/hover = {hero:0, loiter:+} (default).
+ * Default = mutual non-predation (Euglena exceeds Paramecium's cytostome gape:
+ * a size refuge), the euglena carrying the contact-avoidance for the display.
  */
 export const EUGLENA_STEER = {
   forward: 1.0,
   wall: 2.0,
-  hero: 0.35,
-  curiosity: 1.1,
-  wake: 16,
+  hero: 0.0,
+  loiter: 1.1,
+  wake: 10,
   startleAway: 3.0,
-  startleDart: 1.6,
+  startleDart: 1.0,
 };
 
 // Interaction geometry/timing (q = sqrt(heroQd): normalized elliptical distance,
 // q=1 on the exclusion boundary).
-const HERO_STANDOFF = 1.30;        // preferred hover distance just outside the exclusion
+const HERO_LOITER_Q = 1.30;        // emergent hover distance (attraction == avoidance)
 const HERO_INTEREST_RANGE = 2.2;   // beyond this q the hero is ignored
-const STARTLE_TRIGGER_Q = 1.12;    // contact this close -> startle dart
+const HERO_WAKE_RANGE = 1.5;       // entrainment is NEAR-FIELD only (~one half-width)
+const STARTLE_TRIGGER_Q = 1.12;    // contact this close -> startle escape
 const STARTLE_TAU = 0.6;           // s; escape decay time-constant
 
 export function updateEuglena(
@@ -507,6 +515,7 @@ export function updateEuglena(
       ax = dxh / dh;
       ay = dyh / dh;
     }
+    // slow ambient modulation of loiter strength (light/O2 context proxy, not appetite)
     const interest = 0.55 + 0.45 * Math.sin(TAU * wrapUnit(finiteOr(cell.burstPhase, 0)) + 1.3);
 
     // startle: brief escape state, triggered by very close contact or an app
@@ -530,9 +539,10 @@ export function updateEuglena(
       if (safeHeight - py0 < look) sy -= (1 - (safeHeight - py0) / look) * EUGLENA_STEER.wall;
       if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 1e-4) {
         const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
-        // radial weight: >0 repels (too close), <0 attracts (curious, too far).
-        // base `hero` bias + curiosity spring toward HERO_STANDOFF (scaled by interest).
-        const wr = (EUGLENA_STEER.hero + EUGLENA_STEER.curiosity * interest * (HERO_STANDOFF - heroQ)) * falloff;
+        // radial weight: >0 repels (too close), <0 attracts (too far). The `loiter`
+        // term is near-field attraction vs avoidance — it cancels at HERO_LOITER_Q,
+        // an EMERGENT standoff, not a hard-coded goal. `hero` adds an avoid/pursue bias.
+        const wr = (EUGLENA_STEER.hero + EUGLENA_STEER.loiter * interest * (HERO_LOITER_Q - heroQ)) * falloff;
         sx += ax * wr;
         sy += ay * wr;
         sx += ax * EUGLENA_STEER.startleAway * startle; // escape burst pushes straight away
@@ -555,11 +565,11 @@ export function updateEuglena(
     // hero's swimming current advects it along the hero heading (the two drift
     // together). Advection (px/s) decays with distance and with how directly
     // the euglena trails behind the hero's motion.
-    if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 1e-4) {
+    if (heroParams && heroQ < HERO_WAKE_RANGE && heroQ > 1e-4) {
       const hd = finiteOr(frame.hero?.heading, 0);
       const hdx = Math.cos(hd), hdy = Math.sin(hd);
       const behind = Math.max(0, -(ax * hdx + ay * hdy)); // 1 when directly behind the hero
-      const prox = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
+      const prox = Math.min(1, (HERO_WAKE_RANGE - heroQ) / (HERO_WAKE_RANGE - 1));
       const wakeSpeed = EUGLENA_STEER.wake * prox * behind;
       nextX += hdx * wakeSpeed * dt;
       nextY += hdy * wakeSpeed * dt;
