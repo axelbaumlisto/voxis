@@ -406,6 +406,9 @@ export function drawVorticella(
 
     // --- modest bell + a longer stalk so it reads as a stalked, leggy zooid ---
     const { D, bellHeight, restStalk } = vorticellaBellMetrics(cell, scale, frame.height);
+    // the fired zooid BALLS UP: shorten the bell axially on contraction (real Vorticella
+    // retracts toward a sphere) instead of ballooning the width into an oblate disc.
+    const drawBellH = bellHeight * (1 - 0.12 * s);
     // stalk shrinks to nothing as the zooid detaches into a free-swimming telotroch
     const restLength = restStalk * attach;
 
@@ -414,7 +417,7 @@ export function drawVorticella(
       minLengthFrac: 0.32, coilSampleCount: 40, coilTurnsContracted: 6.5, coilRadius: D * 0.4,
     });
     const neck = geom.bellCenter;           // base of the bell (top of stalk)
-    const rimC = { x: neck.x + ux * bellHeight + nx * (periOff + skewAmt) * D, y: neck.y + uy * bellHeight + ny * (periOff + skewAmt) * D }; // peristome centre, off-axis + follows the body skew
+    const rimC = { x: neck.x + ux * drawBellH + nx * (periOff + skewAmt) * D, y: neck.y + uy * drawBellH + ny * (periOff + skewAmt) * D }; // peristome centre, off-axis + follows the body skew
     const open = 1 - 0.7 * s;               // peristome closes as it contracts (open in [0.3,1])
     // everted collar: a rolled rim only slightly wider than the shoulder (~1.28D body-max
     // 1.16D -> ~10% overhang) so it reads CONTINUOUS with the bell, not a floating saucer.
@@ -426,7 +429,7 @@ export function drawVorticella(
     const bodyPoint = (along: number, lateral: number): AquariumPoint => {
       // body axis curves laterally toward the top (per-cell) so the bell is visibly
       // lopsided/distorted like a real cell, not a clean Paint-traced mirror.
-      const cl = skewAmt * D * smoothstep(clamp01(along / Math.max(1, bellHeight)));
+      const cl = skewAmt * D * smoothstep(clamp01(along / Math.max(1, drawBellH)));
       return {
         x: neck.x + ux * along + nx * (lateral + cl),
         y: neck.y + uy * along + ny * (lateral + cl),
@@ -449,7 +452,7 @@ export function drawVorticella(
       const lipGate = 1 - (1 - (0.55 + 0.45 * open)) * smoothstep((u - 0.82) / 0.18);
       // CRITIC FIX (contraction rounding): the bell fattens/rounds toward a sphere as it
       // contracts (s->1), instead of keeping a fixed urn aspect.
-      return D * base * lipGate * (1 + 0.22 * s); // contracted zooid rounds toward a sphere, not an oblate disc
+      return D * base * lipGate; // contraction rounding is done by shortening the AXIS (drawBellH), not widening
     };
 
     // === STALK (spasmoneme) — straight at rest, tight HELIX when contracted ===
@@ -519,8 +522,8 @@ export function drawVorticella(
       // INDEPENDENT irregular lobing per side (different freq/phase) so left != right
       const lobeL = 1 + 0.06 * Math.sin(Math.PI * u * 1.7 + lobePhase);
       const lobeR = 1 + 0.06 * Math.sin(Math.PI * u * 1.3 + lobePhase + 2.1);
-      left.push(bodyPoint(bellHeight * u, -hwB * lobeL * (1 - asymA)));
-      right.push(bodyPoint(bellHeight * u, hwB * lobeR * (1 + asymA)));
+      left.push(bodyPoint(drawBellH * u, -hwB * lobeL * (1 - asymA)));
+      right.push(bodyPoint(drawBellH * u, hwB * lobeR * (1 + asymA)));
     }
     const outline = [...left, ...right.reverse()];
     drawPolyline(ctx, outline, true);
@@ -550,11 +553,11 @@ export function drawVorticella(
       // CYCLOSIS: granules shear slowly on the same wall-tangent gyre (slower than the
       // vacuoles) so the whole endoplasm streams rather than sitting as painted dots.
       const gphi = seededUnit(gSeed, k, 0x3d1f77) * TAU;
-      const gamp = 0.18 + 0.7 * Math.sqrt(seededUnit(gSeed, k, 0x1b3a7d));
+      const gamp = 0.96 * Math.sqrt(seededUnit(gSeed, k, 0x1b3a7d)); // area-uniform: granules fill the endoplasm edge-to-edge incl. the centre
       const gph = (TAU / 46) * tt + gphi + 0.5 * noise2D(gSeed, gphi * 3.3 + k, tt * 0.045); // constant ~46s, NOT audio-driven, aperiodic
-      const gu = 0.5 + 0.44 * gamp * Math.sin(gph);
+      const gu = 0.46 + 0.44 * gamp * Math.sin(gph);
       const glat = gamp * Math.cos(gph) * 0.72 * halfW(gu) * breathMod(gu);
-      const gp = bodyPoint(bellHeight * gu, glat);
+      const gp = bodyPoint(drawBellH * gu, glat);
       const gr = 0.4 + seededUnit(gSeed, k, 0x77c1a3) * 0.9;
       ctx.beginPath();
       ctx.arc(gp.x, gp.y, gr, 0, TAU);
@@ -568,11 +571,11 @@ export function drawVorticella(
     const gCount2 = Math.round(clamp(D * 3.0, 24, 96));
     for (let k = 0; k < gCount2; k++) {
       const p2 = seededUnit(gSeed, k, 0x55aa3b) * TAU;
-      const a2 = 0.12 + 0.78 * Math.sqrt(seededUnit(gSeed, k, 0x2c7f91));
+      const a2 = 0.96 * Math.sqrt(seededUnit(gSeed, k, 0x2c7f91)); // area-uniform fine grain
       const ph2 = (TAU / 60) * tt + p2 + 0.4 * noise2D(gSeed, p2 * 2.7 + k, tt * 0.04); // constant ~60s, aperiodic
-      const u2 = 0.5 + 0.46 * a2 * Math.sin(ph2);
+      const u2 = 0.46 + 0.46 * a2 * Math.sin(ph2);
       const l2 = a2 * Math.cos(ph2) * 0.72 * halfW(u2) * breathMod(u2);
-      const fp = bodyPoint(bellHeight * u2, l2);
+      const fp = bodyPoint(drawBellH * u2, l2);
       ctx.beginPath();
       ctx.arc(fp.x, fp.y, 0.3 + seededUnit(gSeed, k, 0x6b1d2f) * 0.4, 0, TAU);
       ctx.fillStyle = seededUnit(gSeed, k, 0x9911cd) > 0.5
@@ -601,7 +604,7 @@ export function drawVorticella(
     ctx.clip();
     // macronucleus: curved C / horseshoe band lying along the body
     const macPts: AquariumPoint[] = [];
-    const macAlong = bellHeight * 0.50;
+    const macAlong = drawBellH * 0.50;
     const macR = D * 0.44; // large folded horseshoe band filling much of the body
     for (let i = 0; i <= 14; i++) {
       const th = Math.PI * (0.32 + (i / 14) * 1.08);
@@ -615,7 +618,7 @@ export function drawVorticella(
     ctx.lineWidth = Math.max(1.6, D * 0.24);
     ctx.stroke();
     drawPolyline(ctx, macPts, false);
-    ctx.strokeStyle = `hsla(204, 16%, 58%, ${alpha * 0.55})`; // cool neutral C-band, kept distinct against the now-bright glowing body
+    ctx.strokeStyle = `hsla(200, 14%, 86%, ${alpha * 0.5})`; // darkfield: a dense nucleus SCATTERS -> a bright cool C-band, not a dark brightfield stroke
     ctx.lineWidth = Math.max(1.0, D * 0.12);
     ctx.stroke();
     // micronucleus: a tiny dot docked against the OUTER edge of one nuclear arm
@@ -637,7 +640,7 @@ export function drawVorticella(
       const cvPulse = cvPhase < 0.82 ? smoothstep(cvPhase / 0.82) : 1 - smoothstep((cvPhase - 0.82) / 0.18);
       // beside the vestibule (oral pole), on the side CLEAR of the macronucleus C so
       // the refractile bubble is not occluded; visibly fills then collapses at systole.
-      const cv = bodyPoint(bellHeight * 0.70, -D * 0.24);
+      const cv = bodyPoint(drawBellH * 0.70, -D * 0.24);
       const cvR = Math.max(0.8, D * (0.03 + 0.15 * cvPulse));
       ctx.beginPath();
       ctx.arc(cv.x, cv.y, cvR, 0, TAU);
@@ -673,12 +676,12 @@ export function drawVorticella(
         // CONSTANT realistic cyclosis (~34-48s loop ~= a few um/s); NOT coupled to audio.
         const cycT = 34 + seededUnit(fvSeed, j, 0x13b7) * 14;
         const phi0 = seededUnit(fvSeed, j, 0x51bd0e77) * TAU;
-        const amp = 0.28 + 0.6 * Math.sqrt(seededUnit(fvSeed, j, 0x2cd9a14b));
+        const amp = 0.96 * Math.sqrt(seededUnit(fvSeed, j, 0x2cd9a14b)); // area-uniform radial fill (no floor) -> no hollow donut centre
         // + slow aperiodic noise so the loop never repeats byte-for-byte (alive, not a screensaver)
         const ph = (TAU / cycT) * tt + phi0 + 0.6 * noise2D(fvSeed, phi0 * 5.1 + j, tt * 0.05);
-        const u = 0.5 + 0.42 * amp * Math.sin(ph);
+        const u = 0.46 + 0.42 * amp * Math.sin(ph); // gyre centred slightly toward the base (posterior oil-droplet bias)
         const lat = amp * Math.cos(ph) * 0.72 * halfW(u) * breathMod(u);
-        const fv = bodyPoint(bellHeight * u, lat);
+        const fv = bodyPoint(drawBellH * u, lat);
         const fr = Math.max(0.7, D * (0.028 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.075)); // wide size spread
         // refractile ingested-prey sphere: lit cap -> body -> dark Becke rim -> feather,
         // + specular (radial gradient = a 3-D bead, not a flat polka-dot with a hard ring).
@@ -740,7 +743,7 @@ export function drawVorticella(
         spiral.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline(ctx, spiral, false);
-      ctx.strokeStyle = `hsla(198, 18%, 90%, ${alpha * 0.34 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 18%, 94%, ${alpha * 0.48 * crownFade})`; // beating ciliary wreath = among the brightest darkfield features
       ctx.lineWidth = Math.max(0.75, D * 0.03);
       ctx.stroke();
       // second, inner membranelle row (phase-offset) so the AZM reads as a
@@ -755,7 +758,7 @@ export function drawVorticella(
         spiral2.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline(ctx, spiral2, false);
-      ctx.strokeStyle = `hsla(198, 18%, 88%, ${alpha * 0.24 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 18%, 92%, ${alpha * 0.34 * crownFade})`;
       ctx.lineWidth = Math.max(0.75, D * 0.022);
       ctx.stroke();
       const cyt = { x: rimC.x + nx * cytLat + ux * cytDep, y: rimC.y + ny * cytLat + uy * cytDep };
