@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { CELL_DEFAULTS } from "../../defaults";
 import { euglenaContribute, EUGLENA_RELEVANT_FIELDS } from "../euglena";
+import { heroConsumeObstacles } from "../hero";
 import { buildField, KIND_ID, sourceId } from "../interaction";
-import type { FieldContribution } from "../interaction";
+import type { FieldContribution, ObstacleCircle } from "../interaction";
 import { buildEuglenaInteractionField, buildVorticellaInteractionField, heroContribute, seedAquarium, updateAquarium } from "../layer";
 import type { AquariumFrame } from "../types";
 import { vorticellaContribute, vorticellaObstacle, VORTICELLA_RELEVANT_FIELDS } from "../vorticella";
@@ -21,6 +22,30 @@ function frame(overrides: Partial<AquariumFrame> = {}): AquariumFrame {
     baseHue: 50,
     ...overrides,
   };
+}
+
+function legacyHeroVorticellaClampDelta(
+  circles: readonly Pick<ObstacleCircle, "x" | "y" | "radius">[],
+  cx: number,
+  cy: number,
+  heroReach: number,
+): { dx: number; dy: number } {
+  let curX = cx;
+  let curY = cy;
+  for (const o of circles) {
+    const dx = curX - o.x;
+    const dy = curY - o.y;
+    const d = Math.hypot(dx, dy);
+    const minD = o.radius + heroReach;
+    if (d < minD && d > 1e-6) {
+      const push = minD - d;
+      const pxh = (dx / d) * push;
+      const pyh = (dy / d) * push;
+      curX += pxh;
+      curY += pyh;
+    }
+  }
+  return { dx: curX - cx, dy: curY - cy };
 }
 
 describe("aquarium interaction field vocabulary", () => {
@@ -141,6 +166,46 @@ describe("aquarium interaction field vocabulary", () => {
     ]);
     expect([...EUGLENA_RELEVANT_FIELDS]).toEqual(["obstacle", "wake"]);
     expect([...VORTICELLA_RELEVANT_FIELDS]).toEqual(["motile"]);
+  });
+
+  it("hero hard-clamp consume matches legacy vorticella obstacle loop to 1e-10", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 67,
+      aquariumAlpha: 0.55,
+      diatomCount: 0,
+      euglenaCount: 0,
+      vorticellaCount: 2,
+      vorticellaScale: 1.2,
+      vorticellaAlongFrac: 0.16,
+    };
+    const seedFrame = frame({ width: 240, height: 80 });
+    const seeded = seedAquarium(seedFrame, params).vorticella;
+    const circles = buildField(
+      seeded.flatMap((v, i) => vorticellaContribute(v, 1.2, seedFrame.height, i)),
+    ).obstacles.filter((obstacle): obstacle is ObstacleCircle => obstacle.shape === "circle");
+    const heroReach = 14 * Math.sqrt(Math.max(1, 2.6)) * 1.2;
+    const first = circles[0];
+    const second = circles[1];
+    const d1 = first.radius + heroReach;
+    const d2 = second.radius + heroReach;
+    const cases = [
+      { name: "single near vorticella", active: [first], cx: first.x + d1 * 0.35, cy: first.y + d1 * 0.2 },
+      { name: "two vorticella cumulative ordering", active: circles, cx: (first.x + second.x) / 2, cy: (first.y + second.y) / 2 },
+      { name: "far clear", active: circles, cx: 230, cy: 8, zero: true },
+      { name: "exact boundary", active: [second], cx: second.x + d2, cy: second.y, zero: true },
+    ] as const;
+
+    for (const c of cases) {
+      const expected = legacyHeroVorticellaClampDelta(c.active, c.cx, c.cy, heroReach);
+      const actual = heroConsumeObstacles(c.active, c.cx, c.cy, heroReach);
+      expect(actual.dx, `${c.name} dx`).toBeCloseTo(expected.dx, 10);
+      expect(actual.dy, `${c.name} dy`).toBeCloseTo(expected.dy, 10);
+      if (c.zero) {
+        expect(actual).toEqual({ dx: 0, dy: 0 });
+      }
+    }
   });
 
   it("generic staged builders match hand-built filtered references", () => {
