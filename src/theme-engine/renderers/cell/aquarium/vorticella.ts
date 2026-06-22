@@ -82,6 +82,16 @@ function vorticellaCellSeed(anchorX: number): number {
   return (Math.round(anchorX * 7) ^ 0x070271ca) >>> 0;
 }
 
+const MIG_DETACH = 0.6; // s to retract stalk & lift off
+const MIG_SWIM = 16;    // telotroch swim speed (px/s)
+const MIG_ATTACH = 0.7; // s to regrow the stalk at the new spot
+
+/** Deterministic rare interval (s) a zooid stays anchored before migrating as a telotroch. */
+function drawMigrateInterval(cellSeed: number, migrateCount: number): number {
+  const u = Math.max(1e-4, seededUnit(cellSeed, migrateCount, 0x6d2b79f5));
+  return clamp(-Math.log(u) * 20, 12, 50);
+}
+
 /** Contraction amount s in [0,1] from the absolute-time leg/timer state. */
 function vorticellaLegAmount(leg: number, timer: number): number {
   if (leg === 1) { const u = clamp01(timer / T_C); return 1 - Math.pow(1 - u, 3); } // ballistic ease-out
@@ -202,6 +212,12 @@ export function seedVorticella(count: number, seed: number, frame: AquariumFrame
       contractTimer: seededUnit(seed, i, salt ^ 0x29ab7f15) * 1.5,
       feedInterval: drawFeedInterval(vorticellaCellSeed(anchorX), 0, 0, 1),
       eventCount: 0,
+      migrateState: 0,
+      attach: 1,
+      migrateTimer: seededUnit(seed, i, salt ^ 0x71fa9c3d) * 6, // staggered start
+      migrateInterval: drawMigrateInterval(vorticellaCellSeed(anchorX), 0),
+      migrateTargetX: anchorX,
+      migrateCount: 0,
     });
   }
   return vorticella;
@@ -255,10 +271,47 @@ export function updateVorticella(
       else if (leg === 2) { if (timer >= T_HOLD) { timer -= T_HOLD; leg = 3; } else break; }
       else { if (timer >= T_E) { timer -= T_E; leg = 0; evt += 1; interval = drawFeedInterval(cellSeed, evt, activityMix, cadence); } else break; }
     }
+
+    // --- telotroch migration (rare): a sessile zooid occasionally detaches into a
+    // free-swimming telotroch, glides to a new floor spot, and re-anchors there. ---
+    let migrateState = Math.max(0, Math.min(3, Math.floor(finiteOr(cell.migrateState, 0))));
+    let attach = clamp01(finiteOr(cell.attach, 1));
+    let migrateTimer = Math.max(0, finiteOr(cell.migrateTimer, 0));
+    let migrateInterval = Math.max(8, finiteOr(cell.migrateInterval, 30));
+    let migrateTargetX = finiteOr(cell.migrateTargetX, finite(cell.anchorX, 0));
+    let migrateCount = Math.max(0, Math.floor(finiteOr(cell.migrateCount, 0)));
+    let anchorX = finite(cell.anchorX, 0);
+    const safeWidth = Math.max(1, finite(frame.width, 0));
+    const inset2 = Math.max(8, safeWidth * 0.08);
+    if (migrateState === 0) {
+      migrateTimer += dt; // only migrate when calm (fully extended, not mid-contraction)
+      if (migrateTimer >= migrateInterval && leg === 0) {
+        migrateState = 1;
+        migrateCount += 1;
+        const u = seededUnit(cellSeed, migrateCount, 0x9e3779b1);
+        const nx = inset2 + u * (safeWidth - 2 * inset2);
+        migrateTargetX = Math.abs(nx - anchorX) >= safeWidth * 0.2 ? nx
+          : anchorX < safeWidth / 2 ? Math.min(safeWidth - inset2, anchorX + safeWidth * 0.3)
+          : Math.max(inset2, anchorX - safeWidth * 0.3);
+      }
+    } else if (migrateState === 1) {
+      attach = Math.max(0, attach - dt / MIG_DETACH);
+      if (attach <= 0) { attach = 0; migrateState = 2; }
+    } else if (migrateState === 2) {
+      const dx = migrateTargetX - anchorX;
+      const step = MIG_SWIM * dt;
+      if (Math.abs(dx) <= step) { anchorX = migrateTargetX; migrateState = 3; }
+      else anchorX += Math.sign(dx) * step;
+    } else {
+      attach = Math.min(1, attach + dt / MIG_ATTACH);
+      if (attach >= 1) { attach = 1; migrateState = 0; migrateTimer = 0; migrateInterval = drawMigrateInterval(cellSeed, migrateCount); }
+    }
+
     return {
       ...cell,
-      x: cell.anchorX,
+      x: anchorX,
       y: cell.anchorY,
+      anchorX,
       phase: cvClock,
       contractCyclePhase: cvClock,
       contractPhase: clamp01(vorticellaLegAmount(leg, timer)),
@@ -268,6 +321,12 @@ export function updateVorticella(
       eventCount: evt,
       oralWreathPhase: wrapUnit(cell.oralWreathPhase + oralHz * dt),
       swayPhase: wrapUnit(finiteOr(cell.swayPhase, 0) + Math.max(0, finiteOr(cell.swayRate, 0.12)) * swayMul * dt),
+      migrateState,
+      attach,
+      migrateTimer,
+      migrateInterval,
+      migrateTargetX,
+      migrateCount,
     };
   });
 }
@@ -300,7 +359,8 @@ export function drawVorticella(
     const baseDir = finite(cell.directionAngle, -Math.PI / 2);
     // idle sway: the slender stalk flexes gently so the zooid is alive at rest;
     // sway eases out as it contracts (the coiled spasmoneme is short and stiff).
-    const sway = 0.07 * (1 - 0.8 * s) * Math.sin(TAU * wrapUnit(finiteOr(cell.swayPhase, 0)));
+    const attach = clamp01(finiteOr(cell.attach, 1)); // 1=anchored, 0=free telotroch
+    const sway = 0.07 * (1 - 0.8 * s) * attach * Math.sin(TAU * wrapUnit(finiteOr(cell.swayPhase, 0)));
     // post-arrest recoil: a fast under-damped bell tilt right after the ballistic
     // collapse arrests (during HOLD + early re-extension), decaying to 0.
     const vleg = Math.floor(finiteOr(cell.contractLeg, 0));
@@ -318,7 +378,8 @@ export function drawVorticella(
     // --- modest bell + a longer stalk so it reads as a stalked, leggy zooid ---
     const D = clamp((8 + finite(cell.size, 1) * 4) * scale, 6, H * 0.40);
     const bellHeight = 1.35 * D;
-    const restStalk = clamp(D * 2.8, D * 1.3, H - bellHeight - 3);
+    // stalk shrinks to nothing as the zooid detaches into a free-swimming telotroch
+    const restStalk = clamp(D * 2.8, D * 1.3, H - bellHeight - 3) * attach;
 
     const geom = vorticellaGeometry(s, {
       anchorX, anchorY, restLength: restStalk, directionAngle: dir,
@@ -375,11 +436,32 @@ export function drawVorticella(
     ctx.strokeStyle = `hsla(204, 30%, 70%, ${alpha * 0.3})`;
     ctx.lineWidth = Math.max(0.3, D * 0.03);
     ctx.stroke();
-    // floor holdfast
-    ctx.beginPath();
-    ctx.arc(anchorX, anchorY, Math.max(0.8, D * 0.16), 0, TAU);
-    ctx.fillStyle = `hsla(202, 24%, 76%, ${alpha * 0.4})`;
-    ctx.fill();
+    // floor holdfast (only while anchored)
+    if (attach > 0.5) {
+      ctx.beginPath();
+      ctx.arc(anchorX, anchorY, Math.max(0.8, D * 0.16), 0, TAU);
+      ctx.fillStyle = `hsla(202, 24%, 76%, ${alpha * 0.4 * attach})`;
+      ctx.fill();
+    }
+    // telotroch: an aboral ring of locomotor cilia at the bell base while detached
+    if (attach < 0.7) {
+      const band = (1 - attach) * (1 - attach);
+      const ringR = halfW(0.06) * 1.05;
+      const M = Math.max(8, Math.round(D * 1.0));
+      const beatBase = wrapUnit(finiteOr(cell.oralWreathPhase, 0));
+      ctx.strokeStyle = `hsla(200, 22%, 86%, ${alpha * 0.5 * band})`;
+      ctx.lineWidth = Math.max(0.25, D * 0.025);
+      for (let i = 0; i < M; i++) {
+        const a = i / M;
+        const lateral = Math.cos(a * TAU) * ringR;
+        const baseP = bodyPoint(-D * 0.04, lateral);
+        const beat = Math.sin((a * 3 - beatBase) * TAU);
+        const len = D * (0.12 + 0.05 * beat);
+        const tip = { x: baseP.x - ux * len + nx * beat * D * 0.04, y: baseP.y - uy * len + ny * beat * D * 0.04 };
+        drawPolyline(ctx, [baseP, tip], false);
+        ctx.stroke();
+      }
+    }
 
     // === BELL BODY (hyaline) ===
     const SAMP = 16;
