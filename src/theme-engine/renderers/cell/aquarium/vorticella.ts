@@ -141,7 +141,7 @@ export function vorticellaGeometry(
     // term, so the projected stalk reads as crossing helical coils, not a flat sine.
     const theta = t * coilTurns * TAU;
     const wave = Math.cos(theta) * coilRadius * fill;
-    const loop = Math.sin(theta) * coilRadius * 0.4 * fill;
+    const loop = Math.sin(theta) * coilRadius * 0.85 * fill; // near-circular helix cross-section -> coils visibly overlap into a corkscrew spring
     stalkPath.push({
       x: anchorX + ux * (along + loop) + nx * wave,
       y: anchorY + uy * (along + loop) + ny * wave,
@@ -411,7 +411,7 @@ export function drawVorticella(
 
     const geom = vorticellaGeometry(s, {
       anchorX, anchorY, restLength, directionAngle: dir,
-      minLengthFrac: 0.32, coilSampleCount: 36, coilTurnsContracted: 4.5, coilRadius: D * 0.28,
+      minLengthFrac: 0.32, coilSampleCount: 40, coilTurnsContracted: 6.5, coilRadius: D * 0.4,
     });
     const neck = geom.bellCenter;           // base of the bell (top of stalk)
     const rimC = { x: neck.x + ux * bellHeight + nx * (periOff + skewAmt) * D, y: neck.y + uy * bellHeight + ny * (periOff + skewAmt) * D }; // peristome centre, off-axis + follows the body skew
@@ -440,9 +440,9 @@ export function drawVorticella(
       // CRITIC FIX (morphology F1): the widest point sits BELOW the everted rim (a convex
       // campanulate shoulder); above it the wall eases IN to a narrower rim so the
       // peristomial collar (Rrim) clearly overhangs the body margin; fuller rounded heel.
-      const um = 0.68, w0 = 0.26, wMax = 0.60, wRim = 0.50;
+      const um = 0.66, w0 = 0.16, wMax = 0.66, wRim = 0.42; // narrow scopula heel; deep convex shoulder; rim eases well IN so the collar clearly overhangs
       const base = u <= um
-        ? w0 + (wMax - w0) * Math.pow(smoothstep(u / um), 0.62) // convex bulge up to the widest shoulder
+        ? w0 + (wMax - w0) * Math.pow(smoothstep(u / um), 0.6) // convex bulge up to the widest shoulder
         : wMax - (wMax - wRim) * smoothstep((u - um) / (1 - um)); // ease IN above widest -> collar overhangs
       // everted-lip taper as a SMOOTH gate over u in [0.82,1] (math-review fix: was a
       // hard C0 -31% step at u=0.9 when contracted).
@@ -529,11 +529,11 @@ export function drawVorticella(
     // hyaline (near-colorless) cytoplasm: pale grey-blue ectoplasm at the rim, a touch
     // denser/warmer granular endoplasm toward the neck — NOT a saturated teal wash.
     const cyto = ctx.createLinearGradient(rimC.x, rimC.y, neck.x, neck.y);
-    // DARKFIELD: a homogeneous cytoplasm does NOT scatter -> the interior must read
-    // near-background-dark; only edges/granules/organelles/cilia glow. So the body fill
-    // is only a FAINT translucent haze, not a luminous-grey brightfield card.
-    cyto.addColorStop(0, `hsla(200, 16%, 86%, ${alpha * 0.12})`);
-    cyto.addColorStop(1, `hsla(202, 20%, 70%, ${alpha * 0.18})`);
+    // DARKFIELD (real micrograph): Vorticella's endoplasm is DENSELY GRANULAR -> it
+    // scatters strongly -> the whole zooid GLOWS cool blue-white edge-to-edge (NOT a black
+    // hollow shell). The body fill is a luminous cool glow; granules add bright texture.
+    cyto.addColorStop(0, `hsla(198, 18%, 90%, ${alpha * 0.34})`);
+    cyto.addColorStop(1, `hsla(200, 22%, 76%, ${alpha * 0.46})`);
     ctx.fillStyle = cyto;
     ctx.fill();
     // granular endoplasm + soft DIC-style relief, CLIPPED to the bell, so the body reads
@@ -544,7 +544,7 @@ export function drawVorticella(
     // (DIC shaded-relief pass removed: darkfield has no oblique light/shadow modeling.)
     // refractile granule stipple (seeded from a birth-stable field, dt-free -> byte-stable)
     const gSeed = (Math.round(finite(cell.restLength, 10) * 8192) ^ 0x6e3a) >>> 0;
-    const gCount = Math.round(clamp(D * 4.0, 30, 120)); // dense foamy endoplasm, edge-to-edge
+    const gCount = Math.round(clamp(D * 5.0, 44, 150)); // dense granule-packed endoplasm -> glows edge-to-edge
     for (let k = 0; k < gCount; k++) {
       // density biased toward the posterior base (oil-droplet pooling); higher contrast
       // CYCLOSIS: granules shear slowly on the same wall-tangent gyre (slower than the
@@ -559,8 +559,8 @@ export function drawVorticella(
       ctx.beginPath();
       ctx.arc(gp.x, gp.y, gr, 0, TAU);
       ctx.fillStyle = seededUnit(gSeed, k, 0x9d11ef) > 0.5
-        ? `hsla(48, 16%, 95%, ${alpha * 0.22})`   // bright refractile scatter
-        : `hsla(200, 14%, 70%, ${alpha * 0.14})`; // dimmer scatter (NOT a dark brightfield speck)
+        ? `hsla(196, 18%, 96%, ${alpha * 0.30})`   // bright cool refractile scatter
+        : `hsla(200, 16%, 82%, ${alpha * 0.20})`;  // mid cool scatter (still luminous, never dark)
       ctx.fill();
     }
     // second, FINER micro-grain layer filling between the coarse granules so the
@@ -576,8 +576,8 @@ export function drawVorticella(
       ctx.beginPath();
       ctx.arc(fp.x, fp.y, 0.3 + seededUnit(gSeed, k, 0x6b1d2f) * 0.4, 0, TAU);
       ctx.fillStyle = seededUnit(gSeed, k, 0x9911cd) > 0.5
-        ? `hsla(46, 14%, 92%, ${alpha * 0.13})`
-        : `hsla(200, 12%, 72%, ${alpha * 0.10})`;
+        ? `hsla(196, 16%, 95%, ${alpha * 0.16})`
+        : `hsla(200, 14%, 80%, ${alpha * 0.13})`;
       ctx.fill();
     }
     // (dark basal pooling removed: darkfield has no absorbing dark masses; dense regions
@@ -615,7 +615,7 @@ export function drawVorticella(
     ctx.lineWidth = Math.max(1.6, D * 0.24);
     ctx.stroke();
     drawPolyline(ctx, macPts, false);
-    ctx.strokeStyle = `hsla(40, 16%, 50%, ${alpha * 0.6})`;
+    ctx.strokeStyle = `hsla(200, 12%, 66%, ${alpha * 0.42})`; // cool neutral band seen THROUGH the glow, not a warm stained logo
     ctx.lineWidth = Math.max(1.0, D * 0.12);
     ctx.stroke();
     // micronucleus: a tiny dot docked against the OUTER edge of one nuclear arm
@@ -623,7 +623,7 @@ export function drawVorticella(
       const mic = bodyPoint(macAlong - macR * 0.9, macR * 0.5);
       ctx.beginPath();
       ctx.arc(mic.x, mic.y, Math.max(0.4, D * 0.045), 0, TAU);
-      ctx.fillStyle = `hsla(40, 16%, 50%, ${alpha * 0.5})`;
+      ctx.fillStyle = `hsla(200, 12%, 66%, ${alpha * 0.46})`;
       ctx.fill();
     }
 
@@ -647,15 +647,15 @@ export function drawVorticella(
       const cg = ctx.createRadialGradient(cgx, cgy, cvR * 0.1, cv.x, cv.y, cvR * 1.12);
       cg.addColorStop(0, `hsla(200, 14%, 98%, ${alpha * 0.34})`);
       cg.addColorStop(0.7, `hsla(200, 12%, 93%, ${alpha * 0.2})`);
-      cg.addColorStop(0.88, `hsla(205, 26%, 56%, ${alpha * 0.5})`);
-      cg.addColorStop(1, `hsla(205, 26%, 48%, 0)`);
+      cg.addColorStop(0.88, `hsla(196, 26%, 95%, ${alpha * 0.5})`); // bright cool scattering rim (darkfield), not a dark Becke ring
+      cg.addColorStop(1, `hsla(196, 30%, 96%, 0)`);
       ctx.beginPath();
       ctx.arc(cv.x, cv.y, cvR * 1.12, 0, TAU);
       ctx.fillStyle = cg;
       ctx.fill();
       ctx.beginPath();
       ctx.arc(cgx, cgy, Math.max(0.4, cvR * 0.3), 0, TAU);
-      ctx.fillStyle = `hsla(0, 0%, 100%, ${alpha * 0.85})`;
+      ctx.fillStyle = `hsla(196, 20%, 96%, ${alpha * 0.4})`; // faint cool scatter, not a pure-white CG specular hotspot
       ctx.fill();
     }
 
@@ -682,26 +682,17 @@ export function drawVorticella(
         const fr = Math.max(0.7, D * (0.028 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.075)); // wide size spread
         // refractile ingested-prey sphere: lit cap -> body -> dark Becke rim -> feather,
         // + specular (radial gradient = a 3-D bead, not a flat polka-dot with a hard ring).
-        const warm = j === 0;
-        // per-vacuole highlight DIRECTION jitter (around the base upper-left) so they
-        // don't all share one identical rendered light cap.
-        const hj = (seededUnit(fvSeed, j, 0x5c1d2b) - 0.5) * 1.7;
-        const rn = 0.4 * (Math.sin(hj) - Math.cos(hj));
-        const ru = -0.4 * (Math.sin(hj) + Math.cos(hj));
-        const fgx = fv.x + nx * rn * fr + ux * ru * fr, fgy = fv.y + ny * rn * fr + uy * ru * fr;
-        const fg = ctx.createRadialGradient(fgx, fgy, fr * 0.1, fv.x, fv.y, fr * 1.12);
-        fg.addColorStop(0, warm ? `hsla(42, 24%, 82%, ${alpha * 0.22})` : `hsla(44, 14%, 82%, ${alpha * 0.20})`);
-        fg.addColorStop(0.5, warm ? `hsla(40, 26%, 70%, ${alpha * 0.28})` : `hsla(42, 16%, 70%, ${alpha * 0.24})`);
-        // darkfield refractile bead: a BRIGHT scattering halo at the rim, not a dark Becke line
-        fg.addColorStop(0.82, `hsla(44, 40%, 86%, ${alpha * 0.5})`);
-        fg.addColorStop(1, `hsla(48, 50%, 92%, 0)`);
+        const warm = j === 0; // reserve a faint warm tint for one ingested-prey vacuole
+        // DARKFIELD refractile vacuole = a bright cool scattering ANNULUS (bright rim, dim
+        // centre), NOT a CG glass marble with a directional specular cap.
+        const fg = ctx.createRadialGradient(fv.x, fv.y, fr * 0.1, fv.x, fv.y, fr * 1.12);
+        fg.addColorStop(0, `hsla(200, 14%, 80%, ${alpha * 0.14})`);
+        fg.addColorStop(0.55, `hsla(198, 16%, 86%, ${alpha * 0.2})`);
+        fg.addColorStop(0.84, warm ? `hsla(42, 26%, 92%, ${alpha * 0.46})` : `hsla(196, 24%, 96%, ${alpha * 0.52})`);
+        fg.addColorStop(1, `hsla(196, 30%, 96%, 0)`);
         ctx.beginPath();
         ctx.arc(fv.x, fv.y, fr * 1.12, 0, TAU);
         ctx.fillStyle = fg;
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(fgx, fgy, Math.max(0.3, fr * 0.26), 0, TAU);
-        ctx.fillStyle = `hsla(44, 26%, 94%, ${alpha * 0.18})`;
         ctx.fill();
       }
     }
@@ -786,12 +777,12 @@ export function drawVorticella(
         bandPts.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline(ctx, bandPts, true);
-      ctx.strokeStyle = `hsla(46, 14%, 86%, ${alpha * 0.16 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 16%, 93%, ${alpha * 0.26 * crownFade})`;
       ctx.lineWidth = Math.max(1.0, D * 0.11);
       ctx.stroke();
       // fine, faint individual cilia splayed OUTWARD over the everted lip (not a vertical comb)
       const M = Math.max(8, Math.round(D * 0.7));
-      ctx.strokeStyle = `hsla(46, 14%, 86%, ${alpha * 0.2 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 16%, 93%, ${alpha * 0.30 * crownFade})`;
       ctx.lineWidth = Math.max(0.5, D * 0.018);
       const cilS = (Math.round(finite(cell.restLength, 10) * 2048) ^ 0x51a3) >>> 0;
       for (let i = 0; i < M; i++) {
