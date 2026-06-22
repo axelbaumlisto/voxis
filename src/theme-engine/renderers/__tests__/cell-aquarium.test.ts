@@ -193,18 +193,18 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0.5)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass: 6 rimmed food
       // vacuoles + bigger CV + taller bell (bellHeight 1.45D, restStalk 3.1D) change ops/hash.
-      hash: "a89d0404112e8778",
-      opCount: 1276,
+      hash: "e0eeaf7cc8b205da",
+      opCount: 1473,
       counts: {
-        beginPath: 194,
-        moveTo: 87,
-        lineTo: 671,
-        closePath: 11,
-        fill: 113,
+        beginPath: 243,
+        moveTo: 89,
+        lineTo: 719,
+        closePath: 13,
+        fill: 162,
         stroke: 84,
         save: 4,
-        ellipse: 8,
-        arc: 99,
+        ellipse: 6,
+        arc: 148,
         restore: 4,
         clip: 1,
       },
@@ -215,18 +215,18 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass (6 rimmed food
       // vacuoles + bigger CV + taller bell change ops/hash).
-      hash: "01e1e58d1e48ea19",
-      opCount: 1160,
+      hash: "014f9e623cf7791e",
+      opCount: 1357,
       counts: {
-        beginPath: 165,
-        moveTo: 58,
-        lineTo: 642,
-        closePath: 11,
-        fill: 113,
+        beginPath: 214,
+        moveTo: 60,
+        lineTo: 690,
+        closePath: 13,
+        fill: 162,
         stroke: 55,
         save: 4,
-        ellipse: 8,
-        arc: 99,
+        ellipse: 6,
+        arc: 148,
         restore: 4,
         clip: 1,
       },
@@ -1854,7 +1854,7 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(ctx.clip).toHaveBeenCalled();
     expect(ctx.fill).toHaveBeenCalled();
     expect(ctx.stroke).toHaveBeenCalled();
-    expect(ctx.ellipse).toHaveBeenCalled();
+    // (vorticella's lip/disc are now amorphous polylines, not ctx.ellipse)
     expect(ctx.arc).toHaveBeenCalled();
     // near-colorless HYALINE cytoplasm (low-saturation grey-blue, hue ~200) + a faint
     // warm granular endoplasm/food (hue ~34-46) — realistic microscopy look, not teal cartoon
