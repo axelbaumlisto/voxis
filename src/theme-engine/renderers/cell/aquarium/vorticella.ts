@@ -64,7 +64,9 @@ function vorticellaBellMetrics(cell: VorticellaState, scale: number, H: number):
   const bellHeight = 1.45 * D;
   // longer stalk + headroom reserved for the upward crown cilia (~D*0.34 above the
   // rim) so the zooid fills the frame and the crown never clips the top edge.
-  const restStalk = clamp(D * 3.1, D * 1.3, Hc - bellHeight - Math.max(10, D * 0.34));
+  // Math-review fix: cap with min() (no D*1.3 floor) so the clamp can never INVERT
+  // (lower>upper) at large D and silently defeat the headroom -> crown would clip.
+  const restStalk = Math.max(0, Math.min(D * 3.7, Hc - bellHeight - Math.max(10, D * 0.34)));
   return { D, bellHeight, restStalk };
 }
 
@@ -82,7 +84,9 @@ function drawMigrateInterval(cellSeed: number, migrateCount: number): number {
 function vorticellaLegAmount(leg: number, timer: number): number {
   if (leg === 1) { const u = clamp01(timer / T_C); return 1 - Math.pow(1 - u, 3); } // ballistic ease-out
   if (leg === 2) return 1;                                                          // hold
-  if (leg === 3) { const u = clamp01(timer / T_E); return Math.exp(-Math.pow(u * 1.9, 1.4)); } // stretched-exp
+  // stretched-exp, normalized so the tail reaches EXACTLY 0 at u=1 (was 0.086 -> a
+  // per-cycle pop as it snapped to the leg-0 value 0). e0 = exp(-1.9^1.4).
+  if (leg === 3) { const u = clamp01(timer / T_E); const e0 = Math.exp(-Math.pow(1.9, 1.4)); return (Math.exp(-Math.pow(u * 1.9, 1.4)) - e0) / (1 - e0); }
   return 0;                                                                          // extended / feeding
 }
 
@@ -128,7 +132,10 @@ export function vorticellaGeometry(
     const t = i / (sampleCount - 1);
     const along = stalkLength * t;
     // coil bunches toward the bell end (nucleation front spreads from the zooid)
-    const fill = smoothstep(t);
+    // bunch the coil toward the bell end BUT taper the amplitude back to 0 at the very
+    // tip (t=1) so the stalk endpoint coincides with the on-axis bellCenter (math-review
+    // fix: was leaving a lateral gap up to ~0.2D between stalk tip and bell base).
+    const fill = smoothstep(t) * (1 - smoothstep((t - 0.85) / 0.15));
     const wave = Math.sin(t * coilTurns * TAU) * coilRadius * fill;
     stalkPath.push({
       x: anchorX + ux * along + nx * wave,
@@ -369,8 +376,10 @@ export function drawVorticella(
     const vleg = Math.floor(finiteOr(cell.contractLeg, 0));
     const arrestT = vleg === 2 ? Math.max(0, finiteOr(cell.contractTimer, 0))
       : vleg === 3 ? T_HOLD + Math.max(0, finiteOr(cell.contractTimer, 0)) : -1;
+    // damped recoil: zero-start envelope (sin, not cos) so the bell tilt begins at 0
+    // displacement with peak velocity (math-review fix: cos jumped to 0.10rad instantly).
     const wobble = arrestT >= 0 && arrestT < 0.7
-      ? 0.10 * Math.exp(-0.45 * TAU * 6 * arrestT) * Math.cos(TAU * 6 * 0.8932 * arrestT)
+      ? 0.10 * Math.exp(-0.45 * TAU * 6 * arrestT) * Math.sin(TAU * 6 * 0.8932 * arrestT)
       : 0;
     const dir = baseDir + sway + wobble;
     const ux = Math.cos(dir), uy = Math.sin(dir);
@@ -404,11 +413,14 @@ export function drawVorticella(
     // campanulate bell: FULL neck (not a needle), convex bulging shoulders,
     // widest just below the everted lip, easing in slightly to the rim.
     const halfW = (u: number): number => {
-      const um = 0.82, w0 = 0.24, wMax = 0.54, wRim = 0.54; // ~2.25x flare; everted lip is the widest
+      const um = 0.82, w0 = 0.30, wMax = 0.54, wRim = 0.54; // fuller (campanulate) shoulders; everted lip widest
       const base = u <= um
         ? w0 + (wMax - w0) * Math.pow(smoothstep(u / um), 0.72) // convex shoulders
         : wMax + (wRim - wMax) * smoothstep((u - um) / (1 - um));
-      return D * base * (u > 0.9 ? 0.55 + 0.45 * open : 1);
+      // everted-lip taper as a SMOOTH gate over u in [0.82,1] (math-review fix: was a
+      // hard C0 -31% step at u=0.9 when contracted).
+      const lipGate = 1 - (1 - (0.55 + 0.45 * open)) * smoothstep((u - 0.82) / 0.18);
+      return D * base * lipGate;
     };
 
     // === STALK (spasmoneme) — straight at rest, tight HELIX when contracted ===
@@ -518,11 +530,15 @@ export function drawVorticella(
     // contractile vacuole: a crisp refractile clear bubble (pale fill + brighter rim +
     // a small specular highlight), pulsing on its slow rhythm, off-axis in the upper body.
     if (D >= 10) {
-      const cvPulse = 0.5 - 0.5 * Math.cos(TAU * wrapUnit(finite(cell.contractCyclePhase, 0) * 0.5));
+      // CV cycle = the cell's CV clock period (~9-16s, within the real several-second
+      // range), ASYMMETRIC: slow diastole fill (~82% of cycle) then fast systole empty
+      // (~18%). (Was a symmetric cosine at DOUBLE the period = far too slow/static.)
+      const cvPhase = wrapUnit(finite(cell.contractCyclePhase, 0));
+      const cvPulse = cvPhase < 0.82 ? smoothstep(cvPhase / 0.82) : 1 - smoothstep((cvPhase - 0.82) / 0.18);
       // beside the vestibule (oral pole), on the side CLEAR of the macronucleus C so
-      // the refractile bubble is not occluded; visibly fills (diastole) then empties.
+      // the refractile bubble is not occluded; visibly fills then collapses at systole.
       const cv = bodyPoint(bellHeight * 0.70, -D * 0.24);
-      const cvR = Math.max(1.2, D * (0.07 + 0.10 * cvPulse));
+      const cvR = Math.max(0.8, D * (0.03 + 0.15 * cvPulse));
       ctx.beginPath();
       ctx.arc(cv.x, cv.y, cvR, 0, TAU);
       ctx.fillStyle = `hsla(186, 30%, 94%, ${alpha * 0.4})`;
@@ -545,11 +561,12 @@ export function drawVorticella(
       const fvSeed = (Math.round(finite(cell.restLength, 10) * 4096) ^ 0x9e37) >>> 0;
       const fvCount = 6;
       for (let j = 0; j < fvCount; j++) {
-        // lower-mid granular endoplasm, clear of the macronucleus band; mixed sizes
-        const u = 0.22 + seededUnit(fvSeed, j, 0x51bd0e77) * 0.30;
-        const lat = (seededUnit(fvSeed, j, 0x2cd9a14b) - 0.5) * 1.25 * halfW(u);
+        // spread across the lower-mid granular endoplasm so they read as DISCRETE
+        // spheres (not a clump): wide axial range, tighter lateral, smaller radii.
+        const u = 0.18 + seededUnit(fvSeed, j, 0x51bd0e77) * 0.44;
+        const lat = (seededUnit(fvSeed, j, 0x2cd9a14b) - 0.5) * 0.95 * halfW(u);
         const fv = bodyPoint(bellHeight * u, lat);
-        const fr = Math.max(0.8, D * (0.06 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.06));
+        const fr = Math.max(0.8, D * (0.045 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.05));
         ctx.beginPath();
         ctx.arc(fv.x, fv.y, fr, 0, TAU);
         // ingested prey vary: mostly grey-brown food vacuoles, an occasional algal-green one
@@ -577,6 +594,12 @@ export function drawVorticella(
     ctx.strokeStyle = `hsla(186, 50%, 90%, ${alpha * 0.55 * open})`;
     ctx.lineWidth = Math.max(0.75, D * 0.05);
     ctx.stroke();
+    // convex peristomial disc capping the bell mouth (a slightly domed translucent
+    // surface, NOT an open hollow cup) — the AZM/oral wreath ring its margin.
+    ctx.beginPath();
+    ctx.ellipse(rimC.x, rimC.y, Rrim * 0.9, lipRy * 0.9, dir + Math.PI / 2, 0, TAU);
+    ctx.fillStyle = `hsla(188, 38%, 80%, ${alpha * 0.30 * open})`;
+    ctx.fill();
 
     // adoral zone of membranelles (AZM): a CCW spiral on the peristomal disc
     // funnelling to the cytostome — the feeding vortex.

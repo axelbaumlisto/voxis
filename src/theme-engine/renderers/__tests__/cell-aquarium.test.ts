@@ -193,17 +193,17 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0.5)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass: 6 rimmed food
       // vacuoles + bigger CV + taller bell (bellHeight 1.45D, restStalk 3.1D) change ops/hash.
-      hash: "d4ac5e86103fb24c",
-      opCount: 750,
+      hash: "211fe465dbf092e5",
+      opCount: 753,
       counts: {
-        beginPath: 114,
+        beginPath: 115,
         moveTo: 87,
         lineTo: 391,
         closePath: 5,
-        fill: 25,
+        fill: 26,
         stroke: 95,
         save: 3,
-        ellipse: 7,
+        ellipse: 8,
         arc: 20,
         restore: 3,
       },
@@ -214,17 +214,17 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass (6 rimmed food
       // vacuoles + bigger CV + taller bell change ops/hash).
-      hash: "e89fe3a9881173d0",
-      opCount: 634,
+      hash: "7b0e694537c59caf",
+      opCount: 637,
       counts: {
-        beginPath: 85,
+        beginPath: 86,
         moveTo: 58,
         lineTo: 362,
         closePath: 5,
-        fill: 25,
+        fill: 26,
         stroke: 66,
         save: 3,
-        ellipse: 7,
+        ellipse: 8,
         arc: 20,
         restore: 3,
       },
