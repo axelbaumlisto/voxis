@@ -193,18 +193,18 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0.5)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass: 6 rimmed food
       // vacuoles + bigger CV + taller bell (bellHeight 1.45D, restStalk 3.1D) change ops/hash.
-      hash: "9065a5f1f2ffffc8",
-      opCount: 1524,
+      hash: "ad274788884b9b0d",
+      opCount: 1494,
       counts: {
-        beginPath: 244,
+        beginPath: 234,
         moveTo: 90,
         lineTo: 764,
         closePath: 14,
-        fill: 162,
+        fill: 152,
         stroke: 84,
         save: 5,
         ellipse: 6,
-        arc: 148,
+        arc: 138,
         restore: 5,
         clip: 2,
       },
@@ -215,18 +215,18 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass (6 rimmed food
       // vacuoles + bigger CV + taller bell change ops/hash).
-      hash: "266f8d9578b13014",
-      opCount: 1408,
+      hash: "023a88aff036dfe3",
+      opCount: 1378,
       counts: {
-        beginPath: 215,
+        beginPath: 205,
         moveTo: 61,
         lineTo: 735,
         closePath: 14,
-        fill: 162,
+        fill: 152,
         stroke: 55,
         save: 5,
         ellipse: 6,
-        arc: 148,
+        arc: 138,
         restore: 5,
         clip: 2,
       },
@@ -770,7 +770,7 @@ describe("aquarium layer Phase 2 diatoms", () => {
           restLength: 8.697909643291496,
           contractPhase: 0,
           contractCyclePhase: 0.4531427220983897,
-          oralWreathPhase: 0.42228521409071984,
+          oralWreathPhase: 0.3982852140907198,
           contractRate: 0.10650784630794077,
           oralRate: 0.5634912510495633,
           swayPhase: 0.9713883993529016,

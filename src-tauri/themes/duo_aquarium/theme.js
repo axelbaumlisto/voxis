@@ -2656,8 +2656,8 @@ var VC_RELAX = 0.33;
 var T_C = 0.08;
 var T_HOLD = 0.05;
 var T_E = 2.6;
-function drawFeedInterval(cellSeed, eventCount, activityMix, cadence) {
-  const mean = (9 - 6 * clamp01(activityMix)) / Math.max(0.2, cadence);
+function drawFeedInterval(cellSeed, eventCount, _activityMix, cadence) {
+  const mean = 12 / Math.max(0.2, cadence);
   const u = Math.max(0.0001, seededUnit(cellSeed, eventCount, 1371344503));
   return clamp(-Math.log(u) * mean, 2.5, 18);
 }
@@ -2813,13 +2813,10 @@ function updateVorticella(vorticella, frame, view) {
   const dt = Math.max(0, finite(frame.dt, 0));
   const activityMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
   const idleRate = Math.max(0, finite(view.vorticella.contractRate, 0));
-  const activeRate = Math.max(0, finite(view.vorticella.contractRateActive, idleRate));
-  const rate = idleRate + (activeRate - idleRate) * activityMix;
-  const modeMul = frame.mode === "recording" ? 1.18 : frame.mode === "transcribing" ? 0.35 : frame.mode === "error" ? 0.15 : 1;
-  const startleBoost = 1 + Math.min(0.35, Math.max(0, finite(frame.startle, 0)) * 0.35);
-  const cadence = Math.max(0.2, Math.min(3.5, rate * modeMul * startleBoost));
-  const oralHz = Math.min(6, (frame.mode === "error" ? 3 : frame.mode === "transcribing" ? 4 : 5) * (1 + activityMix * 0.2));
-  const swayMul = frame.mode === "error" ? 0.3 : frame.mode === "transcribing" ? 0.6 : 1;
+  const rate = idleRate;
+  const cadence = Math.max(0.2, Math.min(3.5, rate));
+  const oralHz = 5;
+  const swayMul = 1;
   return vorticella.map((cell, idx) => {
     const cvClock = wrapUnit(finite(cell.contractCyclePhase, 0) + Math.max(0, finite(cell.contractRate, 0)) * dt);
     const cellSeed = vorticellaCellSeed(finite(cell.anchorX, 0));
@@ -2963,7 +2960,6 @@ function drawVorticella(ctx, vorticella, frame, view) {
     const arrestT = vleg === 2 ? Math.max(0, finiteOr(cell.contractTimer, 0)) : vleg === 3 ? T_HOLD + Math.max(0, finiteOr(cell.contractTimer, 0)) : -1;
     const wobble = arrestT >= 0 && arrestT < 0.7 ? 0.1 * Math.exp(-0.45 * TAU2 * 6 * arrestT) * Math.sin(TAU2 * 6 * 0.8932 * arrestT) : 0;
     const tt = finite(frame.t, 0);
-    const actMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
     const aSeed = (Math.round(finite(cell.restLength, 10) * 1024) ^ 3862981) >>> 0;
     const asymA = (seededUnit(aSeed, 0, 17) - 0.5) * 0.24;
     const skewAmt = (seededUnit(aSeed, 7, 136) - 0.5) * 0.55;
@@ -3006,7 +3002,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
       const um = 0.85, w0 = 0.2, wMax = 0.58, wRim = 0.58;
       const base = u <= um ? w0 + (wMax - w0) * Math.pow(smoothstep2(u / um), 0.58) : wMax + (wRim - wMax) * smoothstep2((u - um) / (1 - um));
       const lipGate = 1 - (1 - (0.55 + 0.45 * open)) * smoothstep2((u - 0.82) / 0.18);
-      return D * base * lipGate;
+      return D * base * lipGate * (1 + 0.45 * s);
     };
     drawPolyline3(ctx, geom.stalkPath, false);
     ctx.strokeStyle = `hsla(202, 26%, 80%, ${alpha * 0.34})`;
@@ -3070,8 +3066,8 @@ function drawVorticella(ctx, vorticella, frame, view) {
     const outline = [...left, ...right.reverse()];
     drawPolyline3(ctx, outline, true);
     const cyto = ctx.createLinearGradient(rimC.x, rimC.y, neck.x, neck.y);
-    cyto.addColorStop(0, `hsla(205, 12%, 82%, ${alpha * 0.3})`);
-    cyto.addColorStop(1, `hsla(205, 16%, 64%, ${alpha * 0.5})`);
+    cyto.addColorStop(0, `hsla(200, 14%, 87%, ${alpha * 0.34})`);
+    cyto.addColorStop(1, `hsla(202, 18%, 72%, ${alpha * 0.5})`);
     ctx.fillStyle = cyto;
     ctx.fill();
     ctx.save();
@@ -3089,7 +3085,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
     for (let k = 0;k < gCount; k++) {
       const gphi = seededUnit(gSeed, k, 4005751) * TAU2;
       const gamp = 0.18 + 0.7 * Math.sqrt(seededUnit(gSeed, k, 1784445));
-      const gph = TAU2 / 130 * tt * 0.7 + gphi;
+      const gph = TAU2 / 46 * tt + gphi + 0.5 * noise2D2(gSeed, gphi * 3.3 + k, tt * 0.045);
       const gu = 0.5 + 0.44 * gamp * Math.sin(gph);
       const glat = gamp * Math.cos(gph) * 0.72 * halfW(gu) * breathMod(gu);
       const gp = bodyPoint(bellHeight * gu, glat);
@@ -3103,7 +3099,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
     for (let k = 0;k < gCount2; k++) {
       const p2 = seededUnit(gSeed, k, 5614139) * TAU2;
       const a2 = 0.12 + 0.78 * Math.sqrt(seededUnit(gSeed, k, 2916241));
-      const ph2 = TAU2 / 150 * tt * 0.5 + p2;
+      const ph2 = TAU2 / 60 * tt + p2 + 0.4 * noise2D2(gSeed, p2 * 2.7 + k, tt * 0.04);
       const u2 = 0.5 + 0.46 * a2 * Math.sin(ph2);
       const l2 = a2 * Math.cos(ph2) * 0.72 * halfW(u2) * breathMod(u2);
       const fp = bodyPoint(bellHeight * u2, l2);
@@ -3114,7 +3110,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
     }
     const baseHeel = bodyPoint(bellHeight * 0.14, 0);
     const basal = ctx.createRadialGradient(baseHeel.x, baseHeel.y, 1, baseHeel.x, baseHeel.y, bellHeight * 0.5);
-    basal.addColorStop(0, `hsla(208, 18%, 42%, ${alpha * 0.3})`);
+    basal.addColorStop(0, `hsla(208, 18%, 46%, ${alpha * 0.14})`);
     basal.addColorStop(1, `hsla(208, 18%, 42%, 0)`);
     ctx.fillStyle = basal;
     drawPolyline3(ctx, outline, true);
@@ -3177,12 +3173,12 @@ function drawVorticella(ctx, vorticella, frame, view) {
     }
     if (D >= 12) {
       const fvSeed = (Math.round(finite(cell.restLength, 10) * 4096) ^ 40503) >>> 0;
-      const fvCount = 13;
+      const fvCount = 8;
       for (let j = 0;j < fvCount; j++) {
-        const cycT = Math.max(20, 95 + seededUnit(fvSeed, j, 5047) * 60 - 30 * actMix);
+        const cycT = 34 + seededUnit(fvSeed, j, 5047) * 14;
         const phi0 = seededUnit(fvSeed, j, 1371344503) * TAU2;
         const amp = 0.28 + 0.6 * Math.sqrt(seededUnit(fvSeed, j, 752460107));
-        const ph = TAU2 / cycT * tt + phi0;
+        const ph = TAU2 / cycT * tt + phi0 + 0.6 * noise2D2(fvSeed, phi0 * 5.1 + j, tt * 0.05);
         const u = 0.5 + 0.42 * amp * Math.sin(ph);
         const lat = amp * Math.cos(ph) * 0.72 * halfW(u) * breathMod(u);
         const fv = bodyPoint(bellHeight * u, lat);
@@ -3193,7 +3189,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
         const ru = -0.4 * (Math.sin(hj) + Math.cos(hj));
         const fgx = fv.x + nx * rn * fr + ux * ru * fr, fgy = fv.y + ny * rn * fr + uy * ru * fr;
         const fg = ctx.createRadialGradient(fgx, fgy, fr * 0.1, fv.x, fv.y, fr * 1.12);
-        fg.addColorStop(0, warm ? `hsla(40, 34%, 74%, ${alpha * 0.55})` : `hsla(40, 18%, 72%, ${alpha * 0.5})`);
+        fg.addColorStop(0, warm ? `hsla(40, 28%, 76%, ${alpha * 0.46})` : `hsla(42, 14%, 76%, ${alpha * 0.42})`);
         fg.addColorStop(0.5, warm ? `hsla(32, 32%, 50%, ${alpha * 0.56})` : `hsla(34, 15%, 52%, ${alpha * 0.5})`);
         fg.addColorStop(0.84, `hsla(28, 22%, 42%, ${alpha * 0.42})`);
         fg.addColorStop(1, `hsla(26, 28%, 30%, 0)`);
