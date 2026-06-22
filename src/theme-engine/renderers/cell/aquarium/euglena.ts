@@ -411,27 +411,44 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
       turnProgress: 2,
       turnFrom: heading,
       turnTo: heading,
+      startle: 0,
     });
   }
   return euglena;
 }
 
 /**
- * Priority-weighted steering behaviour for the euglena. Each weight is the
- * PRIORITY of that behaviour; the heading eases toward the weighted sum of the
- * behaviours' direction vectors. Tune these to manage behaviour:
- *  - forward: momentum / minimal-reverse bias (keeps the current heading so the
- *    cell turns the short way and rarely flips backward).
- *  - wall:    avoid the impassable tank walls — highest priority.
- *  - hero:    avoid the hero (paramecium); set NEGATIVE to PURSUE/chase it.
- * More behaviours (other organisms, food, light) can be added as extra
- * weighted vectors in the same accumulator.
+ * Priority-weighted steering + interaction model for the euglena. Each weight
+ * is the PRIORITY of a behaviour; the heading eases toward the weighted sum of
+ * the behaviours' direction vectors. Tune these to manage behaviour:
+ *  - forward:   momentum / minimal-reverse bias (turns the short way, rarely flips back).
+ *  - wall:      avoid the impassable tank walls — highest priority.
+ *  - hero:      constant bias toward the hero (>0 keep clear / AVOID, <0 PURSUE/chase).
+ *  - curiosity: approach-then-retreat SPRING toward a preferred standoff distance
+ *               (>0 makes it orbit/investigate the hero; 0 disables the spring).
+ *  - wake:      hydrodynamic drafting — advection (px/s) along the hero's heading
+ *               when the euglena sits in its wake (the two "swim together").
+ *  - startleAway/startleDart: extra away-steer / speed burst while startled.
+ *
+ * Behaviour recipes: pure AVOID = {hero:+, curiosity:0}; pure PURSUE = {hero:negative,
+ * curiosity:0}; INVESTIGATE/orbit = {hero:small+, curiosity:+}.
  */
 export const EUGLENA_STEER = {
   forward: 1.0,
   wall: 2.0,
-  hero: 1.2,
+  hero: 0.35,
+  curiosity: 1.1,
+  wake: 16,
+  startleAway: 3.0,
+  startleDart: 1.6,
 };
+
+// Interaction geometry/timing (q = sqrt(heroQd): normalized elliptical distance,
+// q=1 on the exclusion boundary).
+const HERO_STANDOFF = 1.30;        // preferred hover distance just outside the exclusion
+const HERO_INTEREST_RANGE = 2.2;   // beyond this q the hero is ignored
+const STARTLE_TRIGGER_Q = 1.12;    // contact this close -> startle dart
+const STARTLE_TAU = 0.6;           // s; escape decay time-constant
 
 export function updateEuglena(
   euglena: readonly EuglenaState[],
@@ -480,12 +497,29 @@ export function updateEuglena(
       const py = -dx * heroParams.sphi + dy * heroParams.cphi;
       heroQd = (px * px) / (A * A) + (py * py) / (B * B);
     }
+    const heroQ = Math.sqrt(Math.max(0, heroQd)); // normalized elliptical distance (1 = boundary)
 
-    // === priority-weighted steering (tunable behaviour arbitration) ===
-    // Every behaviour adds a world-space direction vector scaled by its weight
-    // (= priority). `forward` carries the current heading so the cell turns the
-    // SHORT way and minimizes reversing; walls win over the hero; a negative
-    // hero weight would make it PURSUE the hero instead of avoiding.
+    // away-from-hero unit vector + interest level (slow hunger<->satiety cycle)
+    let ax = 0, ay = 0;
+    if (heroParams) {
+      const dxh = px0 - heroParams.hx, dyh = py0 - heroParams.hy;
+      const dh = Math.hypot(dxh, dyh) || 1e-6;
+      ax = dxh / dh;
+      ay = dyh / dh;
+    }
+    const interest = 0.55 + 0.45 * Math.sin(TAU * wrapUnit(finiteOr(cell.burstPhase, 0)) + 1.3);
+
+    // startle: brief escape state, triggered by very close contact or an app
+    // startle pulse, decaying exponentially (frame-rate exact).
+    let startle = clamp01(finiteOr(cell.startle, 0));
+    if (heroParams && heroQ > 1e-4 && heroQ < STARTLE_TRIGGER_Q) startle = 1;
+    if (finite(frame.startle, 0) > 0.5) startle = 1;
+
+    // === priority-weighted steering (tunable interaction arbitration) ===
+    // Every behaviour adds a world-space direction vector scaled by its weight.
+    // `forward` carries the current heading (short-way turns, minimal reverse);
+    // walls win over the hero; the hero term blends a constant bias with an
+    // approach-then-retreat spring (curiosity) and a startle escape.
     {
       let sx = ux * EUGLENA_STEER.forward;
       let sy = uy * EUGLENA_STEER.forward;
@@ -494,15 +528,16 @@ export function updateEuglena(
       if (safeWidth - px0 < look) sx -= (1 - (safeWidth - px0) / look) * EUGLENA_STEER.wall;
       if (py0 < look) sy += (1 - py0 / look) * EUGLENA_STEER.wall;
       if (safeHeight - py0 < look) sy -= (1 - (safeHeight - py0) / look) * EUGLENA_STEER.wall;
-      if (heroParams && heroQd < 1.69 && heroQd > 1e-9) {
-        const dxh = px0 - heroParams.hx;
-        const dyh = py0 - heroParams.hy;
-        const dh = Math.hypot(dxh, dyh) || 1e-6;
-        const prox = Math.min(1, (1.69 - heroQd) / 0.69);
-        sx += (dxh / dh) * EUGLENA_STEER.hero * prox; // >0 steer away (avoid); <0 steer toward (pursue)
-        sy += (dyh / dh) * EUGLENA_STEER.hero * prox;
+      if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 1e-4) {
+        const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
+        // radial weight: >0 repels (too close), <0 attracts (curious, too far).
+        // base `hero` bias + curiosity spring toward HERO_STANDOFF (scaled by interest).
+        const wr = (EUGLENA_STEER.hero + EUGLENA_STEER.curiosity * interest * (HERO_STANDOFF - heroQ)) * falloff;
+        sx += ax * wr;
+        sy += ay * wr;
+        sx += ax * EUGLENA_STEER.startleAway * startle; // escape burst pushes straight away
+        sy += ay * EUGLENA_STEER.startleAway * startle;
       }
-      // pressure = strength of the non-forward (avoid/pursue) demand
       const pressure = Math.hypot(sx - ux * EUGLENA_STEER.forward, sy - uy * EUGLENA_STEER.forward);
       if (pressure > 1e-6) {
         const desired = Math.atan2(sy, sx);
@@ -512,8 +547,23 @@ export function updateEuglena(
       }
     }
 
-    let nextX = px0 + ux * vPx * dt;
-    let nextY = py0 + uy * vPx * dt;
+    const vPxEff = vPx * (1 + EUGLENA_STEER.startleDart * startle); // dart faster while fleeing
+    let nextX = px0 + ux * vPxEff * dt;
+    let nextY = py0 + uy * vPxEff * dt;
+
+    // hydrodynamic drafting: when the euglena sits in the hero's wake, the
+    // hero's swimming current advects it along the hero heading (the two drift
+    // together). Advection (px/s) decays with distance and with how directly
+    // the euglena trails behind the hero's motion.
+    if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 1e-4) {
+      const hd = finiteOr(frame.hero?.heading, 0);
+      const hdx = Math.cos(hd), hdy = Math.sin(hd);
+      const behind = Math.max(0, -(ax * hdx + ay * hdy)); // 1 when directly behind the hero
+      const prox = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
+      const wakeSpeed = EUGLENA_STEER.wake * prox * behind;
+      nextX += hdx * wakeSpeed * dt;
+      nextY += hdy * wakeSpeed * dt;
+    }
 
     // hard non-overlap push (safety net, independent of the soft steer above):
     // soft exponential push = exact discrete solution of ṗ=-k·p, so it is
@@ -563,6 +613,7 @@ export function updateEuglena(
       turnProgress: finiteOr(cell.turnProgress, 2),
       turnFrom: finiteOr(cell.turnFrom, heading),
       turnTo: finiteOr(cell.turnTo, heading),
+      startle: startle * Math.exp(-dt / STARTLE_TAU),
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + rollDelta),
       metabolyPhase: wrapUnit(finite(cell.metabolyPhase, 0) + Math.max(0, finite(cell.metabolyRate, 0)) * act * dt),
       flagellumPhase: wrapUnit(finite(cell.flagellumPhase, 0) + fEff * dt),
