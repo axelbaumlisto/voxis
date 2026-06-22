@@ -2269,7 +2269,9 @@ function drawEuglena(ctx, euglena, frame, view) {
     const ny = ux;
     const cxr = finite2(cell.x, 0) + nx * lateral;
     const cyr = finite2(cell.y, 0) + ny * lateral;
-    const vigour = 0.78 + 0.22 * Math.sin(TAU3 * wrapUnit(finiteOr3(cell.burstPhase, 0)) + finite2(cell.heading, 0));
+    const bp = wrapUnit(finiteOr3(cell.burstPhase, 0));
+    const hh = finite2(cell.heading, 0);
+    const vigour = 0.8 + 0.12 * Math.sin(TAU3 * bp + hh) + 0.08 * Math.sin(TAU3 * bp * 2.7 + hh * 1.7);
     const ampTip = clamp(length * 0.22, 2, 0.4 * H) * vigour;
     const env = metabolyEnvelope(finiteOr3(cell.burstPhase, 0));
     const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {

@@ -612,9 +612,15 @@ export function drawEuglena(
     const cxr = finite(cell.x, 0) + nx * lateral;
     const cyr = finite(cell.y, 0) + ny * lateral;
 
-    // beat vigour breathes slowly (deterministic, ~6-10s) so the whip is never
-    // perfectly metronomic — real flagellar beating ebbs and surges.
-    const vigour = 0.78 + 0.22 * Math.sin(TAU * wrapUnit(finiteOr(cell.burstPhase, 0)) + finite(cell.heading, 0));
+    // beat vigour ebbs and surges (deterministic) so the whip is never
+    // metronomic. Real cruising beats are regular but show stochastic "active
+    // fluctuations" (Ma/Friedrich PRL 2014) — approximated here by a sum of two
+    // incommensurate slow components so there is no single clean period.
+    const bp = wrapUnit(finiteOr(cell.burstPhase, 0));
+    const hh = finite(cell.heading, 0);
+    const vigour = 0.80
+      + 0.12 * Math.sin(TAU * bp + hh)
+      + 0.08 * Math.sin(TAU * bp * 2.7 + hh * 1.7);
     const ampTip = clamp(length * 0.22, 2, 0.40 * H) * vigour;
     const env = metabolyEnvelope(finiteOr(cell.burstPhase, 0));
 
