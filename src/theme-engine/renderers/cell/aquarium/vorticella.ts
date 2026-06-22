@@ -1,5 +1,6 @@
 import type { AquariumFrame, AquariumParamsView, VorticellaState } from "./types";
 import { sourceId } from "./interaction";
+import type { FieldContribution, FieldKind } from "./interaction";
 import { seededUnit } from "./seeds";
 import { TAU, clamp, clamp01, finite, finiteOr, smoothstep, wrapUnit } from "./util";
 
@@ -153,6 +154,25 @@ export function vorticellaObstacle(
   const ay = finite(cell.anchorY, 0);
   // direction is UP (-y); bell mid sits above the neck (top of the rest stalk)
   return { x: ax, y: ay - (restStalk + bellHeight * 0.5), radius: 1.1 * D };
+}
+
+export const VORTICELLA_RELEVANT_FIELDS: ReadonlySet<FieldKind> = new Set(["motile"]);
+
+export function vorticellaContribute(
+  cell: VorticellaState,
+  scale: number,
+  frameHeight: number,
+  idx: number,
+): FieldContribution[] {
+  const obstacle = vorticellaObstacle(cell, scale, frameHeight);
+  return [{
+    kind: "obstacle",
+    shape: "circle",
+    x: obstacle.x,
+    y: obstacle.y,
+    radius: obstacle.radius,
+    sourceId: sourceId("vorticella", idx),
+  }];
 }
 
 export function seedVorticella(count: number, seed: number, frame: AquariumFrame, alongFrac = 0.5, salt = 0x070271ca): VorticellaState[] {

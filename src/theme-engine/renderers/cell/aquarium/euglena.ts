@@ -1,6 +1,6 @@
 import type { ThemeState } from "../../../contract";
 import { sourceId } from "./interaction";
-import type { ObstacleEllipse } from "./interaction";
+import type { FieldContribution, FieldKind, ObstacleEllipse } from "./interaction";
 import type { AquariumFrame, AquariumParamsView, EuglenaState } from "./types";
 import { mix32, noise2D, seededUnit } from "./seeds";
 import { TAU, clamp, clamp01, finite, finiteOr, positive, wrapUnit } from "./util";
@@ -479,6 +479,12 @@ const TUMBLE_MIN_RAD = Math.PI / 6; // 30°
 const TUMBLE_MAX_RAD = (5 * Math.PI) / 6; // 150°
 const TUMBLE_RATE_MIN = 0.045;      // heavy-tail clamped slow end: ~22s max cycle
 const TUMBLE_RATE_MAX = 0.16;       // fast end: ~6.25s min cycle
+
+export const EUGLENA_RELEVANT_FIELDS: ReadonlySet<FieldKind> = new Set(["obstacle", "wake"]);
+
+export function euglenaContribute(cell: EuglenaState, idx: number): FieldContribution[] {
+  return [{ kind: "motile", x: cell.x, y: cell.y, sourceId: sourceId("euglena", idx) }];
+}
 
 export function updateEuglena(
   euglena: readonly EuglenaState[],
