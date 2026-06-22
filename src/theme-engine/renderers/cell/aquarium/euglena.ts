@@ -612,7 +612,10 @@ export function drawEuglena(
     const cxr = finite(cell.x, 0) + nx * lateral;
     const cyr = finite(cell.y, 0) + ny * lateral;
 
-    const ampTip = clamp(length * 0.22, 2, 0.40 * H);
+    // beat vigour breathes slowly (deterministic, ~6-10s) so the whip is never
+    // perfectly metronomic — real flagellar beating ebbs and surges.
+    const vigour = 0.78 + 0.22 * Math.sin(TAU * wrapUnit(finiteOr(cell.burstPhase, 0)) + finite(cell.heading, 0));
+    const ampTip = clamp(length * 0.22, 2, 0.40 * H) * vigour;
     const env = metabolyEnvelope(finiteOr(cell.burstPhase, 0));
 
     const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {
