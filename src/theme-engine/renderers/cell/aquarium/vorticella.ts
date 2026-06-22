@@ -60,7 +60,7 @@ const TAU = Math.PI * 2;
 // a SLOW sigmoid re-extension, then a long extended/feeding dwell (s=0). This
 // matches the real spasmoneme (ballistic <10ms collapse, ~seconds reload) while
 // staying a deterministic, dt-integrated function of one cycle phase.
-const VC_CONTRACT = 0.05; // fast collapse window (fraction of cycle)
+const VC_CONTRACT = 0.02; // ballistic collapse window (snap)
 const VC_HOLD = 0.02;     // contracted hold
 const VC_RELAX = 0.33;    // slow re-extension window
 
@@ -173,9 +173,9 @@ export function updateVorticella(
   const rate = idleRate + (activeRate - idleRate) * activityMix;
   const modeMul = frame.mode === "recording" ? 1.18 : frame.mode === "transcribing" ? 0.35 : frame.mode === "error" ? 0.15 : 1;
   const startleBoost = 1 + Math.min(0.35, Math.max(0, finite(frame.startle, 0)) * 0.35);
-  const cycleRateMul = Math.min(1.45, rate * modeMul * startleBoost);
-  // oral cilia beat ~20Hz, capped < 30Hz Nyquist; faster when active
-  const oralHz = Math.min(28, (frame.mode === "error" ? 6 : frame.mode === "transcribing" ? 12 : 20) * (1 + activityMix * 0.2));
+  const cycleRateMul = Math.min(3.0, rate * modeMul * startleBoost); // headroom so recording visibly speeds contraction
+  // oral cilia beat ~20Hz; visual cap 24Hz (>=3 samples/cycle @60fps, anti-shimmer)
+  const oralHz = Math.min(24, (frame.mode === "error" ? 6 : frame.mode === "transcribing" ? 12 : 20) * (1 + activityMix * 0.2));
 
   // sway slows a little under load (the zooid stiffens when contracting often)
   const swayMul = frame.mode === "error" ? 0.3 : frame.mode === "transcribing" ? 0.6 : 1;
@@ -236,7 +236,7 @@ export function drawVorticella(
 
     const geom = vorticellaGeometry(s, {
       anchorX, anchorY, restLength: restStalk, directionAngle: dir,
-      minLengthFrac: 0.32, coilSampleCount: 28, coilRadius: D * 0.32,
+      minLengthFrac: 0.32, coilSampleCount: 30, coilTurnsContracted: 3.0, coilRadius: D * 0.24,
     });
     const neck = geom.bellCenter;           // base of the bell (top of stalk)
     const rimC = { x: neck.x + ux * bellHeight, y: neck.y + uy * bellHeight }; // peristome centre
@@ -249,21 +249,40 @@ export function drawVorticella(
     });
     // convex urn/bell silhouette: narrow neck, bulges to widest just below the
     // everted peristomial lip, then eases in slightly to the rim (NOT a straight cone).
+    // campanulate bell: FULL neck (not a needle), convex bulging shoulders,
+    // widest just below the everted lip, easing in slightly to the rim.
     const halfW = (u: number): number => {
-      const um = 0.74, w0 = 0.18, wMax = 0.50, wRim = 0.45;
+      const um = 0.82, w0 = 0.32, wMax = 0.50, wRim = 0.46;
       const base = u <= um
-        ? w0 + (wMax - w0) * smoothstep(u / um)
+        ? w0 + (wMax - w0) * Math.pow(smoothstep(u / um), 0.72) // convex shoulders
         : wMax + (wRim - wMax) * smoothstep((u - um) / (1 - um));
       return D * base * (u > 0.9 ? 0.55 + 0.45 * open : 1);
     };
 
-    // === STALK (spasmoneme) — straight at rest, tight helix when contracted ===
+    // === STALK (spasmoneme) — straight at rest, tight HELIX when contracted ===
+    // base pass (back side / whole path), dim
     drawPolyline(ctx, geom.stalkPath, false);
-    ctx.strokeStyle = `hsla(202, 26%, 84%, ${alpha * 0.42})`;
+    ctx.strokeStyle = `hsla(202, 26%, 80%, ${alpha * 0.34})`;
     ctx.lineWidth = Math.max(0.6, D * 0.07);
     ctx.stroke();
+    // depth-shaded near-side turns: brighter/thicker where the coil faces the
+    // viewer (cos>0) so the contracted stalk reads as a 3-D helical SPRING,
+    // not a flat zigzag. (Only meaningful once coiled; negligible when straight.)
+    if (s > 0.05 && geom.stalkPath.length > 2) {
+      const n = geom.stalkPath.length;
+      for (let i = 1; i < n; i++) {
+        const t = i / (n - 1);
+        const near = Math.cos(t * geom.coilTurns * TAU); // +1 near, -1 far
+        if (near <= 0) continue;
+        drawPolyline(ctx, [geom.stalkPath[i - 1], geom.stalkPath[i]], false);
+        ctx.strokeStyle = `hsla(204, 30%, 90%, ${alpha * (0.18 + 0.34 * near) * s})`;
+        ctx.lineWidth = Math.max(0.4, D * (0.05 + 0.05 * near));
+        ctx.stroke();
+      }
+    }
     // faint inner spasmoneme line
-    ctx.strokeStyle = `hsla(204, 30%, 72%, ${alpha * 0.32})`;
+    drawPolyline(ctx, geom.stalkPath, false);
+    ctx.strokeStyle = `hsla(204, 30%, 70%, ${alpha * 0.3})`;
     ctx.lineWidth = Math.max(0.3, D * 0.03);
     ctx.stroke();
     // floor holdfast
@@ -284,8 +303,8 @@ export function drawVorticella(
     }
     const outline = [...left, ...right.reverse()];
     drawPolyline(ctx, outline, true);
-    ctx.fillStyle = `hsla(202, 26%, 80%, ${alpha * 0.15})`;
-    ctx.strokeStyle = `hsla(204, 28%, 90%, ${alpha * 0.42})`;
+    ctx.fillStyle = `hsla(203, 30%, 81%, ${alpha * 0.20})`; // glassier cool body, less hollow
+    ctx.strokeStyle = `hsla(205, 30%, 91%, ${alpha * 0.44})`;
     ctx.lineWidth = Math.max(0.4, D * 0.05);
     ctx.fill();
     ctx.stroke();
@@ -293,16 +312,24 @@ export function drawVorticella(
     // === INTERIOR (subtle, hyaline) ===
     // macronucleus: curved C / horseshoe band lying along the body
     const macPts: AquariumPoint[] = [];
-    const macAlong = bellHeight * 0.52;
-    const macR = D * 0.24;
-    for (let i = 0; i <= 12; i++) {
-      const th = Math.PI * (0.30 + (i / 12) * 1.40);
-      macPts.push(bodyPoint(macAlong - macR * 0.7 * Math.cos(th), macR * Math.sin(th)));
+    const macAlong = bellHeight * 0.50;
+    const macR = D * 0.30; // long horseshoe band spanning most of the body
+    for (let i = 0; i <= 14; i++) {
+      const th = Math.PI * (0.18 + (i / 14) * 1.64);
+      macPts.push(bodyPoint(macAlong - macR * 1.05 * Math.cos(th), macR * Math.sin(th)));
     }
     drawPolyline(ctx, macPts, false);
     ctx.strokeStyle = `hsla(50, 14%, 72%, ${alpha * 0.3})`;
     ctx.lineWidth = Math.max(0.6, D * 0.12);
     ctx.stroke();
+    // micronucleus: a tiny dot docked on the macronucleus concavity
+    if (D >= 11) {
+      const mic = bodyPoint(macAlong - macR * 0.2, 0);
+      ctx.beginPath();
+      ctx.arc(mic.x, mic.y, Math.max(0.4, D * 0.045), 0, TAU);
+      ctx.fillStyle = `hsla(50, 16%, 66%, ${alpha * 0.34})`;
+      ctx.fill();
+    }
 
     // contractile vacuole: a faint translucent fill (NOT a bright ring — must not
     // read as an eye), set to one side of the upper body.
@@ -358,6 +385,21 @@ export function drawVorticella(
       drawPolyline(ctx, spiral, false);
       ctx.strokeStyle = `hsla(48, 24%, 88%, ${alpha * 0.32 * open})`;
       ctx.lineWidth = Math.max(0.25, D * 0.03);
+      ctx.stroke();
+      // second, inner membranelle row (phase-offset) so the AZM reads as a
+      // layered band driving a feeding vortex, not a single circlet.
+      const spiral2: AquariumPoint[] = [];
+      for (let i = 0; i <= N; i++) {
+        const t = i / N;
+        const rr = (1 - t) * 0.7;
+        const a = -t * turns * TAU + 0.6;
+        const lateral = Math.cos(a) * Rrim * rr + cytLat * t;
+        const depth = Math.sin(a) * lipRy * rr + cytDep * t;
+        spiral2.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
+      }
+      drawPolyline(ctx, spiral2, false);
+      ctx.strokeStyle = `hsla(46, 22%, 84%, ${alpha * 0.22 * open})`;
+      ctx.lineWidth = Math.max(0.2, D * 0.022);
       ctx.stroke();
       const cyt = { x: rimC.x + nx * cytLat + ux * cytDep, y: rimC.y + ny * cytLat + uy * cytDep };
       ctx.beginPath();
