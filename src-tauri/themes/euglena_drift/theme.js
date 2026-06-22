@@ -2227,6 +2227,8 @@ function updateEuglena(euglena, frame, view) {
         sy += (1 - py0 / look) * steer.wall;
       if (safeHeight - py0 < look)
         sy -= (1 - (safeHeight - py0) / look) * steer.wall;
+      const gravFade = clamp01((safeHeight / Math.max(0.000001, L) - 3) / 2);
+      sy -= steer.gravitaxis * gravFade;
       if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 0.0001) {
         const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
         const wr = (steer.hero + steer.loiter * interest * (HERO_LOITER_Q - heroQ)) * falloff;

@@ -717,6 +717,53 @@ describe("aquarium layer Phase 3 euglena", () => {
     }
   });
 
+  it("negative gravitaxis drifts heading toward screen-up in tall open water", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaScale: 3,
+      aquariumActivityBoost: 1,
+    });
+    const saved = EUGLENA_STEER.gravitaxis;
+    try {
+      EUGLENA_STEER.gravitaxis = 0.6;
+      let cell = testEuglena({ x: 150, y: 150, heading: 0, swimSpeed: 0 });
+      for (let i = 0; i < 20; i++) {
+        cell = updateEuglena([cell], frame({ dt: 0.05, width: 300, height: 300, activity: 0 }), view)[0];
+      }
+      expect(cell.heading).toBeLessThan(0);
+      expect(Math.sin(cell.heading)).toBeLessThan(-0.1);
+    } finally {
+      EUGLENA_STEER.gravitaxis = saved;
+    }
+  });
+
+  it("short-tank fade disables gravitaxis when height is at most three body lengths", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaScale: 3,
+      aquariumActivityBoost: 1,
+    });
+    const saved = EUGLENA_STEER.gravitaxis;
+    try {
+      EUGLENA_STEER.gravitaxis = 2.0;
+      let cell = testEuglena({ x: 150, y: 35, heading: 0, swimSpeed: 0 });
+      for (let i = 0; i < 20; i++) {
+        cell = updateEuglena([cell], frame({ dt: 0.05, width: 300, height: 70, activity: 0 }), view)[0];
+      }
+      expect(cell.heading).toBeCloseTo(0, 10);
+    } finally {
+      EUGLENA_STEER.gravitaxis = saved;
+    }
+  });
+
   it("priority steering banks the euglena away from an approaching wall", () => {
     const view = aquariumParamsView({
       ...CELL_DEFAULTS,
@@ -886,6 +933,7 @@ describe("aquarium layer Phase 3 euglena", () => {
       euglenaSpeedActive: 1,
       aquariumActivityBoost: 1,
     });
+    expect(EUGLENA_STEER.gravitaxis).toBe(0);
     // open water, no wall/hero/startle pressure; new foundation knobs are default no-op
     const initial = [testEuglena({ x: 150, y: 150, heading: 0, swimSpeed: 1, rollPhase: 0.1, metabolyPhase: 0.2, flagellumPhase: 0.3 })];
     const oneStep = updateEuglena(initial, frame({ dt: 0.24, width: 300, height: 300, activity: 0 }), view);
