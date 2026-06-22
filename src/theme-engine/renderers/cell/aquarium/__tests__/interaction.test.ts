@@ -164,7 +164,7 @@ describe("aquarium interaction field vocabulary", () => {
       { kind: "wake", x: hero.x, y: hero.y, heading: hero.heading, sourceId: sourceId("hero", 0) },
       { kind: "motile", x: hero.x, y: hero.y, sourceId: sourceId("hero", 0) },
     ]);
-    expect([...EUGLENA_RELEVANT_FIELDS]).toEqual(["obstacle", "wake"]);
+    expect([...EUGLENA_RELEVANT_FIELDS]).toEqual(["obstacle", "wake", "motile"]);
     expect([...VORTICELLA_RELEVANT_FIELDS]).toEqual(["motile"]);
   });
 

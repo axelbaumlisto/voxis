@@ -1,5 +1,5 @@
 import type { ThemeState } from "../../../contract";
-import { sourceId } from "./interaction";
+import { KIND_ID, sourceId } from "./interaction";
 import type { FieldContribution, FieldKind, ObstacleEllipse } from "./interaction";
 import type { AquariumFrame, AquariumParamsView, EuglenaState } from "./types";
 import { mix32, noise2D, seededUnit } from "./seeds";
@@ -414,6 +414,8 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
  *               at the distance where the two cancel (not a teleological target).
  *  - wake:      near-field hydrodynamic entrainment — a brief advective tug (px/s)
  *               along the hero's heading while the euglena trails in its wake.
+ *  - separation: same-species soft spacing; default 0 so multi-euglena scenes
+ *               stay byte-identical until a theme explicitly opts in.
  *  - startleAway/startleDart: escape REORIENTATION (away-turn, beat-switch tumble)
  *               + small speed bump when contact is too close.
  *
@@ -428,6 +430,7 @@ export interface EuglenaSteer {
   hero: number;
   loiter: number;
   wake: number;
+  separation: number;
   startleAway: number;
   startleDart: number;
   gravitaxis: number;
@@ -441,6 +444,7 @@ export const EUGLENA_STEER: EuglenaSteer = {
   hero: 0.0,
   loiter: 1.1,
   wake: 10,
+  separation: 0,
   startleAway: 3.0,
   startleDart: 1.0,
   gravitaxis: 0,
@@ -479,8 +483,9 @@ const TUMBLE_MIN_RAD = Math.PI / 6; // 30°
 const TUMBLE_MAX_RAD = (5 * Math.PI) / 6; // 150°
 const TUMBLE_RATE_MIN = 0.045;      // heavy-tail clamped slow end: ~22s max cycle
 const TUMBLE_RATE_MAX = 0.16;       // fast end: ~6.25s min cycle
+const SEPARATION_RANGE_BODY_LENGTHS = 1.6; // soft steer only; no hard push / no overlap clamp
 
-export const EUGLENA_RELEVANT_FIELDS: ReadonlySet<FieldKind> = new Set(["obstacle", "wake"]);
+export const EUGLENA_RELEVANT_FIELDS: ReadonlySet<FieldKind> = new Set(["obstacle", "wake", "motile"]);
 
 export function euglenaContribute(cell: EuglenaState, idx: number): FieldContribution[] {
   return [{ kind: "motile", x: cell.x, y: cell.y, sourceId: sourceId("euglena", idx) }];
@@ -521,6 +526,9 @@ export function updateEuglena(
     const field = frame.interaction;
     const fieldObstacles = field ? field.obstacles.filter((obstacle) => obstacle.sourceId !== selfId) : undefined;
     const fieldWakes = field ? field.wakes.filter((wake) => wake.sourceId !== selfId) : undefined;
+    const sameSpeciesMotiles = field?.motiles.filter((motile) => (
+      (motile.sourceId >> 20) === KIND_ID.euglena && motile.sourceId !== selfId
+    ));
     const circleObstacles = fieldObstacles?.filter((obstacle) => obstacle.shape === "circle");
     const socialEllipse = fieldObstacles?.find((obstacle): obstacle is ObstacleEllipse => obstacle.shape === "ellipse" && obstacle.social === true);
     const socialWake = socialEllipse
@@ -625,6 +633,24 @@ export function updateEuglena(
         sy += ay * wr;
         sx += ax * steer.startleAway * startle; // escape burst pushes straight away
         sy += ay * steer.startleAway * startle;
+      }
+      // Intra-species separation: species-matched euglena motiles only. The
+      // weight multiplies the contribution before accumulation, so default 0 is
+      // an exact no-op even though motiles are present in the field.
+      const separationW = steer.separation;
+      if (sameSpeciesMotiles && sameSpeciesMotiles.length > 0) {
+        const reach = L * SEPARATION_RANGE_BODY_LENGTHS;
+        for (let mi = 0; mi < sameSpeciesMotiles.length; mi++) {
+          const mdx = px0 - finite(sameSpeciesMotiles[mi].x, 0);
+          const mdy = py0 - finite(sameSpeciesMotiles[mi].y, 0);
+          const md = Math.hypot(mdx, mdy) || 1e-6;
+          if (md < reach) {
+            const prox = (reach - md) / reach;
+            const w = separationW * prox;
+            sx += (mdx / md) * w;
+            sy += (mdy / md) * w;
+          }
+        }
       }
       // static obstacles (e.g. a sessile vorticella): steer AROUND them, well
       // before contact, scaled by proximity. (Hard non-overlap push below.)

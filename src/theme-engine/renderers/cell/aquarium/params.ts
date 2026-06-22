@@ -15,8 +15,13 @@ function nonNegative(value: number | undefined, fallback: number): number {
 function euglenaSteerOverride(params: CellParams): Partial<EuglenaSteer> | undefined {
   const gravitaxis = nonNegative(params.euglenaGravitaxis, 0);
   const phototaxis = nonNegative(params.euglenaPhototaxis, 0);
-  if (gravitaxis === 0 && phototaxis === 0) return undefined;
-  return { gravitaxis, phototaxis };
+  const separation = nonNegative(params.euglenaSeparation, 0);
+  if (gravitaxis === 0 && phototaxis === 0 && separation === 0) return undefined;
+  return {
+    gravitaxis,
+    phototaxis,
+    ...(separation === 0 ? {} : { separation }),
+  };
 }
 
 /** Build a partial medium override from theme params (undefined = use module defaults). */
