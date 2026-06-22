@@ -515,9 +515,7 @@ export function updateEuglena(
     const field = frame.interaction;
     const fieldObstacles = field ? field.obstacles.filter((obstacle) => obstacle.sourceId !== selfId) : undefined;
     const fieldWakes = field ? field.wakes.filter((wake) => wake.sourceId !== selfId) : undefined;
-    const circleObstacles = field
-      ? fieldObstacles?.filter((obstacle) => obstacle.shape === "circle")
-      : frame.obstacles;
+    const circleObstacles = fieldObstacles?.filter((obstacle) => obstacle.shape === "circle");
     const socialEllipse = fieldObstacles?.find((obstacle): obstacle is ObstacleEllipse => obstacle.shape === "ellipse" && obstacle.social === true);
     const socialWake = socialEllipse
       ? fieldWakes?.find((wake) => wake.sourceId === socialEllipse.sourceId)

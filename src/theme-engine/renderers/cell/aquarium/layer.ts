@@ -8,10 +8,10 @@ import { vorticellaObstacle } from "./vorticella";
 
 type MutableAquariumLayerState = { -readonly [K in keyof AquariumLayerState]: AquariumLayerState[K] };
 
-type LegacyObstacle = NonNullable<AquariumFrame["obstacles"]>[number];
+type EuglenaObstacle = { readonly x: number; readonly y: number; readonly radius: number };
 
 export function buildEuglenaInteractionField(
-  obstacles: readonly LegacyObstacle[] | undefined,
+  obstacles: readonly EuglenaObstacle[] | undefined,
   hero: AquariumFrame["hero"],
 ): InteractionField {
   const contribs: FieldContribution[] = [];
@@ -104,18 +104,14 @@ export function updateAquarium(
     ? aquarium.vorticella.map((v) => vorticellaObstacle(v, view.vorticella.scale, frame.height))
     : undefined;
   const euglenaField = buildEuglenaInteractionField(obstacles, frame.hero);
-  const euglenaFrame = { ...frame, ...(obstacles ? { obstacles } : {}), interaction: euglenaField };
+  const euglenaFrame = { ...frame, interaction: euglenaField };
   const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, euglenaFrame, cfgBySpecies.euglena) : aquarium.euglena;
-  // motile cells (hero + euglena) can mechanically disturb a sessile vorticella
   let vorticella = aquarium.vorticella;
   if (view.vorticella.count > 0) {
-    const motiles: { x: number; y: number }[] = [];
-    if (frame.hero) motiles.push({ x: frame.hero.x, y: frame.hero.y });
-    for (const e of euglena) motiles.push({ x: e.x, y: e.y });
     const vorticellaField = buildVorticellaInteractionField(frame.hero, euglena);
     vorticella = REGISTRY.vorticella.update(
       aquarium.vorticella,
-      motiles.length > 0 ? { ...frame, motiles, interaction: vorticellaField } : frame,
+      { ...frame, interaction: vorticellaField },
       cfgBySpecies.vorticella,
     );
   }

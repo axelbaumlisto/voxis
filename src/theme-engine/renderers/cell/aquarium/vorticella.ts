@@ -235,9 +235,7 @@ export function updateVorticella(
     // MECHANOSENSITIVE reflex: a motile cell passing close to the bell triggers a
     // contraction (the iconic Vorticella startle). Only while extended and past a
     // short refractory, so a lingering cell does not cause a spasm storm.
-    const motiles = frame.interaction
-      ? frame.interaction.motiles.filter((motile) => motile.sourceId !== sourceId("vorticella", idx))
-      : frame.motiles;
+    const motiles = frame.interaction?.motiles.filter((motile) => motile.sourceId !== sourceId("vorticella", idx));
     if (motiles && motiles.length > 0 && leg === 0 && timer > 1.0) {
       const obs = vorticellaObstacle(cell, view.vorticella.scale, frame.height);
       const trigR = obs.radius * 1.25;

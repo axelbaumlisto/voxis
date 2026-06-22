@@ -2225,7 +2225,7 @@ function updateEuglena(euglena, frame, view) {
     const field = frame.interaction;
     const fieldObstacles = field ? field.obstacles.filter((obstacle) => obstacle.sourceId !== selfId) : undefined;
     const fieldWakes = field ? field.wakes.filter((wake) => wake.sourceId !== selfId) : undefined;
-    const circleObstacles = field ? fieldObstacles?.filter((obstacle) => obstacle.shape === "circle") : frame.obstacles;
+    const circleObstacles = fieldObstacles?.filter((obstacle) => obstacle.shape === "circle");
     const socialEllipse = fieldObstacles?.find((obstacle) => obstacle.shape === "ellipse" && obstacle.social === true);
     const socialWake = socialEllipse ? fieldWakes?.find((wake) => wake.sourceId === socialEllipse.sourceId) : undefined;
     let heroParams = null;
@@ -2786,7 +2786,7 @@ function updateVorticella(vorticella, frame, view) {
     let timer = Math.max(0, finiteOr(cell.contractTimer, 0)) + dt;
     let interval = Math.max(2.5, finiteOr(cell.feedInterval, 6));
     let evt = Math.max(0, Math.floor(finiteOr(cell.eventCount, 0)));
-    const motiles = frame.interaction ? frame.interaction.motiles.filter((motile) => motile.sourceId !== sourceId("vorticella", idx)) : frame.motiles;
+    const motiles = frame.interaction?.motiles.filter((motile) => motile.sourceId !== sourceId("vorticella", idx));
     if (motiles && motiles.length > 0 && leg === 0 && timer > 1) {
       const obs = vorticellaObstacle(cell, view.vorticella.scale, frame.height);
       const trigR = obs.radius * 1.25;
@@ -3295,17 +3295,12 @@ function updateAquarium(aquarium, frame, params) {
   const diatoms = view.diatoms.count > 0 ? REGISTRY.diatom.update(aquarium.diatoms, frame, cfgBySpecies.diatom) : aquarium.diatoms;
   const obstacles = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella.map((v) => vorticellaObstacle(v, view.vorticella.scale, frame.height)) : undefined;
   const euglenaField = buildEuglenaInteractionField(obstacles, frame.hero);
-  const euglenaFrame = { ...frame, ...obstacles ? { obstacles } : {}, interaction: euglenaField };
+  const euglenaFrame = { ...frame, interaction: euglenaField };
   const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, euglenaFrame, cfgBySpecies.euglena) : aquarium.euglena;
   let vorticella = aquarium.vorticella;
   if (view.vorticella.count > 0) {
-    const motiles = [];
-    if (frame.hero)
-      motiles.push({ x: frame.hero.x, y: frame.hero.y });
-    for (const e of euglena)
-      motiles.push({ x: e.x, y: e.y });
     const vorticellaField = buildVorticellaInteractionField(frame.hero, euglena);
-    vorticella = REGISTRY.vorticella.update(aquarium.vorticella, motiles.length > 0 ? { ...frame, motiles, interaction: vorticellaField } : frame, cfgBySpecies.vorticella);
+    vorticella = REGISTRY.vorticella.update(aquarium.vorticella, { ...frame, interaction: vorticellaField }, cfgBySpecies.vorticella);
   }
   return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella ? aquarium : { ...aquarium, diatoms, euglena, vorticella };
 }

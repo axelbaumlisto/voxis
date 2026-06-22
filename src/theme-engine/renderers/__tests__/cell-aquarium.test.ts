@@ -1628,7 +1628,13 @@ describe("aquarium layer Phase 4 vorticella", () => {
     const stepsTo90 = (withMotile: boolean): number => {
       let cell = seeded;
       const f = withMotile
-        ? frame({ dt: 0.05, width: 240, height: 80, activity: 0.2, motiles: [{ x: obs.x, y: obs.y }] })
+        ? frame({
+          dt: 0.05,
+          width: 240,
+          height: 80,
+          activity: 0.2,
+          interaction: buildField([{ kind: "motile", x: obs.x, y: obs.y, sourceId: sourceId("euglena", 0) }]),
+        })
         : frame({ dt: 0.05, width: 240, height: 80, activity: 0.2 });
       for (let i = 0; i < 200; i++) {
         cell = updateVorticella(cell, f, view);
@@ -1644,7 +1650,7 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(stepsTo90(true)).toBe(withM);
   });
 
-  it("mechanosensitive field path matches legacy motiles and empty field matches no motiles", () => {
+  it("mechanosensitive field path triggers from motiles and empty field matches no motiles", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,
       enableAquarium: true,
@@ -1658,8 +1664,7 @@ describe("aquarium layer Phase 4 vorticella", () => {
     const initial = seeded.map((cell) => ({ ...cell, contractLeg: 0, contractTimer: 1.1 }));
     const obs = vorticellaObstacle(initial[0], view.vorticella.scale, 80);
     const base = { dt: 0.05, width: 240, height: 80, activity: 0.2 };
-    const legacy = updateVorticella(initial, frame({ ...base, motiles: [{ x: obs.x, y: obs.y }] }), view);
-    const field = updateVorticella(
+    const motileField = updateVorticella(
       initial,
       frame({ ...base, interaction: buildField([{ kind: "motile", x: obs.x, y: obs.y, sourceId: sourceId("euglena", 0) }]) }),
       view,
@@ -1668,10 +1673,10 @@ describe("aquarium layer Phase 4 vorticella", () => {
     const emptyField = updateVorticella(initial, frame({ ...base, interaction: buildField([]) }), view);
 
     for (const key of ["contractPhase", "contractLeg", "contractTimer", "eventCount", "feedInterval"] as const) {
-      expect(field[0][key]).toBeCloseTo(legacy[0][key], 10);
       expect(emptyField[0][key]).toBeCloseTo(noMotiles[0][key], 10);
     }
-    expect(field).toEqual(legacy);
+    expect(motileField[0].contractLeg).toBe(1);
+    expect(motileField[0].contractTimer).toBe(0);
     expect(emptyField).toEqual(noMotiles);
   });
 
