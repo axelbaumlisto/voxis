@@ -488,7 +488,7 @@ export function updateEuglena(
       const hx = finite(frame.hero.x, safeWidth / 2);
       const hy = finite(frame.hero.y, safeHeight / 2);
       const hr = Math.max(0, finite(frame.hero.radius, 0));
-      const m = 0.5 * L;
+      const m = 0.9 * L; // keep the whole euglena body (and most of its flagellum reach) off the hero
       const A = Math.max(1e-3, finiteOr(frame.hero.halfLen, hr) + m);
       const B = Math.max(1e-3, finiteOr(frame.hero.halfWid, hr) + m);
       const hh = finiteOr(frame.hero.heading, 0);
@@ -728,8 +728,9 @@ export function drawEuglena(
       if (frame.hero) {
         const hdx = finite(cell.x, 0) - finite(frame.hero.x, 0);
         const hdy = finite(cell.y, 0) - finite(frame.hero.y, 0);
-        const reach = Math.max(finiteOr(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) * 1.15;
-        if (Math.hypot(hdx, hdy) < reach) flagFade = 0.45;
+        const reach = Math.max(finiteOr(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) * 1.7;
+        const hdist = Math.hypot(hdx, hdy);
+        if (hdist < reach) flagFade = clamp(0.12 + 0.6 * (hdist / reach), 0.12, 0.7);
       }
       // soft underglow so the thin whip separates from the dark field
       ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.30 * flagFade})`;

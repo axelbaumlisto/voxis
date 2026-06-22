@@ -2163,7 +2163,7 @@ function updateEuglena(euglena, frame, view) {
       const hx = finite2(frame.hero.x, safeWidth / 2);
       const hy = finite2(frame.hero.y, safeHeight / 2);
       const hr = Math.max(0, finite2(frame.hero.radius, 0));
-      const m = 0.5 * L;
+      const m = 0.9 * L;
       const A = Math.max(0.001, finiteOr3(frame.hero.halfLen, hr) + m);
       const B = Math.max(0.001, finiteOr3(frame.hero.halfWid, hr) + m);
       const hh = finiteOr3(frame.hero.heading, 0);
@@ -2361,9 +2361,10 @@ function drawEuglena(ctx, euglena, frame, view) {
       if (frame.hero) {
         const hdx = finite2(cell.x, 0) - finite2(frame.hero.x, 0);
         const hdy = finite2(cell.y, 0) - finite2(frame.hero.y, 0);
-        const reach = Math.max(finiteOr3(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) * 1.15;
-        if (Math.hypot(hdx, hdy) < reach)
-          flagFade = 0.45;
+        const reach = Math.max(finiteOr3(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) * 1.7;
+        const hdist = Math.hypot(hdx, hdy);
+        if (hdist < reach)
+          flagFade = clamp(0.12 + 0.6 * (hdist / reach), 0.12, 0.7);
       }
       ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.3 * flagFade})`;
       ctx.lineWidth = Math.max(0.9, width * 0.18);
@@ -2394,44 +2395,60 @@ function clamp012(value) {
     return 0;
   return value < 0 ? 0 : value > 1 ? 1 : value;
 }
+function clamp2(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
 function wrapUnit2(value) {
   if (!Number.isFinite(value))
     return 0;
   return (value % 1 + 1) % 1;
 }
+function smoothstep3(x) {
+  const t = clamp012(x);
+  return t * t * (3 - 2 * t);
+}
 var TAU4 = Math.PI * 2;
-var CONTRACT_FRACTION = 0.16;
+var VC_CONTRACT = 0.05;
+var VC_HOLD = 0.02;
+var VC_RELAX = 0.33;
 function vorticellaContractPhase(cyclePhase) {
   const phase = wrapUnit2(cyclePhase);
-  if (phase < CONTRACT_FRACTION) {
-    const q2 = phase / CONTRACT_FRACTION;
-    return 1 - Math.pow(1 - q2, 3);
+  if (phase < VC_CONTRACT) {
+    const q = phase / VC_CONTRACT;
+    return 1 - Math.pow(1 - q, 3);
   }
-  const q = (phase - CONTRACT_FRACTION) / (1 - CONTRACT_FRACTION);
-  return Math.pow(1 - q, 2);
+  if (phase < VC_CONTRACT + VC_HOLD)
+    return 1;
+  if (phase < VC_CONTRACT + VC_HOLD + VC_RELAX) {
+    const q = (phase - VC_CONTRACT - VC_HOLD) / VC_RELAX;
+    return 1 - smoothstep3(q);
+  }
+  return 0;
 }
 function vorticellaGeometry(contractPhase, options = {}) {
   const phase = clamp012(contractPhase);
   const anchorX = finiteOr4(options.anchorX, 0);
   const anchorY = finiteOr4(options.anchorY, 0);
   const restLength = Math.max(0.001, finiteOr4(options.restLength, 10));
-  const minLengthFrac = Math.min(1, Math.max(0.12, finiteOr4(options.minLengthFrac, 0.32)));
-  const angle = finiteOr4(options.directionAngle, Math.PI / 2);
-  const coilTurnsRest = Math.max(0, finiteOr4(options.coilTurnsRest, 0.15));
-  const coilTurnsContracted = Math.max(coilTurnsRest, finiteOr4(options.coilTurnsContracted, 3.2));
-  const sampleCount = Math.max(2, Math.floor(finiteOr4(options.coilSampleCount, 16)));
+  const minLengthFrac = Math.min(1, Math.max(0.12, finiteOr4(options.minLengthFrac, 0.35)));
+  const angle = finiteOr4(options.directionAngle, -Math.PI / 2);
+  const coilTurnsRest = Math.max(0, finiteOr4(options.coilTurnsRest, 0));
+  const coilTurnsContracted = Math.max(coilTurnsRest, finiteOr4(options.coilTurnsContracted, 3.5));
+  const sampleCount = Math.max(2, Math.floor(finiteOr4(options.coilSampleCount, 22)));
+  const coilRadiusMax = Math.max(0, finiteOr4(options.coilRadius, restLength * 0.18));
   const stalkLength = restLength * (1 - phase * (1 - minLengthFrac));
   const coilTurns = coilTurnsRest + (coilTurnsContracted - coilTurnsRest) * phase;
+  const coilRadius = coilRadiusMax * phase;
   const ux = Math.cos(angle);
   const uy = Math.sin(angle);
   const nx = -uy;
   const ny = ux;
-  const coilAmplitude = restLength * 0.035 * phase;
   const stalkPath = [];
   for (let i = 0;i < sampleCount; i++) {
     const t = i / (sampleCount - 1);
     const along = stalkLength * t;
-    const wave = Math.sin(t * coilTurns * TAU4) * coilAmplitude;
+    const fill = smoothstep3(t);
+    const wave = Math.sin(t * coilTurns * TAU4) * coilRadius * fill;
     stalkPath.push({
       x: anchorX + ux * along + nx * wave,
       y: anchorY + uy * along + ny * wave
@@ -2452,27 +2469,13 @@ function seedVorticella(count, seed, frame, salt = 117600714) {
   const vorticella = [];
   const safeWidth = Math.max(0, finite3(frame.width, 0));
   const safeHeight = Math.max(0, finite3(frame.height, 0));
+  const inset = 0.5;
   for (let i = 0;i < count; i++) {
-    const side = Math.floor(seededUnit(seed, i, salt ^ 523543229) * 4) % 4;
-    const along = seededUnit(seed, i, salt ^ 1164169887);
-    const inset = 0.5;
-    let anchorX = along * safeWidth;
-    let anchorY = inset;
-    let directionAngle = Math.PI / 2;
-    if (side === 1) {
-      anchorX = safeWidth - inset;
-      anchorY = along * safeHeight;
-      directionAngle = Math.PI;
-    } else if (side === 2) {
-      anchorX = along * safeWidth;
-      anchorY = safeHeight - inset;
-      directionAngle = -Math.PI / 2;
-    } else if (side === 3) {
-      anchorX = inset;
-      anchorY = along * safeHeight;
-      directionAngle = 0;
-    }
-    const restLength = Math.max(5.5, Math.min(12, (7.5 + seededUnit(seed, i, salt ^ 48610963) * 3.5) * Math.min(1, safeHeight / 36)));
+    const along = count === 1 ? 0.5 : seededUnit(seed, i, salt ^ 1164169887);
+    const anchorX = along * safeWidth;
+    const anchorY = safeHeight - inset;
+    const directionAngle = -Math.PI / 2;
+    const restLength = 7.5 + seededUnit(seed, i, salt ^ 48610963) * 3.5;
     const cycle = seededUnit(seed, i, salt ^ 1628012333);
     vorticella.push({
       x: anchorX,
@@ -2486,7 +2489,7 @@ function seedVorticella(count, seed, frame, salt = 117600714) {
       contractPhase: vorticellaContractPhase(cycle),
       contractCyclePhase: cycle,
       oralWreathPhase: seededUnit(seed, i, salt ^ 1757159915),
-      contractRate: 0.055 + seededUnit(seed, i, salt ^ 802853537) * 0.06,
+      contractRate: 0.06 + seededUnit(seed, i, salt ^ 802853537) * 0.05,
       oralRate: 0.42 + seededUnit(seed, i, salt ^ 348696353) * 0.18
     });
   }
@@ -2503,7 +2506,7 @@ function updateVorticella(vorticella, frame, view) {
   const modeMul = frame.mode === "recording" ? 1.18 : frame.mode === "transcribing" ? 0.35 : frame.mode === "error" ? 0.15 : 1;
   const startleBoost = 1 + Math.min(0.35, Math.max(0, finite3(frame.startle, 0)) * 0.35);
   const cycleRateMul = Math.min(1.45, rate * modeMul * startleBoost);
-  const oralRateMul = frame.mode === "error" ? 0.2 : frame.mode === "transcribing" ? 0.45 : 1 + activityMix * 0.18;
+  const oralHz = Math.min(28, (frame.mode === "error" ? 6 : frame.mode === "transcribing" ? 12 : 20) * (1 + activityMix * 0.2));
   return vorticella.map((cell) => {
     const cyclePhase = wrapUnit2(cell.contractCyclePhase + Math.max(0, finite3(cell.contractRate, 0)) * cycleRateMul * dt);
     return {
@@ -2513,7 +2516,7 @@ function updateVorticella(vorticella, frame, view) {
       phase: cyclePhase,
       contractCyclePhase: cyclePhase,
       contractPhase: vorticellaContractPhase(cyclePhase),
-      oralWreathPhase: wrapUnit2(cell.oralWreathPhase + Math.max(0, finite3(cell.oralRate, 0)) * oralRateMul * dt)
+      oralWreathPhase: wrapUnit2(cell.oralWreathPhase + oralHz * dt)
     };
   });
 }
@@ -2530,71 +2533,129 @@ function drawPolyline3(ctx, points, close) {
 function drawVorticella(ctx, vorticella, frame, view) {
   if (!view.enabled || vorticella.length === 0 || view.vorticella.count <= 0)
     return;
-  const alpha = Math.max(0, Math.min(1, view.alpha * 0.62));
+  const alpha = Math.max(0, Math.min(1, view.alpha * 0.85));
   if (alpha <= 0)
     return;
   const scale = Math.max(0.1, finite3(view.vorticella.scale, 1));
-  const hue = finite3(frame.baseHue, 50) + 110;
+  const H = Math.max(1, finite3(frame.height, 80));
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   for (const cell of vorticella) {
-    const bellRadius = Math.max(2.4, Math.min(6.2, (3.8 + finite3(cell.size, 1) * 1.4) * scale));
-    const restLength = Math.max(5.5, Math.min(12, finite3(cell.restLength, 9) * scale));
-    const geometry = vorticellaGeometry(cell.contractPhase, {
-      anchorX: finite3(cell.anchorX, 0),
-      anchorY: finite3(cell.anchorY, 0),
-      restLength,
-      directionAngle: finite3(cell.directionAngle, Math.PI / 2),
-      minLengthFrac: 0.26,
-      coilSampleCount: 14
+    const s = clamp012(finite3(cell.contractPhase, 0));
+    const dir = finite3(cell.directionAngle, -Math.PI / 2);
+    const ux = Math.cos(dir), uy = Math.sin(dir);
+    const nx = -uy, ny = ux;
+    const anchorX = finite3(cell.anchorX, 0);
+    const anchorY = finite3(cell.anchorY, 0);
+    const D = clamp2((8 + finite3(cell.size, 1) * 4) * scale, 6, H * 0.42);
+    const bellHeight = 1.35 * D;
+    const restStalk = clamp2(D * 2.4, D, H - bellHeight - 3);
+    const geom = vorticellaGeometry(s, {
+      anchorX,
+      anchorY,
+      restLength: restStalk,
+      directionAngle: dir,
+      minLengthFrac: 0.35,
+      coilSampleCount: 26,
+      coilRadius: D * 0.5
     });
-    const ux = Math.cos(cell.directionAngle);
-    const uy = Math.sin(cell.directionAngle);
-    const nx = -uy;
-    const ny = ux;
-    const bellCx = geometry.bellCenter.x;
-    const bellCy = geometry.bellCenter.y;
-    const cupDepth = bellRadius * 0.88;
-    const cupWidth = bellRadius * (1.18 - cell.contractPhase * 0.18);
-    const cup = [
-      { x: bellCx + nx * -cupWidth * 0.72 - ux * cupDepth * 0.3, y: bellCy + ny * -cupWidth * 0.72 - uy * cupDepth * 0.3 },
-      { x: bellCx + nx * -cupWidth * 0.38 + ux * cupDepth * 0.42, y: bellCy + ny * -cupWidth * 0.38 + uy * cupDepth * 0.42 },
-      { x: bellCx + ux * cupDepth * 0.64, y: bellCy + uy * cupDepth * 0.64 },
-      { x: bellCx + nx * cupWidth * 0.38 + ux * cupDepth * 0.42, y: bellCy + ny * cupWidth * 0.38 + uy * cupDepth * 0.42 },
-      { x: bellCx + nx * cupWidth * 0.72 - ux * cupDepth * 0.3, y: bellCy + ny * cupWidth * 0.72 - uy * cupDepth * 0.3 }
-    ];
-    drawPolyline3(ctx, geometry.stalkPath, false);
-    ctx.strokeStyle = `hsla(${hue}, 20%, 72%, ${alpha * 0.46})`;
-    ctx.lineWidth = 0.44;
+    const neck = geom.bellCenter;
+    const rimC = { x: neck.x + ux * bellHeight, y: neck.y + uy * bellHeight };
+    const open = 1 - 0.7 * s;
+    const Rrim = D / 2 * open;
+    const bodyPoint = (along, lateral) => ({
+      x: neck.x + ux * along + nx * lateral,
+      y: neck.y + uy * along + ny * lateral
+    });
+    const halfW = (u) => (0.1 * D + 0.4 * D * smoothstep3(u)) * (u > 0.9 ? open : 1);
+    drawPolyline3(ctx, geom.stalkPath, false);
+    ctx.strokeStyle = `hsla(200, 12%, 84%, ${alpha * 0.42})`;
+    ctx.lineWidth = Math.max(0.6, D * 0.07);
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(200, 16%, 70%, ${alpha * 0.3})`;
+    ctx.lineWidth = Math.max(0.3, D * 0.03);
     ctx.stroke();
     ctx.beginPath();
-    ctx.arc(geometry.anchor.x, geometry.anchor.y, 0.65, 0, TAU4);
-    ctx.fillStyle = `hsla(${hue - 12}, 14%, 74%, ${alpha * 0.35})`;
+    ctx.arc(anchorX, anchorY, Math.max(0.8, D * 0.16), 0, TAU4);
+    ctx.fillStyle = `hsla(200, 12%, 76%, ${alpha * 0.4})`;
     ctx.fill();
-    drawPolyline3(ctx, cup, true);
-    ctx.fillStyle = `hsla(${hue}, 18%, 70%, ${alpha * 0.12})`;
-    ctx.strokeStyle = `hsla(${hue + 8}, 22%, 78%, ${alpha * 0.42})`;
-    ctx.lineWidth = 0.48;
+    const SAMP = 16;
+    const left = [];
+    const right = [];
+    for (let i = 0;i <= SAMP; i++) {
+      const u = i / SAMP;
+      const hw = halfW(u);
+      left.push(bodyPoint(bellHeight * u, -hw));
+      right.push(bodyPoint(bellHeight * u, hw));
+    }
+    const outline = [...left, ...right.reverse()];
+    drawPolyline3(ctx, outline, true);
+    ctx.fillStyle = `hsla(200, 10%, 82%, ${alpha * 0.14})`;
+    ctx.strokeStyle = `hsla(200, 16%, 90%, ${alpha * 0.4})`;
+    ctx.lineWidth = Math.max(0.4, D * 0.05);
     ctx.fill();
     ctx.stroke();
-    const mouthX = bellCx - ux * cupDepth * 0.3;
-    const mouthY = bellCy - uy * cupDepth * 0.3;
-    ctx.beginPath();
-    ctx.ellipse(mouthX, mouthY, cupWidth * 0.78, Math.max(0.55, bellRadius * 0.28), cell.directionAngle, 0, TAU4);
-    ctx.strokeStyle = `hsla(${hue + 18}, 18%, 82%, ${alpha * 0.52})`;
-    ctx.lineWidth = 0.36;
+    const macPts = [];
+    const macAlong = bellHeight * 0.52;
+    const macR = D * 0.24;
+    for (let i = 0;i <= 12; i++) {
+      const th = Math.PI * (0.3 + i / 12 * 1.4);
+      macPts.push(bodyPoint(macAlong - macR * 0.7 * Math.cos(th), macR * Math.sin(th)));
+    }
+    drawPolyline3(ctx, macPts, false);
+    ctx.strokeStyle = `hsla(50, 14%, 72%, ${alpha * 0.3})`;
+    ctx.lineWidth = Math.max(0.6, D * 0.12);
     ctx.stroke();
-    ctx.strokeStyle = `hsla(${hue + 20}, 18%, 84%, ${alpha * 0.38})`;
-    ctx.lineWidth = 0.24;
-    for (let i = 0;i < 7; i++) {
-      const q = (i / 7 + cell.oralWreathPhase) % 1;
-      const lateral = (q - 0.5) * cupWidth * 1.35;
-      const beat = Math.sin((q + cell.oralWreathPhase) * TAU4) * bellRadius * 0.12;
-      const base = { x: mouthX + nx * lateral, y: mouthY + ny * lateral };
-      const tip = { x: base.x - ux * (0.85 + beat), y: base.y - uy * (0.85 + beat) };
-      drawPolyline3(ctx, [base, tip], false);
+    if (D >= 10) {
+      const cvPulse = 0.5 - 0.5 * Math.cos(TAU4 * wrapUnit2(finite3(cell.contractCyclePhase, 0) * 0.5));
+      const cv = bodyPoint(bellHeight * 0.78, -D * 0.18);
+      ctx.beginPath();
+      ctx.arc(cv.x, cv.y, Math.max(0.5, D * (0.05 + 0.05 * cvPulse)), 0, TAU4);
+      ctx.strokeStyle = `hsla(190, 30%, 86%, ${alpha * 0.4})`;
+      ctx.lineWidth = Math.max(0.3, D * 0.03);
       ctx.stroke();
+    }
+    if (D >= 12) {
+      const fvSeed = (Math.round(anchorX) ^ 40503) >>> 0;
+      const fvCount = 4;
+      for (let j = 0;j < fvCount; j++) {
+        const u = 0.3 + seededUnit(fvSeed, j, 1371344503) * 0.4;
+        const lat = (seededUnit(fvSeed, j, 752460107) - 0.5) * 1.2 * halfW(u);
+        const fv = bodyPoint(bellHeight * u, lat);
+        ctx.beginPath();
+        ctx.arc(fv.x, fv.y, Math.max(0.4, D * (0.05 + seededUnit(fvSeed, j, 2117754257) * 0.05)), 0, TAU4);
+        ctx.fillStyle = `hsla(40, 18%, 74%, ${alpha * 0.18})`;
+        ctx.fill();
+      }
+    }
+    const lipRy = Math.max(0.5, Rrim * 0.34);
+    ctx.beginPath();
+    ctx.ellipse(rimC.x, rimC.y, Rrim, lipRy, dir, 0, TAU4);
+    ctx.fillStyle = `hsla(195, 16%, 80%, ${alpha * 0.16 * open})`;
+    ctx.fill();
+    ctx.strokeStyle = `hsla(200, 16%, 88%, ${alpha * 0.45 * open})`;
+    ctx.lineWidth = Math.max(0.4, D * 0.05);
+    ctx.stroke();
+    if (open > 0.25) {
+      const M = Math.max(8, Math.round(D * 1.1));
+      ctx.strokeStyle = `hsla(48, 22%, 86%, ${alpha * 0.5 * open})`;
+      ctx.lineWidth = Math.max(0.25, D * 0.025);
+      const oral = wrapUnit2(finite3(cell.oralWreathPhase, 0));
+      for (let i = 0;i < M; i++) {
+        const a = i / M;
+        const lateral = Math.cos(a * TAU4) * Rrim;
+        const depth = Math.sin(a * TAU4) * lipRy;
+        const base = { x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth };
+        const beat = Math.sin((a * 2 - oral) * TAU4);
+        const len = D * (0.14 + 0.06 * beat);
+        const tip = {
+          x: base.x + ux * len + nx * beat * D * 0.05,
+          y: base.y + uy * len + ny * beat * D * 0.05
+        };
+        drawPolyline3(ctx, [base, tip], false);
+        ctx.stroke();
+      }
     }
   }
   ctx.restore();
