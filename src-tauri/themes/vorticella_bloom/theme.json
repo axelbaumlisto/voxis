@@ -1,0 +1,10 @@
+{
+  "manifest_version": 2,
+  "id": "vorticella_bloom",
+  "name": "Vorticella Bloom",
+  "description": "A single Vorticella — a bell-shaped sessile ciliate on a contractile coiling stalk anchored to the floor, its oral ciliary wreath beating. No paramecium; the vorticella is the whole organism.",
+  "api_version": 1,
+  "overlay_width": 240,
+  "overlay_height": 80,
+  "entry": "theme.js"
+}
