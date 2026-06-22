@@ -1644,6 +1644,61 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(stepsTo90(true)).toBe(withM);
   });
 
+  it("mechanosensitive field path matches legacy motiles and empty field matches no motiles", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 51,
+      vorticellaCount: 1,
+      vorticellaContractRate: 1.0,
+      vorticellaContractRateActive: 1.6,
+    };
+    const view = aquariumParamsView(params);
+    const seeded = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
+    const initial = seeded.map((cell) => ({ ...cell, contractLeg: 0, contractTimer: 1.1 }));
+    const obs = vorticellaObstacle(initial[0], view.vorticella.scale, 80);
+    const base = { dt: 0.05, width: 240, height: 80, activity: 0.2 };
+    const legacy = updateVorticella(initial, frame({ ...base, motiles: [{ x: obs.x, y: obs.y }] }), view);
+    const field = updateVorticella(
+      initial,
+      frame({ ...base, interaction: buildField([{ kind: "motile", x: obs.x, y: obs.y, sourceId: sourceId("euglena", 0) }]) }),
+      view,
+    );
+    const noMotiles = updateVorticella(initial, frame(base), view);
+    const emptyField = updateVorticella(initial, frame({ ...base, interaction: buildField([]) }), view);
+
+    for (const key of ["contractPhase", "contractLeg", "contractTimer", "eventCount", "feedInterval"] as const) {
+      expect(field[0][key]).toBeCloseTo(legacy[0][key], 10);
+      expect(emptyField[0][key]).toBeCloseTo(noMotiles[0][key], 10);
+    }
+    expect(field).toEqual(legacy);
+    expect(emptyField).toEqual(noMotiles);
+  });
+
+  it("mechanosensitive field self-excludes this vorticella source id", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 51,
+      vorticellaCount: 1,
+      vorticellaContractRate: 1.0,
+      vorticellaContractRateActive: 1.6,
+    };
+    const view = aquariumParamsView(params);
+    const seeded = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
+    const initial = seeded.map((cell) => ({ ...cell, contractLeg: 0, contractTimer: 1.1 }));
+    const obs = vorticellaObstacle(initial[0], view.vorticella.scale, 80);
+    const base = { dt: 0.05, width: 240, height: 80, activity: 0.2 };
+    const noMotiles = updateVorticella(initial, frame(base), view);
+    const selfOnly = updateVorticella(
+      initial,
+      frame({ ...base, interaction: buildField([{ kind: "motile", x: obs.x, y: obs.y, sourceId: sourceId("vorticella", 0) }]) }),
+      view,
+    );
+
+    expect(selfOnly).toEqual(noMotiles);
+  });
+
   it("updateVorticella is dt-partition invariant away from event boundaries", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,

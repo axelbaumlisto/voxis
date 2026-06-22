@@ -2779,14 +2779,14 @@ function updateVorticella(vorticella, frame, view) {
   const cadence = Math.max(0.2, Math.min(3.5, rate * modeMul * startleBoost));
   const oralHz = Math.min(24, (frame.mode === "error" ? 6 : frame.mode === "transcribing" ? 12 : 20) * (1 + activityMix * 0.2));
   const swayMul = frame.mode === "error" ? 0.3 : frame.mode === "transcribing" ? 0.6 : 1;
-  return vorticella.map((cell) => {
+  return vorticella.map((cell, idx) => {
     const cvClock = wrapUnit(finite(cell.contractCyclePhase, 0) + Math.max(0, finite(cell.contractRate, 0)) * dt);
     const cellSeed = vorticellaCellSeed(finite(cell.anchorX, 0));
     let leg = Math.max(0, Math.min(3, Math.floor(finiteOr(cell.contractLeg, 0))));
     let timer = Math.max(0, finiteOr(cell.contractTimer, 0)) + dt;
     let interval = Math.max(2.5, finiteOr(cell.feedInterval, 6));
     let evt = Math.max(0, Math.floor(finiteOr(cell.eventCount, 0)));
-    const motiles = frame.motiles;
+    const motiles = frame.interaction ? frame.interaction.motiles.filter((motile) => motile.sourceId !== sourceId("vorticella", idx)) : frame.motiles;
     if (motiles && motiles.length > 0 && leg === 0 && timer > 1) {
       const obs = vorticellaObstacle(cell, view.vorticella.scale, frame.height);
       const trigR = obs.radius * 1.25;

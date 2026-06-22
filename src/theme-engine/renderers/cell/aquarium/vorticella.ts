@@ -1,4 +1,5 @@
 import type { AquariumFrame, AquariumParamsView, VorticellaState } from "./types";
+import { sourceId } from "./interaction";
 import { seededUnit } from "./seeds";
 import { TAU, clamp, clamp01, finite, finiteOr, smoothstep, wrapUnit } from "./util";
 
@@ -222,7 +223,7 @@ export function updateVorticella(
   const oralHz = Math.min(24, (frame.mode === "error" ? 6 : frame.mode === "transcribing" ? 12 : 20) * (1 + activityMix * 0.2));
   // sway slows a little under load (the zooid stiffens when contracting often)
   const swayMul = frame.mode === "error" ? 0.3 : frame.mode === "transcribing" ? 0.6 : 1;
-  return vorticella.map((cell) => {
+  return vorticella.map((cell, idx) => {
     // CV pulses on its own slow rhythm, independent of contraction events
     const cvClock = wrapUnit(finite(cell.contractCyclePhase, 0) + Math.max(0, finite(cell.contractRate, 0)) * dt);
     const cellSeed = vorticellaCellSeed(finite(cell.anchorX, 0));
@@ -234,7 +235,9 @@ export function updateVorticella(
     // MECHANOSENSITIVE reflex: a motile cell passing close to the bell triggers a
     // contraction (the iconic Vorticella startle). Only while extended and past a
     // short refractory, so a lingering cell does not cause a spasm storm.
-    const motiles = frame.motiles;
+    const motiles = frame.interaction
+      ? frame.interaction.motiles.filter((motile) => motile.sourceId !== sourceId("vorticella", idx))
+      : frame.motiles;
     if (motiles && motiles.length > 0 && leg === 0 && timer > 1.0) {
       const obs = vorticellaObstacle(cell, view.vorticella.scale, frame.height);
       const trigR = obs.radius * 1.25;
