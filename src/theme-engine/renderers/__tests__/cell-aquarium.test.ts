@@ -8,6 +8,7 @@ import { updateVorticella, vorticellaContractPhase, vorticellaGeometry, vorticel
 import { noise2D } from "../cell/aquarium/seeds";
 import type { AquariumFrame, AquariumLayerState, EuglenaState } from "../cell/aquarium/types";
 import type { CellParams } from "../cell/types";
+import { RecordingCanvasContext2D, summarize, type GoldenSummary } from "./helpers/recordingCanvas";
 
 function installNoopCanvasContext(): void {
   const gradient = { addColorStop: vi.fn() };
@@ -101,6 +102,102 @@ function frame(overrides: Partial<AquariumFrame> = {}): AquariumFrame {
     ...overrides,
   };
 }
+
+const GOLDEN_FRAME: AquariumFrame = {
+  t: 4.0,
+  dt: 1 / 60,
+  width: 240,
+  height: 80,
+  mode: "recording",
+  activity: 0.6,
+  audioLevel: 0.4,
+  startle: 0,
+  baseHue: 50,
+};
+
+function aquariumGoldenParams(): CellParams {
+  return {
+    ...CELL_DEFAULTS,
+    enableAquarium: true,
+    aquariumSeed: 67,
+    aquariumAlpha: 0.55,
+    diatomCount: 3,
+    diatomAlpha: 0.35,
+    euglenaCount: 1,
+    euglenaScale: 1.4,
+    vorticellaCount: 1,
+    vorticellaScale: 1.2,
+    baseHue: 50,
+  };
+}
+
+function goldenFor(contractPhase: number): GoldenSummary {
+  const params = aquariumGoldenParams();
+  const base = seedAquarium(GOLDEN_FRAME, params);
+  const state: AquariumLayerState = {
+    ...base,
+    euglena: base.euglena.map((cell) => ({
+      ...cell,
+      rollPhase: 0.3,
+      metabolyPhase: 0.4,
+      flagellumPhase: 0.2,
+    })),
+    vorticella: base.vorticella.map((cell) => ({
+      ...cell,
+      contractPhase,
+      contractCyclePhase: 0.2,
+      oralWreathPhase: 0.5,
+    })),
+  };
+  const ops: string[] = [];
+  drawAquariumBackground(
+    new RecordingCanvasContext2D(ops) as unknown as CanvasRenderingContext2D,
+    state,
+    GOLDEN_FRAME,
+    params,
+  );
+  return summarize(ops);
+}
+
+describe("aquarium draw-op golden (Epic 1 P0)", () => {
+  it("keeps the three-species CONTRACTED draw byte-stable", () => {
+    expect(goldenFor(0.5)).toEqual({
+      hash: "c964ee6b90b8e6bb",
+      opCount: 720,
+      counts: {
+        beginPath: 104,
+        moveTo: 87,
+        lineTo: 391,
+        closePath: 5,
+        fill: 22,
+        stroke: 88,
+        save: 3,
+        ellipse: 7,
+        arc: 10,
+        restore: 3,
+      },
+    });
+  });
+
+  it("keeps the three-species RESTING draw byte-stable", () => {
+    expect(goldenFor(0)).toEqual({
+      hash: "221ae33f4097705f",
+      opCount: 604,
+      counts: {
+        beginPath: 75,
+        moveTo: 58,
+        lineTo: 362,
+        closePath: 5,
+        fill: 22,
+        stroke: 59,
+        save: 3,
+        ellipse: 7,
+        arc: 10,
+        restore: 3,
+      },
+    });
+  });
+});
 
 describe("aquariumParamsView", () => {
   it("builds euglena steer + medium overrides only when taxis/jitter params are set", () => {
