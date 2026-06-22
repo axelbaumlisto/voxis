@@ -278,7 +278,6 @@ describe("aquariumParamsView", () => {
       euglenaSeparation: 0.4,
       vorticellaCount: 1,
       vorticellaContractRate: 0.6,
-      vorticellaContractRateActive: 1.8,
       vorticellaScale: 1.2,
     };
 
@@ -289,7 +288,7 @@ describe("aquariumParamsView", () => {
       activityBoost: 0.7,
       diatoms: { count: 3, alpha: 0.2, driftSpeed: 0.8 },
       euglena: { count: 2, speed: 1.1, speedActive: 2.4, scale: 0.9, hueOffset: 42, steer: { gravitaxis: 0, phototaxis: 0, separation: 0.4 } },
-      vorticella: { count: 1, contractRate: 0.6, contractRateActive: 1.8, scale: 1.2, alongFrac: 0.5 },
+      vorticella: { count: 1, contractRate: 0.6, scale: 1.2, alongFrac: 0.5 },
     });
   });
 
@@ -682,7 +681,6 @@ describe("aquarium layer Phase 2 diatoms", () => {
       euglenaRotDiffusion: 0.12,
       vorticellaCount: 1,
       vorticellaContractRate: 1.2,
-      vorticellaContractRateActive: 1.5,
       vorticellaScale: 1.2,
       vorticellaAlongFrac: 0.16,
     };
@@ -1587,7 +1585,6 @@ describe("aquarium layer Phase 4 vorticella", () => {
       aquariumSeed: 51,
       vorticellaCount: 2,
       vorticellaContractRate: 1.0,
-      vorticellaContractRateActive: 1.4,
     };
     const view = aquariumParamsView(params);
     const initial = seedAquarium(frame({ width: 172, height: 36 }), params).vorticella;
@@ -1635,7 +1632,6 @@ describe("aquarium layer Phase 4 vorticella", () => {
       aquariumSeed: 51,
       vorticellaCount: 1,
       vorticellaContractRate: 1.0,
-      vorticellaContractRateActive: 1.6,
     };
     const view = aquariumParamsView(params);
     let cell = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
@@ -1677,7 +1673,6 @@ describe("aquarium layer Phase 4 vorticella", () => {
       aquariumSeed: 51,
       vorticellaCount: 1,
       vorticellaContractRate: 1.0,
-      vorticellaContractRateActive: 1.6,
     };
     const view = aquariumParamsView(params);
     let cell = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
@@ -1707,7 +1702,6 @@ describe("aquarium layer Phase 4 vorticella", () => {
       aquariumSeed: 51,
       vorticellaCount: 1,
       vorticellaContractRate: 1.0,
-      vorticellaContractRateActive: 1.6,
     };
     const view = aquariumParamsView(params);
     const seeded = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
@@ -1744,7 +1738,6 @@ describe("aquarium layer Phase 4 vorticella", () => {
       aquariumSeed: 51,
       vorticellaCount: 1,
       vorticellaContractRate: 1.0,
-      vorticellaContractRateActive: 1.6,
     };
     const view = aquariumParamsView(params);
     const seeded = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
@@ -1774,7 +1767,6 @@ describe("aquarium layer Phase 4 vorticella", () => {
       aquariumSeed: 51,
       vorticellaCount: 1,
       vorticellaContractRate: 1.0,
-      vorticellaContractRateActive: 1.6,
     };
     const view = aquariumParamsView(params);
     const seeded = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
@@ -1798,7 +1790,6 @@ describe("aquarium layer Phase 4 vorticella", () => {
       aquariumSeed: 57,
       vorticellaCount: 1,
       vorticellaContractRate: 0.8,
-      vorticellaContractRateActive: 1.0,
     };
     const view = aquariumParamsView(params);
     const initial = seedAquarium(frame({ width: 172, height: 36 }), params).vorticella;
@@ -1912,7 +1903,6 @@ describe("aquarium layer Phase 4.5 combined perf/golden", () => {
       euglenaScale: 1.4,
       vorticellaCount: 1,
       vorticellaContractRate: 0.8,
-      vorticellaContractRateActive: 1.0,
       vorticellaScale: 1.2,
       vorticellaAlongFrac: 0.16,
     };
@@ -1958,7 +1948,6 @@ describe("aquarium layer Phase 4.5 combined perf/golden", () => {
       euglenaSpeed: 0.7,
       euglenaSpeedActive: 1.1,
       vorticellaContractRate: 0.8,
-      vorticellaContractRateActive: 1.0,
     };
     const initial = seedAquarium(frame({ width: 172, height: 36 }), params);
     let state = initial;

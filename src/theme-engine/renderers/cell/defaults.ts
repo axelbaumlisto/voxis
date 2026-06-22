@@ -111,7 +111,6 @@ export const CELL_DEFAULTS: CellParams = {
   euglenaRotDiffusion: 0,
   vorticellaCount: 0,
   vorticellaContractRate: 1.0,
-  vorticellaContractRateActive: 2.0,
   vorticellaScale: 1.0,
   vorticellaAlongFrac: 0.5,
   // H4 ambient flow field: OFF by default (dark-launch). flowStrength folds the

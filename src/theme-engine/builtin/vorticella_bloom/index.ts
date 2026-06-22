@@ -26,8 +26,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       diatomCount: 0,
       euglenaCount: 0,
       vorticellaCount: 1,
-      vorticellaContractRate: 1.2,        // occasional contraction (~9s idle period)
-      vorticellaContractRateActive: 1.5,
+      vorticellaContractRate: 1.2,        // metabolic contraction cadence (not audio-coupled)
       vorticellaScale: 3.6,        // fills the 240x240 overlay (crown near the top, no clip) without being oversized
       ...userParams,
     },

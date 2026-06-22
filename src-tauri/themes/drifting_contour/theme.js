@@ -1552,7 +1552,6 @@ var CELL_DEFAULTS = {
   euglenaRotDiffusion: 0,
   vorticellaCount: 0,
   vorticellaContractRate: 1,
-  vorticellaContractRateActive: 2,
   vorticellaScale: 1,
   vorticellaAlongFrac: 0.5,
   enableFlowField: false,
@@ -1691,7 +1690,6 @@ function aquariumParamsView(params) {
     vorticella: {
       count: nonNegativeInt(params.vorticellaCount, 0),
       contractRate: nonNegative(params.vorticellaContractRate, 1),
-      contractRateActive: nonNegative(params.vorticellaContractRateActive, 2),
       scale: nonNegative(params.vorticellaScale, 1),
       alongFrac: Math.min(1, Math.max(0, finiteOr(params.vorticellaAlongFrac, 0.5)))
     }
@@ -2656,7 +2654,7 @@ var VC_RELAX = 0.33;
 var T_C = 0.08;
 var T_HOLD = 0.05;
 var T_E = 2.6;
-function drawFeedInterval(cellSeed, eventCount, _activityMix, cadence) {
+function drawFeedInterval(cellSeed, eventCount, cadence) {
   const mean = 12 / Math.max(0.2, cadence);
   const u = Math.max(0.0001, seededUnit(cellSeed, eventCount, 1371344503));
   return clamp(-Math.log(u) * mean, 2.5, 18);
@@ -2797,7 +2795,7 @@ function seedVorticella(count, seed, frame, alongFrac = 0.5, salt = 117600714) {
       swayRate: 0.1 + seededUnit(seed, i, salt ^ 1513062835) * 0.07,
       contractLeg: 0,
       contractTimer: seededUnit(seed, i, salt ^ 699105045) * 1.5,
-      feedInterval: drawFeedInterval(vorticellaCellSeed(anchorX), 0, 0, 1),
+      feedInterval: drawFeedInterval(vorticellaCellSeed(anchorX), 0, 1),
       eventCount: 0,
       migrateState: 0,
       attach: 1,
@@ -2813,7 +2811,6 @@ function updateVorticella(vorticella, frame, view) {
   if (vorticella.length === 0)
     return vorticella;
   const dt = Math.max(0, finite(frame.dt, 0));
-  const activityMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
   const idleRate = Math.max(0, finite(view.vorticella.contractRate, 0));
   const rate = idleRate;
   const cadence = Math.max(0.2, Math.min(3.5, rate));
@@ -2864,7 +2861,7 @@ function updateVorticella(vorticella, frame, view) {
           timer -= T_E;
           leg = 0;
           evt += 1;
-          interval = drawFeedInterval(cellSeed, evt, activityMix, cadence);
+          interval = drawFeedInterval(cellSeed, evt, cadence);
         } else
           break;
       }
@@ -3287,7 +3284,7 @@ function viewForDiatom(cfg) {
     activityBoost: cfg.activityBoost,
     diatoms: cfg,
     euglena: { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 },
-    vorticella: { count: 0, contractRate: 0, contractRateActive: 0, scale: 1, alongFrac: 0.5 }
+    vorticella: { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 }
   };
 }
 function viewForEuglena(cfg) {
@@ -3299,7 +3296,7 @@ function viewForEuglena(cfg) {
     medium: cfg.medium,
     diatoms: { count: 0, alpha: 0, driftSpeed: 0 },
     euglena: cfg,
-    vorticella: { count: 0, contractRate: 0, contractRateActive: 0, scale: 1, alongFrac: 0.5 }
+    vorticella: { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 }
   };
 }
 function viewForVorticella(cfg) {
@@ -4279,7 +4276,6 @@ function mount(container, api) {
       vorticellaCount: 1,
       vorticellaScale: 2.6,
       vorticellaContractRate: 1.2,
-      vorticellaContractRateActive: 1.5,
       ...userParams
     }
   });

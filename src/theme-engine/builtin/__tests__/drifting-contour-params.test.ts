@@ -71,7 +71,6 @@ const AQUARIUM_CRITICAL = {
   vorticellaCount: 1,
   vorticellaScale: 2.6,
   vorticellaContractRate: 1.2,
-  vorticellaContractRateActive: 1.5,
 } as const;
 
 // duo_aquarium is the 2-hero counterpart: paramecium + euglena, no sessile vorticella
@@ -169,7 +168,7 @@ function expectUserParamsLast(body: string): void {
 
 function expectNoVorticellaPreviewParams(block: string): void {
   // duo theme only — vorticella is a separate theme (vorticella_bloom)
-  expect(block).not.toMatch(/\bvorticella(?:Scale|AlongFrac|ContractRate|ContractRateActive)\s*:/i);
+  expect(block).not.toMatch(/\bvorticella(?:Scale|AlongFrac|ContractRate)\s*:/i);
 }
 
 function expectSharedSpreadBeforeUserParams(body: string): void {

@@ -47,7 +47,6 @@ export interface AquariumParamsView {
   readonly vorticella: {
     readonly count: number;
     readonly contractRate: number;
-    readonly contractRateActive: number;
     readonly scale: number;
     readonly alongFrac: number;
   };

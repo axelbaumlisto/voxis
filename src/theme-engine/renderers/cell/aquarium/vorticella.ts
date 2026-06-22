@@ -47,7 +47,7 @@ const T_E = 2.6;     // slow Ca-reload re-extension
 
 /** Deterministic Poisson-ish feeding dwell (s) before the next contraction.
  *  `cadence` folds in the theme contract-rate + mode + startle (higher = more frequent). */
-function drawFeedInterval(cellSeed: number, eventCount: number, _activityMix: number, cadence: number): number {
+function drawFeedInterval(cellSeed: number, eventCount: number, cadence: number): number {
   const mean = 12 / Math.max(0.2, cadence); // METABOLIC resting cadence; NOT shortened by audio
   const u = Math.max(1e-4, seededUnit(cellSeed, eventCount, 0x51bd0e77));
   return clamp(-Math.log(u) * mean, 2.5, 18);
@@ -224,7 +224,7 @@ export function seedVorticella(count: number, seed: number, frame: AquariumFrame
       // contraction boundary (timer < 1.5 < min interval) so dt-partition stays exact
       contractLeg: 0,
       contractTimer: seededUnit(seed, i, salt ^ 0x29ab7f15) * 1.5,
-      feedInterval: drawFeedInterval(vorticellaCellSeed(anchorX), 0, 0, 1),
+      feedInterval: drawFeedInterval(vorticellaCellSeed(anchorX), 0, 1),
       eventCount: 0,
       migrateState: 0,
       attach: 1,
@@ -244,11 +244,10 @@ export function updateVorticella(
 ): readonly VorticellaState[] {
   if (vorticella.length === 0) return vorticella;
   const dt = Math.max(0, finite(frame.dt, 0));
-  const activityMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
   const idleRate = Math.max(0, finite(view.vorticella.contractRate, 0));
   // CRITIC FIX: contraction cadence / oral cilia / CV are METABOLIC and must NOT speed
   // up with the user's voice level or app mode (real cyclosis & beating are not driven
-  // by ambient sound). Decouple from activityMix + mode; the ONLY world-coupled trigger
+  // by ambient sound). Cadence/beat are purely metabolic; the ONLY world-coupled trigger
   // left is the mechanosensitive motile reflex (passing cells) in the leg state machine.
   const rate = idleRate;
   const cadence = Math.max(0.2, Math.min(3.5, rate));
@@ -281,7 +280,7 @@ export function updateVorticella(
       if (leg === 0) { if (timer >= interval) { timer -= interval; leg = 1; } else break; }
       else if (leg === 1) { if (timer >= T_C) { timer -= T_C; leg = 2; } else break; }
       else if (leg === 2) { if (timer >= T_HOLD) { timer -= T_HOLD; leg = 3; } else break; }
-      else { if (timer >= T_E) { timer -= T_E; leg = 0; evt += 1; interval = drawFeedInterval(cellSeed, evt, activityMix, cadence); } else break; }
+      else { if (timer >= T_E) { timer -= T_E; leg = 0; evt += 1; interval = drawFeedInterval(cellSeed, evt, cadence); } else break; }
     }
 
     // --- telotroch migration (rare): a sessile zooid occasionally detaches into a

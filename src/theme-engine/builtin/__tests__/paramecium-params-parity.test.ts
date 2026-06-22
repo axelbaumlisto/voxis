@@ -134,7 +134,6 @@ const EXPECTED_DRIFTING_CONTOUR_PARAMS = {
   vorticellaCount: 1,
   vorticellaScale: 2.6,
   vorticellaContractRate: 1.2,
-  vorticellaContractRateActive: 1.5,
 } as const;
 
 // duo_aquarium = the 2-hero counterpart: identical to drifting_contour minus the
@@ -145,7 +144,6 @@ const EXPECTED_DUO_AQUARIUM_PARAMS = {
   vorticellaCount: 0,
   vorticellaScale: undefined,
   vorticellaContractRate: undefined,
-  vorticellaContractRateActive: undefined,
 } as const;
 
 const EXPECTED_PARAMECIUM_SOLO_PARAMS = {

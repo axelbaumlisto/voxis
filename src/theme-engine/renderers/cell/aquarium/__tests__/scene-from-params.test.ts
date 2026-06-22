@@ -68,7 +68,6 @@ function vorticellaBloomParams(): CellParams {
     euglenaCount: 0,
     vorticellaCount: 1,
     vorticellaContractRate: 1.2,
-    vorticellaContractRateActive: 1.5,
     vorticellaScale: 5.5,
   };
 }
@@ -87,7 +86,6 @@ function multiOrganismParams(): CellParams {
     euglenaSpeedActive: 1.5,
     euglenaScale: 2.8,
     vorticellaContractRate: 1.2,
-    vorticellaContractRateActive: 1.5,
     vorticellaScale: 1.2,
     vorticellaAlongFrac: 0.16,
   };
@@ -243,7 +241,6 @@ describe("sceneFromParams", () => {
           cfg: {
             count: 1,
             contractRate: 1.2,
-            contractRateActive: 1.5,
             scale: 5.5,
             alongFrac: 0.5,
             seed: 3,

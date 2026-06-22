@@ -23,7 +23,6 @@ const FROZEN_EUGLENA_WILD = {
 const FROZEN_VORTICELLA_DEFAULT = {
   scale: 5.5,
   contractRate: 1.2,
-  contractRateActive: 1.5,
   palette: { hueOffset: 200 },
 };
 
@@ -76,7 +75,6 @@ describe("aquarium species variants", () => {
     expect(EUGLENA_SPECIES.wild).not.toHaveProperty("vorticellaCount");
     expect(EUGLENA_SPECIES.wild).not.toHaveProperty("vorticellaScale");
     expect(EUGLENA_SPECIES.wild).not.toHaveProperty("vorticellaContractRate");
-    expect(EUGLENA_SPECIES.wild).not.toHaveProperty("vorticellaContractRateActive");
 
     expect(PARAMECIUM_SPECIES.aurelia).toEqual({
       params: PARAMECIUM_CELL_PARAMS,
