@@ -2103,10 +2103,6 @@ function seedEuglena(count, seed, frame, salt = 235478698) {
   }
   return euglena;
 }
-function smoothstep2(x) {
-  const t = clamp01(x);
-  return t * t * (3 - 2 * t);
-}
 function updateEuglena(euglena, frame, view) {
   if (euglena.length === 0)
     return euglena;
@@ -2120,42 +2116,37 @@ function updateEuglena(euglena, frame, view) {
   const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
   const act = modeView.motionMul * (1 + 0.7 * activityMix);
   const scale = view.euglena.scale;
-  const turnTime = 1.3;
-  const margin = Math.max(8, safeWidth * 0.1);
   return euglena.map((cell) => {
     const L = euglenaDisplayLength(finite2(cell.size, 1), scale);
     let heading = finite2(cell.heading, 0);
-    let turnProgress = finiteOr3(cell.turnProgress, 2);
-    let turnFrom = finiteOr3(cell.turnFrom, heading);
-    let turnTo = finiteOr3(cell.turnTo, heading);
-    let speedScale = 1;
-    const turning = turnProgress < 1;
-    if (turning) {
-      turnProgress = Math.min(1, turnProgress + dt / turnTime);
-      heading = turnFrom + (turnTo - turnFrom) * smoothstep2(turnProgress);
-      speedScale = 0.4 + 0.6 * Math.abs(Math.cos(turnProgress * Math.PI));
-      if (turnProgress >= 1)
-        heading = turnTo;
-    } else {
-      const ux0 = Math.cos(heading);
-      const lead = finite2(cell.x, 0) + ux0 * (L / 2);
-      const turnMargin = Math.max(margin, L * 1.4);
-      if (ux0 > 0 && lead > safeWidth - turnMargin || ux0 < 0 && lead < turnMargin) {
-        turnProgress = 0;
-        turnFrom = heading;
-        turnTo = heading + Math.PI;
-        speedScale = 1;
+    const wrapPi2 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    const px0 = finite2(cell.x, 0);
+    const py0 = finite2(cell.y, 0);
+    let ux = Math.cos(heading);
+    let uy = Math.sin(heading);
+    const vPx = Math.max(0, finite2(cell.swimSpeed, 0)) * vBL * L;
+    {
+      const look = Math.max(L * 2.4, Math.min(safeWidth, safeHeight) * 0.5);
+      let avoidX = 0;
+      let avoidY = 0;
+      if (ux < 0 && px0 < look)
+        avoidX += 1 - px0 / look;
+      if (ux > 0 && safeWidth - px0 < look)
+        avoidX -= 1 - (safeWidth - px0) / look;
+      if (uy < 0 && py0 < look)
+        avoidY += 1 - py0 / look;
+      if (uy > 0 && safeHeight - py0 < look)
+        avoidY -= 1 - (safeHeight - py0) / look;
+      if (avoidX !== 0 || avoidY !== 0) {
+        const urgency = Math.min(1, Math.hypot(avoidX, avoidY));
+        const desired = Math.atan2(uy + 2 * avoidY, ux + 2 * avoidX);
+        heading += wrapPi2(desired - heading) * Math.min(1, (3 + 6 * urgency) * dt);
+        ux = Math.cos(heading);
+        uy = Math.sin(heading);
       }
     }
-    const ux = Math.cos(heading);
-    const uy = Math.sin(heading);
-    const vPx = Math.max(0, finite2(cell.swimSpeed, 0)) * vBL * L * speedScale;
-    let nextX = finite2(cell.x, 0) + ux * vPx * dt;
-    let nextY = finite2(cell.y, 0) + uy * vPx * dt;
-    const yc = safeHeight / 2;
-    if (safeHeight > 0 && Math.abs(nextY - yc) > 0.28 * safeHeight) {
-      nextY += (yc - nextY) * Math.min(1, 4 * dt);
-    }
+    let nextX = px0 + ux * vPx * dt;
+    let nextY = py0 + uy * vPx * dt;
     if (frame.hero) {
       const hx = finite2(frame.hero.x, safeWidth / 2);
       const hy = finite2(frame.hero.y, safeHeight / 2);
@@ -2184,21 +2175,20 @@ function updateEuglena(euglena, frame, view) {
       }
       if (qd < 1.69 && qd > 0.000000001) {
         const factor = Math.min(1, (1.69 - qd) / 0.69);
-        const wrapPi2 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+        const wrapPi3 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
         const awayAng = Math.atan2(dy, dx);
         const t1 = awayAng + Math.PI / 2;
         const t2 = awayAng - Math.PI / 2;
-        const target = Math.abs(wrapPi2(t1 - heading)) < Math.abs(wrapPi2(t2 - heading)) ? t1 : t2;
-        heading += wrapPi2(target - heading) * Math.min(1, 1.8 * factor * dt);
+        const target = Math.abs(wrapPi3(t1 - heading)) < Math.abs(wrapPi3(t2 - heading)) ? t1 : t2;
+        heading += wrapPi3(target - heading) * Math.min(1, 1.8 * factor * dt);
       }
     }
     const rollDelta = Math.max(0, finite2(cell.rollRate, 0)) * act * dt;
     const bphase = wrapUnit(finiteOr3(cell.burstPhase, 0));
     const flick = bphase < 0.08 ? Math.sin(bphase / 0.08 * Math.PI) : 0;
     const beatBoost = 1 + 1.3 * flick;
-    if (turnProgress >= 1 && flick > 0) {
-      const wrapPi2 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
-      const toCenter = Math.atan2(safeHeight / 2 - finite2(cell.y, 0), safeWidth / 2 - finite2(cell.x, 0));
+    if (flick > 0) {
+      const toCenter = Math.atan2(safeHeight / 2 - py0, safeWidth / 2 - px0);
       const turnSign = wrapPi2(toCenter - heading) >= 0 ? 1 : -1;
       heading += turnSign * 0.9 * flick * dt;
     }
@@ -2209,9 +2199,9 @@ function updateEuglena(euglena, frame, view) {
       y: clamp(nextY, 0, safeHeight),
       phase: heading,
       heading,
-      turnProgress,
-      turnFrom,
-      turnTo,
+      turnProgress: finiteOr3(cell.turnProgress, 2),
+      turnFrom: finiteOr3(cell.turnFrom, heading),
+      turnTo: finiteOr3(cell.turnTo, heading),
       rollPhase: wrapUnit(finite2(cell.rollPhase, 0) + rollDelta),
       metabolyPhase: wrapUnit(finite2(cell.metabolyPhase, 0) + Math.max(0, finite2(cell.metabolyRate, 0)) * act * dt),
       flagellumPhase: wrapUnit(finite2(cell.flagellumPhase, 0) + fEff * dt),
@@ -2421,7 +2411,7 @@ function wrapUnit2(value) {
     return 0;
   return (value % 1 + 1) % 1;
 }
-function smoothstep3(x) {
+function smoothstep2(x) {
   const t = clamp012(x);
   return t * t * (3 - 2 * t);
 }
@@ -2439,7 +2429,7 @@ function vorticellaContractPhase(cyclePhase) {
     return 1;
   if (phase < VC_CONTRACT + VC_HOLD + VC_RELAX) {
     const q = (phase - VC_CONTRACT - VC_HOLD) / VC_RELAX;
-    return 1 - smoothstep3(q);
+    return 1 - smoothstep2(q);
   }
   return 0;
 }
@@ -2465,7 +2455,7 @@ function vorticellaGeometry(contractPhase, options = {}) {
   for (let i = 0;i < sampleCount; i++) {
     const t = i / (sampleCount - 1);
     const along = stalkLength * t;
-    const fill = smoothstep3(t);
+    const fill = smoothstep2(t);
     const wave = Math.sin(t * coilTurns * TAU4) * coilRadius * fill;
     stalkPath.push({
       x: anchorX + ux * along + nx * wave,
@@ -2586,7 +2576,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
       x: neck.x + ux * along + nx * lateral,
       y: neck.y + uy * along + ny * lateral
     });
-    const halfW = (u) => (0.1 * D + 0.4 * D * smoothstep3(u)) * (u > 0.9 ? open : 1);
+    const halfW = (u) => (0.1 * D + 0.4 * D * smoothstep2(u)) * (u > 0.9 ? open : 1);
     drawPolyline3(ctx, geom.stalkPath, false);
     ctx.strokeStyle = `hsla(200, 12%, 84%, ${alpha * 0.42})`;
     ctx.lineWidth = Math.max(0.6, D * 0.07);
