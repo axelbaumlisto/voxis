@@ -40,7 +40,11 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       euglenaGravitaxis: 0.2,
       euglenaPhototaxis: 0.6,
       euglenaRotDiffusion: 0.12,
-      vorticellaCount: 0,
+      // third hero: a sessile vorticella the euglena and paramecium swim around
+      vorticellaCount: 1,
+      vorticellaScale: 2.6,
+      vorticellaContractRate: 1.2,
+      vorticellaContractRateActive: 1.5,
       ...userParams,
     },
   });

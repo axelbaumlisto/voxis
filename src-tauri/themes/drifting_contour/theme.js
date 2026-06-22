@@ -4159,7 +4159,10 @@ function mount(container, api) {
       euglenaGravitaxis: 0.2,
       euglenaPhototaxis: 0.6,
       euglenaRotDiffusion: 0.12,
-      vorticellaCount: 0,
+      vorticellaCount: 1,
+      vorticellaScale: 2.6,
+      vorticellaContractRate: 1.2,
+      vorticellaContractRateActive: 1.5,
       ...userParams
     }
   });
