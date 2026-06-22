@@ -1692,6 +1692,27 @@ function aquariumParamsView(params) {
   };
 }
 
+// src/theme-engine/renderers/cell/aquarium/interaction.ts
+var KIND_ID = { diatom: 0, euglena: 1, vorticella: 2, hero: 3 };
+function buildField(contribs) {
+  const obstacles = [];
+  const motiles = [];
+  const wakes = [];
+  for (const contrib of contribs) {
+    if (contrib.kind === "obstacle") {
+      obstacles.push(contrib);
+    } else if (contrib.kind === "motile") {
+      motiles.push(contrib);
+    } else {
+      wakes.push(contrib);
+    }
+  }
+  return { obstacles, motiles, wakes };
+}
+function sourceId(kind, instanceIndex) {
+  return KIND_ID[kind] << 20 | instanceIndex;
+}
+
 // src/theme-engine/renderers/cell/aquarium/seeds.ts
 function mix32(n) {
   let x = n | 0;
@@ -3178,6 +3199,65 @@ function sceneFromParams(params) {
 }
 
 // src/theme-engine/renderers/cell/aquarium/layer.ts
+function buildEuglenaInteractionField(obstacles, hero) {
+  const contribs = [];
+  if (obstacles) {
+    for (let i = 0;i < obstacles.length; i++) {
+      const obstacle = obstacles[i];
+      contribs.push({
+        kind: "obstacle",
+        shape: "circle",
+        x: obstacle.x,
+        y: obstacle.y,
+        radius: obstacle.radius,
+        sourceId: sourceId("vorticella", i)
+      });
+    }
+  }
+  if (hero) {
+    const heroId = sourceId("hero", 0);
+    contribs.push({
+      kind: "obstacle",
+      shape: "ellipse",
+      x: hero.x,
+      y: hero.y,
+      halfLen: hero.halfLen ?? hero.radius,
+      halfWid: hero.halfWid ?? hero.radius,
+      heading: hero.heading ?? 0,
+      social: true,
+      sourceId: heroId
+    });
+    contribs.push({
+      kind: "wake",
+      x: hero.x,
+      y: hero.y,
+      heading: hero.heading ?? 0,
+      sourceId: heroId
+    });
+  }
+  return buildField(contribs);
+}
+function buildVorticellaInteractionField(hero, euglena) {
+  const contribs = [];
+  if (hero) {
+    contribs.push({
+      kind: "motile",
+      x: hero.x,
+      y: hero.y,
+      sourceId: sourceId("hero", 0)
+    });
+  }
+  for (let i = 0;i < euglena.length; i++) {
+    const cell = euglena[i];
+    contribs.push({
+      kind: "motile",
+      x: cell.x,
+      y: cell.y,
+      sourceId: sourceId("euglena", i)
+    });
+  }
+  return buildField(contribs);
+}
 function seedAquarium(frame, params) {
   const scene = sceneFromParams(params);
   const state = { seed: scene.seed, diatoms: [], euglena: [], vorticella: [] };
@@ -3195,7 +3275,8 @@ function updateAquarium(aquarium, frame, params) {
   const cfgBySpecies = Object.fromEntries(scene.instances.map((instance) => [instance.species, instance.cfg]));
   const diatoms = view.diatoms.count > 0 ? REGISTRY.diatom.update(aquarium.diatoms, frame, cfgBySpecies.diatom) : aquarium.diatoms;
   const obstacles = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella.map((v) => vorticellaObstacle(v, view.vorticella.scale, frame.height)) : undefined;
-  const euglenaFrame = obstacles ? { ...frame, obstacles } : frame;
+  const euglenaField = buildEuglenaInteractionField(obstacles, frame.hero);
+  const euglenaFrame = obstacles || euglenaField.obstacles.length > 0 || euglenaField.wakes.length > 0 ? { ...frame, ...obstacles ? { obstacles } : {}, interaction: euglenaField } : frame;
   const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, euglenaFrame, cfgBySpecies.euglena) : aquarium.euglena;
   let vorticella = aquarium.vorticella;
   if (view.vorticella.count > 0) {
@@ -3204,7 +3285,8 @@ function updateAquarium(aquarium, frame, params) {
       motiles.push({ x: frame.hero.x, y: frame.hero.y });
     for (const e of euglena)
       motiles.push({ x: e.x, y: e.y });
-    vorticella = REGISTRY.vorticella.update(aquarium.vorticella, motiles.length > 0 ? { ...frame, motiles } : frame, cfgBySpecies.vorticella);
+    const vorticellaField = buildVorticellaInteractionField(frame.hero, euglena);
+    vorticella = REGISTRY.vorticella.update(aquarium.vorticella, motiles.length > 0 ? { ...frame, motiles, interaction: vorticellaField } : frame, cfgBySpecies.vorticella);
   }
   return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella ? aquarium : { ...aquarium, diatoms, euglena, vorticella };
 }

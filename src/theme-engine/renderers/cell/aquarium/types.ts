@@ -1,5 +1,6 @@
 import type { ThemeState } from "../../../contract";
 import type { EuglenaSteer, Medium } from "./euglena";
+import type { InteractionField } from "./interaction";
 
 export interface AquariumFrame {
   readonly t: number;
@@ -15,6 +16,8 @@ export interface AquariumFrame {
   readonly obstacles?: readonly { readonly x: number; readonly y: number; readonly radius: number }[];
   /** Positions of motile cells that can mechanically disturb a sessile vorticella (trigger contraction). */
   readonly motiles?: readonly { readonly x: number; readonly y: number }[];
+  /** Capability interaction field built in parallel to legacy channels; consumers do not read it yet. */
+  readonly interaction?: InteractionField;
   readonly hero?: {
     readonly x: number;
     readonly y: number;
