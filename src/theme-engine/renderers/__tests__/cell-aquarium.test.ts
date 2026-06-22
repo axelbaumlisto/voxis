@@ -4,7 +4,7 @@ import { aquariumParamsView } from "../cell/aquarium/params";
 import { heroConsumeObstacles } from "../cell/aquarium/hero";
 import { buildField, sourceId } from "../cell/aquarium/interaction";
 import type { ObstacleCircle } from "../cell/aquarium/interaction";
-import { seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aquarium/layer";
+import { buildAquariumInteractionField, seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aquarium/layer";
 import { diatomGeometry } from "../cell/aquarium/diatoms";
 import { euglenaPose, updateEuglena, drawEuglena, EUGLENA_STEER, MEDIUM } from "../cell/aquarium/euglena";
 import { updateVorticella, vorticellaContribute, vorticellaContractPhase, vorticellaGeometry, vorticellaObstacle } from "../cell/aquarium/vorticella";
@@ -191,6 +191,7 @@ function euglenaHueSummary(hueOffset: number): GoldenSummary {
 describe("aquarium draw-op golden (Epic 1 P0)", () => {
   it("keeps the three-species CONTRACTED draw byte-stable", () => {
     expect(goldenFor(0.5)).toEqual({
+      // Revalidated for 3D.2 publish-then-consume flip: this golden draws the unchanged seed-state input.
       hash: "c964ee6b90b8e6bb",
       opCount: 720,
       counts: {
@@ -210,6 +211,7 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
 
   it("keeps the three-species RESTING draw byte-stable", () => {
     expect(goldenFor(0)).toEqual({
+      // Revalidated for 3D.2 publish-then-consume flip: this golden draws the unchanged seed-state input.
       hash: "221ae33f4097705f",
       opCount: 604,
       counts: {
@@ -1805,6 +1807,54 @@ describe("aquarium layer gate-off no-ops", () => {
 });
 
 describe("aquarium layer Phase 4.5 combined perf/golden", () => {
+  it("2-phase euglena/vorticella updates are order-independent to 1e-10", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 67,
+      aquariumAlpha: 0.55,
+      aquariumActivityBoost: 0.8,
+      diatomCount: 0,
+      euglenaCount: 1,
+      euglenaSpeed: 0.7,
+      euglenaSpeedActive: 1.1,
+      euglenaScale: 1.4,
+      vorticellaCount: 1,
+      vorticellaContractRate: 0.8,
+      vorticellaContractRateActive: 1.0,
+      vorticellaScale: 1.2,
+      vorticellaAlongFrac: 0.16,
+    };
+    const view = aquariumParamsView(params);
+    const hero = { x: 120, y: 40, radius: 14, heading: 0.2, halfLen: 18, halfWid: 11 };
+    const f0 = frame({ t: 2, dt: 1 / 60, width: 240, height: 80, activity: 0.5, audioLevel: 0.25, hero });
+    const initial = seedAquarium(f0, params);
+    const interaction = buildAquariumInteractionField(initial.euglena, initial.vorticella, f0.hero, view.vorticella.scale, f0.height);
+    const snapshotFrame = { ...f0, interaction };
+
+    const production = updateAquarium(initial, f0, params);
+    const reverse = {
+      ...initial,
+      vorticella: updateVorticella(initial.vorticella, snapshotFrame, view),
+      euglena: updateEuglena(initial.euglena, snapshotFrame, view),
+    };
+
+    for (const species of ["euglena", "vorticella"] as const) {
+      expect(production[species]).toHaveLength(reverse[species].length);
+      for (let i = 0; i < production[species].length; i++) {
+        for (const key of Object.keys(production[species][i]) as Array<keyof typeof production[typeof species][number]>) {
+          const actual = production[species][i][key];
+          const expected = reverse[species][i][key];
+          if (typeof actual === "number" && typeof expected === "number") {
+            expect(actual, `${species}[${i}].${String(key)}`).toBeCloseTo(expected, 10);
+          } else {
+            expect(actual, `${species}[${i}].${String(key)}`).toEqual(expected);
+          }
+        }
+      }
+    }
+  });
+
   it("retains seeded identities and anchors across combined multi-frame updates", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,

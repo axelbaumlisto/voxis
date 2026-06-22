@@ -3265,26 +3265,20 @@ function heroContribute(hero) {
     }
   ];
 }
-function fieldForConsumer(contribs, relevantFields) {
-  return buildField(contribs.filter((contrib) => relevantFields.has(contrib.kind)));
-}
-function buildEuglenaInteractionField(vorticella, hero, vorticellaScale, frameHeight) {
+function buildAquariumInteractionField(euglena, vorticella, hero, vorticellaScale, frameHeight) {
   const contribs = [];
   if (vorticella) {
     for (let i = 0;i < vorticella.length; i++) {
       contribs.push(...vorticellaContribute(vorticella[i], vorticellaScale, frameHeight, i));
     }
   }
-  contribs.push(...heroContribute(hero));
-  return fieldForConsumer(contribs, EUGLENA_RELEVANT_FIELDS);
-}
-function buildVorticellaInteractionField(hero, euglena) {
-  const contribs = [];
-  contribs.push(...heroContribute(hero));
-  for (let i = 0;i < euglena.length; i++) {
-    contribs.push(...euglenaContribute(euglena[i], i));
+  if (euglena) {
+    for (let i = 0;i < euglena.length; i++) {
+      contribs.push(...euglenaContribute(euglena[i], i));
+    }
   }
-  return fieldForConsumer(contribs, VORTICELLA_RELEVANT_FIELDS);
+  contribs.push(...heroContribute(hero));
+  return buildField(contribs);
 }
 function seedAquarium(frame, params) {
   const scene = sceneFromParams(params);
@@ -3302,15 +3296,12 @@ function updateAquarium(aquarium, frame, params) {
   const scene = sceneFromParams(params);
   const cfgBySpecies = Object.fromEntries(scene.instances.map((instance) => [instance.species, instance.cfg]));
   const diatoms = view.diatoms.count > 0 ? REGISTRY.diatom.update(aquarium.diatoms, frame, cfgBySpecies.diatom) : aquarium.diatoms;
-  const euglenaVorticella = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella : undefined;
-  const euglenaField = buildEuglenaInteractionField(euglenaVorticella, frame.hero, view.vorticella.scale, frame.height);
-  const euglenaFrame = { ...frame, interaction: euglenaField };
-  const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, euglenaFrame, cfgBySpecies.euglena) : aquarium.euglena;
-  let vorticella = aquarium.vorticella;
-  if (view.vorticella.count > 0) {
-    const vorticellaField = buildVorticellaInteractionField(frame.hero, euglena);
-    vorticella = REGISTRY.vorticella.update(aquarium.vorticella, { ...frame, interaction: vorticellaField }, cfgBySpecies.vorticella);
-  }
+  const preUpdateEuglena = view.euglena.count > 0 && aquarium.euglena.length > 0 ? aquarium.euglena : undefined;
+  const preUpdateVorticella = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella : undefined;
+  const interaction = buildAquariumInteractionField(preUpdateEuglena, preUpdateVorticella, frame.hero, view.vorticella.scale, frame.height);
+  const interactionFrame = { ...frame, interaction };
+  const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, interactionFrame, cfgBySpecies.euglena) : aquarium.euglena;
+  const vorticella = view.vorticella.count > 0 ? REGISTRY.vorticella.update(aquarium.vorticella, interactionFrame, cfgBySpecies.vorticella) : aquarium.vorticella;
   return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella ? aquarium : { ...aquarium, diatoms, euglena, vorticella };
 }
 function drawAquariumBackground(ctx, aquarium, frame, params) {

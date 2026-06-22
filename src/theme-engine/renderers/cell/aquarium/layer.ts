@@ -1,11 +1,11 @@
 import type { CellParams } from "../types";
 import { aquariumParamsView } from "./params";
 import { buildField, sourceId } from "./interaction";
-import type { FieldContribution, FieldKind, InteractionField } from "./interaction";
+import type { FieldContribution, InteractionField } from "./interaction";
 import { REGISTRY, sceneFromParams } from "./registry";
 import type { AquariumFrame, AquariumLayerState } from "./types";
-import { euglenaContribute, EUGLENA_RELEVANT_FIELDS } from "./euglena";
-import { vorticellaContribute, VORTICELLA_RELEVANT_FIELDS } from "./vorticella";
+import { euglenaContribute } from "./euglena";
+import { vorticellaContribute } from "./vorticella";
 
 type MutableAquariumLayerState = { -readonly [K in keyof AquariumLayerState]: AquariumLayerState[K] };
 
@@ -40,11 +40,8 @@ export function heroContribute(hero: AquariumFrame["hero"]): FieldContribution[]
   ];
 }
 
-function fieldForConsumer(contribs: readonly FieldContribution[], relevantFields: ReadonlySet<FieldKind>): InteractionField {
-  return buildField(contribs.filter((contrib) => relevantFields.has(contrib.kind)));
-}
-
-export function buildEuglenaInteractionField(
+export function buildAquariumInteractionField(
+  euglena: readonly AquariumLayerState["euglena"][number][] | undefined,
   vorticella: readonly AquariumLayerState["vorticella"][number][] | undefined,
   hero: AquariumFrame["hero"],
   vorticellaScale: number,
@@ -56,20 +53,13 @@ export function buildEuglenaInteractionField(
       contribs.push(...vorticellaContribute(vorticella[i], vorticellaScale, frameHeight, i));
     }
   }
-  contribs.push(...heroContribute(hero));
-  return fieldForConsumer(contribs, EUGLENA_RELEVANT_FIELDS);
-}
-
-export function buildVorticellaInteractionField(
-  hero: AquariumFrame["hero"],
-  euglena: AquariumLayerState["euglena"],
-): InteractionField {
-  const contribs: FieldContribution[] = [];
-  contribs.push(...heroContribute(hero));
-  for (let i = 0; i < euglena.length; i++) {
-    contribs.push(...euglenaContribute(euglena[i], i));
+  if (euglena) {
+    for (let i = 0; i < euglena.length; i++) {
+      contribs.push(...euglenaContribute(euglena[i], i));
+    }
   }
-  return fieldForConsumer(contribs, VORTICELLA_RELEVANT_FIELDS);
+  contribs.push(...heroContribute(hero));
+  return buildField(contribs);
 }
 
 export function seedAquarium(frame: AquariumFrame, params: CellParams): AquariumLayerState {
@@ -94,19 +84,14 @@ export function updateAquarium(
   const scene = sceneFromParams(params);
   const cfgBySpecies = Object.fromEntries(scene.instances.map((instance) => [instance.species, instance.cfg]));
   const diatoms = view.diatoms.count > 0 ? REGISTRY.diatom.update(aquarium.diatoms, frame, cfgBySpecies.diatom) : aquarium.diatoms;
-  const euglenaVorticella = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella : undefined;
-  const euglenaField = buildEuglenaInteractionField(euglenaVorticella, frame.hero, view.vorticella.scale, frame.height);
-  const euglenaFrame = { ...frame, interaction: euglenaField };
-  const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, euglenaFrame, cfgBySpecies.euglena) : aquarium.euglena;
-  let vorticella = aquarium.vorticella;
-  if (view.vorticella.count > 0) {
-    const vorticellaField = buildVorticellaInteractionField(frame.hero, euglena);
-    vorticella = REGISTRY.vorticella.update(
-      aquarium.vorticella,
-      { ...frame, interaction: vorticellaField },
-      cfgBySpecies.vorticella,
-    );
-  }
+  const preUpdateEuglena = view.euglena.count > 0 && aquarium.euglena.length > 0 ? aquarium.euglena : undefined;
+  const preUpdateVorticella = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella : undefined;
+  const interaction = buildAquariumInteractionField(preUpdateEuglena, preUpdateVorticella, frame.hero, view.vorticella.scale, frame.height);
+  const interactionFrame = { ...frame, interaction };
+  const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, interactionFrame, cfgBySpecies.euglena) : aquarium.euglena;
+  const vorticella = view.vorticella.count > 0
+    ? REGISTRY.vorticella.update(aquarium.vorticella, interactionFrame, cfgBySpecies.vorticella)
+    : aquarium.vorticella;
   return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella
     ? aquarium
     : { ...aquarium, diatoms, euglena, vorticella };
