@@ -160,11 +160,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       euglenaGravitaxis: 0.2,    // gentle negative-gravitaxis up-bias (faded in short tanks)
       euglenaPhototaxis: 0.6,    // orients to a virtual light when you talk (sign-inverts when loud)
       euglenaRotDiffusion: 0.12, // subtle cosmetic path jitter (active flagellar noise)
-      vorticellaCount: 1,            // third organism: a sessile vorticella on the floor
-      vorticellaScale: 1.2,          // modest companion bell (D~14 on 160px)
-      vorticellaAlongFrac: 0.16,     // anchored to the LEFT floor, clear of the central hero
-      vorticellaContractRate: 0.9,
-      vorticellaContractRateActive: 1.6,
+      vorticellaCount: 0,            // duo only (paramecium + euglena); vorticella is its own theme
       ...userParams,
     },
   });

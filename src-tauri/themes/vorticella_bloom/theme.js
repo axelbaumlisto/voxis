@@ -3834,7 +3834,7 @@ function mount(container, api) {
       vorticellaCount: 1,
       vorticellaContractRate: 1.2,
       vorticellaContractRateActive: 1.5,
-      vorticellaScale: 2,
+      vorticellaScale: 5.5,
       ...userParams
     }
   });

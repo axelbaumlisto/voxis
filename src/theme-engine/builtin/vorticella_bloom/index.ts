@@ -28,7 +28,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       vorticellaCount: 1,
       vorticellaContractRate: 1.2,        // occasional contraction (~9s idle period)
       vorticellaContractRateActive: 1.5,
-      vorticellaScale: 2.0,        // modest bell so the long stalk reads (D~24 on 80px)
+      vorticellaScale: 5.5,        // big solo hero (~3x): D~66 on the tall 240x240 overlay
       ...userParams,
     },
   });

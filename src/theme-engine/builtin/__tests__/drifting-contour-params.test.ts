@@ -45,7 +45,7 @@ const CRITICAL_PARAMS = {
   euglenaSpeedActive: 1.5,
   // (euglena_drift retuned separately; drifting_contour companion unchanged here)
   euglenaScale: 2.8,
-  vorticellaCount: 1,
+  vorticellaCount: 0,
 } as const;
 
 type CriticalParamName = keyof typeof CRITICAL_PARAMS;
@@ -116,10 +116,9 @@ function expectUserParamsLast(body: string): void {
   expect(body.slice(userParams + "...userParams".length, paramsEnd)).not.toMatch(/\w+\s*:/);
 }
 
-function expectVorticellaConfigured(block: string): void {
-  // the trio now includes a sessile vorticella as the third organism
-  expect(block).toMatch(/\bvorticellaScale\s*:/i);
-  expect(block).toMatch(/\bvorticellaAlongFrac\s*:/i);
+function expectNoVorticellaPreviewParams(block: string): void {
+  // duo theme only — vorticella is a separate theme (vorticella_bloom)
+  expect(block).not.toMatch(/\bvorticella(?:Scale|AlongFrac|ContractRate|ContractRateActive)\s*:/i);
 }
 
 describe("drifting_contour v1.0 critical params", () => {
@@ -131,12 +130,12 @@ describe("drifting_contour v1.0 critical params", () => {
     expectCriticalParams(readBundleMountBlock());
   });
 
-  it("configures the third-organism vorticella in the source theme", () => {
-    expectVorticellaConfigured(readSourceMountBlock());
+  it("keeps the duo theme free of vorticella params (vorticella is its own theme)", () => {
+    expectNoVorticellaPreviewParams(readSourceMountBlock());
   });
 
-  it("configures the third-organism vorticella in the built bundle", () => {
-    expectVorticellaConfigured(readBundleMountBlock());
+  it("keeps the built bundle duo free of vorticella params", () => {
+    expectNoVorticellaPreviewParams(readBundleMountBlock());
   });
 
   it("keeps source theme params before user params so user overrides win", () => {
