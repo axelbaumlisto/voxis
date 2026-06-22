@@ -2098,7 +2098,8 @@ function seedEuglena(count, seed, frame, salt = 235478698) {
       burstRate: 0.08 + seededUnit(seed, i, salt ^ 1186583265) * 0.05,
       turnProgress: 2,
       turnFrom: heading,
-      turnTo: heading
+      turnTo: heading,
+      startle: 0
     });
   }
   return euglena;
@@ -2106,8 +2107,16 @@ function seedEuglena(count, seed, frame, salt = 235478698) {
 var EUGLENA_STEER = {
   forward: 1,
   wall: 2,
-  hero: 1.2
+  hero: 0.35,
+  curiosity: 1.1,
+  wake: 16,
+  startleAway: 3,
+  startleDart: 1.6
 };
+var HERO_STANDOFF = 1.3;
+var HERO_INTEREST_RANGE = 2.2;
+var STARTLE_TRIGGER_Q = 1.12;
+var STARTLE_TAU = 0.6;
 function updateEuglena(euglena, frame, view) {
   if (euglena.length === 0)
     return euglena;
@@ -2146,6 +2155,20 @@ function updateEuglena(euglena, frame, view) {
       const py = -dx * heroParams.sphi + dy * heroParams.cphi;
       heroQd = px * px / (A * A) + py * py / (B * B);
     }
+    const heroQ = Math.sqrt(Math.max(0, heroQd));
+    let ax = 0, ay = 0;
+    if (heroParams) {
+      const dxh = px0 - heroParams.hx, dyh = py0 - heroParams.hy;
+      const dh = Math.hypot(dxh, dyh) || 0.000001;
+      ax = dxh / dh;
+      ay = dyh / dh;
+    }
+    const interest = 0.55 + 0.45 * Math.sin(TAU3 * wrapUnit(finiteOr3(cell.burstPhase, 0)) + 1.3);
+    let startle = clamp01(finiteOr3(cell.startle, 0));
+    if (heroParams && heroQ > 0.0001 && heroQ < STARTLE_TRIGGER_Q)
+      startle = 1;
+    if (finite2(frame.startle, 0) > 0.5)
+      startle = 1;
     {
       let sx = ux * EUGLENA_STEER.forward;
       let sy = uy * EUGLENA_STEER.forward;
@@ -2158,13 +2181,13 @@ function updateEuglena(euglena, frame, view) {
         sy += (1 - py0 / look) * EUGLENA_STEER.wall;
       if (safeHeight - py0 < look)
         sy -= (1 - (safeHeight - py0) / look) * EUGLENA_STEER.wall;
-      if (heroParams && heroQd < 1.69 && heroQd > 0.000000001) {
-        const dxh = px0 - heroParams.hx;
-        const dyh = py0 - heroParams.hy;
-        const dh = Math.hypot(dxh, dyh) || 0.000001;
-        const prox = Math.min(1, (1.69 - heroQd) / 0.69);
-        sx += dxh / dh * EUGLENA_STEER.hero * prox;
-        sy += dyh / dh * EUGLENA_STEER.hero * prox;
+      if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 0.0001) {
+        const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
+        const wr = (EUGLENA_STEER.hero + EUGLENA_STEER.curiosity * interest * (HERO_STANDOFF - heroQ)) * falloff;
+        sx += ax * wr;
+        sy += ay * wr;
+        sx += ax * EUGLENA_STEER.startleAway * startle;
+        sy += ay * EUGLENA_STEER.startleAway * startle;
       }
       const pressure = Math.hypot(sx - ux * EUGLENA_STEER.forward, sy - uy * EUGLENA_STEER.forward);
       if (pressure > 0.000001) {
@@ -2174,8 +2197,18 @@ function updateEuglena(euglena, frame, view) {
         uy = Math.sin(heading);
       }
     }
-    let nextX = px0 + ux * vPx * dt;
-    let nextY = py0 + uy * vPx * dt;
+    const vPxEff = vPx * (1 + EUGLENA_STEER.startleDart * startle);
+    let nextX = px0 + ux * vPxEff * dt;
+    let nextY = py0 + uy * vPxEff * dt;
+    if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 0.0001) {
+      const hd = finiteOr3(frame.hero?.heading, 0);
+      const hdx = Math.cos(hd), hdy = Math.sin(hd);
+      const behind = Math.max(0, -(ax * hdx + ay * hdy));
+      const prox = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
+      const wakeSpeed = EUGLENA_STEER.wake * prox * behind;
+      nextX += hdx * wakeSpeed * dt;
+      nextY += hdy * wakeSpeed * dt;
+    }
     if (heroParams) {
       const { hx, hy, A, B, cphi, sphi } = heroParams;
       const dx = nextX - hx, dy = nextY - hy;
@@ -2214,6 +2247,7 @@ function updateEuglena(euglena, frame, view) {
       turnProgress: finiteOr3(cell.turnProgress, 2),
       turnFrom: finiteOr3(cell.turnFrom, heading),
       turnTo: finiteOr3(cell.turnTo, heading),
+      startle: startle * Math.exp(-dt / STARTLE_TAU),
       rollPhase: wrapUnit(finite2(cell.rollPhase, 0) + rollDelta),
       metabolyPhase: wrapUnit(finite2(cell.metabolyPhase, 0) + Math.max(0, finite2(cell.metabolyRate, 0)) * act * dt),
       flagellumPhase: wrapUnit(finite2(cell.flagellumPhase, 0) + fEff * dt),

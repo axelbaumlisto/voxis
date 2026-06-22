@@ -78,6 +78,8 @@ export interface EuglenaState extends AquariumSeedPoint {
   readonly turnProgress?: number;
   readonly turnFrom?: number;
   readonly turnTo?: number;
+  /** Decaying escape state [0,1] for the startle-dart interaction. */
+  readonly startle?: number;
 }
 
 export interface VorticellaState extends AquariumSeedPoint {

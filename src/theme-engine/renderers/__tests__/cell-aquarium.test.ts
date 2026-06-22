@@ -697,19 +697,50 @@ describe("aquarium layer Phase 3 euglena", () => {
       aquariumActivityBoost: 1,
     });
     const hero = { x: 150, y: 150, radius: 18 };
-    const start = testEuglena({ x: 150, y: 185, heading: -Math.PI / 2, swimSpeed: 1 }); // just below, heading up toward hero
-    const saved = EUGLENA_STEER.hero;
+    // start well outside the startle zone, below the hero, heading up toward it
+    const start = testEuglena({ x: 150, y: 220, heading: -Math.PI / 2, swimSpeed: 1 });
+    const savedHero = EUGLENA_STEER.hero;
+    const savedCuriosity = EUGLENA_STEER.curiosity;
     try {
-      EUGLENA_STEER.hero = -1.2; // pursue
+      EUGLENA_STEER.hero = -1.2;     // pure pursue
+      EUGLENA_STEER.curiosity = 0;   // disable the approach-then-retreat spring
       let chase = start;
       for (let i = 0; i < 8; i++) {
         chase = updateEuglena([chase], frame({ dt: 0.05, width: 300, height: 300, hero }), view)[0];
       }
       // pursuing keeps it pointed at the hero (heading stays roughly upward)
-      expect(Math.sin(chase.heading)).toBeLessThan(-0.5); // still heading up toward hero
+      expect(Math.sin(chase.heading)).toBeLessThan(-0.5);
     } finally {
-      EUGLENA_STEER.hero = saved;
+      EUGLENA_STEER.hero = savedHero;
+      EUGLENA_STEER.curiosity = savedCuriosity;
     }
+  });
+
+  it("close contact triggers a decaying startle-dart away from the hero", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaScale: 3,
+      aquariumActivityBoost: 1,
+    });
+    const hero = { x: 150, y: 150, radius: 18 };
+    // placed right on the exclusion rim (q ~ 1) -> inside the startle trigger
+    const start = testEuglena({ x: 150, y: 192, heading: -Math.PI / 2, swimSpeed: 1, startle: 0 });
+    const d0 = Math.hypot(start.x - hero.x, start.y - hero.y);
+    const once = updateEuglena([start], frame({ dt: 0.05, width: 300, height: 300, hero }), view)[0];
+    expect(once.startle).toBeGreaterThan(0); // startle engaged on contact
+    // over a few frames the dart turns it around and it flees (moves away)
+    let cell = once;
+    for (let i = 0; i < 10; i++) {
+      cell = updateEuglena([cell], frame({ dt: 0.05, width: 300, height: 300, hero }), view)[0];
+    }
+    expect(Math.hypot(cell.x - hero.x, cell.y - hero.y)).toBeGreaterThan(d0);
+    // and it decays toward zero when contact ends (far away, no trigger)
+    const far = updateEuglena([{ ...once, x: 20, y: 20, startle: 1 }], frame({ dt: 0.5, width: 300, height: 300 }), view)[0];
+    expect(far.startle).toBeLessThan(1);
   });
 
   it("updateEuglena is dt-partition invariant across phase wrap", () => {
