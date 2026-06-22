@@ -440,6 +440,8 @@ export interface CellParams {
   euglenaSpeedActive?: number;
   /** Euglena size scalar. */
   euglenaScale?: number;
+  /** Euglena palette offset from baseHue in degrees. Default 42 = chlorophyll green. */
+  euglenaHueOffset?: number;
   /** Euglena negative-gravitaxis up-bias weight (0 = off). */
   euglenaGravitaxis?: number;
   /** Euglena phototaxis weight toward the virtual light (0 = off). */

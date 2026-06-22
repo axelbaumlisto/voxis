@@ -1545,6 +1545,7 @@ var CELL_DEFAULTS = {
   euglenaSpeed: 1,
   euglenaSpeedActive: 2,
   euglenaScale: 1,
+  euglenaHueOffset: 42,
   euglenaGravitaxis: 0,
   euglenaPhototaxis: 0,
   euglenaRotDiffusion: 0,
@@ -1677,6 +1678,7 @@ function aquariumParamsView(params) {
       speed: nonNegative(params.euglenaSpeed, 1),
       speedActive: nonNegative(params.euglenaSpeedActive, 2),
       scale: nonNegative(params.euglenaScale, 1),
+      hueOffset: finiteOr(params.euglenaHueOffset, 42),
       steer: euglenaSteerOverride(params)
     },
     medium: mediumOverride(params),
@@ -2421,7 +2423,7 @@ function drawEuglena(ctx, euglena, frame, view) {
   if (alpha <= 0)
     return;
   const scale = Math.max(0.1, finite(view.euglena.scale, 1));
-  const hue = finite(frame.baseHue, 50) + 42;
+  const hue = finite(frame.baseHue, 50) + finite(view.euglena.hueOffset, 42);
   const H = Math.max(1, finite(frame.height, 36));
   ctx.save();
   ctx.lineCap = "round";
@@ -3087,7 +3089,7 @@ function viewForDiatom(cfg) {
     alpha: cfg.aquariumAlpha,
     activityBoost: cfg.activityBoost,
     diatoms: cfg,
-    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1 },
+    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 },
     vorticella: { count: 0, contractRate: 0, contractRateActive: 0, scale: 1, alongFrac: 0.5 }
   };
 }
@@ -3110,7 +3112,7 @@ function viewForVorticella(cfg) {
     alpha: cfg.aquariumAlpha,
     activityBoost: cfg.activityBoost,
     diatoms: { count: 0, alpha: 0, driftSpeed: 0 },
-    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1 },
+    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 },
     vorticella: cfg
   };
 }

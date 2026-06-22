@@ -69,7 +69,7 @@ function viewForDiatom(cfg: DiatomCfg): AquariumParamsView {
     alpha: cfg.aquariumAlpha,
     activityBoost: cfg.activityBoost,
     diatoms: cfg,
-    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1 },
+    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 },
     vorticella: { count: 0, contractRate: 0, contractRateActive: 0, scale: 1, alongFrac: 0.5 },
   };
 }
@@ -94,7 +94,7 @@ function viewForVorticella(cfg: VorticellaCfg): AquariumParamsView {
     alpha: cfg.aquariumAlpha,
     activityBoost: cfg.activityBoost,
     diatoms: { count: 0, alpha: 0, driftSpeed: 0 },
-    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1 },
+    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 },
     vorticella: cfg,
   };
 }

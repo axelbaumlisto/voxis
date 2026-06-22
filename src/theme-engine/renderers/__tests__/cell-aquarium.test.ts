@@ -3,7 +3,7 @@ import { CELL_DEFAULTS } from "../cell/defaults";
 import { aquariumParamsView } from "../cell/aquarium/params";
 import { seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aquarium/layer";
 import { diatomGeometry } from "../cell/aquarium/diatoms";
-import { euglenaPose, updateEuglena, EUGLENA_STEER, MEDIUM } from "../cell/aquarium/euglena";
+import { euglenaPose, updateEuglena, drawEuglena, EUGLENA_STEER, MEDIUM } from "../cell/aquarium/euglena";
 import { updateVorticella, vorticellaContractPhase, vorticellaGeometry, vorticellaObstacle } from "../cell/aquarium/vorticella";
 import { noise2D } from "../cell/aquarium/seeds";
 import type { AquariumFrame, AquariumLayerState, EuglenaState } from "../cell/aquarium/types";
@@ -159,6 +159,32 @@ function goldenFor(contractPhase: number): GoldenSummary {
   return summarize(ops);
 }
 
+function euglenaHueSummary(hueOffset: number): GoldenSummary {
+  const params: CellParams = {
+    ...CELL_DEFAULTS,
+    enableAquarium: true,
+    aquariumSeed: 17,
+    aquariumAlpha: 0.55,
+    euglenaCount: 1,
+    euglenaScale: 2.8,
+    euglenaHueOffset: hueOffset,
+  };
+  const seeded = seedAquarium(GOLDEN_FRAME, params).euglena.map((cell) => ({
+    ...cell,
+    rollPhase: 0.3,
+    metabolyPhase: 0.4,
+    flagellumPhase: 0.2,
+  }));
+  const ops: string[] = [];
+  drawEuglena(
+    new RecordingCanvasContext2D(ops) as unknown as CanvasRenderingContext2D,
+    seeded,
+    GOLDEN_FRAME,
+    aquariumParamsView(params),
+  );
+  return summarize(ops);
+}
+
 describe("aquarium draw-op golden (Epic 1 P0)", () => {
   it("keeps the three-species CONTRACTED draw byte-stable", () => {
     expect(goldenFor(0.5)).toEqual({
@@ -196,6 +222,15 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
         restore: 3,
       },
     });
+  });
+
+  it("changes euglena draw ops when the per-instance hue offset changes", () => {
+    const defaultHue = euglenaHueSummary(42);
+    const shiftedHue = euglenaHueSummary(80);
+
+    expect(defaultHue.hash).not.toEqual(shiftedHue.hash);
+    expect(defaultHue.opCount).toBe(shiftedHue.opCount);
+    expect(defaultHue.counts).toEqual(shiftedHue.counts);
   });
 });
 
@@ -242,7 +277,7 @@ describe("aquariumParamsView", () => {
       alpha: 0.25,
       activityBoost: 0.7,
       diatoms: { count: 3, alpha: 0.2, driftSpeed: 0.8 },
-      euglena: { count: 2, speed: 1.1, speedActive: 2.4, scale: 0.9 },
+      euglena: { count: 2, speed: 1.1, speedActive: 2.4, scale: 0.9, hueOffset: 42 },
       vorticella: { count: 1, contractRate: 0.6, contractRateActive: 1.8, scale: 1.2, alongFrac: 0.5 },
     });
   });

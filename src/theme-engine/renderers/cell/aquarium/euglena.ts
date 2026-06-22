@@ -788,7 +788,7 @@ export function drawEuglena(
   const alpha = Math.max(0, Math.min(1, view.alpha * 0.72 * euglenaModeView(frame.mode).alphaMul));
   if (alpha <= 0) return;
   const scale = Math.max(0.1, finite(view.euglena.scale, 1));
-  const hue = finite(frame.baseHue, 50) + 42;
+  const hue = finite(frame.baseHue, 50) + finite(view.euglena.hueOffset, 42);
   const H = Math.max(1, finite(frame.height, 36));
 
   ctx.save();
