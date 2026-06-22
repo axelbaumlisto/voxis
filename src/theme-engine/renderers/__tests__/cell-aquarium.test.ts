@@ -193,18 +193,18 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0.5)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass: 6 rimmed food
       // vacuoles + bigger CV + taller bell (bellHeight 1.45D, restStalk 3.1D) change ops/hash.
-      hash: "824fd506c0869c2b",
-      opCount: 1138,
+      hash: "a89d0404112e8778",
+      opCount: 1276,
       counts: {
-        beginPath: 148,
+        beginPath: 194,
         moveTo: 87,
         lineTo: 671,
         closePath: 11,
-        fill: 67,
+        fill: 113,
         stroke: 84,
         save: 4,
         ellipse: 8,
-        arc: 53,
+        arc: 99,
         restore: 4,
         clip: 1,
       },
@@ -215,18 +215,18 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass (6 rimmed food
       // vacuoles + bigger CV + taller bell change ops/hash).
-      hash: "16601630c243d91a",
-      opCount: 1022,
+      hash: "01e1e58d1e48ea19",
+      opCount: 1160,
       counts: {
-        beginPath: 119,
+        beginPath: 165,
         moveTo: 58,
         lineTo: 642,
         closePath: 11,
-        fill: 67,
+        fill: 113,
         stroke: 55,
         save: 4,
         ellipse: 8,
-        arc: 53,
+        arc: 99,
         restore: 4,
         clip: 1,
       },
@@ -2260,7 +2260,7 @@ describe("createCellRenderer aquarium gate", () => {
     expect(draw.mock.calls[1]?.[2]?.hero).toBe(publishedHero);
   });
 
-  it("keeps combined diatom/euglena/vorticella gate-on draw overhead under 1200 ops at 172x36", async () => {
+  it("keeps combined diatom/euglena/vorticella gate-on draw overhead under 1400 ops at 172x36", async () => {
     const offOps = await renderAquariumOpCount(false, 1, 1, 4);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -2268,7 +2268,9 @@ describe("createCellRenderer aquarium gate", () => {
     const onOps = await renderAquariumOpCount(true, 1, 1, 4);
 
     expect(onOps - offOps).toBeGreaterThan(0);
-    expect(onOps - offOps).toBeLessThan(1200);
+    // budget raised 1200 -> 1400: the realism pass adds a denser granular endoplasm
+    // stipple (cheap arc fills) for the foamy microscopy look; still trivially cheap.
+    expect(onOps - offOps).toBeLessThan(1400);
   });
 });
 

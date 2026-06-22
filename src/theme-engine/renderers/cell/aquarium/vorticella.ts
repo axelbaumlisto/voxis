@@ -61,7 +61,7 @@ function vorticellaBellMetrics(cell: VorticellaState, scale: number, H: number):
   const Hc = Math.max(1, finite(H, 80));
   const Sc = Math.max(0.1, finite(scale, 1));
   const D = clamp((8 + finite(cell.size, 1) * 4) * Sc, 6, Hc * 0.40);
-  const bellHeight = 1.5 * D;
+  const bellHeight = 1.35 * D;
   // longer stalk + headroom reserved for the upward crown cilia (~D*0.34 above the
   // rim) so the zooid fills the frame and the crown never clips the top edge.
   // Math-review fix: cap with min() (no D*1.3 floor) so the clamp can never INVERT
@@ -417,7 +417,7 @@ export function drawVorticella(
     const open = 1 - 0.7 * s;               // peristome closes as it contracts (open in [0.3,1])
     // everted collar: a rolled rim only slightly wider than the shoulder (~1.28D body-max
     // 1.16D -> ~10% overhang) so it reads CONTINUOUS with the bell, not a floating saucer.
-    const Rrim = 0.64 * D * open;
+    const Rrim = 0.70 * D * open;
     // smooth furl of the feeding crown as it closes — fade out over the last bit of
     // contraction instead of a hard on/off pop at full contraction (anti-flicker).
     const crownFade = smoothstep(clamp01((open - 0.30) / 0.18));
@@ -538,7 +538,7 @@ export function drawVorticella(
     ctx.fill();
     // refractile granule stipple (seeded from a birth-stable field, dt-free -> byte-stable)
     const gSeed = (Math.round(finite(cell.restLength, 10) * 8192) ^ 0x6e3a) >>> 0;
-    const gCount = Math.round(clamp(D * 2.0, 18, 64));
+    const gCount = Math.round(clamp(D * 4.0, 30, 120)); // dense foamy endoplasm, edge-to-edge
     for (let k = 0; k < gCount; k++) {
       // density biased toward the posterior base (oil-droplet pooling); higher contrast
       // CYCLOSIS: granules shear slowly on the same wall-tangent gyre (slower than the
@@ -553,8 +553,8 @@ export function drawVorticella(
       ctx.beginPath();
       ctx.arc(gp.x, gp.y, gr, 0, TAU);
       ctx.fillStyle = seededUnit(gSeed, k, 0x9d11ef) > 0.5
-        ? `hsla(48, 14%, 94%, ${alpha * 0.30})`   // refractile highlight
-        : `hsla(210, 12%, 38%, ${alpha * 0.26})`; // shadowed granule
+        ? `hsla(48, 14%, 94%, ${alpha * 0.20})`   // refractile highlight (lower contrast, denser)
+        : `hsla(210, 12%, 38%, ${alpha * 0.18})`; // shadowed granule
       ctx.fill();
     }
     // dark basal pooling: the dense oil-droplet heel that gives a live cell its
@@ -591,11 +591,11 @@ export function drawVorticella(
     // long low-contrast translucent horseshoe seen THROUGH the cytoplasm: a soft wide
     // underglow + a thin near-neutral core (never a dark muddy blob or a bright logo).
     drawPolyline(ctx, macPts, false);
-    ctx.strokeStyle = `hsla(205, 8%, 58%, ${alpha * 0.20})`;
-    ctx.lineWidth = Math.max(1.6, D * 0.22);
+    ctx.strokeStyle = `hsla(205, 9%, 54%, ${alpha * 0.28})`;
+    ctx.lineWidth = Math.max(1.6, D * 0.24);
     ctx.stroke();
     drawPolyline(ctx, macPts, false);
-    ctx.strokeStyle = `hsla(44, 10%, 56%, ${alpha * 0.34})`;
+    ctx.strokeStyle = `hsla(42, 12%, 52%, ${alpha * 0.52})`;
     ctx.lineWidth = Math.max(1.0, D * 0.11);
     ctx.stroke();
     // micronucleus: a tiny dot docked against the OUTER edge of one nuclear arm
@@ -644,7 +644,7 @@ export function drawVorticella(
       // seed from a BIRTH-stable field (restLength), never the live anchorX, so the
       // inclusions do not teleport while the zooid migrates as a telotroch.
       const fvSeed = (Math.round(finite(cell.restLength, 10) * 4096) ^ 0x9e37) >>> 0;
-      const fvCount = 6;
+      const fvCount = 13; // numerous scattered inclusions (real cells carry ~10-20), not a 6-bead ring
       for (let j = 0; j < fvCount; j++) {
         // spread across the lower-mid granular endoplasm so they read as DISCRETE
         // spheres (not a clump): wide axial range, tighter lateral, smaller radii.
@@ -657,7 +657,7 @@ export function drawVorticella(
         const u = 0.5 + 0.42 * amp * Math.sin(ph);
         const lat = amp * Math.cos(ph) * 0.82 * halfW(u) * breathMod(u);
         const fv = bodyPoint(bellHeight * u, lat);
-        const fr = Math.max(0.8, D * (0.045 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.06));
+        const fr = Math.max(0.7, D * (0.028 + seededUnit(fvSeed, j, 0x7e3a5d91) * 0.075)); // wide size spread
         // refractile ingested-prey sphere: lit cap -> body -> dark Becke rim -> feather,
         // + specular (radial gradient = a 3-D bead, not a flat polka-dot with a hard ring).
         const warm = j === 0;
@@ -665,7 +665,7 @@ export function drawVorticella(
         const fg = ctx.createRadialGradient(fgx, fgy, fr * 0.1, fv.x, fv.y, fr * 1.12);
         fg.addColorStop(0, warm ? `hsla(40, 34%, 74%, ${alpha * 0.55})` : `hsla(40, 18%, 72%, ${alpha * 0.5})`);
         fg.addColorStop(0.5, warm ? `hsla(32, 32%, 50%, ${alpha * 0.56})` : `hsla(34, 15%, 52%, ${alpha * 0.5})`);
-        fg.addColorStop(0.84, `hsla(26, 30%, 32%, ${alpha * 0.56})`);
+        fg.addColorStop(0.84, `hsla(28, 22%, 42%, ${alpha * 0.42})`);
         fg.addColorStop(1, `hsla(26, 28%, 30%, 0)`);
         ctx.beginPath();
         ctx.arc(fv.x, fv.y, fr * 1.12, 0, TAU);
@@ -673,7 +673,7 @@ export function drawVorticella(
         ctx.fill();
         ctx.beginPath();
         ctx.arc(fgx, fgy, Math.max(0.3, fr * 0.26), 0, TAU);
-        ctx.fillStyle = `hsla(40, 40%, 96%, ${alpha * 0.7})`;
+        ctx.fillStyle = `hsla(40, 30%, 92%, ${alpha * 0.3})`;
         ctx.fill();
       }
     }
@@ -754,7 +754,7 @@ export function drawVorticella(
       ctx.stroke();
       // fine, faint individual cilia splayed OUTWARD over the everted lip (not a vertical comb)
       const M = Math.max(8, Math.round(D * 0.7));
-      ctx.strokeStyle = `hsla(46, 16%, 84%, ${alpha * 0.32 * crownFade})`;
+      ctx.strokeStyle = `hsla(46, 14%, 86%, ${alpha * 0.2 * crownFade})`;
       ctx.lineWidth = Math.max(0.5, D * 0.018);
       const cilS = (Math.round(finite(cell.restLength, 10) * 2048) ^ 0x51a3) >>> 0;
       for (let i = 0; i < M; i++) {
