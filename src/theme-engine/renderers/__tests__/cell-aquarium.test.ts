@@ -5,6 +5,7 @@ import { seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aq
 import { diatomGeometry } from "../cell/aquarium/diatoms";
 import { euglenaPose, updateEuglena, EUGLENA_STEER, MEDIUM } from "../cell/aquarium/euglena";
 import { updateVorticella, vorticellaContractPhase, vorticellaGeometry } from "../cell/aquarium/vorticella";
+import { noise2D } from "../cell/aquarium/seeds";
 import type { AquariumFrame, AquariumLayerState, EuglenaState } from "../cell/aquarium/types";
 import type { CellParams } from "../cell/types";
 
@@ -147,6 +148,28 @@ describe("aquariumParamsView", () => {
     expect(view.diatoms.count).toBe(0);
     expect(view.euglena.count).toBe(2);
     expect(view.vorticella.count).toBe(0);
+  });
+});
+
+describe("deterministic aquarium noise", () => {
+  it("noise2D is deterministic, smooth, finite, and in [0, 1)", () => {
+    const a = noise2D(123, 4.25, -7.75);
+    const b = noise2D(123, 4.25, -7.75);
+    const c = noise2D(123, 4.26, -7.75);
+
+    expect(a).toBe(b);
+    expect(c).not.toBe(a);
+    for (const value of [
+      a,
+      c,
+      noise2D(0, 0, 0),
+      noise2D(0xffffffff, -100.5, 2048.125),
+      noise2D(42, Number.NaN, Number.POSITIVE_INFINITY),
+    ]) {
+      expect(Number.isFinite(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThan(1);
+    }
   });
 });
 
@@ -770,6 +793,29 @@ describe("aquarium layer Phase 3 euglena", () => {
     // and it decays toward zero when contact ends (far away, no trigger)
     const far = updateEuglena([{ ...once, x: 20, y: 20, startle: 1 }], frame({ dt: 0.5, width: 300, height: 300 }), view)[0];
     expect(far.startle).toBeLessThan(1);
+  });
+
+  it("updateEuglena stays dt-partition-exact with all new knobs at default", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      aquariumActivityBoost: 1,
+    });
+    // open water, no wall/hero/startle pressure; new foundation knobs are default no-op
+    const initial = [testEuglena({ x: 150, y: 150, heading: 0, swimSpeed: 1, rollPhase: 0.1, metabolyPhase: 0.2, flagellumPhase: 0.3 })];
+    const oneStep = updateEuglena(initial, frame({ dt: 0.24, width: 300, height: 300, activity: 0 }), view);
+    const halfStep = updateEuglena(initial, frame({ dt: 0.12, width: 300, height: 300, activity: 0 }), view);
+    const twoSteps = updateEuglena(halfStep, frame({ dt: 0.12, width: 300, height: 300, activity: 0 }), view);
+
+    expect(twoSteps[0].x).toBeCloseTo(oneStep[0].x, 10);
+    expect(twoSteps[0].y).toBeCloseTo(oneStep[0].y, 10);
+    expect(twoSteps[0].heading).toBeCloseTo(oneStep[0].heading, 10);
+    expect(twoSteps[0].rollPhase).toBeCloseTo(oneStep[0].rollPhase, 10);
+    expect(twoSteps[0].metabolyPhase).toBeCloseTo(oneStep[0].metabolyPhase, 10);
+    expect(twoSteps[0].flagellumPhase).toBeCloseTo(oneStep[0].flagellumPhase, 10);
   });
 
   it("updateEuglena is dt-partition invariant across phase wrap", () => {

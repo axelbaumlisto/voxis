@@ -1,4 +1,5 @@
 import type { ThemeState } from "../../../contract";
+import type { EuglenaSteer, Medium } from "./euglena";
 
 export interface AquariumFrame {
   readonly t: number;
@@ -27,6 +28,7 @@ export interface AquariumParamsView {
   readonly seed: number;
   readonly alpha: number;
   readonly activityBoost: number;
+  readonly medium?: Medium;
   readonly diatoms: {
     readonly count: number;
     readonly alpha: number;
@@ -37,6 +39,7 @@ export interface AquariumParamsView {
     readonly speed: number;
     readonly speedActive: number;
     readonly scale: number;
+    readonly steer?: EuglenaSteer;
   };
   readonly vorticella: {
     readonly count: number;
@@ -80,6 +83,8 @@ export interface EuglenaState extends AquariumSeedPoint {
   readonly turnTo?: number;
   /** Decaying escape state [0,1] for the startle-dart interaction. */
   readonly startle?: number;
+  /** Stable per-cell deterministic noise key for future stochastic behaviours. */
+  readonly noiseSeed?: number;
 }
 
 export interface VorticellaState extends AquariumSeedPoint {

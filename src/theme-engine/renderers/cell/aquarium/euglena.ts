@@ -1,6 +1,6 @@
 import type { ThemeState } from "../../../contract";
 import type { AquariumFrame, AquariumParamsView, EuglenaState } from "./types";
-import { seededUnit } from "./seeds";
+import { mix32, seededUnit } from "./seeds";
 
 export interface EuglenaPoseOptions {
   readonly centerX?: number;
@@ -402,7 +402,7 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
       flagellumPhase: seededUnit(seed, i, salt ^ 0x27d4eb2f),
       rollRate: 0.25 + seededUnit(seed, i, salt ^ 0x14c8af21) * 0.25,
       metabolyRate: 0.10 + seededUnit(seed, i, salt ^ 0x3bc85a13) * 0.06,
-      flagellumRate: 3.0 + seededUnit(seed, i, salt ^ 0x752f7c59) * 2.0, // Hz; ~8-12 beats/roll (real 15-20), under 30Hz Nyquist
+      flagellumRate: 3.0 + seededUnit(seed, i, salt ^ 0x752f7c59) * 2.0, // rendered Hz; real beat ≈20-40Hz, capped later at 13Hz for anti-aliasing
       spiralAmplitude: 0.12 + seededUnit(seed, i, salt ^ 0x61ab0917) * 0.06,
       cvPhase: seededUnit(seed, i, salt ^ 0x3da17c45),
       cvRate: 0.035 + seededUnit(seed, i, salt ^ 0x59e2b7a3) * 0.015,
@@ -412,6 +412,7 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
       turnFrom: heading,
       turnTo: heading,
       startle: 0,
+      noiseSeed: mix32(seed ^ Math.imul(i + 1, 0x9e3779b1) ^ 0x5eed) >>> 0,
     });
   }
   return euglena;
@@ -440,7 +441,19 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
  * Default = mutual non-predation (Euglena exceeds Paramecium's cytostome gape:
  * a size refuge), the euglena carrying the contact-avoidance for the display.
  */
-export const EUGLENA_STEER = {
+export interface EuglenaSteer {
+  forward: number;
+  wall: number;
+  hero: number;
+  loiter: number;
+  wake: number;
+  startleAway: number;
+  startleDart: number;
+  gravitaxis: number;
+  phototaxis: number;
+}
+
+export const EUGLENA_STEER: EuglenaSteer = {
   forward: 1.0,
   wall: 2.0,
   hero: 0.0,
@@ -448,6 +461,8 @@ export const EUGLENA_STEER = {
   wake: 10,
   startleAway: 3.0,
   startleDart: 1.0,
+  gravitaxis: 0,
+  phototaxis: 0,
 };
 
 /**
@@ -456,8 +471,16 @@ export const EUGLENA_STEER = {
  * banks and drifts more sluggishly. Physically low-Reynolds: angular velocity and
  * advection scale ~ 1/viscosity. Raise it for thick/syrupy water, lower for thin.
  */
-export const MEDIUM = {
+export interface Medium {
+  viscosity: number;
+  rotDiffusion: number;
+  translationDrag: number;
+}
+
+export const MEDIUM: Medium = {
   viscosity: 1.6,
+  rotDiffusion: 0,
+  translationDrag: 1,
 };
 
 // Interaction geometry/timing (q = sqrt(heroQd): normalized elliptical distance,
@@ -484,7 +507,9 @@ export function updateEuglena(
   const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
   const act = modeView.motionMul * (1 + 0.7 * activityMix);
   const scale = view.euglena.scale;
-  const drag = Math.max(0.1, finite(MEDIUM.viscosity, 1)); // fluid resistance (water = 1)
+  const steer = view.euglena.steer ?? EUGLENA_STEER;
+  const medium = view.medium ?? MEDIUM;
+  const drag = Math.max(0.1, finite(medium.viscosity, 1)); // fluid resistance (water = 1)
 
   return euglena.map((cell) => {
     const L = euglenaDisplayLength(finite(cell.size, 1), scale);
@@ -541,25 +566,25 @@ export function updateEuglena(
     // walls win over the hero; the hero term blends a constant bias with an
     // approach-then-retreat spring (curiosity) and a startle escape.
     {
-      let sx = ux * EUGLENA_STEER.forward;
-      let sy = uy * EUGLENA_STEER.forward;
+      let sx = ux * steer.forward;
+      let sy = uy * steer.forward;
       const look = L * 2.4; // anticipate ~2.4 body-lengths ahead of every wall
-      if (px0 < look) sx += (1 - px0 / look) * EUGLENA_STEER.wall;
-      if (safeWidth - px0 < look) sx -= (1 - (safeWidth - px0) / look) * EUGLENA_STEER.wall;
-      if (py0 < look) sy += (1 - py0 / look) * EUGLENA_STEER.wall;
-      if (safeHeight - py0 < look) sy -= (1 - (safeHeight - py0) / look) * EUGLENA_STEER.wall;
+      if (px0 < look) sx += (1 - px0 / look) * steer.wall;
+      if (safeWidth - px0 < look) sx -= (1 - (safeWidth - px0) / look) * steer.wall;
+      if (py0 < look) sy += (1 - py0 / look) * steer.wall;
+      if (safeHeight - py0 < look) sy -= (1 - (safeHeight - py0) / look) * steer.wall;
       if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 1e-4) {
         const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
         // radial weight: >0 repels (too close), <0 attracts (too far). The `loiter`
         // term is near-field attraction vs avoidance — it cancels at HERO_LOITER_Q,
         // an EMERGENT standoff, not a hard-coded goal. `hero` adds an avoid/pursue bias.
-        const wr = (EUGLENA_STEER.hero + EUGLENA_STEER.loiter * interest * (HERO_LOITER_Q - heroQ)) * falloff;
+        const wr = (steer.hero + steer.loiter * interest * (HERO_LOITER_Q - heroQ)) * falloff;
         sx += ax * wr;
         sy += ay * wr;
-        sx += ax * EUGLENA_STEER.startleAway * startle; // escape burst pushes straight away
-        sy += ay * EUGLENA_STEER.startleAway * startle;
+        sx += ax * steer.startleAway * startle; // escape burst pushes straight away
+        sy += ay * steer.startleAway * startle;
       }
-      const pressure = Math.hypot(sx - ux * EUGLENA_STEER.forward, sy - uy * EUGLENA_STEER.forward);
+      const pressure = Math.hypot(sx - ux * steer.forward, sy - uy * steer.forward);
       if (pressure > 1e-6) {
         const desired = Math.atan2(sy, sx);
         // gentle viscous (low-Reynolds) reorientation: exact exponential approach,
@@ -572,7 +597,7 @@ export function updateEuglena(
       }
     }
 
-    const vPxEff = vPx * (1 + EUGLENA_STEER.startleDart * startle); // dart faster while fleeing
+    const vPxEff = vPx * (1 + steer.startleDart * startle) / Math.max(0.1, finite(medium.translationDrag, 1)); // inert translation drag default
     let nextX = px0 + ux * vPxEff * dt;
     let nextY = py0 + uy * vPxEff * dt;
 
@@ -585,7 +610,7 @@ export function updateEuglena(
       const hdx = Math.cos(hd), hdy = Math.sin(hd);
       const behind = Math.max(0, -(ax * hdx + ay * hdy)); // 1 when directly behind the hero
       const prox = Math.min(1, (HERO_WAKE_RANGE - heroQ) / (HERO_WAKE_RANGE - 1));
-      const wakeSpeed = (EUGLENA_STEER.wake * prox * behind) / drag; // entrainment slows in thicker medium
+      const wakeSpeed = (steer.wake * prox * behind) / drag; // entrainment slows in thicker medium
       nextX += hdx * wakeSpeed * dt;
       nextY += hdy * wakeSpeed * dt;
     }

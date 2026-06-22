@@ -2099,7 +2099,8 @@ function seedEuglena(count, seed, frame, salt = 235478698) {
       turnProgress: 2,
       turnFrom: heading,
       turnTo: heading,
-      startle: 0
+      startle: 0,
+      noiseSeed: mix32(seed ^ Math.imul(i + 1, 2654435761) ^ 24301) >>> 0
     });
   }
   return euglena;
@@ -2111,10 +2112,14 @@ var EUGLENA_STEER = {
   loiter: 1.1,
   wake: 10,
   startleAway: 3,
-  startleDart: 1
+  startleDart: 1,
+  gravitaxis: 0,
+  phototaxis: 0
 };
 var MEDIUM = {
-  viscosity: 1.6
+  viscosity: 1.6,
+  rotDiffusion: 0,
+  translationDrag: 1
 };
 var HERO_LOITER_Q = 1.3;
 var HERO_INTEREST_RANGE = 2.2;
@@ -2134,7 +2139,9 @@ function updateEuglena(euglena, frame, view) {
   const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
   const act = modeView.motionMul * (1 + 0.7 * activityMix);
   const scale = view.euglena.scale;
-  const drag = Math.max(0.1, finite2(MEDIUM.viscosity, 1));
+  const steer = view.euglena.steer ?? EUGLENA_STEER;
+  const medium = view.medium ?? MEDIUM;
+  const drag = Math.max(0.1, finite2(medium.viscosity, 1));
   return euglena.map((cell) => {
     const L = euglenaDisplayLength(finite2(cell.size, 1), scale);
     let heading = finite2(cell.heading, 0);
@@ -2175,26 +2182,26 @@ function updateEuglena(euglena, frame, view) {
     if (finite2(frame.startle, 0) > 0.5)
       startle = 1;
     {
-      let sx = ux * EUGLENA_STEER.forward;
-      let sy = uy * EUGLENA_STEER.forward;
+      let sx = ux * steer.forward;
+      let sy = uy * steer.forward;
       const look = L * 2.4;
       if (px0 < look)
-        sx += (1 - px0 / look) * EUGLENA_STEER.wall;
+        sx += (1 - px0 / look) * steer.wall;
       if (safeWidth - px0 < look)
-        sx -= (1 - (safeWidth - px0) / look) * EUGLENA_STEER.wall;
+        sx -= (1 - (safeWidth - px0) / look) * steer.wall;
       if (py0 < look)
-        sy += (1 - py0 / look) * EUGLENA_STEER.wall;
+        sy += (1 - py0 / look) * steer.wall;
       if (safeHeight - py0 < look)
-        sy -= (1 - (safeHeight - py0) / look) * EUGLENA_STEER.wall;
+        sy -= (1 - (safeHeight - py0) / look) * steer.wall;
       if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 0.0001) {
         const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
-        const wr = (EUGLENA_STEER.hero + EUGLENA_STEER.loiter * interest * (HERO_LOITER_Q - heroQ)) * falloff;
+        const wr = (steer.hero + steer.loiter * interest * (HERO_LOITER_Q - heroQ)) * falloff;
         sx += ax * wr;
         sy += ay * wr;
-        sx += ax * EUGLENA_STEER.startleAway * startle;
-        sy += ay * EUGLENA_STEER.startleAway * startle;
+        sx += ax * steer.startleAway * startle;
+        sy += ay * steer.startleAway * startle;
       }
-      const pressure = Math.hypot(sx - ux * EUGLENA_STEER.forward, sy - uy * EUGLENA_STEER.forward);
+      const pressure = Math.hypot(sx - ux * steer.forward, sy - uy * steer.forward);
       if (pressure > 0.000001) {
         const desired = Math.atan2(sy, sx);
         const turnK = (1 + 2.5 * Math.min(1, pressure)) / drag;
@@ -2203,7 +2210,7 @@ function updateEuglena(euglena, frame, view) {
         uy = Math.sin(heading);
       }
     }
-    const vPxEff = vPx * (1 + EUGLENA_STEER.startleDart * startle);
+    const vPxEff = vPx * (1 + steer.startleDart * startle) / Math.max(0.1, finite2(medium.translationDrag, 1));
     let nextX = px0 + ux * vPxEff * dt;
     let nextY = py0 + uy * vPxEff * dt;
     if (heroParams && heroQ < HERO_WAKE_RANGE && heroQ > 0.0001) {
@@ -2211,7 +2218,7 @@ function updateEuglena(euglena, frame, view) {
       const hdx = Math.cos(hd), hdy = Math.sin(hd);
       const behind = Math.max(0, -(ax * hdx + ay * hdy));
       const prox = Math.min(1, (HERO_WAKE_RANGE - heroQ) / (HERO_WAKE_RANGE - 1));
-      const wakeSpeed = EUGLENA_STEER.wake * prox * behind / drag;
+      const wakeSpeed = steer.wake * prox * behind / drag;
       nextX += hdx * wakeSpeed * dt;
       nextY += hdy * wakeSpeed * dt;
     }
