@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CELL_DEFAULTS } from "../cell/defaults";
 import { aquariumParamsView } from "../cell/aquarium/params";
+import { heroConsumeObstacles } from "../cell/aquarium/hero";
 import { buildField, sourceId } from "../cell/aquarium/interaction";
+import type { ObstacleCircle } from "../cell/aquarium/interaction";
 import { seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aquarium/layer";
 import { diatomGeometry } from "../cell/aquarium/diatoms";
 import { euglenaPose, updateEuglena, drawEuglena, EUGLENA_STEER, MEDIUM } from "../cell/aquarium/euglena";
-import { updateVorticella, vorticellaContractPhase, vorticellaGeometry, vorticellaObstacle } from "../cell/aquarium/vorticella";
+import { updateVorticella, vorticellaContribute, vorticellaContractPhase, vorticellaGeometry, vorticellaObstacle } from "../cell/aquarium/vorticella";
 import { noise2D } from "../cell/aquarium/seeds";
 import type { AquariumFrame, AquariumLayerState, EuglenaState } from "../cell/aquarium/types";
 import type { CellParams } from "../cell/types";
@@ -2034,6 +2036,88 @@ describe("createCellRenderer aquarium gate", () => {
     expect(draw.mock.calls[0]?.[1]).toBe(states[1]);
     expect(draw.mock.calls[1]?.[1]).toBe(states[2]);
     expect(draw.mock.calls[2]?.[1]).toBe(states[3]);
+  });
+
+  it("publishes the renderer-local hero after the vorticella field clamp", async () => {
+    installNoopCanvasContext();
+    const state: AquariumLayerState = {
+      seed: 67,
+      diatoms: [],
+      euglena: [],
+      vorticella: [{
+        x: 86,
+        y: 36,
+        phase: 0.2,
+        size: 1,
+        anchorX: 86,
+        anchorY: 36,
+        directionAngle: -Math.PI / 2,
+        restLength: 8,
+        contractPhase: 0,
+        contractCyclePhase: 0.2,
+        oralWreathPhase: 0.1,
+        contractRate: 0.1,
+        oralRate: 0.5,
+      }],
+    };
+    const seed = vi.fn(() => state);
+    const update = vi.fn((aquarium: AquariumLayerState) => aquarium);
+    const draw = vi.fn();
+    vi.doMock("../cell/aquarium/layer", () => ({
+      seedAquarium: seed,
+      updateAquarium: update,
+      drawAquariumBackground: draw,
+    }));
+    const rafCalls: Array<() => void> = [];
+    let now = 1000;
+    vi.stubGlobal("performance", { ["now"]: () => now });
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      rafCalls.push(cb);
+      return rafCalls.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const width = 172;
+    const height = 36;
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      enableHero: true,
+      enableHelicalSwim: false,
+      vorticellaCount: 1,
+      vorticellaScale: 1.2,
+      bodyAspect: 3,
+      swimSpeedMaxFrac: 0,
+      idleSwimFrac: 0,
+      idleDriftMin: 0,
+    };
+    const baseR = Math.min(width, height) * (params.radiusFraction ?? CELL_DEFAULTS.radiusFraction);
+    const rawX = width * 0.5;
+    const rawY = height * 0.5;
+    const heroReach = baseR * Math.sqrt(Math.max(1, params.bodyAspect ?? 1)) * 1.2;
+    const circles = buildField(
+      state.vorticella.flatMap((v, idx) => vorticellaContribute(v, params.vorticellaScale ?? 1, height, idx)),
+    ).obstacles.filter((obstacle): obstacle is ObstacleCircle => obstacle.shape === "circle");
+    const expectedDelta = heroConsumeObstacles(circles, rawX, rawY, heroReach);
+    expect(Math.hypot(expectedDelta.dx, expectedDelta.dy)).toBeGreaterThan(0);
+
+    const { createCellRenderer } = await import("../cell/renderer");
+    const renderer = createCellRenderer(document.createElement("div"), { width, height, baseHue: 50, params });
+    now += 1000 / 60;
+    rafCalls.shift()?.();
+    now += 1000 / 60;
+    rafCalls.shift()?.();
+    renderer.destroy();
+
+    const publishedHero = update.mock.calls[1]?.[1]?.hero;
+    expect(publishedHero).toMatchObject({
+      x: rawX + expectedDelta.dx,
+      y: rawY + expectedDelta.dy,
+      halfLen: heroReach / 1.2,
+      halfWid: baseR / Math.sqrt(Math.max(1, params.bodyAspect ?? 1)),
+    });
+    expect(seed.mock.calls[0]?.[0]?.hero).toMatchObject({ x: rawX, y: rawY });
+    expect(draw.mock.calls[1]?.[2]?.hero).toBe(publishedHero);
   });
 
   it("keeps combined diatom/euglena/vorticella gate-on draw overhead under 1200 ops at 172x36", async () => {
