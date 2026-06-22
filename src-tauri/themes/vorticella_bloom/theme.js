@@ -3401,14 +3401,14 @@ function createCellRenderer(container, opts) {
       }
       if ((params.vorticellaCount ?? 0) > 0 && aquarium && aquarium.vorticella.length > 0) {
         const vview = aquariumParamsView(params);
-        const heroReach = baseR * Math.sqrt(Math.max(1, params.bodyAspect ?? 1)) * 0.9;
+        const heroReach = baseR * Math.sqrt(Math.max(1, params.bodyAspect ?? 1)) * 1.2;
         for (const v of aquarium.vorticella) {
           const o = vorticellaObstacle(v, vview.vorticella.scale, height);
           const dx = cx - o.x, dy = cy - o.y;
           const d = Math.hypot(dx, dy);
           const minD = o.radius + heroReach;
           if (d < minD && d > 0.000001) {
-            const push = (minD - d) * (1 - Math.exp(-6 * dt));
+            const push = minD - d;
             const pxh = dx / d * push, pyh = dy / d * push;
             cx += pxh;
             cy += pyh;
