@@ -2126,7 +2126,7 @@ function updateEuglena(euglena, frame, view) {
     let uy = Math.sin(heading);
     const vPx = Math.max(0, finite2(cell.swimSpeed, 0)) * vBL * L;
     {
-      const look = Math.max(L * 2.4, Math.min(safeWidth, safeHeight) * 0.5);
+      const look = L * 2.4;
       let avoidX = 0;
       let avoidY = 0;
       if (ux < 0 && px0 < look)

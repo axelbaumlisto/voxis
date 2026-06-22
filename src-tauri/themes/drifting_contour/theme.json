@@ -4,7 +4,7 @@
   "name": "Drifting Contour",
   "description": "Expressive motion, warm amber palette — most visually active organic theme",
   "api_version": 1,
-  "overlay_width": 160,
+  "overlay_width": 320,
   "overlay_height": 160,
   "entry": "theme.js"
 }
