@@ -728,7 +728,7 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(unitDelta(onset.rollPhase, initial[0].rollPhase)).toBeLessThan(unitDelta(longDt.rollPhase, initial[0].rollPhase));
   });
 
-  it("keeps euglena finite, bounded, and wrapped over long runtime", () => {
+  it("keeps euglena finite and clamped in-bounds over long runtime", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,
       enableAquarium: true,
@@ -744,9 +744,9 @@ describe("aquarium layer Phase 3 euglena", () => {
       expect(Number.isFinite(value)).toBe(true);
     }
     expect(cell.x).toBeGreaterThanOrEqual(0);
-    expect(cell.x).toBeLessThan(172);
+    expect(cell.x).toBeLessThanOrEqual(172); // clamped (no wrap teleport)
     expect(cell.y).toBeGreaterThanOrEqual(0);
-    expect(cell.y).toBeLessThan(36);
+    expect(cell.y).toBeLessThanOrEqual(36);
     expect(cell.rollPhase).toBeGreaterThanOrEqual(0);
     expect(cell.rollPhase).toBeLessThan(1);
     expect(cell.metabolyPhase).toBeGreaterThanOrEqual(0);

@@ -149,13 +149,13 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       enableAquarium: true,
       aquariumSeed: 17,          // euglena mid-field so it actually meets the hero
       aquariumAlpha: 0.68,
-      aquariumActivityBoost: 0.25,
+      aquariumActivityBoost: 1.0,  // euglena strongly responds to audio (much livelier than the hero)
       diatomCount: 0,
       diatomAlpha: 0.16,
       diatomDriftSpeed: 0.35,
       euglenaCount: 1,
-      euglenaSpeed: 0.15,        // body-lengths/sec (idle) — gentle companion drift
-      euglenaSpeedActive: 0.30,  // body-lengths/sec (recording)
+      euglenaSpeed: 0.20,        // body-lengths/sec (idle) — gentle companion drift
+      euglenaSpeedActive: 1.5,   // body-lengths/sec (recording) — vigorous, visibly swims across the tank
       euglenaScale: 2.8,         // companion ~0.4x the paramecium length (correct scale)
       vorticellaCount: 0,
       ...userParams,
