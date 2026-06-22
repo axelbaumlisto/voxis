@@ -193,7 +193,7 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0.5)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass: 6 rimmed food
       // vacuoles + bigger CV + taller bell (bellHeight 1.45D, restStalk 3.1D) change ops/hash.
-      hash: "98b89f3dcb9f4fbb",
+      hash: "67b928e64e8382bf",
       opCount: 1580,
       counts: {
         beginPath: 250,

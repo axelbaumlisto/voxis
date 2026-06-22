@@ -408,7 +408,7 @@ export function drawVorticella(
     const { D, bellHeight, restStalk } = vorticellaBellMetrics(cell, scale, frame.height);
     // the fired zooid BALLS UP: shorten the bell axially on contraction (real Vorticella
     // retracts toward a sphere) instead of ballooning the width into an oblate disc.
-    const drawBellH = bellHeight * (1 - 0.12 * s);
+    const drawBellH = bellHeight * (1 - 0.25 * s);
     // stalk shrinks to nothing as the zooid detaches into a free-swimming telotroch
     const restLength = restStalk * attach;
 
@@ -443,7 +443,9 @@ export function drawVorticella(
       // CRITIC FIX (morphology F1): the widest point sits BELOW the everted rim (a convex
       // campanulate shoulder); above it the wall eases IN to a narrower rim so the
       // peristomial collar (Rrim) clearly overhangs the body margin; fuller rounded heel.
-      const um = 0.66, w0 = 0.16, wMax = 0.66, wRim = 0.42; // narrow scopula heel; deep convex shoulder; rim eases well IN so the collar clearly overhangs
+      // extended: narrow scopula heel (w0 0.16); CONTRACTED: the posterior rounds out
+      // (w0 -> ~0.5) so the fired zooid balls into a near-spherical blob, not a tapered urn.
+      const um = 0.66, w0 = 0.16 + 0.34 * s, wMax = 0.66, wRim = 0.42;
       const base = u <= um
         ? w0 + (wMax - w0) * Math.pow(smoothstep(u / um), 0.6) // convex bulge up to the widest shoulder
         : wMax - (wMax - wRim) * smoothstep((u - um) / (1 - um)); // ease IN above widest -> collar overhangs

@@ -2977,7 +2977,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
     const anchorX = finite(cell.anchorX, 0);
     const anchorY = finite(cell.anchorY, 0);
     const { D, bellHeight, restStalk } = vorticellaBellMetrics(cell, scale, frame.height);
-    const drawBellH = bellHeight * (1 - 0.12 * s);
+    const drawBellH = bellHeight * (1 - 0.25 * s);
     const restLength = restStalk * attach;
     const geom = vorticellaGeometry(s, {
       anchorX,
@@ -3002,7 +3002,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
       };
     };
     const halfW = (u) => {
-      const um = 0.66, w0 = 0.16, wMax = 0.66, wRim = 0.42;
+      const um = 0.66, w0 = 0.16 + 0.34 * s, wMax = 0.66, wRim = 0.42;
       const base = u <= um ? w0 + (wMax - w0) * Math.pow(smoothstep2(u / um), 0.6) : wMax - (wMax - wRim) * smoothstep2((u - um) / (1 - um));
       const lipGate = 1 - (1 - (0.55 + 0.45 * open)) * smoothstep2((u - 0.82) / 0.18);
       return D * base * lipGate;
