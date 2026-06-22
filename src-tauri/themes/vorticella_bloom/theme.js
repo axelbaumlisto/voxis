@@ -2163,7 +2163,7 @@ function updateEuglena(euglena, frame, view) {
       const hx = finite2(frame.hero.x, safeWidth / 2);
       const hy = finite2(frame.hero.y, safeHeight / 2);
       const hr = Math.max(0, finite2(frame.hero.radius, 0));
-      const m = 0.5 * L;
+      const m = 0.9 * L;
       const A = Math.max(0.001, finiteOr3(frame.hero.halfLen, hr) + m);
       const B = Math.max(0.001, finiteOr3(frame.hero.halfWid, hr) + m);
       const hh = finiteOr3(frame.hero.heading, 0);
@@ -2361,9 +2361,10 @@ function drawEuglena(ctx, euglena, frame, view) {
       if (frame.hero) {
         const hdx = finite2(cell.x, 0) - finite2(frame.hero.x, 0);
         const hdy = finite2(cell.y, 0) - finite2(frame.hero.y, 0);
-        const reach = Math.max(finiteOr3(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) * 1.15;
-        if (Math.hypot(hdx, hdy) < reach)
-          flagFade = 0.45;
+        const reach = Math.max(finiteOr3(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) * 1.7;
+        const hdist = Math.hypot(hdx, hdy);
+        if (hdist < reach)
+          flagFade = clamp(0.12 + 0.6 * (hdist / reach), 0.12, 0.7);
       }
       ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.3 * flagFade})`;
       ctx.lineWidth = Math.max(0.9, width * 0.18);
