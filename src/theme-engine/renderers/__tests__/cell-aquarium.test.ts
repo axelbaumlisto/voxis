@@ -695,19 +695,20 @@ describe("aquarium layer Phase 3 euglena", () => {
       euglenaSpeedActive: 1,
       aquariumActivityBoost: 1,
     });
-    // mid-field, mid-height: no edge U-turn and no soft y-centering engage, so
-    // the path is pure forward + closed-form phase accumulators (partition-exact).
-    const initial = [testEuglena({ x: 86, y: 18, heading: Math.PI / 4, rollPhase: 0.9 })];
-    const oneStep = updateEuglena(initial, frame({ dt: 0.16, width: 172, height: 36, activity: 0 }), view);
-    const halfStep = updateEuglena(initial, frame({ dt: 0.08, width: 172, height: 36, activity: 0 }), view);
-    const twoSteps = updateEuglena(halfStep, frame({ dt: 0.08, width: 172, height: 36, activity: 0 }), view);
+    // mid-field, far from every wall (beyond the avoidance lookahead): no wall
+    // steering engages, so the path is pure forward + closed-form phase
+    // accumulators (partition-exact).
+    const initial = [testEuglena({ x: 150, y: 150, heading: Math.PI / 4, rollPhase: 0.9 })];
+    const oneStep = updateEuglena(initial, frame({ dt: 0.16, width: 300, height: 300, activity: 0 }), view);
+    const halfStep = updateEuglena(initial, frame({ dt: 0.08, width: 300, height: 300, activity: 0 }), view);
+    const twoSteps = updateEuglena(halfStep, frame({ dt: 0.08, width: 300, height: 300, activity: 0 }), view);
 
     expect(twoSteps[0].x).toBeCloseTo(oneStep[0].x, 10);
     expect(twoSteps[0].y).toBeCloseTo(oneStep[0].y, 10);
     expect(oneStep[0].x).toBeGreaterThanOrEqual(0);
-    expect(oneStep[0].x).toBeLessThan(172);
+    expect(oneStep[0].x).toBeLessThan(300);
     expect(oneStep[0].y).toBeGreaterThanOrEqual(0);
-    expect(oneStep[0].y).toBeLessThan(36);
+    expect(oneStep[0].y).toBeLessThan(300);
   });
 
   it("abrupt activity onset after long idle uses current dt instead of elapsed frame time", () => {

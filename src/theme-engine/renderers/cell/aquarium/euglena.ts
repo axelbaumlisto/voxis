@@ -416,11 +416,6 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
   return euglena;
 }
 
-function smoothstep(x: number): number {
-  const t = clamp01(x);
-  return t * t * (3 - 2 * t);
-}
-
 export function updateEuglena(
   euglena: readonly EuglenaState[],
   frame: AquariumFrame,
@@ -437,46 +432,41 @@ export function updateEuglena(
   const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
   const act = modeView.motionMul * (1 + 0.7 * activityMix);
   const scale = view.euglena.scale;
-  const turnTime = 1.3; // faster reversal so a fast active swimmer doesn't bang the wall
-  const margin = Math.max(8, safeWidth * 0.10);
 
   return euglena.map((cell) => {
     const L = euglenaDisplayLength(finite(cell.size, 1), scale);
     let heading = finite(cell.heading, 0);
 
-    let turnProgress = finiteOr(cell.turnProgress, 2);
-    let turnFrom = finiteOr(cell.turnFrom, heading);
-    let turnTo = finiteOr(cell.turnTo, heading);
-    let speedScale = 1;
-    const turning = turnProgress < 1;
-    if (turning) {
-      turnProgress = Math.min(1, turnProgress + dt / turnTime);
-      heading = turnFrom + (turnTo - turnFrom) * smoothstep(turnProgress);
-      speedScale = 0.4 + 0.6 * Math.abs(Math.cos(turnProgress * Math.PI));
-      if (turnProgress >= 1) heading = turnTo;
-    } else {
-      const ux0 = Math.cos(heading);
-      const lead = finite(cell.x, 0) + ux0 * (L / 2);
-      const turnMargin = Math.max(margin, L * 1.4); // begin the turn earlier for a fast swimmer
-      if ((ux0 > 0 && lead > safeWidth - turnMargin) || (ux0 < 0 && lead < turnMargin)) {
-        turnProgress = 0;
-        turnFrom = heading;
-        turnTo = heading + Math.PI;
-        speedScale = 1;
+    const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+    const px0 = finite(cell.x, 0);
+    const py0 = finite(cell.y, 0);
+    let ux = Math.cos(heading);
+    let uy = Math.sin(heading);
+    const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L;
+
+    // --- anticipatory wall avoidance: the tank edges are impassable obstacles.
+    // Steer the heading AWAY from any wall the cell is swimming TOWARD, well
+    // before contact (lookahead ~2.4 body-lengths), so it banks around the edge
+    // instead of ramming it. No 180-degree flip, no jerk — a smooth continuous turn. ---
+    {
+      const look = Math.max(L * 2.4, Math.min(safeWidth, safeHeight) * 0.5);
+      let avoidX = 0;
+      let avoidY = 0;
+      if (ux < 0 && px0 < look) avoidX += 1 - px0 / look;                       // heading at left wall → push right
+      if (ux > 0 && safeWidth - px0 < look) avoidX -= 1 - (safeWidth - px0) / look; // heading at right wall → push left
+      if (uy < 0 && py0 < look) avoidY += 1 - py0 / look;                       // heading at top → push down
+      if (uy > 0 && safeHeight - py0 < look) avoidY -= 1 - (safeHeight - py0) / look; // heading at bottom → push up
+      if (avoidX !== 0 || avoidY !== 0) {
+        const urgency = Math.min(1, Math.hypot(avoidX, avoidY));
+        const desired = Math.atan2(uy + 2.0 * avoidY, ux + 2.0 * avoidX);
+        heading += wrapPi(desired - heading) * Math.min(1, (3 + 6 * urgency) * dt);
+        ux = Math.cos(heading);
+        uy = Math.sin(heading);
       }
     }
 
-    const ux = Math.cos(heading);
-    const uy = Math.sin(heading);
-    const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L * speedScale;
-
-    let nextX = finite(cell.x, 0) + ux * vPx * dt;
-    let nextY = finite(cell.y, 0) + uy * vPx * dt;
-
-    const yc = safeHeight / 2;
-    if (safeHeight > 0 && Math.abs(nextY - yc) > 0.28 * safeHeight) {
-      nextY += (yc - nextY) * Math.min(1, 4 * dt); // keep it in the mid-band; no top/bottom banging
-    }
+    let nextX = px0 + ux * vPx * dt;
+    let nextY = py0 + uy * vPx * dt;
 
     // --- hero exclusion (dormant when no hero, e.g. euglena_drift) ---
     // Body-frame ELLIPTICAL exclusion hugging the elongated paramecium (~3:1),
@@ -532,9 +522,8 @@ export function updateEuglena(
     // the spinning/turning beat REORIENTS the cell (run-and-tumble): a brief
     // heading kick during the flick, steered toward open water (tank centre) so
     // it swims AWAY from walls instead of persistently curving off to one side.
-    if (turnProgress >= 1 && flick > 0) {
-      const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
-      const toCenter = Math.atan2(safeHeight / 2 - finite(cell.y, 0), safeWidth / 2 - finite(cell.x, 0));
+    if (flick > 0) {
+      const toCenter = Math.atan2(safeHeight / 2 - py0, safeWidth / 2 - px0);
       const turnSign = wrapPi(toCenter - heading) >= 0 ? 1 : -1;
       heading += turnSign * 0.9 * flick * dt;
     }
@@ -546,9 +535,9 @@ export function updateEuglena(
       y: clamp(nextY, 0, safeHeight),
       phase: heading,
       heading,
-      turnProgress,
-      turnFrom,
-      turnTo,
+      turnProgress: finiteOr(cell.turnProgress, 2),
+      turnFrom: finiteOr(cell.turnFrom, heading),
+      turnTo: finiteOr(cell.turnTo, heading),
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + rollDelta),
       metabolyPhase: wrapUnit(finite(cell.metabolyPhase, 0) + Math.max(0, finite(cell.metabolyRate, 0)) * act * dt),
       flagellumPhase: wrapUnit(finite(cell.flagellumPhase, 0) + fEff * dt),
