@@ -29,7 +29,10 @@ import { CELL_DEFAULTS } from "./defaults";
 import type { AquariumLayerState, AquariumFrame } from "./aquarium/types";
 import { seedAquarium, updateAquarium, drawAquariumBackground } from "./aquarium/layer";
 import { aquariumParamsView } from "./aquarium/params";
-import { vorticellaObstacle } from "./aquarium/vorticella";
+import { heroConsumeObstacles } from "./aquarium/hero";
+import { buildField } from "./aquarium/interaction";
+import type { ObstacleCircle } from "./aquarium/interaction";
+import { vorticellaContribute } from "./aquarium/vorticella";
 import {
   interiorPoint, seedInteriorGranules, cyclosisLoopPointAtPhase,
 } from "./interior";
@@ -468,21 +471,15 @@ export function createCellRenderer(
         const vview = aquariumParamsView(params);
         // full hero half-length (+margin): the elongated body must clear the bell
         const heroReach = baseR * Math.sqrt(Math.max(1, params.bodyAspect ?? 1)) * 1.2;
-        for (const v of aquarium.vorticella) {
-          const o = vorticellaObstacle(v, vview.vorticella.scale, height);
-          const dx = cx - o.x, dy = cy - o.y;
-          const d = Math.hypot(dx, dy);
-          const minD = o.radius + heroReach;
-          if (d < minD && d > 1e-6) {
-            // HARD clamp to the boundary (full correction in one frame): the hero's
-            // cx,cy is re-set by wander each frame, so a soft push barely corrects.
-            const push = minD - d;
-            const pxh = (dx / d) * push, pyh = (dy / d) * push;
-            cx += pxh;
-            cy += pyh;
-            for (let i = 0; i < smoothedPoints.length; i++) {
-              smoothedPoints[i] = [smoothedPoints[i][0] + pxh, smoothedPoints[i][1] + pyh];
-            }
+        const circles = buildField(
+          aquarium.vorticella.flatMap((v, idx) => vorticellaContribute(v, vview.vorticella.scale, height, idx)),
+        ).obstacles.filter((obstacle): obstacle is ObstacleCircle => obstacle.shape === "circle");
+        const { dx, dy } = heroConsumeObstacles(circles, cx, cy, heroReach);
+        if (dx !== 0 || dy !== 0) {
+          cx += dx;
+          cy += dy;
+          for (let i = 0; i < smoothedPoints.length; i++) {
+            smoothedPoints[i] = [smoothedPoints[i][0] + dx, smoothedPoints[i][1] + dy];
           }
         }
       }
