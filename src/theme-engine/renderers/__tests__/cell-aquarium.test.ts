@@ -193,20 +193,20 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0.5)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass: 6 rimmed food
       // vacuoles + bigger CV + taller bell (bellHeight 1.45D, restStalk 3.1D) change ops/hash.
-      hash: "e0eeaf7cc8b205da",
-      opCount: 1473,
+      hash: "9065a5f1f2ffffc8",
+      opCount: 1524,
       counts: {
-        beginPath: 243,
-        moveTo: 89,
-        lineTo: 719,
-        closePath: 13,
+        beginPath: 244,
+        moveTo: 90,
+        lineTo: 764,
+        closePath: 14,
         fill: 162,
         stroke: 84,
-        save: 4,
+        save: 5,
         ellipse: 6,
         arc: 148,
-        restore: 4,
-        clip: 1,
+        restore: 5,
+        clip: 2,
       },
     });
   });
@@ -215,20 +215,20 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass (6 rimmed food
       // vacuoles + bigger CV + taller bell change ops/hash).
-      hash: "014f9e623cf7791e",
-      opCount: 1357,
+      hash: "266f8d9578b13014",
+      opCount: 1408,
       counts: {
-        beginPath: 214,
-        moveTo: 60,
-        lineTo: 690,
-        closePath: 13,
+        beginPath: 215,
+        moveTo: 61,
+        lineTo: 735,
+        closePath: 14,
         fill: 162,
         stroke: 55,
-        save: 4,
+        save: 5,
         ellipse: 6,
         arc: 148,
-        restore: 4,
-        clip: 1,
+        restore: 5,
+        clip: 2,
       },
     });
   });
@@ -1848,9 +1848,9 @@ describe("aquarium layer Phase 4 vorticella", () => {
 
     drawAquariumBackground(ctx, state, frame({ width: 172, height: 36 }), params);
 
-    // 2 save/restore: the outer drawVorticella pass + the inner clipped granule/relief pass
-    expect(ctx.save).toHaveBeenCalledTimes(2);
-    expect(ctx.restore).toHaveBeenCalledTimes(2);
+    // 3 save/restore: outer drawVorticella pass + clipped granule/relief pass + clipped interior-organelle pass
+    expect(ctx.save).toHaveBeenCalledTimes(3);
+    expect(ctx.restore).toHaveBeenCalledTimes(3);
     expect(ctx.clip).toHaveBeenCalled();
     expect(ctx.fill).toHaveBeenCalled();
     expect(ctx.stroke).toHaveBeenCalled();
@@ -2268,9 +2268,9 @@ describe("createCellRenderer aquarium gate", () => {
     const onOps = await renderAquariumOpCount(true, 1, 1, 4);
 
     expect(onOps - offOps).toBeGreaterThan(0);
-    // budget raised 1200 -> 1400: the realism pass adds a denser granular endoplasm
-    // stipple (cheap arc fills) for the foamy microscopy look; still trivially cheap.
-    expect(onOps - offOps).toBeLessThan(1400);
+    // budget 1500: realism pass adds dense two-layer granular stipple + a second clip
+    // for interior-organelle containment (cheap arc fills + one extra clip path).
+    expect(onOps - offOps).toBeLessThan(1500);
   });
 });
 
