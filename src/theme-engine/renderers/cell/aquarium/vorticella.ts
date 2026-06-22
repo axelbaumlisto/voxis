@@ -64,6 +64,32 @@ const VC_CONTRACT = 0.02; // ballistic collapse window (snap)
 const VC_HOLD = 0.02;     // contracted hold
 const VC_RELAX = 0.33;    // slow re-extension window
 
+// Absolute-time spasmoneme clocks (seconds) — the collapse is power-limited and
+// cadence-INDEPENDENT, so it runs on real dt, decoupled from how often it fires.
+const T_C = 0.08;    // ballistic collapse (~5 frames @60fps; real <10ms, floored for visibility)
+const T_HOLD = 0.05; // contracted hold
+const T_E = 2.6;     // slow Ca-reload re-extension
+
+/** Deterministic Poisson-ish feeding dwell (s) before the next contraction.
+ *  `cadence` folds in the theme contract-rate + mode + startle (higher = more frequent). */
+function drawFeedInterval(cellSeed: number, eventCount: number, activityMix: number, cadence: number): number {
+  const mean = (9 - 6 * clamp01(activityMix)) / Math.max(0.2, cadence); // ~9s idle -> shorter when active/loud
+  const u = Math.max(1e-4, seededUnit(cellSeed, eventCount, 0x51bd0e77));
+  return clamp(-Math.log(u) * mean, 2.5, 18);
+}
+
+function vorticellaCellSeed(anchorX: number): number {
+  return (Math.round(anchorX * 7) ^ 0x070271ca) >>> 0;
+}
+
+/** Contraction amount s in [0,1] from the absolute-time leg/timer state. */
+function vorticellaLegAmount(leg: number, timer: number): number {
+  if (leg === 1) { const u = clamp01(timer / T_C); return 1 - Math.pow(1 - u, 3); } // ballistic ease-out
+  if (leg === 2) return 1;                                                          // hold
+  if (leg === 3) { const u = clamp01(timer / T_E); return Math.exp(-Math.pow(u * 1.9, 1.4)); } // stretched-exp
+  return 0;                                                                          // extended / feeding
+}
+
 export function vorticellaContractPhase(cyclePhase: number): number {
   const phase = wrapUnit(cyclePhase);
   if (phase < VC_CONTRACT) {
@@ -155,6 +181,12 @@ export function seedVorticella(count: number, seed: number, frame: AquariumFrame
       oralRate: 0.42 + seededUnit(seed, i, salt ^ 0x14c8af21) * 0.18,
       swayPhase: seededUnit(seed, i, salt ^ 0x3b91ce07),
       swayRate: 0.10 + seededUnit(seed, i, salt ^ 0x5a2f81b3) * 0.07, // ~0.10-0.17 Hz gentle sway
+      // absolute-time contraction machine: start mid-dwell but FAR from a
+      // contraction boundary (timer < 1.5 < min interval) so dt-partition stays exact
+      contractLeg: 0,
+      contractTimer: seededUnit(seed, i, salt ^ 0x29ab7f15) * 1.5,
+      feedInterval: drawFeedInterval(vorticellaCellSeed(anchorX), 0, 0, 1),
+      eventCount: 0,
     });
   }
   return vorticella;
@@ -173,21 +205,39 @@ export function updateVorticella(
   const rate = idleRate + (activeRate - idleRate) * activityMix;
   const modeMul = frame.mode === "recording" ? 1.18 : frame.mode === "transcribing" ? 0.35 : frame.mode === "error" ? 0.15 : 1;
   const startleBoost = 1 + Math.min(0.35, Math.max(0, finite(frame.startle, 0)) * 0.35);
-  const cycleRateMul = Math.min(3.0, rate * modeMul * startleBoost); // headroom so recording visibly speeds contraction
+  // cadence = how OFTEN it contracts (theme rate * mode * startle); the collapse
+  // SPEED is separate and absolute (T_C on real dt), decoupled from cadence.
+  const cadence = Math.max(0.2, Math.min(3.5, rate * modeMul * startleBoost));
   // oral cilia beat ~20Hz; visual cap 24Hz (>=3 samples/cycle @60fps, anti-shimmer)
   const oralHz = Math.min(24, (frame.mode === "error" ? 6 : frame.mode === "transcribing" ? 12 : 20) * (1 + activityMix * 0.2));
-
   // sway slows a little under load (the zooid stiffens when contracting often)
   const swayMul = frame.mode === "error" ? 0.3 : frame.mode === "transcribing" ? 0.6 : 1;
   return vorticella.map((cell) => {
-    const cyclePhase = wrapUnit(cell.contractCyclePhase + Math.max(0, finite(cell.contractRate, 0)) * cycleRateMul * dt);
+    // CV pulses on its own slow rhythm, independent of contraction events
+    const cvClock = wrapUnit(finite(cell.contractCyclePhase, 0) + Math.max(0, finite(cell.contractRate, 0)) * dt);
+    const cellSeed = vorticellaCellSeed(finite(cell.anchorX, 0));
+    // absolute-time contraction state machine (real dt; legs advance with carry)
+    let leg = Math.max(0, Math.min(3, Math.floor(finiteOr(cell.contractLeg, 0))));
+    let timer = Math.max(0, finiteOr(cell.contractTimer, 0)) + dt;
+    let interval = Math.max(2.5, finiteOr(cell.feedInterval, 6));
+    let evt = Math.max(0, Math.floor(finiteOr(cell.eventCount, 0)));
+    for (let guard = 0; guard < 128; guard++) {
+      if (leg === 0) { if (timer >= interval) { timer -= interval; leg = 1; } else break; }
+      else if (leg === 1) { if (timer >= T_C) { timer -= T_C; leg = 2; } else break; }
+      else if (leg === 2) { if (timer >= T_HOLD) { timer -= T_HOLD; leg = 3; } else break; }
+      else { if (timer >= T_E) { timer -= T_E; leg = 0; evt += 1; interval = drawFeedInterval(cellSeed, evt, activityMix, cadence); } else break; }
+    }
     return {
       ...cell,
       x: cell.anchorX,
       y: cell.anchorY,
-      phase: cyclePhase,
-      contractCyclePhase: cyclePhase,
-      contractPhase: vorticellaContractPhase(cyclePhase),
+      phase: cvClock,
+      contractCyclePhase: cvClock,
+      contractPhase: clamp01(vorticellaLegAmount(leg, timer)),
+      contractLeg: leg,
+      contractTimer: timer,
+      feedInterval: interval,
+      eventCount: evt,
       oralWreathPhase: wrapUnit(cell.oralWreathPhase + oralHz * dt),
       swayPhase: wrapUnit(finiteOr(cell.swayPhase, 0) + Math.max(0, finiteOr(cell.swayRate, 0.12)) * swayMul * dt),
     };
@@ -223,7 +273,15 @@ export function drawVorticella(
     // idle sway: the slender stalk flexes gently so the zooid is alive at rest;
     // sway eases out as it contracts (the coiled spasmoneme is short and stiff).
     const sway = 0.07 * (1 - 0.8 * s) * Math.sin(TAU * wrapUnit(finiteOr(cell.swayPhase, 0)));
-    const dir = baseDir + sway;
+    // post-arrest recoil: a fast under-damped bell tilt right after the ballistic
+    // collapse arrests (during HOLD + early re-extension), decaying to 0.
+    const vleg = Math.floor(finiteOr(cell.contractLeg, 0));
+    const arrestT = vleg === 2 ? Math.max(0, finiteOr(cell.contractTimer, 0))
+      : vleg === 3 ? T_HOLD + Math.max(0, finiteOr(cell.contractTimer, 0)) : -1;
+    const wobble = arrestT >= 0 && arrestT < 0.7
+      ? 0.10 * Math.exp(-0.45 * TAU * 6 * arrestT) * Math.cos(TAU * 6 * 0.8932 * arrestT)
+      : 0;
+    const dir = baseDir + sway + wobble;
     const ux = Math.cos(dir), uy = Math.sin(dir);
     const nx = -uy, ny = ux;
     const anchorX = finite(cell.anchorX, 0);

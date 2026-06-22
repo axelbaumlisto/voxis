@@ -2580,6 +2580,30 @@ var TAU4 = Math.PI * 2;
 var VC_CONTRACT = 0.02;
 var VC_HOLD = 0.02;
 var VC_RELAX = 0.33;
+var T_C = 0.08;
+var T_HOLD = 0.05;
+var T_E = 2.6;
+function drawFeedInterval(cellSeed, eventCount, activityMix, cadence) {
+  const mean = (9 - 6 * clamp012(activityMix)) / Math.max(0.2, cadence);
+  const u = Math.max(0.0001, seededUnit(cellSeed, eventCount, 1371344503));
+  return clamp2(-Math.log(u) * mean, 2.5, 18);
+}
+function vorticellaCellSeed(anchorX) {
+  return (Math.round(anchorX * 7) ^ 117600714) >>> 0;
+}
+function vorticellaLegAmount(leg, timer) {
+  if (leg === 1) {
+    const u = clamp012(timer / T_C);
+    return 1 - Math.pow(1 - u, 3);
+  }
+  if (leg === 2)
+    return 1;
+  if (leg === 3) {
+    const u = clamp012(timer / T_E);
+    return Math.exp(-Math.pow(u * 1.9, 1.4));
+  }
+  return 0;
+}
 function vorticellaContractPhase(cyclePhase) {
   const phase = wrapUnit2(cyclePhase);
   if (phase < VC_CONTRACT) {
@@ -2661,7 +2685,11 @@ function seedVorticella(count, seed, frame, salt = 117600714) {
       contractRate: 0.06 + seededUnit(seed, i, salt ^ 802853537) * 0.05,
       oralRate: 0.42 + seededUnit(seed, i, salt ^ 348696353) * 0.18,
       swayPhase: seededUnit(seed, i, salt ^ 999411207),
-      swayRate: 0.1 + seededUnit(seed, i, salt ^ 1513062835) * 0.07
+      swayRate: 0.1 + seededUnit(seed, i, salt ^ 1513062835) * 0.07,
+      contractLeg: 0,
+      contractTimer: seededUnit(seed, i, salt ^ 699105045) * 1.5,
+      feedInterval: drawFeedInterval(vorticellaCellSeed(anchorX), 0, 0, 1),
+      eventCount: 0
     });
   }
   return vorticella;
@@ -2676,18 +2704,56 @@ function updateVorticella(vorticella, frame, view) {
   const rate = idleRate + (activeRate - idleRate) * activityMix;
   const modeMul = frame.mode === "recording" ? 1.18 : frame.mode === "transcribing" ? 0.35 : frame.mode === "error" ? 0.15 : 1;
   const startleBoost = 1 + Math.min(0.35, Math.max(0, finite3(frame.startle, 0)) * 0.35);
-  const cycleRateMul = Math.min(3, rate * modeMul * startleBoost);
+  const cadence = Math.max(0.2, Math.min(3.5, rate * modeMul * startleBoost));
   const oralHz = Math.min(24, (frame.mode === "error" ? 6 : frame.mode === "transcribing" ? 12 : 20) * (1 + activityMix * 0.2));
   const swayMul = frame.mode === "error" ? 0.3 : frame.mode === "transcribing" ? 0.6 : 1;
   return vorticella.map((cell) => {
-    const cyclePhase = wrapUnit2(cell.contractCyclePhase + Math.max(0, finite3(cell.contractRate, 0)) * cycleRateMul * dt);
+    const cvClock = wrapUnit2(finite3(cell.contractCyclePhase, 0) + Math.max(0, finite3(cell.contractRate, 0)) * dt);
+    const cellSeed = vorticellaCellSeed(finite3(cell.anchorX, 0));
+    let leg = Math.max(0, Math.min(3, Math.floor(finiteOr4(cell.contractLeg, 0))));
+    let timer = Math.max(0, finiteOr4(cell.contractTimer, 0)) + dt;
+    let interval = Math.max(2.5, finiteOr4(cell.feedInterval, 6));
+    let evt = Math.max(0, Math.floor(finiteOr4(cell.eventCount, 0)));
+    for (let guard = 0;guard < 128; guard++) {
+      if (leg === 0) {
+        if (timer >= interval) {
+          timer -= interval;
+          leg = 1;
+        } else
+          break;
+      } else if (leg === 1) {
+        if (timer >= T_C) {
+          timer -= T_C;
+          leg = 2;
+        } else
+          break;
+      } else if (leg === 2) {
+        if (timer >= T_HOLD) {
+          timer -= T_HOLD;
+          leg = 3;
+        } else
+          break;
+      } else {
+        if (timer >= T_E) {
+          timer -= T_E;
+          leg = 0;
+          evt += 1;
+          interval = drawFeedInterval(cellSeed, evt, activityMix, cadence);
+        } else
+          break;
+      }
+    }
     return {
       ...cell,
       x: cell.anchorX,
       y: cell.anchorY,
-      phase: cyclePhase,
-      contractCyclePhase: cyclePhase,
-      contractPhase: vorticellaContractPhase(cyclePhase),
+      phase: cvClock,
+      contractCyclePhase: cvClock,
+      contractPhase: clamp012(vorticellaLegAmount(leg, timer)),
+      contractLeg: leg,
+      contractTimer: timer,
+      feedInterval: interval,
+      eventCount: evt,
       oralWreathPhase: wrapUnit2(cell.oralWreathPhase + oralHz * dt),
       swayPhase: wrapUnit2(finiteOr4(cell.swayPhase, 0) + Math.max(0, finiteOr4(cell.swayRate, 0.12)) * swayMul * dt)
     };
@@ -2718,7 +2784,10 @@ function drawVorticella(ctx, vorticella, frame, view) {
     const s = clamp012(finite3(cell.contractPhase, 0));
     const baseDir = finite3(cell.directionAngle, -Math.PI / 2);
     const sway = 0.07 * (1 - 0.8 * s) * Math.sin(TAU4 * wrapUnit2(finiteOr4(cell.swayPhase, 0)));
-    const dir = baseDir + sway;
+    const vleg = Math.floor(finiteOr4(cell.contractLeg, 0));
+    const arrestT = vleg === 2 ? Math.max(0, finiteOr4(cell.contractTimer, 0)) : vleg === 3 ? T_HOLD + Math.max(0, finiteOr4(cell.contractTimer, 0)) : -1;
+    const wobble = arrestT >= 0 && arrestT < 0.7 ? 0.1 * Math.exp(-0.45 * TAU4 * 6 * arrestT) * Math.cos(TAU4 * 6 * 0.8932 * arrestT) : 0;
+    const dir = baseDir + sway + wobble;
     const ux = Math.cos(dir), uy = Math.sin(dir);
     const nx = -uy, ny = ux;
     const anchorX = finite3(cell.anchorX, 0);
