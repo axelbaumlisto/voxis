@@ -795,6 +795,88 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(far.startle).toBeLessThan(1);
   });
 
+  it("discrete tumble reorients deterministically by 30-150 degrees over about 1s", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 0,
+      euglenaSpeedActive: 0,
+      aquariumActivityBoost: 1,
+    });
+    const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+    const start = testEuglena({
+      x: 150, y: 150, heading: 0, swimSpeed: 0,
+      burstPhase: 0.99, burstRate: 1, tumbleIndex: 0, tumbleProgress: 1,
+      noiseSeed: 0x12345678,
+    });
+    const once = updateEuglena([start], frame({ dt: 0.5, width: 300, height: 300, activity: 0 }), view)[0];
+    const repeat = updateEuglena([start], frame({ dt: 0.5, width: 300, height: 300, activity: 0 }), view)[0];
+
+    expect(once).toEqual(repeat);
+    expect(once.tumbleIndex).toBe(1);
+    expect(once.tumbleProgress).toBeGreaterThan(0);
+    const targetTurn = Math.abs(wrapPi((once.tumbleTo ?? 0) - (once.tumbleFrom ?? 0)));
+    expect(targetTurn).toBeGreaterThanOrEqual(Math.PI / 6);
+    expect(targetTurn).toBeLessThanOrEqual((5 * Math.PI) / 6);
+
+    let cell = once;
+    for (let i = 0; i < 12; i++) {
+      cell = updateEuglena([cell], frame({ dt: 0.05, width: 300, height: 300, activity: 0 }), view)[0];
+    }
+    const actualTurn = Math.abs(wrapPi(cell.heading - start.heading));
+    expect(actualTurn).toBeGreaterThanOrEqual(Math.PI / 6);
+    expect(actualTurn).toBeLessThanOrEqual((5 * Math.PI) / 6);
+  });
+
+  it("heavy-tailed tumble interval modulation is deterministic per noise seed", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 0,
+      euglenaSpeedActive: 0,
+      aquariumActivityBoost: 1,
+    });
+    const base = testEuglena({ x: 150, y: 150, swimSpeed: 0, burstPhase: 0.1, burstRate: 0.1, tumbleIndex: 3 });
+    const a1 = updateEuglena([{ ...base, noiseSeed: 111 }], frame({ dt: 1, width: 300, height: 300, activity: 0 }), view)[0];
+    const a2 = updateEuglena([{ ...base, noiseSeed: 111 }], frame({ dt: 1, width: 300, height: 300, activity: 0 }), view)[0];
+    const b = updateEuglena([{ ...base, noiseSeed: 222 }], frame({ dt: 1, width: 300, height: 300, activity: 0 }), view)[0];
+
+    expect(a1.burstPhase).toBe(a2.burstPhase);
+    expect(b.burstPhase).not.toBe(a1.burstPhase);
+  });
+
+  it("rotDiffusion cosmetic jitter is bounded, deterministic, and default-off", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 0,
+      euglenaSpeedActive: 0,
+      aquariumActivityBoost: 1,
+    });
+    const start = testEuglena({
+      x: 150, y: 150, heading: 0.4, swimSpeed: 0,
+      rollRate: 0, metabolyRate: 0, flagellumRate: 0, burstRate: 0,
+      noiseSeed: 0xabcdef,
+    });
+    const saved = MEDIUM.rotDiffusion;
+    try {
+      MEDIUM.rotDiffusion = 0;
+      const off = updateEuglena([start], frame({ t: 10, dt: 0.04, width: 300, height: 300, activity: 0 }), view)[0];
+      expect(off.heading).toBe(start.heading);
+
+      MEDIUM.rotDiffusion = 0.5;
+      const a = updateEuglena([start], frame({ t: 10, dt: 0.04, width: 300, height: 300, activity: 0 }), view)[0];
+      const b = updateEuglena([start], frame({ t: 10, dt: 0.04, width: 300, height: 300, activity: 0 }), view)[0];
+      expect(a.heading).toBe(b.heading);
+      expect(Math.abs(a.heading - start.heading)).toBeLessThanOrEqual(0.5 * Math.sqrt(0.04) + 1e-12);
+    } finally {
+      MEDIUM.rotDiffusion = saved;
+    }
+  });
+
   it("updateEuglena stays dt-partition-exact with all new knobs at default", () => {
     const view = aquariumParamsView({
       ...CELL_DEFAULTS,
