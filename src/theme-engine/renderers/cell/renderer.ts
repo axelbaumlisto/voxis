@@ -28,6 +28,8 @@ import type { CellParams, CellOptions } from "./types";
 import { CELL_DEFAULTS } from "./defaults";
 import type { AquariumLayerState, AquariumFrame } from "./aquarium/types";
 import { seedAquarium, updateAquarium, drawAquariumBackground } from "./aquarium/layer";
+import { aquariumParamsView } from "./aquarium/params";
+import { vorticellaObstacle } from "./aquarium/vorticella";
 import {
   interiorPoint, seedInteriorGranules, cyclosisLoopPointAtPhase,
 } from "./interior";
@@ -457,6 +459,28 @@ export function createCellRenderer(
         cy += hdy;
         for (let i = 0; i < smoothedPoints.length; i++) {
           smoothedPoints[i] = [smoothedPoints[i][0] + hdx, smoothedPoints[i][1] + hdy];
+        }
+      }
+
+      // The hero must not drift on top of a sessile (or migrating) vorticella:
+      // push its RENDER position (cx,cy + contour) out of each vorticella obstacle.
+      if ((params.vorticellaCount ?? 0) > 0 && aquarium && aquarium.vorticella.length > 0) {
+        const vview = aquariumParamsView(params);
+        const heroReach = baseR * Math.sqrt(Math.max(1, params.bodyAspect ?? 1)) * 0.9;
+        for (const v of aquarium.vorticella) {
+          const o = vorticellaObstacle(v, vview.vorticella.scale, height);
+          const dx = cx - o.x, dy = cy - o.y;
+          const d = Math.hypot(dx, dy);
+          const minD = o.radius + heroReach;
+          if (d < minD && d > 1e-6) {
+            const push = (minD - d) * (1 - Math.exp(-6 * dt));
+            const pxh = (dx / d) * push, pyh = (dy / d) * push;
+            cx += pxh;
+            cy += pyh;
+            for (let i = 0; i < smoothedPoints.length; i++) {
+              smoothedPoints[i] = [smoothedPoints[i][0] + pxh, smoothedPoints[i][1] + pyh];
+            }
+          }
         }
       }
 

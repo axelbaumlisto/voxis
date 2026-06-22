@@ -3399,6 +3399,25 @@ function createCellRenderer(container, opts) {
           smoothedPoints[i] = [smoothedPoints[i][0] + hdx, smoothedPoints[i][1] + hdy];
         }
       }
+      if ((params.vorticellaCount ?? 0) > 0 && aquarium && aquarium.vorticella.length > 0) {
+        const vview = aquariumParamsView(params);
+        const heroReach = baseR * Math.sqrt(Math.max(1, params.bodyAspect ?? 1)) * 0.9;
+        for (const v of aquarium.vorticella) {
+          const o = vorticellaObstacle(v, vview.vorticella.scale, height);
+          const dx = cx - o.x, dy = cy - o.y;
+          const d = Math.hypot(dx, dy);
+          const minD = o.radius + heroReach;
+          if (d < minD && d > 0.000001) {
+            const push = (minD - d) * (1 - Math.exp(-6 * dt));
+            const pxh = dx / d * push, pyh = dy / d * push;
+            cx += pxh;
+            cy += pyh;
+            for (let i = 0;i < smoothedPoints.length; i++) {
+              smoothedPoints[i] = [smoothedPoints[i][0] + pxh, smoothedPoints[i][1] + pyh];
+            }
+          }
+        }
+      }
       if (params.enableAquarium) {
         const aquariumFrame = {
           t,
