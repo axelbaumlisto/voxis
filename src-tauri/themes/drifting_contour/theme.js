@@ -2962,7 +2962,17 @@ function drawVorticella(ctx, vorticella, frame, view) {
     const vleg = Math.floor(finiteOr(cell.contractLeg, 0));
     const arrestT = vleg === 2 ? Math.max(0, finiteOr(cell.contractTimer, 0)) : vleg === 3 ? T_HOLD + Math.max(0, finiteOr(cell.contractTimer, 0)) : -1;
     const wobble = arrestT >= 0 && arrestT < 0.7 ? 0.1 * Math.exp(-0.45 * TAU2 * 6 * arrestT) * Math.sin(TAU2 * 6 * 0.8932 * arrestT) : 0;
-    const dir = baseDir + sway + wobble;
+    const tt = finite(frame.t, 0);
+    const actMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
+    const aSeed = (Math.round(finite(cell.restLength, 10) * 1024) ^ 3862981) >>> 0;
+    const asymA = (seededUnit(aSeed, 0, 17) - 0.5) * 0.14;
+    const periOff = (seededUnit(aSeed, 1, 34) - 0.5) * 0.12;
+    const lean = (seededUnit(aSeed, 2, 51) - 0.5) * 0.11;
+    const bp0 = seededUnit(aSeed, 3, 68) * TAU2, bp1 = seededUnit(aSeed, 4, 85) * TAU2;
+    const lobePhase = seededUnit(aSeed, 5, 102) * TAU2;
+    const nod = 0.035 * Math.sin(TAU2 * 0.06 * tt + seededUnit(aSeed, 6, 119) * TAU2);
+    const breathMod = (u) => 1 + 0.035 * Math.sin(TAU2 * 0.075 * tt + bp0 + 2.4 * u) + 0.025 * Math.sin(TAU2 * 0.115 * tt + bp1);
+    const dir = baseDir + lean + sway + wobble + nod;
     const ux = Math.cos(dir), uy = Math.sin(dir);
     const nx = -uy, ny = ux;
     const anchorX = finite(cell.anchorX, 0);
@@ -2980,7 +2990,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
       coilRadius: D * 0.24
     });
     const neck = geom.bellCenter;
-    const rimC = { x: neck.x + ux * bellHeight, y: neck.y + uy * bellHeight };
+    const rimC = { x: neck.x + ux * bellHeight + nx * periOff * D, y: neck.y + uy * bellHeight + ny * periOff * D };
     const open = 1 - 0.7 * s;
     const Rrim = 0.64 * D * open;
     const crownFade = smoothstep2(clamp01((open - 0.3) / 0.18));
@@ -3042,14 +3052,15 @@ function drawVorticella(ctx, vorticella, frame, view) {
         ctx.stroke();
       }
     }
-    const SAMP = 16;
+    const SAMP = 22;
     const left = [];
     const right = [];
     for (let i = 0;i <= SAMP; i++) {
       const u = i / SAMP;
-      const hw = halfW(u);
-      left.push(bodyPoint(bellHeight * u, -hw));
-      right.push(bodyPoint(bellHeight * u, hw));
+      const hwB = halfW(u) * breathMod(u);
+      const lobe = 1 + 0.035 * Math.sin(Math.PI * u * 1.5 + lobePhase);
+      left.push(bodyPoint(bellHeight * u, -hwB * lobe * (1 - asymA)));
+      right.push(bodyPoint(bellHeight * u, hwB * lobe * (1 + asymA)));
     }
     const outline = [...left, ...right.reverse()];
     drawPolyline3(ctx, outline, true);
@@ -3071,8 +3082,11 @@ function drawVorticella(ctx, vorticella, frame, view) {
     const gSeed = (Math.round(finite(cell.restLength, 10) * 8192) ^ 28218) >>> 0;
     const gCount = Math.round(clamp(D * 2, 18, 64));
     for (let k = 0;k < gCount; k++) {
-      const gu = 0.06 + Math.pow(seededUnit(gSeed, k, 1784445), 1.5) * 0.78;
-      const glat = (seededUnit(gSeed, k, 3104017) - 0.5) * 1.7 * halfW(gu);
+      const gphi = seededUnit(gSeed, k, 4005751) * TAU2;
+      const gamp = 0.18 + 0.7 * Math.sqrt(seededUnit(gSeed, k, 1784445));
+      const gph = TAU2 / 52 * tt * 0.7 + gphi;
+      const gu = 0.5 + 0.44 * gamp * Math.sin(gph);
+      const glat = gamp * Math.cos(gph) * 0.86 * halfW(gu) * breathMod(gu);
       const gp = bodyPoint(bellHeight * gu, glat);
       const gr = 0.4 + seededUnit(gSeed, k, 7848355) * 0.9;
       ctx.beginPath();
@@ -3104,11 +3118,11 @@ function drawVorticella(ctx, vorticella, frame, view) {
       macPts.push(bodyPoint(macAlong - macR * 1.35 * Math.cos(th), macR * 0.95 * Math.sin(th)));
     }
     drawPolyline3(ctx, macPts, false);
-    ctx.strokeStyle = `hsla(205, 8%, 60%, ${alpha * 0.15})`;
+    ctx.strokeStyle = `hsla(205, 8%, 58%, ${alpha * 0.2})`;
     ctx.lineWidth = Math.max(1.6, D * 0.22);
     ctx.stroke();
     drawPolyline3(ctx, macPts, false);
-    ctx.strokeStyle = `hsla(44, 9%, 60%, ${alpha * 0.24})`;
+    ctx.strokeStyle = `hsla(44, 10%, 56%, ${alpha * 0.34})`;
     ctx.lineWidth = Math.max(1, D * 0.11);
     ctx.stroke();
     if (D >= 11) {
@@ -3144,8 +3158,12 @@ function drawVorticella(ctx, vorticella, frame, view) {
       const fvSeed = (Math.round(finite(cell.restLength, 10) * 4096) ^ 40503) >>> 0;
       const fvCount = 6;
       for (let j = 0;j < fvCount; j++) {
-        const u = 0.18 + seededUnit(fvSeed, j, 1371344503) * 0.44;
-        const lat = (seededUnit(fvSeed, j, 752460107) - 0.5) * 0.95 * halfW(u);
+        const cycT = Math.max(8, 34 + seededUnit(fvSeed, j, 5047) * 18 - 14 * actMix);
+        const phi0 = seededUnit(fvSeed, j, 1371344503) * TAU2;
+        const amp = 0.28 + 0.6 * Math.sqrt(seededUnit(fvSeed, j, 752460107));
+        const ph = TAU2 / cycT * tt + phi0;
+        const u = 0.5 + 0.42 * amp * Math.sin(ph);
+        const lat = amp * Math.cos(ph) * 0.82 * halfW(u) * breathMod(u);
         const fv = bodyPoint(bellHeight * u, lat);
         const fr = Math.max(0.8, D * (0.045 + seededUnit(fvSeed, j, 2117754257) * 0.06));
         const warm = j === 0;
