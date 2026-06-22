@@ -109,6 +109,14 @@ export interface VorticellaState extends AquariumSeedPoint {
   readonly swayPhase?: number;
   /** Per-cell idle-sway rate (Hz). */
   readonly swayRate?: number;
+  /** Absolute-time contraction state machine: leg 0=extended,1=contracting,2=hold,3=re-extending. */
+  readonly contractLeg?: number;
+  /** Seconds elapsed in the current contraction leg. */
+  readonly contractTimer?: number;
+  /** Drawn feeding-dwell interval (s) before the next contraction (Poisson). */
+  readonly feedInterval?: number;
+  /** Contraction event counter (advances the seeded Poisson draw). */
+  readonly eventCount?: number;
 }
 
 export interface AquariumLayerState {

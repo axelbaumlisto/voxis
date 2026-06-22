@@ -1251,6 +1251,48 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(updated.vorticella[0].anchorY).toBe(initial.vorticella[0].anchorY);
   });
 
+  it("updateVorticella runs an absolute-time ballistic contraction (fast collapse, slow re-extend)", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 51,
+      vorticellaCount: 1,
+      vorticellaContractRate: 1.0,
+      vorticellaContractRateActive: 1.6,
+    };
+    const view = aquariumParamsView(params);
+    let cell = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
+    const dt = 0.05;
+    let peak = 0;
+    let collapseSteps = Infinity; // steps from first s>0.5 to s>0.95
+    let crossed = -1;
+    const phases: number[] = [];
+    for (let i = 0; i < 600; i++) {
+      cell = updateVorticella(cell, frame({ dt, width: 240, height: 80, activity: 0.6 }), view);
+      const s = cell[0].contractPhase;
+      phases.push(s);
+      peak = Math.max(peak, s);
+      if (crossed < 0 && s > 0.5) crossed = i;
+      if (crossed >= 0 && s > 0.95 && collapseSteps === Infinity) collapseSteps = i - crossed;
+      expect(s).toBeGreaterThanOrEqual(0);
+      expect(s).toBeLessThanOrEqual(1);
+    }
+    // a contraction fired and fully collapsed
+    expect(peak).toBeGreaterThan(0.95);
+    // BALLISTIC: from half to full collapse in <= ~0.15s (<=3 steps) — a snap, not a ramp
+    expect(collapseSteps).toBeLessThanOrEqual(3);
+    // it spends most of the time extended (long feeding dwell): s≈0 majority of frames
+    const extendedFrac = phases.filter((s) => s < 0.05).length / phases.length;
+    expect(extendedFrac).toBeGreaterThan(0.6);
+    // deterministic
+    const again = updateVorticella(
+      seedAquarium(frame({ width: 240, height: 80 }), params).vorticella,
+      frame({ dt, width: 240, height: 80, activity: 0.6 }),
+      view,
+    );
+    expect(again[0].contractPhase).toBe(phases.length ? updateVorticella(seedAquarium(frame({ width: 240, height: 80 }), params).vorticella, frame({ dt, width: 240, height: 80, activity: 0.6 }), view)[0].contractPhase : 0);
+  });
+
   it("updateVorticella is dt-partition invariant away from event boundaries", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,
