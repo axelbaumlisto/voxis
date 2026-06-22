@@ -104,9 +104,7 @@ export function updateAquarium(
     ? aquarium.vorticella.map((v) => vorticellaObstacle(v, view.vorticella.scale, frame.height))
     : undefined;
   const euglenaField = buildEuglenaInteractionField(obstacles, frame.hero);
-  const euglenaFrame = obstacles || euglenaField.obstacles.length > 0 || euglenaField.wakes.length > 0
-    ? { ...frame, ...(obstacles ? { obstacles } : {}), interaction: euglenaField }
-    : frame;
+  const euglenaFrame = { ...frame, ...(obstacles ? { obstacles } : {}), interaction: euglenaField };
   const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, euglenaFrame, cfgBySpecies.euglena) : aquarium.euglena;
   // motile cells (hero + euglena) can mechanically disturb a sessile vorticella
   let vorticella = aquarium.vorticella;

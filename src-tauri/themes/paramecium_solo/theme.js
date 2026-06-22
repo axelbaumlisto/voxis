@@ -2212,7 +2212,8 @@ function updateEuglena(euglena, frame, view) {
   const steer = view.euglena.steer ? { ...EUGLENA_STEER, ...view.euglena.steer } : EUGLENA_STEER;
   const medium = view.medium ? { ...MEDIUM, ...view.medium } : MEDIUM;
   const drag = Math.max(0.1, finite(medium.viscosity, 1));
-  return euglena.map((cell) => {
+  return euglena.map((cell, idx) => {
+    const selfId = sourceId("euglena", idx);
     const L = euglenaDisplayLength(finite(cell.size, 1), scale);
     let heading = finite(cell.heading, 0);
     const wrapPi2 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -2221,9 +2222,27 @@ function updateEuglena(euglena, frame, view) {
     let ux = Math.cos(heading);
     let uy = Math.sin(heading);
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L;
+    const field = frame.interaction;
+    const fieldObstacles = field ? field.obstacles.filter((obstacle) => obstacle.sourceId !== selfId) : undefined;
+    const fieldWakes = field ? field.wakes.filter((wake) => wake.sourceId !== selfId) : undefined;
+    const circleObstacles = field ? fieldObstacles?.filter((obstacle) => obstacle.shape === "circle") : frame.obstacles;
+    const socialEllipse = fieldObstacles?.find((obstacle) => obstacle.shape === "ellipse" && obstacle.social === true);
+    const socialWake = socialEllipse ? fieldWakes?.find((wake) => wake.sourceId === socialEllipse.sourceId) : undefined;
     let heroParams = null;
     let heroQd = Infinity;
-    if (frame.hero) {
+    if (socialEllipse) {
+      const hx = finite(socialEllipse.x, safeWidth / 2);
+      const hy = finite(socialEllipse.y, safeHeight / 2);
+      const m = 0.9 * L;
+      const A = Math.max(0.001, finiteOr(socialEllipse.halfLen, 0) + m);
+      const B = Math.max(0.001, finiteOr(socialEllipse.halfWid, 0) + m);
+      const hh = finiteOr(socialEllipse.heading, 0);
+      heroParams = { hx, hy, A, B, cphi: Math.cos(hh), sphi: Math.sin(hh), heading: hh };
+      const dx = px0 - hx, dy = py0 - hy;
+      const px = dx * heroParams.cphi + dy * heroParams.sphi;
+      const py = -dx * heroParams.sphi + dy * heroParams.cphi;
+      heroQd = px * px / (A * A) + py * py / (B * B);
+    } else if (!field && frame.hero) {
       const hx = finite(frame.hero.x, safeWidth / 2);
       const hy = finite(frame.hero.y, safeHeight / 2);
       const hr = Math.max(0, finite(frame.hero.radius, 0));
@@ -2231,7 +2250,7 @@ function updateEuglena(euglena, frame, view) {
       const A = Math.max(0.001, finiteOr(frame.hero.halfLen, hr) + m);
       const B = Math.max(0.001, finiteOr(frame.hero.halfWid, hr) + m);
       const hh = finiteOr(frame.hero.heading, 0);
-      heroParams = { hx, hy, A, B, cphi: Math.cos(hh), sphi: Math.sin(hh) };
+      heroParams = { hx, hy, A, B, cphi: Math.cos(hh), sphi: Math.sin(hh), heading: hh };
       const dx = px0 - hx, dy = py0 - hy;
       const px = dx * heroParams.cphi + dy * heroParams.sphi;
       const py = -dx * heroParams.sphi + dy * heroParams.cphi;
@@ -2287,7 +2306,7 @@ function updateEuglena(euglena, frame, view) {
         sx += ax * steer.startleAway * startle;
         sy += ay * steer.startleAway * startle;
       }
-      const obstacles = frame.obstacles;
+      const obstacles = circleObstacles;
       if (obstacles && obstacles.length > 0) {
         for (let oi = 0;oi < obstacles.length; oi++) {
           const ox = finite(obstacles[oi].x, 0);
@@ -2316,8 +2335,8 @@ function updateEuglena(euglena, frame, view) {
     const vPxEff = vPx * (1 + steer.startleDart * startle) / Math.max(0.1, finite(medium.translationDrag, 1));
     let nextX = px0 + ux * vPxEff * dt;
     let nextY = py0 + uy * vPxEff * dt;
-    if (heroParams && heroQ < HERO_WAKE_RANGE && heroQ > 0.0001) {
-      const hd = finiteOr(frame.hero?.heading, 0);
+    if (heroParams && (!field || socialWake) && heroQ < HERO_WAKE_RANGE && heroQ > 0.0001) {
+      const hd = finiteOr(socialWake?.heading, heroParams.heading);
       const hdx = Math.cos(hd), hdy = Math.sin(hd);
       const behind = Math.max(0, -(ax * hdx + ay * hdy));
       const prox = Math.min(1, (HERO_WAKE_RANGE - heroQ) / (HERO_WAKE_RANGE - 1));
@@ -2344,7 +2363,7 @@ function updateEuglena(euglena, frame, view) {
         }
       }
     }
-    const obstacles2 = frame.obstacles;
+    const obstacles2 = circleObstacles;
     if (obstacles2 && obstacles2.length > 0) {
       for (let oi = 0;oi < obstacles2.length; oi++) {
         const ox = finite(obstacles2[oi].x, 0);
@@ -3276,7 +3295,7 @@ function updateAquarium(aquarium, frame, params) {
   const diatoms = view.diatoms.count > 0 ? REGISTRY.diatom.update(aquarium.diatoms, frame, cfgBySpecies.diatom) : aquarium.diatoms;
   const obstacles = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella.map((v) => vorticellaObstacle(v, view.vorticella.scale, frame.height)) : undefined;
   const euglenaField = buildEuglenaInteractionField(obstacles, frame.hero);
-  const euglenaFrame = obstacles || euglenaField.obstacles.length > 0 || euglenaField.wakes.length > 0 ? { ...frame, ...obstacles ? { obstacles } : {}, interaction: euglenaField } : frame;
+  const euglenaFrame = { ...frame, ...obstacles ? { obstacles } : {}, interaction: euglenaField };
   const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, euglenaFrame, cfgBySpecies.euglena) : aquarium.euglena;
   let vorticella = aquarium.vorticella;
   if (view.vorticella.count > 0) {
