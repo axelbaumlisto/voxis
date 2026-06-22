@@ -193,19 +193,20 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0.5)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass: 6 rimmed food
       // vacuoles + bigger CV + taller bell (bellHeight 1.45D, restStalk 3.1D) change ops/hash.
-      hash: "211fe465dbf092e5",
-      opCount: 753,
+      hash: "da6c544b9cf50669",
+      opCount: 976,
       counts: {
-        beginPath: 115,
-        moveTo: 87,
-        lineTo: 391,
-        closePath: 5,
-        fill: 26,
-        stroke: 95,
-        save: 3,
+        beginPath: 145,
+        moveTo: 84,
+        lineTo: 519,
+        closePath: 9,
+        fill: 60,
+        stroke: 89,
+        save: 4,
         ellipse: 8,
-        arc: 20,
-        restore: 3,
+        arc: 53,
+        restore: 4,
+        clip: 1,
       },
     });
   });
@@ -214,19 +215,20 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass (6 rimmed food
       // vacuoles + bigger CV + taller bell change ops/hash).
-      hash: "7b0e694537c59caf",
-      opCount: 637,
+      hash: "8c79e8447a714971",
+      opCount: 860,
       counts: {
-        beginPath: 86,
-        moveTo: 58,
-        lineTo: 362,
-        closePath: 5,
-        fill: 26,
-        stroke: 66,
-        save: 3,
+        beginPath: 116,
+        moveTo: 55,
+        lineTo: 490,
+        closePath: 9,
+        fill: 60,
+        stroke: 60,
+        save: 4,
         ellipse: 8,
-        arc: 20,
-        restore: 3,
+        arc: 53,
+        restore: 4,
+        clip: 1,
       },
     });
   });
@@ -1825,6 +1827,7 @@ describe("aquarium layer Phase 4 vorticella", () => {
       ellipse: vi.fn(() => calls.push("ellipse")),
       arc: vi.fn(() => calls.push("arc")),
       createLinearGradient: vi.fn(() => ({ addColorStop: (_o: number, color: string) => calls.push(String(color)) })),
+      clip: vi.fn(),
       set lineCap(_value: CanvasLineCap) {},
       set lineJoin(_value: CanvasLineJoin) {},
       set fillStyle(value: string | CanvasGradient | CanvasPattern) { calls.push(String(value)); },
@@ -1844,16 +1847,18 @@ describe("aquarium layer Phase 4 vorticella", () => {
 
     drawAquariumBackground(ctx, state, frame({ width: 172, height: 36 }), params);
 
-    expect(ctx.save).toHaveBeenCalledTimes(1);
-    expect(ctx.restore).toHaveBeenCalledTimes(1);
+    // 2 save/restore: the outer drawVorticella pass + the inner clipped granule/relief pass
+    expect(ctx.save).toHaveBeenCalledTimes(2);
+    expect(ctx.restore).toHaveBeenCalledTimes(2);
+    expect(ctx.clip).toHaveBeenCalled();
     expect(ctx.fill).toHaveBeenCalled();
     expect(ctx.stroke).toHaveBeenCalled();
     expect(ctx.ellipse).toHaveBeenCalled();
     expect(ctx.arc).toHaveBeenCalled();
-    // cool hyaline teal cytoplasm gradient (hue ~168-188) + a warm pigmented
-    // macronucleus (hue ~34-36) so the interior reads with color detail, not flat gray
-    expect(calls.some((call) => /hsla\(1[6-8]\d,/.test(call))).toBe(true);
-    expect(calls.some((call) => /hsla\(3[0-6],/.test(call))).toBe(true);
+    // near-colorless HYALINE cytoplasm (low-saturation grey-blue, hue ~200) + a faint
+    // warm granular endoplasm/food (hue ~34-46) — realistic microscopy look, not teal cartoon
+    expect(calls.some((call) => /hsla\(20[0-5], 1[0-2]%/.test(call))).toBe(true);
+    expect(calls.some((call) => /hsla\(4[0-8], 1[0-3]%/.test(call))).toBe(true);
   });
 });
 
