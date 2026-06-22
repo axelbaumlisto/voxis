@@ -3074,9 +3074,9 @@ function drawVorticella(ctx, vorticella, frame, view) {
     drawPolyline3(ctx, outline, true);
     ctx.clip();
     const relief = ctx.createLinearGradient(bodyPoint(bellHeight * 0.55, -D).x, bodyPoint(bellHeight * 0.55, -D).y, bodyPoint(bellHeight * 0.45, D).x, bodyPoint(bellHeight * 0.45, D).y);
-    relief.addColorStop(0, `hsla(0, 0%, 100%, ${alpha * 0.2})`);
-    relief.addColorStop(0.5, `hsla(0, 0%, 100%, 0)`);
-    relief.addColorStop(1, `hsla(208, 16%, 28%, ${alpha * 0.24})`);
+    relief.addColorStop(0, `hsla(0, 0%, 100%, ${alpha * 0.22})`);
+    relief.addColorStop(0.55, `hsla(0, 0%, 100%, 0)`);
+    relief.addColorStop(1, `hsla(196, 40%, 80%, ${alpha * 0.12})`);
     ctx.fillStyle = relief;
     drawPolyline3(ctx, outline, true);
     ctx.fill();
@@ -3121,8 +3121,8 @@ function drawVorticella(ctx, vorticella, frame, view) {
     ctx.lineWidth = Math.max(0.5, D * 0.03);
     ctx.stroke();
     drawPolyline3(ctx, outline, true);
-    ctx.strokeStyle = `hsla(200, 10%, 96%, ${alpha * 0.4})`;
-    ctx.lineWidth = Math.max(0.4, D * 0.016);
+    ctx.strokeStyle = `hsla(196, 22%, 97%, ${alpha * 0.52})`;
+    ctx.lineWidth = Math.max(0.5, D * 0.02);
     ctx.stroke();
     ctx.save();
     drawPolyline3(ctx, outline, true);
@@ -3190,9 +3190,9 @@ function drawVorticella(ctx, vorticella, frame, view) {
         const fgx = fv.x + nx * rn * fr + ux * ru * fr, fgy = fv.y + ny * rn * fr + uy * ru * fr;
         const fg = ctx.createRadialGradient(fgx, fgy, fr * 0.1, fv.x, fv.y, fr * 1.12);
         fg.addColorStop(0, warm ? `hsla(40, 28%, 76%, ${alpha * 0.46})` : `hsla(42, 14%, 76%, ${alpha * 0.42})`);
-        fg.addColorStop(0.5, warm ? `hsla(32, 32%, 50%, ${alpha * 0.56})` : `hsla(34, 15%, 52%, ${alpha * 0.5})`);
-        fg.addColorStop(0.84, `hsla(28, 22%, 42%, ${alpha * 0.42})`);
-        fg.addColorStop(1, `hsla(26, 28%, 30%, 0)`);
+        fg.addColorStop(0.5, warm ? `hsla(36, 30%, 60%, ${alpha * 0.5})` : `hsla(38, 16%, 62%, ${alpha * 0.44})`);
+        fg.addColorStop(0.82, `hsla(44, 40%, 86%, ${alpha * 0.5})`);
+        fg.addColorStop(1, `hsla(48, 50%, 92%, 0)`);
         ctx.beginPath();
         ctx.arc(fv.x, fv.y, fr * 1.12, 0, TAU2);
         ctx.fillStyle = fg;
