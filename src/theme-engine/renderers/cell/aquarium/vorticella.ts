@@ -61,7 +61,7 @@ function vorticellaBellMetrics(cell: VorticellaState, scale: number, H: number):
   const Hc = Math.max(1, finite(H, 80));
   const Sc = Math.max(0.1, finite(scale, 1));
   const D = clamp((8 + finite(cell.size, 1) * 4) * Sc, 6, Hc * 0.40);
-  const bellHeight = 1.18 * D; // campanulate V. campanula is ~as wide as tall (not a tall funnel)
+  const bellHeight = 1.45 * D; // elongate inverted bell ~1.4:1 taller than wide (real Vorticella)
   // longer stalk + headroom reserved for the upward crown cilia (~D*0.34 above the
   // rim) so the zooid fills the frame and the crown never clips the top edge.
   // Math-review fix: cap with min() (no D*1.3 floor) so the clamp can never INVERT
@@ -387,7 +387,7 @@ export function drawVorticella(
     const tt = finite(frame.t, 0);
     const aSeed = (Math.round(finite(cell.restLength, 10) * 1024) ^ 0x3af1c5) >>> 0;
     const asymA = (seededUnit(aSeed, 0, 0x11) - 0.5) * 0.24;   // +/-12% left/right wall imbalance
-    const skewAmt = (seededUnit(aSeed, 7, 0x88) - 0.5) * 0.55;  // lateral CURVE of the body axis -> visibly lopsided, not a clean mirror
+    const skewAmt = (seededUnit(aSeed, 7, 0x88) - 0.5) * 0.22 * (1 - 0.6 * s);  // gentle lateral axis curve, DAMPED in contraction so the contracted zooid is a smooth near-spherical ovoid (not a sheared two-lobed mass)
     const periOff = (seededUnit(aSeed, 1, 0x22) - 0.5) * 0.12; // +/-6% D peristome lateral offset
     const lean = (seededUnit(aSeed, 2, 0x33) - 0.5) * 0.11;    // ~+/-3deg fixed body lean vs the stalk
     const bp0 = seededUnit(aSeed, 3, 0x44) * TAU, bp1 = seededUnit(aSeed, 4, 0x55) * TAU;
@@ -418,7 +418,7 @@ export function drawVorticella(
     const open = 1 - 0.7 * s;               // peristome closes as it contracts (open in [0.3,1])
     // everted collar: a rolled rim only slightly wider than the shoulder (~1.28D body-max
     // 1.16D -> ~10% overhang) so it reads CONTINUOUS with the bell, not a floating saucer.
-    const Rrim = 0.70 * D * open;
+    const Rrim = 0.80 * D * open; // everted peristomial collar clearly overhangs the body shoulder
     // smooth furl of the feeding crown as it closes — fade out over the last bit of
     // contraction instead of a hard on/off pop at full contraction (anti-flicker).
     const crownFade = smoothstep(clamp01((open - 0.30) / 0.18));
@@ -449,7 +449,7 @@ export function drawVorticella(
       const lipGate = 1 - (1 - (0.55 + 0.45 * open)) * smoothstep((u - 0.82) / 0.18);
       // CRITIC FIX (contraction rounding): the bell fattens/rounds toward a sphere as it
       // contracts (s->1), instead of keeping a fixed urn aspect.
-      return D * base * lipGate * (1 + 0.45 * s);
+      return D * base * lipGate * (1 + 0.22 * s); // contracted zooid rounds toward a sphere, not an oblate disc
     };
 
     // === STALK (spasmoneme) — straight at rest, tight HELIX when contracted ===
@@ -495,7 +495,7 @@ export function drawVorticella(
       const ringR = halfW(0.06) * 1.05;
       const M = Math.max(8, Math.round(D * 1.0));
       const beatBase = wrapUnit(finiteOr(cell.oralWreathPhase, 0));
-      ctx.strokeStyle = `hsla(46, 52%, 86%, ${alpha * 0.55 * band})`;
+      ctx.strokeStyle = `hsla(196, 30%, 92%, ${alpha * 0.55 * band})`;
       ctx.lineWidth = Math.max(0.75, D * 0.025);
       for (let i = 0; i < M; i++) {
         const a = i / M;
@@ -510,7 +510,7 @@ export function drawVorticella(
     }
 
     // === BELL BODY (hyaline) ===
-    const SAMP = 22;
+    const SAMP = 32; // smoother outline (fewer visible facets on the contracted wall)
     const left: AquariumPoint[] = [];
     const right: AquariumPoint[] = [];
     for (let i = 0; i <= SAMP; i++) {
@@ -532,8 +532,8 @@ export function drawVorticella(
     // DARKFIELD (real micrograph): Vorticella's endoplasm is DENSELY GRANULAR -> it
     // scatters strongly -> the whole zooid GLOWS cool blue-white edge-to-edge (NOT a black
     // hollow shell). The body fill is a luminous cool glow; granules add bright texture.
-    cyto.addColorStop(0, `hsla(198, 18%, 90%, ${alpha * 0.34})`);
-    cyto.addColorStop(1, `hsla(200, 22%, 76%, ${alpha * 0.46})`);
+    cyto.addColorStop(0, `hsla(200, 16%, 94%, ${alpha * 0.62})`);
+    cyto.addColorStop(1, `hsla(200, 20%, 86%, ${alpha * 0.74})`);
     ctx.fillStyle = cyto;
     ctx.fill();
     // granular endoplasm + soft DIC-style relief, CLIPPED to the bell, so the body reads
@@ -559,8 +559,8 @@ export function drawVorticella(
       ctx.beginPath();
       ctx.arc(gp.x, gp.y, gr, 0, TAU);
       ctx.fillStyle = seededUnit(gSeed, k, 0x9d11ef) > 0.5
-        ? `hsla(196, 18%, 96%, ${alpha * 0.30})`   // bright cool refractile scatter
-        : `hsla(200, 16%, 82%, ${alpha * 0.20})`;  // mid cool scatter (still luminous, never dark)
+        ? `hsla(196, 18%, 97%, ${alpha * 0.46})`   // bright cool refractile scatter (interior is the brightest region)
+        : `hsla(200, 16%, 90%, ${alpha * 0.36})`;  // mid cool scatter (still luminous, never dark)
       ctx.fill();
     }
     // second, FINER micro-grain layer filling between the coarse granules so the
@@ -586,12 +586,12 @@ export function drawVorticella(
     // soft translucent pellicle + a brighter refractile rim-light (the membrane edge
     // catches light in every micrograph) — no bold cartoon contour.
     drawPolyline(ctx, outline, true);
-    ctx.strokeStyle = `hsla(205, 12%, 72%, ${alpha * 0.30})`;
+    ctx.strokeStyle = `hsla(205, 12%, 70%, ${alpha * 0.22})`;
     ctx.lineWidth = Math.max(0.5, D * 0.03);
     ctx.stroke();
     drawPolyline(ctx, outline, true);
-    ctx.strokeStyle = `hsla(196, 22%, 97%, ${alpha * 0.52})`; // bright membrane scatter = the darkfield signature
-    ctx.lineWidth = Math.max(0.5, D * 0.02);
+    ctx.strokeStyle = `hsla(200, 16%, 88%, ${alpha * 0.30})`; // soft edge (must NOT outshine the luminous granular interior)
+    ctx.lineWidth = Math.max(0.5, D * 0.018);
     ctx.stroke();
 
     // === INTERIOR (subtle, hyaline) — CLIPPED to the bell so organelles never poke
@@ -615,7 +615,7 @@ export function drawVorticella(
     ctx.lineWidth = Math.max(1.6, D * 0.24);
     ctx.stroke();
     drawPolyline(ctx, macPts, false);
-    ctx.strokeStyle = `hsla(200, 12%, 66%, ${alpha * 0.42})`; // cool neutral band seen THROUGH the glow, not a warm stained logo
+    ctx.strokeStyle = `hsla(204, 16%, 58%, ${alpha * 0.55})`; // cool neutral C-band, kept distinct against the now-bright glowing body
     ctx.lineWidth = Math.max(1.0, D * 0.12);
     ctx.stroke();
     // micronucleus: a tiny dot docked against the OUTER edge of one nuclear arm
@@ -740,7 +740,7 @@ export function drawVorticella(
         spiral.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline(ctx, spiral, false);
-      ctx.strokeStyle = `hsla(46, 22%, 80%, ${alpha * 0.34 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 18%, 90%, ${alpha * 0.34 * crownFade})`;
       ctx.lineWidth = Math.max(0.75, D * 0.03);
       ctx.stroke();
       // second, inner membranelle row (phase-offset) so the AZM reads as a
@@ -755,13 +755,13 @@ export function drawVorticella(
         spiral2.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline(ctx, spiral2, false);
-      ctx.strokeStyle = `hsla(44, 20%, 78%, ${alpha * 0.24 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 18%, 88%, ${alpha * 0.24 * crownFade})`;
       ctx.lineWidth = Math.max(0.75, D * 0.022);
       ctx.stroke();
       const cyt = { x: rimC.x + nx * cytLat + ux * cytDep, y: rimC.y + ny * cytLat + uy * cytDep };
       ctx.beginPath();
       ctx.arc(cyt.x, cyt.y, Math.max(0.4, D * 0.05), 0, TAU);
-      ctx.fillStyle = `hsla(40, 22%, 56%, ${alpha * 0.42 * crownFade})`;
+      ctx.fillStyle = `hsla(200, 16%, 64%, ${alpha * 0.42 * crownFade})`;
       ctx.fill();
     }
 

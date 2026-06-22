@@ -193,12 +193,12 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0.5)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass: 6 rimmed food
       // vacuoles + bigger CV + taller bell (bellHeight 1.45D, restStalk 3.1D) change ops/hash.
-      hash: "fb2f16aac767e7e6",
-      opCount: 1480,
+      hash: "8ad8203965916b74",
+      opCount: 1580,
       counts: {
         beginPath: 250,
         moveTo: 98,
-        lineTo: 704,
+        lineTo: 804,
         closePath: 12,
         fill: 158,
         stroke: 94,
@@ -215,12 +215,12 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass (6 rimmed food
       // vacuoles + bigger CV + taller bell change ops/hash).
-      hash: "3f9999698947a289",
-      opCount: 1324,
+      hash: "592999055203f42f",
+      opCount: 1424,
       counts: {
         beginPath: 211,
         moveTo: 59,
-        lineTo: 665,
+        lineTo: 765,
         closePath: 12,
         fill: 158,
         stroke: 55,
@@ -1856,10 +1856,11 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(ctx.stroke).toHaveBeenCalled();
     // (vorticella's lip/disc are now amorphous polylines, not ctx.ellipse)
     expect(ctx.arc).toHaveBeenCalled();
-    // near-colorless HYALINE cytoplasm (low-saturation grey-blue, hue ~200) + a faint
-    // warm granular endoplasm/food (hue ~34-46) — realistic microscopy look, not teal cartoon
-    expect(calls.some((call) => /hsla\(20[0-5], 1[0-6]%/.test(call))).toBe(true);
-    expect(calls.some((call) => /hsla\(4[0-8],/.test(call))).toBe(true);
+    // DARKFIELD palette: a luminous cool blue-white body/granules/structures (hue ~196-205,
+    // low saturation) — committed away from the old warm/teal cartoon look.
+    expect(calls.some((call) => /hsla\(19[6-9], 1[0-8]%/.test(call) || /hsla\(20[0-5], 1[0-9]%/.test(call))).toBe(true);
+    // at least one BRIGHT cool element (high lightness) = the self-luminous darkfield glow
+    expect(calls.some((call) => /hsla\(19[6-9], \d+%, 9[0-9]%/.test(call))).toBe(true);
   });
 });
 
@@ -2268,9 +2269,9 @@ describe("createCellRenderer aquarium gate", () => {
     const onOps = await renderAquariumOpCount(true, 1, 1, 4);
 
     expect(onOps - offOps).toBeGreaterThan(0);
-    // budget 1500: realism pass adds dense two-layer granular stipple + a second clip
+    // budget 1800: luminous granule-packed body + SAMP 32 smoother outline + 3-D helix
     // for interior-organelle containment (cheap arc fills + one extra clip path).
-    expect(onOps - offOps).toBeLessThan(1500);
+    expect(onOps - offOps).toBeLessThan(1800);
   });
 });
 
