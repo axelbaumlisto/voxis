@@ -819,21 +819,23 @@ describe("aquarium layer Phase 3 euglena", () => {
 });
 
 describe("aquarium layer Phase 4 vorticella", () => {
-  it("vorticellaContractPhase is bounded with fast contraction and slow extension", () => {
-    const earlyContract = vorticellaContractPhase(0.04);
-    const lateContract = vorticellaContractPhase(0.12);
-    const earlyExtend = vorticellaContractPhase(0.30);
-    const laterExtend = vorticellaContractPhase(0.70);
-
-    for (const phase of [earlyContract, lateContract, earlyExtend, laterExtend]) {
+  it("vorticellaContractPhase is bounded: ballistic contraction, slow extension, long extended dwell", () => {
+    const samples = [0, 0.02, 0.05, 0.1, 0.3, 0.45, 0.7, 0.95].map(vorticellaContractPhase);
+    for (const phase of samples) {
       expect(phase).toBeGreaterThanOrEqual(0);
       expect(phase).toBeLessThanOrEqual(1);
     }
-    expect(lateContract).toBeGreaterThan(earlyContract);
-    expect(earlyExtend).toBeGreaterThan(laterExtend);
-    expect(vorticellaContractPhase(0.08) - vorticellaContractPhase(0.00)).toBeGreaterThan(
-      vorticellaContractPhase(0.58) - vorticellaContractPhase(0.50),
-    );
+    // ballistic collapse: nearly fully contracted within the first ~5% of the cycle
+    expect(vorticellaContractPhase(0.04)).toBeGreaterThan(0.85);
+    // slow re-extension: monotonically decreasing through the relax window
+    expect(vorticellaContractPhase(0.10)).toBeGreaterThan(vorticellaContractPhase(0.35));
+    // long extended/feeding dwell at the end of the cycle (s = 0)
+    expect(vorticellaContractPhase(0.7)).toBe(0);
+    expect(vorticellaContractPhase(0.95)).toBe(0);
+    // contraction is far faster than re-extension (per-phase rate)
+    const contractRate = vorticellaContractPhase(0.02) - vorticellaContractPhase(0.0);
+    const extendRate = Math.abs(vorticellaContractPhase(0.30) - vorticellaContractPhase(0.25));
+    expect(contractRate).toBeGreaterThan(extendRate);
   });
 
   it("vorticellaGeometry is monotonic from extended to contracted", () => {
@@ -957,7 +959,8 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(ctx.stroke).toHaveBeenCalled();
     expect(ctx.ellipse).toHaveBeenCalled();
     expect(ctx.arc).toHaveBeenCalled();
-    expect(calls.some((call) => call.includes("hsla(160") && call.includes("0.0"))).toBe(true);
+    // hyaline blue-grey body palette (hue ~200), not pigmented
+    expect(calls.some((call) => call.includes("hsla(200"))).toBe(true);
   });
 });
 
