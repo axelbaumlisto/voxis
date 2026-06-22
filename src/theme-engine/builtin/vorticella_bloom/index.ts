@@ -27,7 +27,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       euglenaCount: 0,
       vorticellaCount: 1,
       vorticellaContractRate: 1.2,        // metabolic contraction cadence (not audio-coupled)
-      vorticellaScale: 3.6,        // fills the 240x240 overlay (crown near the top, no clip) without being oversized
+      vorticellaScale: 1.8,        // user: half the previous 3.6 (was too tall/big in the overlay)
       ...userParams,
     },
   });

@@ -4153,7 +4153,7 @@ function mount(container, api) {
       euglenaCount: 0,
       vorticellaCount: 1,
       vorticellaContractRate: 1.2,
-      vorticellaScale: 3.6,
+      vorticellaScale: 1.8,
       ...userParams
     }
   });
