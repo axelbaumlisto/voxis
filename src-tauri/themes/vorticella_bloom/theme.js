@@ -2745,7 +2745,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
       y: neck.y + uy * along + ny * lateral
     });
     const halfW = (u) => {
-      const um = 0.82, w0 = 0.32, wMax = 0.5, wRim = 0.46;
+      const um = 0.82, w0 = 0.24, wMax = 0.54, wRim = 0.54;
       const base = u <= um ? w0 + (wMax - w0) * Math.pow(smoothstep2(u / um), 0.72) : wMax + (wRim - wMax) * smoothstep2((u - um) / (1 - um));
       return D * base * (u > 0.9 ? 0.55 + 0.45 * open : 1);
     };
@@ -2758,11 +2758,14 @@ function drawVorticella(ctx, vorticella, frame, view) {
       for (let i = 1;i < n; i++) {
         const t = i / (n - 1);
         const near = Math.cos(t * geom.coilTurns * TAU4);
-        if (near <= 0)
-          continue;
         drawPolyline3(ctx, [geom.stalkPath[i - 1], geom.stalkPath[i]], false);
-        ctx.strokeStyle = `hsla(204, 30%, 90%, ${alpha * (0.18 + 0.34 * near) * s})`;
-        ctx.lineWidth = Math.max(0.4, D * (0.05 + 0.05 * near));
+        if (near > 0) {
+          ctx.strokeStyle = `hsla(204, 32%, 90%, ${alpha * (0.18 + 0.34 * near) * s})`;
+          ctx.lineWidth = Math.max(0.4, D * (0.05 + 0.05 * near));
+        } else {
+          ctx.strokeStyle = `hsla(204, 24%, 64%, ${alpha * 0.12 * s})`;
+          ctx.lineWidth = Math.max(0.3, D * 0.03);
+        }
         ctx.stroke();
       }
     }
@@ -2785,8 +2788,8 @@ function drawVorticella(ctx, vorticella, frame, view) {
     }
     const outline = [...left, ...right.reverse()];
     drawPolyline3(ctx, outline, true);
-    ctx.fillStyle = `hsla(203, 30%, 81%, ${alpha * 0.2})`;
-    ctx.strokeStyle = `hsla(205, 30%, 91%, ${alpha * 0.44})`;
+    ctx.fillStyle = `hsla(205, 42%, 79%, ${alpha * 0.34})`;
+    ctx.strokeStyle = `hsla(205, 44%, 90%, ${alpha * 0.46})`;
     ctx.lineWidth = Math.max(0.4, D * 0.05);
     ctx.fill();
     ctx.stroke();
@@ -2794,7 +2797,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
     const macAlong = bellHeight * 0.5;
     const macR = D * 0.3;
     for (let i = 0;i <= 14; i++) {
-      const th = Math.PI * (0.18 + i / 14 * 1.64);
+      const th = Math.PI * (0.32 + i / 14 * 1.08);
       macPts.push(bodyPoint(macAlong - macR * 1.05 * Math.cos(th), macR * Math.sin(th)));
     }
     drawPolyline3(ctx, macPts, false);
@@ -2802,7 +2805,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
     ctx.lineWidth = Math.max(0.6, D * 0.12);
     ctx.stroke();
     if (D >= 11) {
-      const mic = bodyPoint(macAlong - macR * 0.2, 0);
+      const mic = bodyPoint(macAlong - macR * 0.9, macR * 0.5);
       ctx.beginPath();
       ctx.arc(mic.x, mic.y, Math.max(0.4, D * 0.045), 0, TAU4);
       ctx.fillStyle = `hsla(50, 16%, 66%, ${alpha * 0.34})`;

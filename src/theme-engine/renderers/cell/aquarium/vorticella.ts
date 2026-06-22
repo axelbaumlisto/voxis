@@ -252,7 +252,7 @@ export function drawVorticella(
     // campanulate bell: FULL neck (not a needle), convex bulging shoulders,
     // widest just below the everted lip, easing in slightly to the rim.
     const halfW = (u: number): number => {
-      const um = 0.82, w0 = 0.32, wMax = 0.50, wRim = 0.46;
+      const um = 0.82, w0 = 0.24, wMax = 0.54, wRim = 0.54; // ~2.25x flare; everted lip is the widest
       const base = u <= um
         ? w0 + (wMax - w0) * Math.pow(smoothstep(u / um), 0.72) // convex shoulders
         : wMax + (wRim - wMax) * smoothstep((u - um) / (1 - um));
@@ -273,10 +273,14 @@ export function drawVorticella(
       for (let i = 1; i < n; i++) {
         const t = i / (n - 1);
         const near = Math.cos(t * geom.coilTurns * TAU); // +1 near, -1 far
-        if (near <= 0) continue;
         drawPolyline(ctx, [geom.stalkPath[i - 1], geom.stalkPath[i]], false);
-        ctx.strokeStyle = `hsla(204, 30%, 90%, ${alpha * (0.18 + 0.34 * near) * s})`;
-        ctx.lineWidth = Math.max(0.4, D * (0.05 + 0.05 * near));
+        if (near > 0) {
+          ctx.strokeStyle = `hsla(204, 32%, 90%, ${alpha * (0.18 + 0.34 * near) * s})`;
+          ctx.lineWidth = Math.max(0.4, D * (0.05 + 0.05 * near));
+        } else {
+          ctx.strokeStyle = `hsla(204, 24%, 64%, ${alpha * 0.12 * s})`; // far turns: faint, continuous
+          ctx.lineWidth = Math.max(0.3, D * 0.03);
+        }
         ctx.stroke();
       }
     }
@@ -303,8 +307,8 @@ export function drawVorticella(
     }
     const outline = [...left, ...right.reverse()];
     drawPolyline(ctx, outline, true);
-    ctx.fillStyle = `hsla(203, 30%, 81%, ${alpha * 0.20})`; // glassier cool body, less hollow
-    ctx.strokeStyle = `hsla(205, 30%, 91%, ${alpha * 0.44})`;
+    ctx.fillStyle = `hsla(205, 42%, 79%, ${alpha * 0.34})`; // discernibly cool hyaline (alpha is the key lever over black)
+    ctx.strokeStyle = `hsla(205, 44%, 90%, ${alpha * 0.46})`;
     ctx.lineWidth = Math.max(0.4, D * 0.05);
     ctx.fill();
     ctx.stroke();
@@ -313,18 +317,18 @@ export function drawVorticella(
     // macronucleus: curved C / horseshoe band lying along the body
     const macPts: AquariumPoint[] = [];
     const macAlong = bellHeight * 0.50;
-    const macR = D * 0.30; // long horseshoe band spanning most of the body
+    const macR = D * 0.30; // open horseshoe band (~195deg, never closes into a ring/logo)
     for (let i = 0; i <= 14; i++) {
-      const th = Math.PI * (0.18 + (i / 14) * 1.64);
+      const th = Math.PI * (0.32 + (i / 14) * 1.08);
       macPts.push(bodyPoint(macAlong - macR * 1.05 * Math.cos(th), macR * Math.sin(th)));
     }
     drawPolyline(ctx, macPts, false);
     ctx.strokeStyle = `hsla(50, 14%, 72%, ${alpha * 0.3})`;
     ctx.lineWidth = Math.max(0.6, D * 0.12);
     ctx.stroke();
-    // micronucleus: a tiny dot docked on the macronucleus concavity
+    // micronucleus: a tiny dot docked against the OUTER edge of one nuclear arm
     if (D >= 11) {
-      const mic = bodyPoint(macAlong - macR * 0.2, 0);
+      const mic = bodyPoint(macAlong - macR * 0.9, macR * 0.5);
       ctx.beginPath();
       ctx.arc(mic.x, mic.y, Math.max(0.4, D * 0.045), 0, TAU);
       ctx.fillStyle = `hsla(50, 16%, 66%, ${alpha * 0.34})`;
