@@ -2229,6 +2229,19 @@ function updateEuglena(euglena, frame, view) {
         sy -= (1 - (safeHeight - py0) / look) * steer.wall;
       const gravFade = clamp01((safeHeight / Math.max(0.000001, L) - 3) / 2);
       sy -= steer.gravitaxis * gravFade;
+      if (steer.phototaxis !== 0 && safeWidth > 0 && safeHeight > 0) {
+        const lightX = safeWidth;
+        const lightY = safeHeight / 2;
+        const ldx = lightX - px0;
+        const ldy = lightY - py0;
+        const ldist = Math.hypot(ldx, ldy) || 0.000001;
+        const intensity = clamp01(finite2(frame.activity, 0) + 0.5 * finite2(frame.audioLevel, 0));
+        const I_SAT = 0.7;
+        const response = intensity * (1 - intensity / I_SAT);
+        const photoW = steer.phototaxis * response;
+        sx += ldx / ldist * photoW;
+        sy += ldy / ldist * photoW;
+      }
       if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 0.0001) {
         const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
         const wr = (steer.hero + steer.loiter * interest * (HERO_LOITER_Q - heroQ)) * falloff;

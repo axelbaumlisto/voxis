@@ -591,6 +591,23 @@ export function updateEuglena(
       // partition-exact open-water path stays unchanged.
       const gravFade = clamp01((safeHeight / Math.max(1e-6, L) - 3) / 2);
       sy -= steer.gravitaxis * gravFade;
+      // Phototaxis: app-level METAPHOR only — audio/activity is mapped to a
+      // fixed virtual light on the wide edge. The visible eyespot remains a
+      // passive shade accent; the real PAB sensor is not rendered. Positive
+      // response at low/moderate light flips to photophobic avoidance above I_SAT.
+      if (steer.phototaxis !== 0 && safeWidth > 0 && safeHeight > 0) {
+        const lightX = safeWidth;
+        const lightY = safeHeight / 2;
+        const ldx = lightX - px0;
+        const ldy = lightY - py0;
+        const ldist = Math.hypot(ldx, ldy) || 1e-6;
+        const intensity = clamp01(finite(frame.activity, 0) + 0.5 * finite(frame.audioLevel, 0));
+        const I_SAT = 0.7;
+        const response = intensity * (1 - intensity / I_SAT);
+        const photoW = steer.phototaxis * response;
+        sx += (ldx / ldist) * photoW;
+        sy += (ldy / ldist) * photoW;
+      }
       if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 1e-4) {
         const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
         // radial weight: >0 repels (too close), <0 attracts (too far). The `loiter`

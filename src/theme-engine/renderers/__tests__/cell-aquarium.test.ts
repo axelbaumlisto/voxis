@@ -764,6 +764,54 @@ describe("aquarium layer Phase 3 euglena", () => {
     }
   });
 
+  it("phototaxis at moderate app-light steers toward the fixed +x light without a hero", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaScale: 3,
+      aquariumActivityBoost: 1,
+    });
+    const saved = EUGLENA_STEER.phototaxis;
+    try {
+      EUGLENA_STEER.phototaxis = 2.0;
+      let cell = testEuglena({ x: 100, y: 150, heading: Math.PI / 2, swimSpeed: 0 });
+      for (let i = 0; i < 20; i++) {
+        cell = updateEuglena([cell], frame({ dt: 0.05, width: 300, height: 300, activity: 0.4, audioLevel: 0 }), view)[0];
+      }
+      expect(cell.heading).toBeLessThan(Math.PI / 2);
+      expect(Math.cos(cell.heading)).toBeGreaterThan(0.1);
+    } finally {
+      EUGLENA_STEER.phototaxis = saved;
+    }
+  });
+
+  it("phototaxis flips to photophobic steering away from the +x light at high app-light", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaScale: 3,
+      aquariumActivityBoost: 1,
+    });
+    const saved = EUGLENA_STEER.phototaxis;
+    try {
+      EUGLENA_STEER.phototaxis = 2.0;
+      let cell = testEuglena({ x: 100, y: 150, heading: Math.PI / 2, swimSpeed: 0 });
+      for (let i = 0; i < 20; i++) {
+        cell = updateEuglena([cell], frame({ dt: 0.05, width: 300, height: 300, activity: 0.95, audioLevel: 0.2 }), view)[0];
+      }
+      expect(cell.heading).toBeGreaterThan(Math.PI / 2);
+      expect(Math.cos(cell.heading)).toBeLessThan(-0.1);
+    } finally {
+      EUGLENA_STEER.phototaxis = saved;
+    }
+  });
+
   it("priority steering banks the euglena away from an approaching wall", () => {
     const view = aquariumParamsView({
       ...CELL_DEFAULTS,
@@ -934,6 +982,7 @@ describe("aquarium layer Phase 3 euglena", () => {
       aquariumActivityBoost: 1,
     });
     expect(EUGLENA_STEER.gravitaxis).toBe(0);
+    expect(EUGLENA_STEER.phototaxis).toBe(0);
     // open water, no wall/hero/startle pressure; new foundation knobs are default no-op
     const initial = [testEuglena({ x: 150, y: 150, heading: 0, swimSpeed: 1, rollPhase: 0.1, metabolyPhase: 0.2, flagellumPhase: 0.3 })];
     const oneStep = updateEuglena(initial, frame({ dt: 0.24, width: 300, height: 300, activity: 0 }), view);
