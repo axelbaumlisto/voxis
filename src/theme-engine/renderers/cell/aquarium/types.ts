@@ -122,6 +122,18 @@ export interface VorticellaState extends AquariumSeedPoint {
   readonly feedInterval?: number;
   /** Contraction event counter (advances the seeded Poisson draw). */
   readonly eventCount?: number;
+  /** Telotroch migration: 0=anchored,1=detaching,2=swimming,3=reattaching. */
+  readonly migrateState?: number;
+  /** Stalk attachment 1=fully anchored .. 0=free telotroch. */
+  readonly attach?: number;
+  /** Seconds elapsed since last anchored (drives the rare migration trigger). */
+  readonly migrateTimer?: number;
+  /** Seconds anchored before the next telotroch migration. */
+  readonly migrateInterval?: number;
+  /** Target floor X the detached telotroch swims to. */
+  readonly migrateTargetX?: number;
+  /** Migration event counter (advances seeded draws). */
+  readonly migrateCount?: number;
 }
 
 export interface AquariumLayerState {
