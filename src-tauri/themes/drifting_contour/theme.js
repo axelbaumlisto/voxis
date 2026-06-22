@@ -3639,7 +3639,7 @@ function mount(container, api) {
       euglenaSpeedActive: 1.5,
       euglenaScale: 2.8,
       euglenaGravitaxis: 0.2,
-      euglenaPhototaxis: 0.4,
+      euglenaPhototaxis: 0.6,
       euglenaRotDiffusion: 0.12,
       vorticellaCount: 0,
       ...userParams

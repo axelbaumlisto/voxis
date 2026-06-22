@@ -112,10 +112,10 @@ describe("aquariumParamsView", () => {
       enableAquarium: true,
       euglenaCount: 1,
       euglenaGravitaxis: 0.2,
-      euglenaPhototaxis: 0.4,
+      euglenaPhototaxis: 0.6,
       euglenaRotDiffusion: 0.12,
     });
-    expect(on.euglena.steer).toEqual({ gravitaxis: 0.2, phototaxis: 0.4 });
+    expect(on.euglena.steer).toEqual({ gravitaxis: 0.2, phototaxis: 0.6 });
     expect(on.medium).toEqual({ rotDiffusion: 0.12 });
   });
 

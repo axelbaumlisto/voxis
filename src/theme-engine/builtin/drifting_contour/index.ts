@@ -158,7 +158,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       euglenaSpeedActive: 1.5,   // body-lengths/sec (recording) — vigorous, visibly swims across the tank
       euglenaScale: 2.8,         // companion ~0.4x the paramecium length (correct scale)
       euglenaGravitaxis: 0.2,    // gentle negative-gravitaxis up-bias (faded in short tanks)
-      euglenaPhototaxis: 0.4,    // orients to a virtual light when you talk (sign-inverts when loud)
+      euglenaPhototaxis: 0.6,    // orients to a virtual light when you talk (sign-inverts when loud)
       euglenaRotDiffusion: 0.12, // subtle cosmetic path jitter (active flagellar noise)
       vorticellaCount: 0,
       ...userParams,
