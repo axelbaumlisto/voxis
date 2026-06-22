@@ -55,6 +55,15 @@ function vorticellaCellSeed(anchorX: number): number {
   return (Math.round(anchorX * 7) ^ 0x070271ca) >>> 0;
 }
 
+function vorticellaBellMetrics(cell: VorticellaState, scale: number, H: number): { D: number; bellHeight: number; restStalk: number } {
+  const Hc = Math.max(1, finite(H, 80));
+  const Sc = Math.max(0.1, finite(scale, 1));
+  const D = clamp((8 + finite(cell.size, 1) * 4) * Sc, 6, Hc * 0.40);
+  const bellHeight = 1.35 * D;
+  const restStalk = clamp(D * 2.8, D * 1.3, Hc - bellHeight - 3);
+  return { D, bellHeight, restStalk };
+}
+
 const MIG_DETACH = 0.6; // s to retract stalk & lift off
 const MIG_SWIM = 16;    // telotroch swim speed (px/s)
 const MIG_ATTACH = 0.7; // s to regrow the stalk at the new spot
@@ -138,10 +147,7 @@ export function vorticellaObstacle(
   scale: number,
   frameHeight: number,
 ): { x: number; y: number; radius: number } {
-  const H = Math.max(1, finite(frameHeight, 80));
-  const D = clamp((8 + finite(cell.size, 1) * 4) * Math.max(0.1, finite(scale, 1)), 6, H * 0.40);
-  const bellHeight = 1.35 * D;
-  const restStalk = clamp(D * 2.8, D * 1.3, H - bellHeight - 3);
+  const { D, bellHeight, restStalk } = vorticellaBellMetrics(cell, scale, frameHeight);
   const ax = finite(cell.anchorX, 0);
   const ay = finite(cell.anchorY, 0);
   // direction is UP (-y); bell mid sits above the neck (top of the rest stalk)
@@ -322,7 +328,6 @@ export function drawVorticella(
   const alpha = Math.max(0, Math.min(1, view.alpha * 0.85));
   if (alpha <= 0) return;
   const scale = Math.max(0.1, finite(view.vorticella.scale, 1));
-  const H = Math.max(1, finite(frame.height, 80));
 
   ctx.save();
   ctx.lineCap = "round";
@@ -349,13 +354,12 @@ export function drawVorticella(
     const anchorY = finite(cell.anchorY, 0);
 
     // --- modest bell + a longer stalk so it reads as a stalked, leggy zooid ---
-    const D = clamp((8 + finite(cell.size, 1) * 4) * scale, 6, H * 0.40);
-    const bellHeight = 1.35 * D;
+    const { D, bellHeight, restStalk } = vorticellaBellMetrics(cell, scale, frame.height);
     // stalk shrinks to nothing as the zooid detaches into a free-swimming telotroch
-    const restStalk = clamp(D * 2.8, D * 1.3, H - bellHeight - 3) * attach;
+    const restLength = restStalk * attach;
 
     const geom = vorticellaGeometry(s, {
-      anchorX, anchorY, restLength: restStalk, directionAngle: dir,
+      anchorX, anchorY, restLength, directionAngle: dir,
       minLengthFrac: 0.32, coilSampleCount: 30, coilTurnsContracted: 3.0, coilRadius: D * 0.24,
     });
     const neck = geom.bellCenter;           // base of the bell (top of stalk)
