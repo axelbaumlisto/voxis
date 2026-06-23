@@ -550,8 +550,8 @@ export function drawDidinium(
         const jy = (seededUnit(mnSeed, m, 0x9a1f2b3c) - 0.5) * halfTh * 1.2;
         const r = halfTh * (0.4 + 0.5 * seededUnit(mnSeed, m, 0x14c8af21));
         ctx.fillStyle = dark
-          ? `hsla(${hue - 8}, 8%, 56%, ${alpha * 0.5})`
-          : `hsla(${hue}, 8%, 86%, ${alpha * 0.42})`;
+          ? `hsla(${hue - 8}, 7%, 50%, ${alpha * 0.6})`
+          : `hsla(${hue}, 7%, 90%, ${alpha * 0.5})`;
         ctx.beginPath();
         ctx.arc(c0.x + jx, c0.y + jy, r, 0, TAU);
         ctx.fill();
@@ -580,19 +580,22 @@ export function drawDidinium(
     const drawGirdle = (gu: number, seatHue: number, gi: number) => {
       const hw = halfWidthAt(gu);
       const baseAlong = halfLength * gu;
-      const NT = 72; // DENSE fine fringe (real pectinelles are numerous close-set cilia)
+      const NT = 96; // DENSE fine fringe (real pectinelles are numerous close-set cilia)
       // bright near-arc band seat line so the girdle reads as a crisp transverse
       // BAND, not a string of separate beads (far arc skipped → no wireframe).
       const seat: { x: number; y: number }[] = [];
       for (let s = 0; s <= NT; s++) {
         const phi = (s / NT) * TAU;
-        if (Math.cos(phi + rollAng) < -0.05) { if (seat.length > 1) { drawPolyline(ctx, seat, false); ctx.strokeStyle = `hsla(${seatHue}, 40%, 92%, ${alpha * 0.34})`; ctx.lineWidth = Math.max(0.4, wMax * 0.035); ctx.stroke(); } seat.length = 0; continue; }
+        // VERY faint seat line: just enough to anchor the band root; the dense comb
+        // of ticks below is what should read (a bold seat line looked like a
+        // wireframe hoop). Hairline + low alpha.
+        if (Math.cos(phi + rollAng) < -0.05) { if (seat.length > 1) { drawPolyline(ctx, seat, false); ctx.strokeStyle = `hsla(${seatHue}, 30%, 90%, ${alpha * 0.14})`; ctx.lineWidth = Math.max(0.3, wMax * 0.02); ctx.stroke(); } seat.length = 0; continue; }
         const lat = Math.cos(phi) * hw;
         const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
         seat.push(transform(cx, cy, ux, uy, along, lat));
       }
-      if (seat.length > 1) { drawPolyline(ctx, seat, false); ctx.strokeStyle = `hsla(${seatHue}, 40%, 92%, ${alpha * 0.34})`; ctx.lineWidth = Math.max(0.4, wMax * 0.035); ctx.stroke(); }
-      ctx.lineWidth = Math.max(0.3, wMax * 0.03); // thin fringe so it reads as a dense comb
+      if (seat.length > 1) { drawPolyline(ctx, seat, false); ctx.strokeStyle = `hsla(${seatHue}, 30%, 90%, ${alpha * 0.14})`; ctx.lineWidth = Math.max(0.3, wMax * 0.02); ctx.stroke(); }
+      ctx.lineWidth = Math.max(0.3, wMax * 0.026); // thin fringe so it reads as a dense comb
       for (let s = 0; s < NT; s++) {
         const phi = (s / NT) * TAU;
         const depth = Math.cos(phi + rollAng); // 1 = nearest viewer
@@ -602,12 +605,12 @@ export function drawDidinium(
         const lat = Math.cos(phi) * hw;
         const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
         const wave = 0.5 + 0.5 * Math.sin(TAU * beat - phi * 3.0); // metachronal
-        const cilLen = hw * (0.09 + 0.06 * wave) * (1 + jit); // SHORT fine comb (not urchin blades)
+        const cilLen = hw * (0.11 + 0.07 * wave) * (1 + jit); // SHORT fine comb (not urchin blades)
         const base = transform(cx, cy, ux, uy, along, lat);
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
         const tip = transform(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
-        ctx.strokeStyle = `hsla(${seatHue}, 44%, 92%, ${alpha * (0.12 + 0.6 * front)})`;
+        ctx.strokeStyle = `hsla(${seatHue}, 40%, 93%, ${alpha * (0.1 + 0.5 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
@@ -657,9 +660,10 @@ export function drawDidinium(
       ctx.fillStyle = `hsla(${hue + 2}, 28%, 90%, ${alpha * 0.52})`;
       ctx.fill();
       // feathered cone flanks (no hard straight outline) — only the two flank edges,
-      // so the cone scatters like the body rather than a constructed triangle.
-      ctx.strokeStyle = `hsla(${hue + 4}, 36%, 94%, ${alpha * 0.4})`;
-      ctx.lineWidth = Math.max(0.5, wMax * 0.06);
+      // VERY faint so the cone scatters like the body rather than a constructed
+      // triangle with hard construction lines.
+      ctx.strokeStyle = `hsla(${hue + 4}, 28%, 92%, ${alpha * 0.18})`;
+      ctx.lineWidth = Math.max(0.4, wMax * 0.035);
       ctx.beginPath();
       ctx.moveTo(shL.x, shL.y);
       ctx.lineTo(tip.x, tip.y);
