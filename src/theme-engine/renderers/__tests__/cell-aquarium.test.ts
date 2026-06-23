@@ -2438,6 +2438,39 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
     expect(stepR[0].avoidTo).toBeGreaterThan(stepL[0].avoidTo!);
   });
 
+  it("hunts the hero ellipse when Paramecium prey is in range", () => {
+    const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0 });
+    const initial = [testDidinium({ x: 120, y: 80, heading: Math.PI, phase: Math.PI })];
+    const interaction = buildField([
+      { kind: "obstacle", shape: "ellipse", x: 210, y: 80, halfLen: 38, halfWid: 14, heading: 0, social: true, sourceId: sourceId("hero", 0) },
+    ]);
+    const next = updateDidinium(initial, frame({ dt: 0.2, t: 2, width: 340, height: 170, interaction }), view);
+    expect(Math.abs(next[0].heading)).toBeLessThan(Math.abs(initial[0].heading));
+  });
+
+  it("banks away from vorticella circle obstacles", () => {
+    const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0 });
+    const initial = [testDidinium({ x: 150, y: 80, heading: 0, phase: 0 })];
+    const interaction = buildField([
+      { kind: "obstacle", shape: "circle", x: 175, y: 80, radius: 18, sourceId: sourceId("vorticella", 0) },
+    ]);
+    const next = updateDidinium(initial, frame({ dt: 0.2, t: 2, width: 340, height: 170, interaction }), view);
+    expect(Math.abs(next[0].heading)).toBeGreaterThan(1.5);
+  });
+
+  it("latches on the hero surface instead of sinking into the prey ellipse", () => {
+    const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0, didiniumScale: 2 });
+    const initial = [testDidinium({ x: 230, y: 80, heading: Math.PI, phase: Math.PI })];
+    const prey = { kind: "obstacle" as const, shape: "ellipse" as const, x: 200, y: 80, halfLen: 38, halfWid: 14, heading: 0, social: true, sourceId: sourceId("hero", 0) };
+    const interaction = buildField([prey]);
+    const next = updateDidinium(initial, frame({ dt: 0.1, t: 2, width: 340, height: 170, interaction }), view);
+    expect(next[0].contactTimer).toBeGreaterThan(0);
+    const A = prey.halfLen + didiniumDisplayLength(1, 2) * 0.38;
+    const q = Math.abs(next[0].x - prey.x) / A;
+    expect(q).toBeGreaterThan(1.0);
+    expect(q).toBeLessThan(1.2);
+  });
+
   it("didiniumContribute emits one motile per cell with the didinium sourceId", () => {
     const cell = testDidinium({ x: 42, y: 24 });
     const contribs = didiniumContribute(cell, 0);

@@ -159,6 +159,10 @@ export interface DidiniumState extends AquariumSeedPoint {
   readonly avoidTo?: number;
   /** Progress [0,1] through the current eased avoiding-reaction back-turn. */
   readonly avoidProgress?: number;
+  /** Seconds remaining in predator contact/latch on a prey surface. */
+  readonly contactTimer?: number;
+  /** Seconds before another prey contact/latch can trigger. */
+  readonly huntCooldown?: number;
   /** Stable per-cell deterministic noise key. */
   readonly noiseSeed?: number;
 }

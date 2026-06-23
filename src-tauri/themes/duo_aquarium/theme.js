@@ -3403,6 +3403,9 @@ function updateDidinium(didinium, frame, view) {
     let heading = finite(cell.heading, 0);
     const px0 = finite(cell.x, 0);
     const py0 = finite(cell.y, 0);
+    const wasContacting = finiteOr(cell.contactTimer, 0) > 0;
+    let contactTimer = Math.max(0, finiteOr(cell.contactTimer, 0) - dt);
+    let huntCooldown = Math.max(0, finiteOr(cell.huntCooldown, 0) - dt);
     const stopgo = noise2D2(nseed ^ 1399873280, t * STOPGO_FREQ, 0.13);
     const cruiseEnv = 0.05 + 0.95 * (1 - Math.pow(1 - stopgo, 2.2));
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L * cruiseEnv;
@@ -3461,6 +3464,64 @@ function updateDidinium(didinium, frame, view) {
       const turnK = 3 + 7 * Math.min(1, wallPressure);
       heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
+    const field = frame.interaction;
+    const prey = (field?.obstacles ?? []).find((obs) => obs.shape === "ellipse" && obs.social);
+    let preyData = null;
+    if (prey && prey.shape === "ellipse") {
+      const hh = finiteOr(prey.heading, 0);
+      const ch = Math.cos(hh), sh = Math.sin(hh);
+      const dx = px0 - prey.x;
+      const dy = py0 - prey.y;
+      const localX = dx * ch + dy * sh;
+      const localY = -dx * sh + dy * ch;
+      const A = Math.max(0.001, finiteOr(prey.halfLen, 1) + L * 0.38);
+      const B = Math.max(0.001, finiteOr(prey.halfWid, 1) + L * 0.38);
+      const q = Math.sqrt(localX * localX / (A * A) + localY * localY / (B * B)) || 0.000001;
+      const targetQ = 1.08;
+      const sx = localX * (targetQ / q);
+      const sy = localY * (targetQ / q);
+      const surfaceX = prey.x + sx * ch - sy * sh;
+      const surfaceY = prey.y + sx * sh + sy * ch;
+      preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y };
+      if (q < 1.08 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
+        contactTimer = 0.72 + seededUnit(nseed, 0, 714207245) * 0.28;
+      }
+    }
+    let obstaclePressure = 0;
+    let obstacleAwayX = 0;
+    let obstacleAwayY = 0;
+    for (const obs of field?.obstacles ?? []) {
+      if (obs.shape !== "circle")
+        continue;
+      const dx = px0 - obs.x;
+      const dy = py0 - obs.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const reach = obs.radius + L * 1.25;
+      if (d < reach) {
+        const p = 1 - d / reach;
+        obstaclePressure += p;
+        obstacleAwayX += dx / d * p;
+        obstacleAwayY += dy / d * p;
+      }
+    }
+    if (obstaclePressure > 0.0001 && avoidProgress >= 1) {
+      const desired = Math.atan2(obstacleAwayY, obstacleAwayX);
+      const turnK = 2.5 + 5 * Math.min(1, obstaclePressure);
+      heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
+    } else if (avoidProgress >= 1 && wallPressure < 0.2 && contactTimer <= 0) {
+      if (preyData) {
+        const dx = preyData.surfaceX - px0;
+        const dy = preyData.surfaceY - py0;
+        const d = Math.hypot(dx, dy) || 1;
+        const sense = Math.max(110, L * 3);
+        if (d < sense) {
+          const hunt = clamp01((sense - d) / (sense * 0.7));
+          const desired = Math.atan2(dy, dx);
+          const turnK = 1.2 + 2.8 * hunt;
+          heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt)) * hunt;
+        }
+      }
+    }
     const curveEnv = clamp01(noise2D2(nseed ^ 2009178803, t * CURVE_FREQ, 0.29));
     const curve = side * CURVE_BIAS * curveEnv;
     const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) + curve;
@@ -3476,10 +3537,15 @@ function updateDidinium(didinium, frame, view) {
     const rawY = py0 + uy * vSigned * dt;
     let nextX = rawX;
     let nextY = rawY;
+    if (contactTimer > 0 && preyData) {
+      nextX = preyData.surfaceX;
+      nextY = preyData.surfaceY;
+      heading = Math.atan2(preyData.preyY - nextY, preyData.preyX - nextX);
+    }
     const margin = Math.min(L * 0.55, safeWidth * 0.45, safeHeight * 0.45);
     nextX = clamp(nextX, margin, safeWidth - margin);
     nextY = clamp(nextY, margin, safeHeight - margin);
-    if ((nextX !== rawX || nextY !== rawY) && avoidProgress >= 1) {
+    if ((nextX !== rawX || nextY !== rawY) && avoidProgress >= 1 && contactTimer <= 0) {
       avoidIndex += 1;
       const magU = noise2D2(nseed ^ 791783381, avoidIndex, 0.71);
       const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
@@ -3488,12 +3554,19 @@ function updateDidinium(didinium, frame, view) {
       avoidTo = inward + side * magnitude * 0.5;
       avoidProgress = 0;
     }
+    if (wasContacting && contactTimer <= 0) {
+      huntCooldown = 1.6 + seededUnit(nseed, 0, 1243315241) * 0.9;
+      avoidIndex += 1;
+      avoidFrom = heading;
+      avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 899314129)));
+      avoidProgress = 0;
+    }
     const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
     return {
       ...cell,
       x: nextX,
       y: nextY,
-      phase: travel,
+      phase: contactTimer > 0 ? heading : travel,
       heading,
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + spinFreq * dt),
       beatPhase: wrapUnit(finiteOr(cell.beatPhase, 0) + beatEff * dt),
@@ -3501,7 +3574,9 @@ function updateDidinium(didinium, frame, view) {
       avoidIndex,
       avoidFrom,
       avoidTo,
-      avoidProgress
+      avoidProgress,
+      contactTimer,
+      huntCooldown
     };
   });
 }
