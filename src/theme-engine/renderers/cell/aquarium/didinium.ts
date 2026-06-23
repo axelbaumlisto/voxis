@@ -496,8 +496,8 @@ export function drawDidinium(
         const jy = (seededUnit(mnSeed, m, 0x9a1f2b3c) - 0.5) * halfTh * 1.2;
         const r = halfTh * (0.4 + 0.5 * seededUnit(mnSeed, m, 0x14c8af21));
         ctx.fillStyle = dark
-          ? `hsla(${hue - 8}, 24%, 68%, ${alpha * 0.4})`
-          : `hsla(${hue}, 32%, 92%, ${alpha * 0.34})`;
+          ? `hsla(${hue - 10}, 26%, 60%, ${alpha * 0.58})`
+          : `hsla(${hue + 2}, 36%, 96%, ${alpha * 0.5})`;
         ctx.beginPath();
         ctx.arc(c0.x + jx, c0.y + jy, r, 0, TAU);
         ctx.fill();
