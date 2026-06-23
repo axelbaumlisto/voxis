@@ -2214,6 +2214,7 @@ var TUMBLE_MAX_RAD = 5 * Math.PI / 6;
 var TUMBLE_RATE_MIN = 0.045;
 var TUMBLE_RATE_MAX = 0.16;
 var SEPARATION_RANGE_BODY_LENGTHS = 1.6;
+var DIDINIUM_HAZARD_WEIGHT = 0.55;
 var EUGLENA_RELEVANT_FIELDS = new Set(["obstacle", "wake", "motile"]);
 function euglenaContribute(cell, idx, scale = 1) {
   const length = euglenaDisplayLength(finite(cell.size, 1), scale);
@@ -2259,6 +2260,7 @@ function updateEuglena(euglena, frame, view) {
     const fieldObstacles = field ? field.obstacles.filter((obstacle) => obstacle.sourceId !== selfId) : undefined;
     const fieldWakes = field ? field.wakes.filter((wake) => wake.sourceId !== selfId) : undefined;
     const sameSpeciesMotiles = field?.motiles.filter((motile) => motile.sourceId >> 20 === KIND_ID.euglena && motile.sourceId !== selfId);
+    const didiniumHazards = field?.motiles.filter((motile) => motile.sourceId >> 20 === KIND_ID.didinium);
     const circleObstacles = fieldObstacles?.filter((obstacle) => obstacle.shape === "circle");
     const socialEllipse = fieldObstacles?.find((obstacle) => obstacle.shape === "ellipse" && obstacle.social === true);
     const socialWake = socialEllipse ? fieldWakes?.find((wake) => wake.sourceId === socialEllipse.sourceId) : undefined;
@@ -2352,6 +2354,22 @@ function updateEuglena(euglena, frame, view) {
             const w = separationW * prox;
             sx += mdx / md * w;
             sy += mdy / md * w;
+          }
+        }
+      }
+      if (didiniumHazards && didiniumHazards.length > 0) {
+        for (let hi = 0;hi < didiniumHazards.length; hi++) {
+          const hazard = didiniumHazards[hi];
+          const hdx = px0 - finite(hazard.x, 0);
+          const hdy = py0 - finite(hazard.y, 0);
+          const hd = Math.hypot(hdx, hdy) || 0.000001;
+          const hazardRadius = Math.max(0, finiteOr(hazard.radius, L * 0.35));
+          const reach = Math.max(L * 1.2, L * 0.75 + hazardRadius * 1.25 + 8);
+          if (hd < reach) {
+            const prox = (reach - hd) / reach;
+            const w = DIDINIUM_HAZARD_WEIGHT * prox;
+            sx += hdx / hd * w;
+            sy += hdy / hd * w;
           }
         }
       }
