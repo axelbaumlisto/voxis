@@ -153,32 +153,32 @@ export function drawAquariumForeground(
     const env = Math.min(1, contact / 0.35);
 
     // Didinium toxicyst / attachment filaments: short, cool darkfield glints.
-    ctx.strokeStyle = `hsla(198, 36%, 94%, ${alpha * 0.42 * env})`;
-    ctx.lineWidth = Math.max(0.45, L * 0.018);
+    ctx.strokeStyle = `hsla(198, 40%, 96%, ${alpha * 0.62 * env})`;
+    ctx.lineWidth = Math.max(0.55, L * 0.022);
     for (let k = -1; k <= 1; k++) {
       const side = k * L * 0.035;
       const sx = snoutX - uy * side;
       const sy = snoutY + ux * side;
       ctx.beginPath();
       ctx.moveTo(sx, sy);
-      ctx.lineTo(sx + ux * Math.min(8, L * 0.16), sy + uy * Math.min(8, L * 0.16));
+      ctx.lineTo(sx + ux * Math.min(10, L * 0.22), sy + uy * Math.min(10, L * 0.22));
       ctx.stroke();
     }
 
     // Paramecium defensive trichocyst sparkle at contact: warm, tiny, decays fast.
-    const fanAlpha = alpha * 0.38 * env;
-    ctx.strokeStyle = `hsla(42, 38%, 92%, ${fanAlpha})`;
-    ctx.lineWidth = 0.55;
+    const fanAlpha = alpha * 0.62 * env;
+    ctx.strokeStyle = `hsla(42, 44%, 94%, ${fanAlpha})`;
+    ctx.lineWidth = 0.75;
     for (let k = 0; k < 9; k++) {
       const a = heading + Math.PI + (k - 4) * 0.16;
-      const len = 2.5 + (k % 3) * 1.1;
+      const len = 4.0 + (k % 3) * 1.6;
       ctx.beginPath();
       ctx.moveTo(snoutX, snoutY);
       ctx.lineTo(snoutX + Math.cos(a) * len, snoutY + Math.sin(a) * len);
       ctx.stroke();
     }
 
-    ctx.fillStyle = `hsla(44, 40%, 94%, ${alpha * 0.35 * env})`;
+    ctx.fillStyle = `hsla(44, 48%, 96%, ${alpha * 0.55 * env})`;
     ctx.beginPath();
     ctx.arc(snoutX, snoutY, Math.max(1, L * 0.045), 0, Math.PI * 2);
     ctx.fill();
