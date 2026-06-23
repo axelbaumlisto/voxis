@@ -599,18 +599,17 @@ export function drawDidinium(
         const lat = Math.cos(phi) * hw;
         const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
         const wave = 0.5 + 0.5 * Math.sin(TAU * beat - phi * 3.0); // metachronal
-        const cilLen = hw * (0.11 + 0.07 * wave) * (1 + jit); // SHORT fine comb (not urchin blades)
+        // VERY SHORT ticks (a fuzzy fringe), uniform along the whole near arc, so
+        // the dense NT=96 set reads as one continuous transverse ciliary BAND, not
+        // a few long radial urchin-spikes (long ticks + edge-gating collapsed into
+        // spikes). No rim gating — length is small enough everywhere that no tick
+        // ever reads as a construction line or a spur.
+        const cilLen = hw * (0.05 + 0.03 * wave) * (1 + jit);
         const base = transform(cx, cy, ux, uy, along, lat);
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
         const tip = transform(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
-        // Fade by proximity to the silhouette RIM (|cos phi|=1 at the body edge,
-        // 0 at the on-axis centre). This keeps the comb only where the transverse
-        // ring crosses the visible profile edge — a surface fringe — and removes the
-        // central ticks that read as a straight construction line through the body.
-        const rim = Math.abs(Math.cos(phi));
-        const rimW = rim * rim; // sharpen to the two edges
-        ctx.strokeStyle = `hsla(${seatHue}, 40%, 93%, ${alpha * (0.1 + 0.5 * front) * rimW})`;
+        ctx.strokeStyle = `hsla(${seatHue}, 40%, 93%, ${alpha * (0.1 + 0.42 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
