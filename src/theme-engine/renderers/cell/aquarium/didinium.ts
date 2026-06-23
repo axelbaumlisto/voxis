@@ -78,8 +78,10 @@ function bodyShape(u: number): number {
     // cone snout: half-width eases from the shoulder width down to ~0 at the tip,
     // slightly concave flanks (a cone, not a dome).
     const q = (u - SHOULDER_U) / (1 - SHOULDER_U); // 0 at shoulder, 1 at tip
-    const wShoulder = 0.9; // flattened shoulder is a touch narrower than the belly
-    return wShoulder * Math.pow(1 - q, 1.15); // blunter, shorter cone (not a witch-hat)
+    // cone base width MUST equal the body shoulder width (0.72) for a C0/C1-smooth
+    // join — a mismatch here read as a kink/notch in the silhouette.
+    const wShoulder = 0.72;
+    return wShoulder * Math.pow(1 - q, 1.25); // blunt cone, smoothly continuing the shoulder
   }
   // ovoid body: moderately narrow anterior shoulder, full belly widest ~40% down,
   // BROADLY ROUNDED posterior (real D. nasutum is plump/egg-shaped, not a flat
@@ -89,7 +91,7 @@ function bodyShape(u: number): number {
   if (t <= tp) {
     return 0.72 + 0.28 * Math.sin((t / tp) * (Math.PI / 2)); // shoulder 0.72 -> belly 1.0
   }
-  return 0.4 + 0.6 * Math.cos(((t - tp) / (1 - tp)) * (Math.PI / 2)); // belly 1.0 -> rounded pole 0.40
+  return 0.46 + 0.54 * Math.cos(((t - tp) / (1 - tp)) * (Math.PI / 2)); // belly 1.0 -> broadly rounded pole 0.46
 }
 
 const BODY_SHAPE_MAX = (() => {
@@ -477,9 +479,11 @@ export function drawDidinium(
       ctx.strokeStyle = `hsla(${hue - 6}, 22%, 70%, ${alpha * 0.3})`;
       ctx.lineWidth = Math.max(2.2, wMax * 0.62);
       ctx.stroke();
-      // DOMINANT solid filled C — the single headline DIC interior landmark
+      // DOMINANT solid filled C — the single headline DIC interior landmark.
+      // Near-NEUTRAL grey (low saturation) so it reads as solid chromatin, not a
+      // glowing cyan fluid vacuole.
       drawPolyline(ctx, ribbon, true);
-      ctx.fillStyle = `hsla(${hue - 4}, 30%, 82%, ${alpha * 0.86})`;
+      ctx.fillStyle = `hsla(${hue - 6}, 14%, 80%, ${alpha * 0.86})`;
       ctx.fill();
       // MOTTLED chromatin texture (clipped to the C): seeded darker/brighter
       // blobs along the centerline so it reads as a granular nucleus, not a flat
@@ -496,8 +500,8 @@ export function drawDidinium(
         const jy = (seededUnit(mnSeed, m, 0x9a1f2b3c) - 0.5) * halfTh * 1.2;
         const r = halfTh * (0.4 + 0.5 * seededUnit(mnSeed, m, 0x14c8af21));
         ctx.fillStyle = dark
-          ? `hsla(${hue - 10}, 26%, 60%, ${alpha * 0.58})`
-          : `hsla(${hue + 2}, 36%, 96%, ${alpha * 0.5})`;
+          ? `hsla(${hue - 8}, 16%, 58%, ${alpha * 0.52})`
+          : `hsla(${hue}, 16%, 88%, ${alpha * 0.44})`;
         ctx.beginPath();
         ctx.arc(c0.x + jx, c0.y + jy, r, 0, TAU);
         ctx.fill();
@@ -505,7 +509,7 @@ export function drawDidinium(
       ctx.restore();
       // faint brighter rim on the filled body for refractile relief
       drawPolyline(ctx, ribbon, true);
-      ctx.strokeStyle = `hsla(${hue - 2}, 34%, 90%, ${alpha * 0.4})`;
+      ctx.strokeStyle = `hsla(${hue - 2}, 18%, 90%, ${alpha * 0.36})`;
       ctx.lineWidth = Math.max(0.4, wMax * 0.04);
       ctx.stroke();
     }
@@ -521,7 +525,7 @@ export function drawDidinium(
     // each girdle reads as a bright scattering crescent on the near face that
     // sweeps as the body rolls. Many faint jittered ticks, metachronal wave.
     const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
-    const RING_TILT = 0.18; // along-axis foreshortening: low → a FLAT transverse band, not a tilted spiral
+    const RING_TILT = 0.1; // along-axis foreshortening: low → a FLAT transverse band, not a crossing diagonal ribbon
     const gSeedR = finiteOr(cell.noiseSeed, 0) | 0;
     const drawGirdle = (gu: number, seatHue: number, gi: number) => {
       const hw = halfWidthAt(gu);
