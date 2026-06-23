@@ -3594,11 +3594,14 @@ function drawDidinium(ctx, didinium, frame, view) {
       const muStart = -0.58;
       const muEnd = 0.4;
       const bowDepth = 0.72 * (0.45 + 0.55 * Math.abs(rollCos));
+      const MN = 40;
+      const side2 = rollCos >= 0 ? 1 : -1;
       const macro = [];
-      for (let k = 0;k <= 18; k++) {
-        const u = muStart + (muEnd - muStart) * (k / 18);
-        const bow = Math.sin(k / 18 * Math.PI) * bowDepth;
-        const lat = bow * halfWidthAt(u) * (rollCos >= 0 ? 1 : -1);
+      for (let k = 0;k <= MN; k++) {
+        const f = k / MN;
+        const u = muStart + (muEnd - muStart) * (0.5 - 0.5 * Math.cos(Math.PI * f));
+        const bow = Math.sin(f * Math.PI) * bowDepth;
+        const lat = bow * halfWidthAt(u) * side2;
         macro.push(transform3(cx, cy, ux, uy, halfLength * u, lat));
       }
       ctx.strokeStyle = `hsla(${hue - 6}, 22%, 70%, ${alpha * 0.34})`;

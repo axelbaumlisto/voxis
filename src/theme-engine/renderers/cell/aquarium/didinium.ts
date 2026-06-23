@@ -438,11 +438,18 @@ export function drawDidinium(
       const muStart = -0.58;
       const muEnd = 0.4; // spans ~0.6L
       const bowDepth = 0.72 * (0.45 + 0.55 * Math.abs(rollCos)); // deeper C-bow + floor so it never collapses to a strut
+      // smooth continuous horseshoe: many samples + a half-cosine along-axis arc so
+      // the C stays a rounded semicircle at every roll phase (no chevron kink).
+      const MN = 40;
+      const side2 = rollCos >= 0 ? 1 : -1;
       const macro: { x: number; y: number }[] = [];
-      for (let k = 0; k <= 18; k++) {
-        const u = muStart + (muEnd - muStart) * (k / 18);
-        const bow = Math.sin((k / 18) * Math.PI) * bowDepth;
-        const lat = bow * halfWidthAt(u) * (rollCos >= 0 ? 1 : -1);
+      for (let k = 0; k <= MN; k++) {
+        const f = k / MN;
+        // place samples along a true arc: the along-axis coord follows a gentle
+        // cosine so endpoints curl back (horseshoe), not a straight bar.
+        const u = muStart + (muEnd - muStart) * (0.5 - 0.5 * Math.cos(Math.PI * f));
+        const bow = Math.sin(f * Math.PI) * bowDepth;
+        const lat = bow * halfWidthAt(u) * side2;
         macro.push(transform(cx, cy, ux, uy, halfLength * u, lat));
       }
       // soft underglow (wide, dark-cool halo to set the C off from the endoplasm)
