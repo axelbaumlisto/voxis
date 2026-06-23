@@ -29,7 +29,7 @@ const STOPGO_FREQ = 0.5; // Hz-ish; erratic cruise stop/dart modulation (phase-f
 const WANDER_FREQ = 0.17; // slow purposeful heading drift (phase-fn of frame.t)
 const WANDER_RAD = 0.32; // gentle heading drift swing (rad) — was a too-random 0.7
 const HELIX_LEAN = 0.2; // corkscrew lean angle (rad); thin helix, coupled to the axial spin
-const CURVE_RATE = 0.5; // rad/s persistent one-sided turning → the real "leaning to one
+const CURVE_RATE = 0.32; // rad/s persistent one-sided turning → the real "leaning to one
                        // side" spiral search path. Applied as side*CURVE_RATE*t,
                        // a pure frame.t function (constant within a step) so the
                        // open-water path stays dt-partition exact while the heading

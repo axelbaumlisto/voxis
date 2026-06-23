@@ -3298,7 +3298,7 @@ var STOPGO_FREQ = 0.5;
 var WANDER_FREQ = 0.17;
 var WANDER_RAD = 0.32;
 var HELIX_LEAN = 0.2;
-var CURVE_RATE = 0.5;
+var CURVE_RATE = 0.32;
 var WALL_LOOK = 1.4;
 var BACKUP_SECONDS = 0.22;
 var AVOID_SECONDS = 0.6;
@@ -4655,8 +4655,8 @@ function mount(container, api) {
       euglenaCount: 0,
       vorticellaCount: 0,
       didiniumCount: 1,
-      didiniumSpeed: 4.5,
-      didiniumSpeedActive: 8,
+      didiniumSpeed: 1.6,
+      didiniumSpeedActive: 3,
       didiniumScale: 3.2,
       ...userParams
     }
