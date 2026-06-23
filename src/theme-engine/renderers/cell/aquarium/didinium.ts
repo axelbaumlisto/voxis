@@ -437,7 +437,7 @@ export function drawDidinium(
     {
       const muStart = -0.58;
       const muEnd = 0.4; // spans ~0.6L
-      const bowDepth = 0.55 * (0.4 + 0.6 * Math.abs(rollCos)); // floor so it never collapses to a strut
+      const bowDepth = 0.72 * (0.45 + 0.55 * Math.abs(rollCos)); // deeper C-bow + floor so it never collapses to a strut
       const macro: { x: number; y: number }[] = [];
       for (let k = 0; k <= 18; k++) {
         const u = muStart + (muEnd - muStart) * (k / 18);
@@ -538,7 +538,7 @@ export function drawDidinium(
     // ── apical cone snout (cytostome cone), filled, protruding, closed at rest ──
     {
       const coneBaseU = SHOULDER_U;
-      const tip = transform(cx, cy, ux, uy, halfLength * 1.04, 0);
+      const tip = transform(cx, cy, ux, uy, halfLength * 1.14, 0); // taller, dramatic proboscis
       const shL = transform(cx, cy, ux, uy, halfLength * coneBaseU, halfWidthAt(coneBaseU));
       const shR = transform(cx, cy, ux, uy, halfLength * coneBaseU, -halfWidthAt(coneBaseU));
       // filled cone with the body glow so it reads as a solid protrusion
@@ -547,12 +547,12 @@ export function drawDidinium(
       ctx.lineTo(tip.x, tip.y);
       ctx.lineTo(shR.x, shR.y);
       ctx.closePath();
-      ctx.fillStyle = `hsla(${hue + 2}, 28%, 88%, ${alpha * 0.4})`;
+      ctx.fillStyle = `hsla(${hue + 2}, 28%, 90%, ${alpha * 0.52})`;
       ctx.fill();
       // feathered cone flanks (no hard straight outline) — only the two flank edges,
-      // dim, so the cone scatters like the body rather than a constructed triangle.
-      ctx.strokeStyle = `hsla(${hue + 4}, 34%, 92%, ${alpha * 0.28})`;
-      ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+      // so the cone scatters like the body rather than a constructed triangle.
+      ctx.strokeStyle = `hsla(${hue + 4}, 36%, 94%, ${alpha * 0.4})`;
+      ctx.lineWidth = Math.max(0.5, wMax * 0.06);
       ctx.beginPath();
       ctx.moveTo(shL.x, shL.y);
       ctx.lineTo(tip.x, tip.y);
@@ -560,8 +560,8 @@ export function drawDidinium(
       ctx.stroke();
       // nematodesmal striae: faint longitudinal lines fanning from the cone base to
       // the apex (the palisade of stiff rods supporting the proboscis).
-      ctx.strokeStyle = `hsla(${hue + 4}, 30%, 93%, ${alpha * 0.22})`;
-      ctx.lineWidth = Math.max(0.35, wMax * 0.03);
+      ctx.strokeStyle = `hsla(${hue + 4}, 32%, 94%, ${alpha * 0.32})`;
+      ctx.lineWidth = Math.max(0.35, wMax * 0.035);
       const NS = 5;
       for (let k = 1; k < NS; k++) {
         const f = k / NS; // across the cone base
@@ -592,9 +592,9 @@ export function drawDidinium(
         ctx.stroke();
       }
       // bright apical pip (closed cytostome), not a gaping mouth
-      ctx.fillStyle = `hsla(${hue + 4}, 40%, 95%, ${alpha * 0.6})`;
+      ctx.fillStyle = `hsla(${hue + 4}, 42%, 96%, ${alpha * 0.72})`;
       ctx.beginPath();
-      ctx.arc(tip.x, tip.y, Math.max(0.5, wMax * 0.09), 0, TAU);
+      ctx.arc(tip.x, tip.y, Math.max(0.5, wMax * 0.11), 0, TAU);
       ctx.fill();
     }
 

@@ -3593,7 +3593,7 @@ function drawDidinium(ctx, didinium, frame, view) {
     {
       const muStart = -0.58;
       const muEnd = 0.4;
-      const bowDepth = 0.55 * (0.4 + 0.6 * Math.abs(rollCos));
+      const bowDepth = 0.72 * (0.45 + 0.55 * Math.abs(rollCos));
       const macro = [];
       for (let k = 0;k <= 18; k++) {
         const u = muStart + (muEnd - muStart) * (k / 18);
@@ -3690,7 +3690,7 @@ function drawDidinium(ctx, didinium, frame, view) {
     drawBrushes(GIRDLE_P_U);
     {
       const coneBaseU = SHOULDER_U;
-      const tip = transform3(cx, cy, ux, uy, halfLength * 1.04, 0);
+      const tip = transform3(cx, cy, ux, uy, halfLength * 1.14, 0);
       const shL = transform3(cx, cy, ux, uy, halfLength * coneBaseU, halfWidthAt(coneBaseU));
       const shR = transform3(cx, cy, ux, uy, halfLength * coneBaseU, -halfWidthAt(coneBaseU));
       ctx.beginPath();
@@ -3698,17 +3698,17 @@ function drawDidinium(ctx, didinium, frame, view) {
       ctx.lineTo(tip.x, tip.y);
       ctx.lineTo(shR.x, shR.y);
       ctx.closePath();
-      ctx.fillStyle = `hsla(${hue + 2}, 28%, 88%, ${alpha * 0.4})`;
+      ctx.fillStyle = `hsla(${hue + 2}, 28%, 90%, ${alpha * 0.52})`;
       ctx.fill();
-      ctx.strokeStyle = `hsla(${hue + 4}, 34%, 92%, ${alpha * 0.28})`;
-      ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+      ctx.strokeStyle = `hsla(${hue + 4}, 36%, 94%, ${alpha * 0.4})`;
+      ctx.lineWidth = Math.max(0.5, wMax * 0.06);
       ctx.beginPath();
       ctx.moveTo(shL.x, shL.y);
       ctx.lineTo(tip.x, tip.y);
       ctx.lineTo(shR.x, shR.y);
       ctx.stroke();
-      ctx.strokeStyle = `hsla(${hue + 4}, 30%, 93%, ${alpha * 0.22})`;
-      ctx.lineWidth = Math.max(0.35, wMax * 0.03);
+      ctx.strokeStyle = `hsla(${hue + 4}, 32%, 94%, ${alpha * 0.32})`;
+      ctx.lineWidth = Math.max(0.35, wMax * 0.035);
       const NS = 5;
       for (let k = 1;k < NS; k++) {
         const f = k / NS;
@@ -3736,9 +3736,9 @@ function drawDidinium(ctx, didinium, frame, view) {
         ctx.lineTo(tipC.x, tipC.y);
         ctx.stroke();
       }
-      ctx.fillStyle = `hsla(${hue + 4}, 40%, 95%, ${alpha * 0.6})`;
+      ctx.fillStyle = `hsla(${hue + 4}, 42%, 96%, ${alpha * 0.72})`;
       ctx.beginPath();
-      ctx.arc(tip.x, tip.y, Math.max(0.5, wMax * 0.09), 0, TAU2);
+      ctx.arc(tip.x, tip.y, Math.max(0.5, wMax * 0.11), 0, TAU2);
       ctx.fill();
     }
     {
