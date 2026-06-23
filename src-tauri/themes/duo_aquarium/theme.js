@@ -3298,7 +3298,8 @@ var STOPGO_FREQ = 0.5;
 var WANDER_FREQ = 0.17;
 var WANDER_RAD = 0.32;
 var HELIX_LEAN = 0.2;
-var CURVE_RATE = 0.32;
+var CURVE_FREQ = 0.09;
+var CURVE_BIAS = 0.9;
 var WALL_LOOK = 1.4;
 var BACKUP_SECONDS = 0.22;
 var AVOID_SECONDS = 0.6;
@@ -3460,7 +3461,8 @@ function updateDidinium(didinium, frame, view) {
       const turnK = 1 + 2.5 * Math.min(1, wallPressure);
       heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
-    const curve = side * CURVE_RATE * t;
+    const curveEnv = clamp01(noise2D2(nseed ^ 2009178803, t * CURVE_FREQ, 0.29));
+    const curve = side * CURVE_BIAS * curveEnv;
     const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) + curve;
     const spinFreq = Math.max(0, finite(cell.rollRate, 0));
     const spinSeed = seededUnit(nseed, 0, 1821285621);
@@ -3470,11 +3472,22 @@ function updateDidinium(didinium, frame, view) {
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
     const vSigned = reversing ? -vPx * 0.6 : vPx;
-    let nextX = px0 + ux * vSigned * dt;
-    let nextY = py0 + uy * vSigned * dt;
+    const rawX = px0 + ux * vSigned * dt;
+    const rawY = py0 + uy * vSigned * dt;
+    let nextX = rawX;
+    let nextY = rawY;
     const margin = Math.min(L * 0.6, safeWidth * 0.45, safeHeight * 0.45);
     nextX = clamp(nextX, margin, safeWidth - margin);
     nextY = clamp(nextY, margin, safeHeight - margin);
+    if (nextX !== rawX || nextY !== rawY) {
+      let hx = Math.cos(heading);
+      let hy = Math.sin(heading);
+      if (nextX !== rawX)
+        hx = -hx;
+      if (nextY !== rawY)
+        hy = -hy;
+      heading = Math.atan2(hy, hx);
+    }
     const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
     return {
       ...cell,

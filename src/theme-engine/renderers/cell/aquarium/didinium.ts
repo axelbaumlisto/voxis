@@ -29,11 +29,16 @@ const STOPGO_FREQ = 0.5; // Hz-ish; erratic cruise stop/dart modulation (phase-f
 const WANDER_FREQ = 0.17; // slow purposeful heading drift (phase-fn of frame.t)
 const WANDER_RAD = 0.32; // gentle heading drift swing (rad) — was a too-random 0.7
 const HELIX_LEAN = 0.2; // corkscrew lean angle (rad); thin helix, coupled to the axial spin
-const CURVE_RATE = 0.32; // rad/s persistent one-sided turning → the real "leaning to one
-                       // side" spiral search path. Applied as side*CURVE_RATE*t,
-                       // a pure frame.t function (constant within a step) so the
-                       // open-water path stays dt-partition exact while the heading
-                       // sweeps over frames into a wide spiral.
+// One-sided turning BIAS as a BOUNDED slow phase-function of frame.t: a slow
+// noise envelope (0..1) scaled by a max lean angle and the fixed per-cell side.
+// When the envelope is low the cell runs near-straight (directed gait); when it
+// rises it leans to its fixed side (the real "constantly leaning" search) — so
+// the path alternates straight runs and gentle one-sided turns instead of one
+// permanent loop. Bounded → frame-rate independent & dt-partition exact at every
+// t (unlike the old linear-in-t side*CURVE_RATE*t, which grew without bound and
+// made the partition error climb with t).
+const CURVE_FREQ = 0.09; // Hz-ish; how fast the one-sided turning bias varies
+const CURVE_BIAS = 0.9; // max one-sided lean (rad)
 const WALL_LOOK = 1.4; // body-lengths of anticipatory wall lookahead (tank is short)
 const BACKUP_SECONDS = 0.22; // brief reverse jerk that opens the avoiding reaction
 const AVOID_SECONDS = 0.6; // eased duration of the fixed-side back-turn after the reverse
@@ -257,7 +262,8 @@ export function updateDidinium(
     // NOTE: linear-in-t → a 2-step approximation, NOT bit-exact under dt-partition
     // like the bounded phase terms; the dedicated partition test stays on the
     // constant-heading pure-forward open-water cruise.
-    const curve = side * CURVE_RATE * t;
+    const curveEnv = clamp01(noise2D(nseed ^ 0x77c1a2b3, t * CURVE_FREQ, 0.29));
+    const curve = side * CURVE_BIAS * curveEnv;
     const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) + curve;
     // ── thin corkscrew LEAN at the axial SPIN frequency: a small constant-
     // amplitude offset so the velocity traces a tight cone (thin helix, pitch >>
@@ -272,8 +278,10 @@ export function updateDidinium(
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
     const vSigned = reversing ? -vPx * 0.6 : vPx; // brief reverse jerk
-    let nextX = px0 + ux * vSigned * dt;
-    let nextY = py0 + uy * vSigned * dt;
+    const rawX = px0 + ux * vSigned * dt;
+    const rawY = py0 + uy * vSigned * dt;
+    let nextX = rawX;
+    let nextY = rawY;
     // Keep the whole BODY on-canvas: clamp the centroid inset by half a body
     // length (not to 0), so the cell never slides half-off the wall. Wall-only
     // safety net — in open water nextX/Y are far inside, so this is a no-op and
@@ -283,6 +291,19 @@ export function updateDidinium(
     const margin = Math.min(L * 0.6, safeWidth * 0.45, safeHeight * 0.45);
     nextX = clamp(nextX, margin, safeWidth - margin);
     nextY = clamp(nextY, margin, safeHeight - margin);
+    // Billiard REFLECTION on an actual wall hit: when a coordinate is clamped the
+    // wall-normal velocity component would otherwise be silently dropped, making
+    // the cell glide frictionlessly ALONG the wall (rail-glide). Reflect the base
+    // heading off the hit wall(s) so it bounces inward on the next step. Discrete
+    // wall event, gated on a real clamp — open water never clamps, so the pure-
+    // forward dt-partition path is unaffected.
+    if (nextX !== rawX || nextY !== rawY) {
+      let hx = Math.cos(heading);
+      let hy = Math.sin(heading);
+      if (nextX !== rawX) hx = -hx;
+      if (nextY !== rawY) hy = -hy;
+      heading = Math.atan2(hy, hx);
+    }
 
     // beat freq capped so the metachronal girdle shimmer stays < Nyquist.
     const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
