@@ -3363,7 +3363,7 @@ function seedDidinium(count, seed, frame, salt = DIDINIUM_SALT) {
       heading,
       swimSpeed: 0.85 + seededUnit(seed, i, salt ^ 802853537) * 0.3,
       rollPhase: seededUnit(seed, i, salt ^ 1107813911),
-      rollRate: 0.7 + seededUnit(seed, i, salt ^ 348696353) * 0.4,
+      rollRate: 0.6 + seededUnit(seed, i, salt ^ 348696353) * 0.24,
       beatPhase: seededUnit(seed, i, salt ^ 668265263),
       beatRate: 4 + seededUnit(seed, i, salt ^ 1966046297) * 1.5,
       cvPhase: seededUnit(seed, i, salt ^ 1033993285),
@@ -3630,6 +3630,24 @@ function drawDidinium(ctx, didinium, frame, view) {
       drawPolyline4(ctx, ribbon, true);
       ctx.fillStyle = `hsla(${hue - 4}, 30%, 82%, ${alpha * 0.86})`;
       ctx.fill();
+      ctx.save();
+      drawPolyline4(ctx, ribbon, true);
+      ctx.clip();
+      const mnSeed = finiteOr(cell.noiseSeed, 0) | 0;
+      for (let m = 0;m < MN; m += 2) {
+        const c0 = macro[m];
+        const u01 = seededUnit(mnSeed, m, 1545415487);
+        const dark = u01 < 0.5;
+        const jx = (seededUnit(mnSeed, m, 752460107) - 0.5) * halfTh * 1.2;
+        const jy = (seededUnit(mnSeed, m, 2585733948) - 0.5) * halfTh * 1.2;
+        const r = halfTh * (0.4 + 0.5 * seededUnit(mnSeed, m, 348696353));
+        ctx.fillStyle = dark ? `hsla(${hue - 8}, 24%, 68%, ${alpha * 0.4})` : `hsla(${hue}, 32%, 92%, ${alpha * 0.34})`;
+        ctx.beginPath();
+        ctx.arc(c0.x + jx, c0.y + jy, r, 0, TAU2);
+        ctx.fill();
+      }
+      ctx.restore();
+      drawPolyline4(ctx, ribbon, true);
       ctx.strokeStyle = `hsla(${hue - 2}, 34%, 90%, ${alpha * 0.4})`;
       ctx.lineWidth = Math.max(0.4, wMax * 0.04);
       ctx.stroke();

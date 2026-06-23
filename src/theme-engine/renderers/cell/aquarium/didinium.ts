@@ -122,7 +122,7 @@ export function seedDidinium(count: number, seed: number, frame: AquariumFrame, 
       heading,
       swimSpeed: 0.85 + seededUnit(seed, i, salt ^ 0x2fda92a1) * 0.3,
       rollPhase: seededUnit(seed, i, salt ^ 0x4207e617),
-      rollRate: 0.7 + seededUnit(seed, i, salt ^ 0x14c8af21) * 0.4, // axial spin (rev/s) — constantly rotating
+      rollRate: 0.6 + seededUnit(seed, i, salt ^ 0x14c8af21) * 0.24, // axial spin (rev/s) — centred on real Ω≈0.7 rev/s
       beatPhase: seededUnit(seed, i, salt ^ 0x27d4eb2f),
       beatRate: 4.0 + seededUnit(seed, i, salt ^ 0x752f7c59) * 1.5, // pectinelle beat (rendered Hz, capped)
       cvPhase: seededUnit(seed, i, salt ^ 0x3da17c45),
@@ -481,7 +481,30 @@ export function drawDidinium(
       drawPolyline(ctx, ribbon, true);
       ctx.fillStyle = `hsla(${hue - 4}, 30%, 82%, ${alpha * 0.86})`;
       ctx.fill();
+      // MOTTLED chromatin texture (clipped to the C): seeded darker/brighter
+      // blobs along the centerline so it reads as a granular nucleus, not a flat
+      // fill (Berdan DIC shows a mottled C). Deterministic from the cell seed.
+      ctx.save();
+      drawPolyline(ctx, ribbon, true);
+      ctx.clip();
+      const mnSeed = finiteOr(cell.noiseSeed, 0) | 0;
+      for (let m = 0; m < MN; m += 2) {
+        const c0 = macro[m];
+        const u01 = seededUnit(mnSeed, m, 0x5c1d2b3f);
+        const dark = u01 < 0.5;
+        const jx = (seededUnit(mnSeed, m, 0x2cd9a14b) - 0.5) * halfTh * 1.2;
+        const jy = (seededUnit(mnSeed, m, 0x9a1f2b3c) - 0.5) * halfTh * 1.2;
+        const r = halfTh * (0.4 + 0.5 * seededUnit(mnSeed, m, 0x14c8af21));
+        ctx.fillStyle = dark
+          ? `hsla(${hue - 8}, 24%, 68%, ${alpha * 0.4})`
+          : `hsla(${hue}, 32%, 92%, ${alpha * 0.34})`;
+        ctx.beginPath();
+        ctx.arc(c0.x + jx, c0.y + jy, r, 0, TAU);
+        ctx.fill();
+      }
+      ctx.restore();
       // faint brighter rim on the filled body for refractile relief
+      drawPolyline(ctx, ribbon, true);
       ctx.strokeStyle = `hsla(${hue - 2}, 34%, 90%, ${alpha * 0.4})`;
       ctx.lineWidth = Math.max(0.4, wMax * 0.04);
       ctx.stroke();
