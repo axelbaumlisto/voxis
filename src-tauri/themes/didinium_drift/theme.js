@@ -3294,13 +3294,13 @@ var GIRDLE_A_U = 0.46;
 var GIRDLE_P_U = -0.16;
 var SHOULDER_U = 0.6;
 var BRUSH_ROWS = 5;
-var STOPGO_FREQ = 0.42;
-var WANDER_FREQ = 0.31;
-var WANDER_RAD = 0.7;
-var SPIRAL_FREQ = 0.9;
-var SPIRAL_YAW = 0.42;
+var STOPGO_FREQ = 0.5;
+var WANDER_FREQ = 0.17;
+var WANDER_RAD = 0.32;
+var HELIX_LEAN = 0.2;
 var WALL_LOOK = 2;
-var AVOID_SECONDS = 0.7;
+var BACKUP_SECONDS = 0.22;
+var AVOID_SECONDS = 0.6;
 var AVOID_TURN_MIN = 2 * Math.PI / 3;
 var AVOID_TURN_MAX = 5 * Math.PI / 6;
 function didiniumModeView(mode) {
@@ -3440,25 +3440,35 @@ function updateDidinium(didinium, frame, view) {
       avoidTo = heading + side * magnitude;
       avoidProgress = 0;
     }
+    const avoidTotal = BACKUP_SECONDS + AVOID_SECONDS;
+    const backupFrac = BACKUP_SECONDS / avoidTotal;
+    let reversing = false;
     if (avoidProgress < 1) {
-      const next = Math.min(1, avoidProgress + dt / AVOID_SECONDS);
-      const turnK = 6;
-      heading += wrapPi2(avoidTo - heading) * (1 - Math.exp(-turnK * dt));
-      if (next >= 1)
-        heading = avoidTo;
+      const next = Math.min(1, avoidProgress + dt / avoidTotal);
+      if (avoidProgress < backupFrac) {
+        reversing = true;
+      } else {
+        const turnK = 6;
+        heading += wrapPi2(avoidTo - heading) * (1 - Math.exp(-turnK * dt));
+        if (next >= 1)
+          heading = avoidTo;
+      }
       avoidProgress = next;
     } else if (wallPressure > 0.000001) {
       const desired = Math.atan2(Math.sin(heading) + wallAwayY, Math.cos(heading) + wallAwayX);
       const turnK = 1 + 2.5 * Math.min(1, wallPressure);
       heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
-    const yawPhase = seededUnit(nseed, 0, 1821285621) * TAU2;
-    const yaw = Math.sin(TAU2 * t * SPIRAL_FREQ + yawPhase) * SPIRAL_YAW * cruiseEnv;
-    const eh = heading + (wander + yaw) * (0.3 + 0.7 * cruiseEnv);
+    const spinFreq = Math.max(0, finite(cell.rollRate, 0)) * act;
+    const spinSeed = seededUnit(nseed, 0, 1821285621);
+    const spinAng = TAU2 * (spinSeed + spinFreq * t);
+    const lean = Math.sin(spinAng) * HELIX_LEAN * cruiseEnv;
+    const eh = heading + wander * (0.3 + 0.7 * cruiseEnv) + lean;
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
-    let nextX = px0 + ux * vPx * dt;
-    let nextY = py0 + uy * vPx * dt;
+    const vSigned = reversing ? -vPx * 0.6 : vPx;
+    let nextX = px0 + ux * vSigned * dt;
+    let nextY = py0 + uy * vSigned * dt;
     nextX = clamp(nextX, 0, safeWidth);
     nextY = clamp(nextY, 0, safeHeight);
     const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
@@ -4642,8 +4652,8 @@ function mount(container, api) {
       euglenaCount: 0,
       vorticellaCount: 0,
       didiniumCount: 1,
-      didiniumSpeed: 0.9,
-      didiniumSpeedActive: 2.4,
+      didiniumSpeed: 1.7,
+      didiniumSpeedActive: 3.8,
       didiniumScale: 3.2,
       ...userParams
     }

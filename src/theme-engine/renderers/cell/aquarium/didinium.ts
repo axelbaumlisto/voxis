@@ -19,14 +19,19 @@ const GIRDLE_P_U = -0.16; // posterior girdle position (just below mid-body)
 const SHOULDER_U = 0.6; // where the barrel meets the cone snout (short, blunt cone)
 const BRUSH_ROWS = 5; // dorsal brushes (brosse) per girdle
 
-// ── swim constants ──────────────────────────────────────────────────────────
-const STOPGO_FREQ = 0.42; // Hz-ish; erratic cruise stop/dart modulation (phase-fn of frame.t)
-const WANDER_FREQ = 0.31; // heading wander (phase-fn of frame.t)
-const WANDER_RAD = 0.7; // max wander heading swing (rad) at full noise
-const SPIRAL_FREQ = 0.9; // helical swim yaw frequency (phase-fn of frame.t)
-const SPIRAL_YAW = 0.42; // heading-yaw weave amplitude (rad) — snout always leads
+// ── swim constants (grounded in real D. nasutum kinematics) ───────────────────
+// Real cell: U≈11 BL/s (1.3 mm/s), axial spin Ω≈4.5 rad/s (~0.7 rev/s), thin
+// stretched helix (pitch≈10×radius → small helix/lean angle), "constantly
+// rotating and leaning to one side" = a smooth corkscrew coupled to the spin,
+// punctuated by stops + a fixed-side avoiding reaction that BACKS UP first.
+// (bioRxiv 2025.09.12.675801; Jennings 1902; Berdan; cavac/Rosetta)
+const STOPGO_FREQ = 0.5; // Hz-ish; erratic cruise stop/dart modulation (phase-fn of frame.t)
+const WANDER_FREQ = 0.17; // slow purposeful heading drift (phase-fn of frame.t)
+const WANDER_RAD = 0.32; // gentle heading drift swing (rad) — was a too-random 0.7
+const HELIX_LEAN = 0.2; // corkscrew lean angle (rad); thin helix, coupled to the axial spin
 const WALL_LOOK = 2.0; // body-lengths of anticipatory wall lookahead
-const AVOID_SECONDS = 0.7; // eased duration of the "avoiding reaction" back-turn
+const BACKUP_SECONDS = 0.22; // brief reverse jerk that opens the avoiding reaction
+const AVOID_SECONDS = 0.6; // eased duration of the fixed-side back-turn after the reverse
 const AVOID_TURN_MIN = (2 * Math.PI) / 3; // ~120° sharp re-orient
 const AVOID_TURN_MAX = (5 * Math.PI) / 6; // ~150°
 
@@ -213,11 +218,21 @@ export function updateDidinium(
       avoidProgress = 0;
     }
 
+    // The avoiding reaction runs over BACKUP_SECONDS (reverse jerk) + AVOID_SECONDS
+    // (fixed-side back-turn). avoidProgress in [0,1] spans the whole thing; the
+    // first backupFrac is the reverse, then the heading eases to avoidTo.
+    const avoidTotal = BACKUP_SECONDS + AVOID_SECONDS;
+    const backupFrac = BACKUP_SECONDS / avoidTotal;
+    let reversing = false;
     if (avoidProgress < 1) {
-      const next = Math.min(1, avoidProgress + dt / AVOID_SECONDS);
-      const turnK = 6.0; // sharp re-orient
-      heading += wrapPi(avoidTo - heading) * (1 - Math.exp(-turnK * dt));
-      if (next >= 1) heading = avoidTo;
+      const next = Math.min(1, avoidProgress + dt / avoidTotal);
+      if (avoidProgress < backupFrac) {
+        reversing = true; // back up a short distance before turning (Jennings)
+      } else {
+        const turnK = 6.0; // sharp re-orient toward the fixed side
+        heading += wrapPi(avoidTo - heading) * (1 - Math.exp(-turnK * dt));
+        if (next >= 1) heading = avoidTo;
+      }
       avoidProgress = next;
     } else if (wallPressure > 1e-6) {
       // gentle anticipatory bank away before an actual hit (gated near walls only)
@@ -226,20 +241,27 @@ export function updateDidinium(
       heading += wrapPi(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
 
-    // effective swim heading = base + frame.t-phase wander + helical YAW weave.
-    // The yaw makes the snout sweep side-to-side so the PATH corkscrews while the
-    // body always leads snout-first (no sideways crab). Motion is pure-forward
-    // along this heading, so a single 0.24s step == two 0.12s steps at fixed t
-    // (yaw/wander are pure functions of frame.t → constant across the partition).
-    // per-cell yaw phase (so multiple didinia don't weave in lockstep), gated by
-    // cruiseEnv so the snout doesn't wag in place during a near-stop.
-    const yawPhase = seededUnit(nseed, 0, 0x6c8e9cf5) * TAU;
-    const yaw = Math.sin(TAU * t * SPIRAL_FREQ + yawPhase) * SPIRAL_YAW * cruiseEnv;
-    const eh = heading + (wander + yaw) * (0.3 + 0.7 * cruiseEnv);
+    // Effective swim heading = base heading + slow wander + a THIN corkscrew LEAN.
+    // The lean is a small constant-amplitude offset (~11°) rotating at the axial
+    // SPIN frequency, so the velocity vector traces a tight cone around the mean
+    // heading = a real thin helix (pitch>>radius), NOT a fat planar S-wag. It is a
+    // pure function of frame.t (spin freq = rollRate*act is constant within a
+    // frame), so the open-water path stays dt-partition exact; the per-cell phase
+    // keeps the visual roll and the path lean on ONE clock and de-syncs cells.
+    const spinFreq = Math.max(0, finite(cell.rollRate, 0)) * act; // rev/s, same rate as the visual roll
+    // phase seed is a FIXED per-cell constant (NOT the evolving rollPhase state):
+    // the lean must be a pure function of frame.t so the open-water path stays
+    // dt-partition exact. Cells still de-sync via the seed, and the lean shares the
+    // spin frequency so it reads as one coherent corkscrew with the visual roll.
+    const spinSeed = seededUnit(nseed, 0, 0x6c8e9cf5);
+    const spinAng = TAU * (spinSeed + spinFreq * t);
+    const lean = Math.sin(spinAng) * HELIX_LEAN * cruiseEnv;
+    const eh = heading + wander * (0.3 + 0.7 * cruiseEnv) + lean;
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
-    let nextX = px0 + ux * vPx * dt;
-    let nextY = py0 + uy * vPx * dt;
+    const vSigned = reversing ? -vPx * 0.6 : vPx; // brief reverse jerk
+    let nextX = px0 + ux * vSigned * dt;
+    let nextY = py0 + uy * vSigned * dt;
     nextX = clamp(nextX, 0, safeWidth);
     nextY = clamp(nextY, 0, safeHeight);
 

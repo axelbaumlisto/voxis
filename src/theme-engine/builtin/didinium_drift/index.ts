@@ -32,8 +32,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       euglenaCount: 0,
       vorticellaCount: 0,
       didiniumCount: 1,
-      didiniumSpeed: 0.9,         // body-lengths/sec idle cruise (fast swimmer)
-      didiniumSpeedActive: 2.4,   // faster darts while recording/active
+      didiniumSpeed: 1.7,         // body-lengths/sec cruise (real ~11 BL/s; capped so it stays visible in a 320px tank)
+      didiniumSpeedActive: 3.8,   // fast darts while recording/active
       didiniumScale: 3.2,
       ...userParams,
     },
