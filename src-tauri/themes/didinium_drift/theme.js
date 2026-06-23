@@ -3292,7 +3292,7 @@ var DIDINIUM_SALT = 220011530;
 var ASPECT = 1.42;
 var GIRDLE_A_U = 0.46;
 var GIRDLE_P_U = -0.16;
-var SHOULDER_U = 0.54;
+var SHOULDER_U = 0.49;
 var BRUSH_ROWS = 5;
 var STOPGO_FREQ = 0.5;
 var WANDER_FREQ = 0.1;
@@ -3668,7 +3668,7 @@ function drawDidinium(ctx, didinium, frame, view) {
     const drawGirdle = (gu, seatHue, gi) => {
       const hw = halfWidthAt(gu);
       const baseAlong = halfLength * gu;
-      const NT = 96;
+      const NT = 104;
       ctx.lineWidth = Math.max(0.3, wMax * 0.026);
       for (let s = 0;s < NT; s++) {
         const phi = s / NT * TAU2;
@@ -3680,12 +3680,18 @@ function drawDidinium(ctx, didinium, frame, view) {
         const lat = Math.cos(phi) * hw;
         const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
         const wave = 0.5 + 0.5 * Math.sin(TAU2 * beat - phi * 3);
-        const cilLen = hw * (0.05 + 0.03 * wave) * (1 + jit);
+        const cilLen = hw * (0.042 + 0.022 * wave) * (1 + jit);
         const base = transform3(cx, cy, ux, uy, along, lat);
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
         const tip = transform3(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
-        ctx.strokeStyle = `hsla(${seatHue}, 40%, 93%, ${alpha * (0.1 + 0.42 * front)})`;
+        if (s % 2 === 0) {
+          ctx.fillStyle = `hsla(${seatHue}, 34%, 94%, ${alpha * (0.09 + 0.24 * front)})`;
+          ctx.beginPath();
+          ctx.arc(base.x, base.y, Math.max(0.35, wMax * 0.032), 0, TAU2);
+          ctx.fill();
+        }
+        ctx.strokeStyle = `hsla(${seatHue}, 44%, 96%, ${alpha * (0.2 + 0.78 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
@@ -3706,8 +3712,8 @@ function drawDidinium(ctx, didinium, frame, view) {
         const lat = Math.cos(phi) * hw * 0.62;
         const along = halfLength * bu + Math.sin(phi) * hw * 0.34 * 0.62;
         const base = transform3(cx, cy, ux, uy, along, lat);
-        const tip = transform3(cx, cy, ux, uy, along + hw * 0.04, lat + Math.sign(lat || 1) * hw * 0.05);
-        ctx.strokeStyle = `hsla(${hue + 8}, 32%, 90%, ${alpha * 0.26 * front})`;
+        const tip = transform3(cx, cy, ux, uy, along + hw * 0.035, lat + Math.sign(lat || 1) * hw * 0.035);
+        ctx.strokeStyle = `hsla(${hue + 8}, 34%, 92%, ${alpha * 0.42 * front})`;
         ctx.lineWidth = Math.max(0.35, wMax * 0.03);
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
@@ -3720,7 +3726,7 @@ function drawDidinium(ctx, didinium, frame, view) {
     {
       const coneBaseU = SHOULDER_U;
       const tip = transform3(cx, cy, ux, uy, halfLength * 1.02, 0);
-      ctx.strokeStyle = `hsla(${hue + 4}, 26%, 93%, ${alpha * 0.14})`;
+      ctx.strokeStyle = `hsla(${hue + 4}, 20%, 90%, ${alpha * 0.08})`;
       ctx.lineWidth = Math.max(0.3, wMax * 0.025);
       const NS = 4;
       for (let k = 1;k < NS; k++) {
@@ -3742,27 +3748,27 @@ function drawDidinium(ctx, didinium, frame, view) {
           continue;
         const front = clamp01(0.5 + 0.5 * depth);
         const base = transform3(cx, cy, ux, uy, halfLength * coneBaseU, lat);
-        const tipC = transform3(cx, cy, ux, uy, halfLength * (coneBaseU + 0.05), lat + Math.sign(lat || 1) * collarHw * 0.08);
-        ctx.strokeStyle = `hsla(${hue + 6}, 36%, 93%, ${alpha * (0.12 + 0.36 * front)})`;
+        const tipC = transform3(cx, cy, ux, uy, halfLength * (coneBaseU + 0.045), lat + Math.sign(lat || 1) * collarHw * 0.05);
+        ctx.strokeStyle = `hsla(${hue + 6}, 30%, 91%, ${alpha * (0.1 + 0.28 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tipC.x, tipC.y);
         ctx.stroke();
       }
-      ctx.fillStyle = `hsla(${hue + 4}, 34%, 93%, ${alpha * 0.42})`;
+      ctx.fillStyle = `hsla(${hue + 4}, 18%, 88%, ${alpha * 0.17})`;
       ctx.beginPath();
-      ctx.arc(tip.x, tip.y, Math.max(0.4, wMax * 0.06), 0, TAU2);
+      ctx.arc(tip.x, tip.y, Math.max(0.36, wMax * 0.052), 0, TAU2);
       ctx.fill();
     }
     {
       const cvPulse = 0.5 - 0.5 * Math.cos(TAU2 * wrapUnit(finiteOr(cell.cvPhase, 0)));
       const cvR = Math.max(0.5, wMax * (0.13 + 0.06 * cvPulse));
-      const p = transform3(cx, cy, ux, uy, -halfLength * 0.78, 0);
-      ctx.fillStyle = `hsla(${hue + 2}, 30%, 93%, ${alpha * 0.26})`;
+      const p = transform3(cx, cy, ux, uy, -halfLength * 0.86, 0);
+      ctx.fillStyle = `hsla(${hue + 2}, 22%, 90%, ${alpha * 0.22})`;
       ctx.beginPath();
       ctx.arc(p.x, p.y, cvR, 0, TAU2);
       ctx.fill();
-      ctx.strokeStyle = `hsla(${hue + 4}, 42%, 95%, ${alpha * 0.5})`;
+      ctx.strokeStyle = `hsla(${hue + 4}, 32%, 96%, ${alpha * 0.78})`;
       ctx.lineWidth = Math.max(0.4, wMax * 0.04);
       ctx.beginPath();
       ctx.arc(p.x, p.y, cvR, 0, TAU2);

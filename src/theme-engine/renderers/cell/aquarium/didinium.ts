@@ -16,7 +16,7 @@ export const DIDINIUM_SALT = 0x0d1d1c0a;
 const ASPECT = 1.42; // length : width (real D. nasutum is an ELONGATE barrel ~1.4:1, not globular)
 const GIRDLE_A_U = 0.46; // anterior girdle position (shoulder), u ∈ [-1(post), +1(snout)]
 const GIRDLE_P_U = -0.16; // posterior girdle position (just below mid-body)
-const SHOULDER_U = 0.54; // where the barrel meets the cone snout (a real, visible cone)
+const SHOULDER_U = 0.49; // where the barrel meets the cone snout (slightly longer visible cone)
 const BRUSH_ROWS = 5; // dorsal brushes (brosse) per girdle
 
 // ── swim constants (grounded in real D. nasutum kinematics) ───────────────────
@@ -584,7 +584,7 @@ export function drawDidinium(
     const drawGirdle = (gu: number, seatHue: number, gi: number) => {
       const hw = halfWidthAt(gu);
       const baseAlong = halfLength * gu;
-      const NT = 96; // DENSE fine fringe (real pectinelles are numerous close-set cilia)
+      const NT = 104; // DENSE fine fringe (real pectinelles are numerous close-set cilia)
       // NO seat chord line: a bright polyline spanning lat=-hw..+hw read as a
       // straight construction line cutting across the body interior. The girdle is
       // now ONLY the dense comb of short ticks below — a surface fringe, not a
@@ -604,12 +604,18 @@ export function drawDidinium(
         // a few long radial urchin-spikes (long ticks + edge-gating collapsed into
         // spikes). No rim gating — length is small enough everywhere that no tick
         // ever reads as a construction line or a spur.
-        const cilLen = hw * (0.05 + 0.03 * wave) * (1 + jit);
+        const cilLen = hw * (0.042 + 0.022 * wave) * (1 + jit);
         const base = transform(cx, cy, ux, uy, along, lat);
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
         const tip = transform(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
-        ctx.strokeStyle = `hsla(${seatHue}, 40%, 93%, ${alpha * (0.1 + 0.42 * front)})`;
+        if (s % 2 === 0) {
+          ctx.fillStyle = `hsla(${seatHue}, 34%, 94%, ${alpha * (0.09 + 0.24 * front)})`;
+          ctx.beginPath();
+          ctx.arc(base.x, base.y, Math.max(0.35, wMax * 0.032), 0, TAU);
+          ctx.fill();
+        }
+        ctx.strokeStyle = `hsla(${seatHue}, 44%, 96%, ${alpha * (0.2 + 0.78 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
@@ -634,8 +640,8 @@ export function drawDidinium(
         const base = transform(cx, cy, ux, uy, along, lat);
         // tiny tick that stays INSIDE the silhouette (no antenna projecting past
         // the rim): short, mostly along-axis, minimal lateral flare.
-        const tip = transform(cx, cy, ux, uy, along + hw * 0.04, lat + Math.sign(lat || 1) * hw * 0.05);
-        ctx.strokeStyle = `hsla(${hue + 8}, 32%, 90%, ${alpha * 0.26 * front})`;
+        const tip = transform(cx, cy, ux, uy, along + hw * 0.035, lat + Math.sign(lat || 1) * hw * 0.035);
+        ctx.strokeStyle = `hsla(${hue + 8}, 34%, 92%, ${alpha * 0.42 * front})`;
         ctx.lineWidth = Math.max(0.35, wMax * 0.03);
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
@@ -657,7 +663,7 @@ export function drawDidinium(
       // nematodesmal striae: VERY faint SHORT hints near the apex only (not full
       // base->apex lines, which read as straight interior construction lines / a
       // triangulation fan). Just a few short converging ticks just below the tip.
-      ctx.strokeStyle = `hsla(${hue + 4}, 26%, 93%, ${alpha * 0.14})`;
+      ctx.strokeStyle = `hsla(${hue + 4}, 20%, 90%, ${alpha * 0.08})`;
       ctx.lineWidth = Math.max(0.3, wMax * 0.025);
       const NS = 4;
       for (let k = 1; k < NS; k++) {
@@ -683,8 +689,8 @@ export function drawDidinium(
         const base = transform(cx, cy, ux, uy, halfLength * coneBaseU, lat);
         // short collar tick that stays inside the silhouette (minimal flare) so it
         // reads as a wreath, not projecting antennae.
-        const tipC = transform(cx, cy, ux, uy, halfLength * (coneBaseU + 0.05), lat + Math.sign(lat || 1) * collarHw * 0.08);
-        ctx.strokeStyle = `hsla(${hue + 6}, 36%, 93%, ${alpha * (0.12 + 0.36 * front)})`;
+        const tipC = transform(cx, cy, ux, uy, halfLength * (coneBaseU + 0.045), lat + Math.sign(lat || 1) * collarHw * 0.05);
+        ctx.strokeStyle = `hsla(${hue + 6}, 30%, 91%, ${alpha * (0.1 + 0.28 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tipC.x, tipC.y);
@@ -692,9 +698,9 @@ export function drawDidinium(
       }
       // apical pip (closed cytostome): a SMALL soft dot, NOT a bright bead/knob on
       // a stick (that read as a non-biological terminal bead).
-      ctx.fillStyle = `hsla(${hue + 4}, 34%, 93%, ${alpha * 0.42})`;
+      ctx.fillStyle = `hsla(${hue + 4}, 18%, 88%, ${alpha * 0.17})`;
       ctx.beginPath();
-      ctx.arc(tip.x, tip.y, Math.max(0.4, wMax * 0.06), 0, TAU);
+      ctx.arc(tip.x, tip.y, Math.max(0.36, wMax * 0.052), 0, TAU);
       ctx.fill();
     }
 
@@ -702,13 +708,13 @@ export function drawDidinium(
     {
       const cvPulse = 0.5 - 0.5 * Math.cos(TAU * wrapUnit(finiteOr(cell.cvPhase, 0)));
       const cvR = Math.max(0.5, wMax * (0.13 + 0.06 * cvPulse)); // small, ~0.15×
-      const p = transform(cx, cy, ux, uy, -halfLength * 0.78, 0); // inboard
-      ctx.fillStyle = `hsla(${hue + 2}, 30%, 93%, ${alpha * 0.26})`;
+      const p = transform(cx, cy, ux, uy, -halfLength * 0.86, 0); // terminal/posterior
+      ctx.fillStyle = `hsla(${hue + 2}, 22%, 90%, ${alpha * 0.22})`;
       ctx.beginPath();
       ctx.arc(p.x, p.y, cvR, 0, TAU);
       ctx.fill();
       // refractile ring (annulus), not a solid eye
-      ctx.strokeStyle = `hsla(${hue + 4}, 42%, 95%, ${alpha * 0.5})`;
+      ctx.strokeStyle = `hsla(${hue + 4}, 32%, 96%, ${alpha * 0.78})`;
       ctx.lineWidth = Math.max(0.4, wMax * 0.04);
       ctx.beginPath();
       ctx.arc(p.x, p.y, cvR, 0, TAU);
