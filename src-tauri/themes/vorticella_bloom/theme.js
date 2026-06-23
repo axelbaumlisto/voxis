@@ -3289,7 +3289,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
 
 // src/theme-engine/renderers/cell/aquarium/didinium.ts
 var DIDINIUM_SALT = 220011530;
-var ASPECT = 1.28;
+var ASPECT = 1.42;
 var GIRDLE_A_U = 0.46;
 var GIRDLE_P_U = -0.16;
 var SHOULDER_U = 0.54;
@@ -3329,11 +3329,11 @@ function bodyShape2(u) {
     return wShoulder * Math.pow(1 - q, 1.25);
   }
   const t = (u - SHOULDER_U) / (-1 - SHOULDER_U);
-  const tp = 0.42;
+  const tp = 0.45;
   if (t <= tp) {
     return 0.72 + 0.28 * Math.sin(t / tp * (Math.PI / 2));
   }
-  return 0.46 + 0.54 * Math.cos((t - tp) / (1 - tp) * (Math.PI / 2));
+  return 0.62 + 0.38 * Math.cos((t - tp) / (1 - tp) * (Math.PI / 2));
 }
 var BODY_SHAPE_MAX2 = (() => {
   let m = 0;
@@ -3641,7 +3641,7 @@ function drawDidinium(ctx, didinium, frame, view) {
       ctx.lineWidth = Math.max(2.2, wMax * 0.62);
       ctx.stroke();
       drawPolyline4(ctx, ribbon, true);
-      ctx.fillStyle = `hsla(${hue - 6}, 14%, 80%, ${alpha * 0.86})`;
+      ctx.fillStyle = `hsla(${hue - 8}, 6%, 78%, ${alpha * 0.88})`;
       ctx.fill();
       ctx.save();
       drawPolyline4(ctx, ribbon, true);
@@ -3654,7 +3654,7 @@ function drawDidinium(ctx, didinium, frame, view) {
         const jx = (seededUnit(mnSeed, m, 752460107) - 0.5) * halfTh * 1.2;
         const jy = (seededUnit(mnSeed, m, 2585733948) - 0.5) * halfTh * 1.2;
         const r = halfTh * (0.4 + 0.5 * seededUnit(mnSeed, m, 348696353));
-        ctx.fillStyle = dark ? `hsla(${hue - 8}, 16%, 58%, ${alpha * 0.52})` : `hsla(${hue}, 16%, 88%, ${alpha * 0.44})`;
+        ctx.fillStyle = dark ? `hsla(${hue - 8}, 8%, 56%, ${alpha * 0.5})` : `hsla(${hue}, 8%, 86%, ${alpha * 0.42})`;
         ctx.beginPath();
         ctx.arc(c0.x + jx, c0.y + jy, r, 0, TAU2);
         ctx.fill();
@@ -3745,7 +3745,7 @@ function drawDidinium(ctx, didinium, frame, view) {
     drawBrushes(GIRDLE_P_U);
     {
       const coneBaseU = SHOULDER_U;
-      const tip = transform3(cx, cy, ux, uy, halfLength * 1.14, 0);
+      const tip = transform3(cx, cy, ux, uy, halfLength * 1.02, 0);
       const shL = transform3(cx, cy, ux, uy, halfLength * coneBaseU, halfWidthAt(coneBaseU));
       const shR = transform3(cx, cy, ux, uy, halfLength * coneBaseU, -halfWidthAt(coneBaseU));
       ctx.beginPath();
@@ -3791,9 +3791,9 @@ function drawDidinium(ctx, didinium, frame, view) {
         ctx.lineTo(tipC.x, tipC.y);
         ctx.stroke();
       }
-      ctx.fillStyle = `hsla(${hue + 4}, 42%, 96%, ${alpha * 0.72})`;
+      ctx.fillStyle = `hsla(${hue + 4}, 34%, 93%, ${alpha * 0.42})`;
       ctx.beginPath();
-      ctx.arc(tip.x, tip.y, Math.max(0.5, wMax * 0.11), 0, TAU2);
+      ctx.arc(tip.x, tip.y, Math.max(0.4, wMax * 0.06), 0, TAU2);
       ctx.fill();
     }
     {

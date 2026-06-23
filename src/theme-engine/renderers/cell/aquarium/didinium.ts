@@ -13,7 +13,7 @@ export const DIDINIUM_SALT = 0x0d1d1c0a;
 // (pectinelles): anterior at the shoulder, posterior just below mid-body. A
 // conical apical snout (cytostome cone, closed at rest). Horseshoe macronucleus.
 // Terminal contractile vacuole at the aboral (posterior) pole.
-const ASPECT = 1.28; // length : width (real D. nasutum ~1.25-1.3:1)
+const ASPECT = 1.42; // length : width (real D. nasutum is an ELONGATE barrel ~1.4:1, not globular)
 const GIRDLE_A_U = 0.46; // anterior girdle position (shoulder), u ∈ [-1(post), +1(snout)]
 const GIRDLE_P_U = -0.16; // posterior girdle position (just below mid-body)
 const SHOULDER_U = 0.54; // where the barrel meets the cone snout (a real, visible cone)
@@ -100,11 +100,14 @@ function bodyShape(u: number): number {
   // BROADLY ROUNDED posterior (real D. nasutum is plump/egg-shaped, not a flat
   // lemon). Two smooth cosine lobes meet C1-continuously at the belly peak.
   const t = (u - SHOULDER_U) / (-1 - SHOULDER_U); // 0 at shoulder, 1 at aboral pole
-  const tp = 0.42; // widest point, just below mid
+  const tp = 0.45; // widest point, just below mid
   if (t <= tp) {
     return 0.72 + 0.28 * Math.sin((t / tp) * (Math.PI / 2)); // shoulder 0.72 -> belly 1.0
   }
-  return 0.46 + 0.54 * Math.cos(((t - tp) / (1 - tp)) * (Math.PI / 2)); // belly 1.0 -> broadly rounded pole 0.46
+  // belly 1.0 -> BROADLY ROUNDED aboral pole: a high floor (0.62) + a gentle
+  // quarter-cosine keeps the posterior a full hemispherical dome (NOT a pointed
+  // lemon tip). Real D. nasutum has a bluntly rounded aboral end.
+  return 0.62 + 0.38 * Math.cos(((t - tp) / (1 - tp)) * (Math.PI / 2));
 }
 
 const BODY_SHAPE_MAX = (() => {
@@ -527,10 +530,10 @@ export function drawDidinium(
       ctx.lineWidth = Math.max(2.2, wMax * 0.62);
       ctx.stroke();
       // DOMINANT solid filled C — the single headline DIC interior landmark.
-      // Near-NEUTRAL grey (low saturation) so it reads as solid chromatin, not a
-      // glowing cyan fluid vacuole.
+      // NEUTRAL grey (very low saturation) so it reads as solid chromatin, NOT a
+      // glowing cyan fluid lens.
       drawPolyline(ctx, ribbon, true);
-      ctx.fillStyle = `hsla(${hue - 6}, 14%, 80%, ${alpha * 0.86})`;
+      ctx.fillStyle = `hsla(${hue - 8}, 6%, 78%, ${alpha * 0.88})`;
       ctx.fill();
       // MOTTLED chromatin texture (clipped to the C): seeded darker/brighter
       // blobs along the centerline so it reads as a granular nucleus, not a flat
@@ -547,8 +550,8 @@ export function drawDidinium(
         const jy = (seededUnit(mnSeed, m, 0x9a1f2b3c) - 0.5) * halfTh * 1.2;
         const r = halfTh * (0.4 + 0.5 * seededUnit(mnSeed, m, 0x14c8af21));
         ctx.fillStyle = dark
-          ? `hsla(${hue - 8}, 16%, 58%, ${alpha * 0.52})`
-          : `hsla(${hue}, 16%, 88%, ${alpha * 0.44})`;
+          ? `hsla(${hue - 8}, 8%, 56%, ${alpha * 0.5})`
+          : `hsla(${hue}, 8%, 86%, ${alpha * 0.42})`;
         ctx.beginPath();
         ctx.arc(c0.x + jx, c0.y + jy, r, 0, TAU);
         ctx.fill();
@@ -642,7 +645,7 @@ export function drawDidinium(
     // ── apical cone snout (cytostome cone), filled, protruding, closed at rest ──
     {
       const coneBaseU = SHOULDER_U;
-      const tip = transform(cx, cy, ux, uy, halfLength * 1.14, 0); // taller, dramatic proboscis
+      const tip = transform(cx, cy, ux, uy, halfLength * 1.02, 0); // blunt shouldered cone (not a thin spike)
       const shL = transform(cx, cy, ux, uy, halfLength * coneBaseU, halfWidthAt(coneBaseU));
       const shR = transform(cx, cy, ux, uy, halfLength * coneBaseU, -halfWidthAt(coneBaseU));
       // filled cone with the body glow so it reads as a solid protrusion
@@ -695,10 +698,11 @@ export function drawDidinium(
         ctx.lineTo(tipC.x, tipC.y);
         ctx.stroke();
       }
-      // bright apical pip (closed cytostome), not a gaping mouth
-      ctx.fillStyle = `hsla(${hue + 4}, 42%, 96%, ${alpha * 0.72})`;
+      // apical pip (closed cytostome): a SMALL soft dot, NOT a bright bead/knob on
+      // a stick (that read as a non-biological terminal bead).
+      ctx.fillStyle = `hsla(${hue + 4}, 34%, 93%, ${alpha * 0.42})`;
       ctx.beginPath();
-      ctx.arc(tip.x, tip.y, Math.max(0.5, wMax * 0.11), 0, TAU);
+      ctx.arc(tip.x, tip.y, Math.max(0.4, wMax * 0.06), 0, TAU);
       ctx.fill();
     }
 
