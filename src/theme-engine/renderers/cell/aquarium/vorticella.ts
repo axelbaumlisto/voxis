@@ -395,8 +395,8 @@ export function drawVorticella(
     // RECORDING feeding-posture envelope (smooth, set in updateVorticella): eases the
     // peristome wider, brightens the wreath/body, and adds a little sway while recording.
     const vEnv = clamp01(finiteOr(cell.voiceEnv, 0));
-    const glow = 1 + 0.20 * vEnv; // body + crown brighten gently while recording (darkfield scatter swell)
-    const dir = baseDir + lean + sway * (1 + 0.5 * vEnv) + wobble + nod;
+    const glow = 1 + 0.45 * vEnv; // body + crown brighten while recording (darkfield scatter swell)
+    const dir = baseDir + lean + sway * (1 + 0.7 * vEnv) + wobble + nod;
     const ux = Math.cos(dir), uy = Math.sin(dir);
     const nx = -uy, ny = ux;
     const anchorX = finite(cell.anchorX, 0);
@@ -417,7 +417,7 @@ export function drawVorticella(
     const neck = geom.bellCenter;           // base of the bell (top of stalk)
     const rimC = { x: neck.x + ux * drawBellH + nx * (periOff + skewAmt) * D, y: neck.y + uy * drawBellH + ny * (periOff + skewAmt) * D }; // peristome centre, off-axis + follows the body skew
     // peristome closes as it contracts; while recording it eases a little WIDER (feeding).
-    const open = (1 - 0.7 * s) * (1 + 0.14 * vEnv);
+    const open = (1 - 0.7 * s) * (1 + 0.22 * vEnv);
     // everted collar: a rolled rim only slightly wider than the shoulder (~1.28D body-max
     // 1.16D -> ~10% overhang) so it reads CONTINUOUS with the bell, not a floating saucer.
     const Rrim = 0.80 * D * open; // everted peristomial collar clearly overhangs the body shoulder
@@ -527,6 +527,21 @@ export function drawVorticella(
       right.push(bodyPoint(drawBellH * u, hwB * lobeR * (1 + asymA)));
     }
     const outline = [...left, ...right.reverse()];
+    // RECORDING AURA: a soft cool halo blooms behind the bell while recording (the clearest
+    // glance-legible "recording is on" tell). Smooth via voiceEnv -> no pop. Drawn first so
+    // the organism sits on top of it.
+    if (vEnv > 0.01) {
+      const bellMid = bodyPoint(drawBellH * 0.5, 0);
+      const haloR = drawBellH * (0.95 + 0.35 * vEnv);
+      const halo = ctx.createRadialGradient(bellMid.x, bellMid.y, drawBellH * 0.2, bellMid.x, bellMid.y, haloR);
+      halo.addColorStop(0, `hsla(196, 60%, 86%, ${alpha * 0.42 * vEnv})`);
+      halo.addColorStop(0.5, `hsla(198, 55%, 80%, ${alpha * 0.20 * vEnv})`);
+      halo.addColorStop(1, `hsla(200, 50%, 78%, 0)`);
+      ctx.beginPath();
+      ctx.arc(bellMid.x, bellMid.y, haloR, 0, TAU);
+      ctx.fillStyle = halo;
+      ctx.fill();
+    }
     drawPolyline(ctx, outline, true);
     // living cytoplasm: a vertical gradient (denser/greener endoplasm toward the neck,
     // paler hyaline ectoplasm toward the rim) instead of a flat gray fill.

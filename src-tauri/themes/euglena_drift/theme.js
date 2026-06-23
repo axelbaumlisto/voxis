@@ -2955,8 +2955,8 @@ function drawVorticella(ctx, vorticella, frame, view) {
     const nod = 0.035 * Math.sin(TAU2 * 0.06 * tt + seededUnit(aSeed, 6, 119) * TAU2);
     const breathMod = (u) => 1 + 0.035 * Math.sin(TAU2 * 0.075 * tt + bp0 + 2.4 * u) + 0.025 * Math.sin(TAU2 * 0.115 * tt + bp1);
     const vEnv = clamp01(finiteOr(cell.voiceEnv, 0));
-    const glow = 1 + 0.2 * vEnv;
-    const dir = baseDir + lean + sway * (1 + 0.5 * vEnv) + wobble + nod;
+    const glow = 1 + 0.45 * vEnv;
+    const dir = baseDir + lean + sway * (1 + 0.7 * vEnv) + wobble + nod;
     const ux = Math.cos(dir), uy = Math.sin(dir);
     const nx = -uy, ny = ux;
     const anchorX = finite(cell.anchorX, 0);
@@ -2976,7 +2976,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
     });
     const neck = geom.bellCenter;
     const rimC = { x: neck.x + ux * drawBellH + nx * (periOff + skewAmt) * D, y: neck.y + uy * drawBellH + ny * (periOff + skewAmt) * D };
-    const open = (1 - 0.7 * s) * (1 + 0.14 * vEnv);
+    const open = (1 - 0.7 * s) * (1 + 0.22 * vEnv);
     const Rrim = 0.8 * D * open;
     const crownFade = smoothstep2(clamp01((open - 0.3) / 0.18));
     const bodyPoint = (along, lateral) => {
@@ -3052,6 +3052,18 @@ function drawVorticella(ctx, vorticella, frame, view) {
       right.push(bodyPoint(drawBellH * u, hwB * lobeR * (1 + asymA)));
     }
     const outline = [...left, ...right.reverse()];
+    if (vEnv > 0.01) {
+      const bellMid = bodyPoint(drawBellH * 0.5, 0);
+      const haloR = drawBellH * (0.95 + 0.35 * vEnv);
+      const halo = ctx.createRadialGradient(bellMid.x, bellMid.y, drawBellH * 0.2, bellMid.x, bellMid.y, haloR);
+      halo.addColorStop(0, `hsla(196, 60%, 86%, ${alpha * 0.42 * vEnv})`);
+      halo.addColorStop(0.5, `hsla(198, 55%, 80%, ${alpha * 0.2 * vEnv})`);
+      halo.addColorStop(1, `hsla(200, 50%, 78%, 0)`);
+      ctx.beginPath();
+      ctx.arc(bellMid.x, bellMid.y, haloR, 0, TAU2);
+      ctx.fillStyle = halo;
+      ctx.fill();
+    }
     drawPolyline3(ctx, outline, true);
     const cyto = ctx.createLinearGradient(rimC.x, rimC.y, neck.x, neck.y);
     cyto.addColorStop(0, `hsla(200, 16%, 94%, ${alpha * 0.62 * glow})`);
