@@ -505,6 +505,32 @@ export function createCellRenderer(
         drawAquariumBackground(ctx, aquarium, aquariumFrame, params);
       }
 
+      // Predator-contact prey response: when Didinium is latched to the hero, the
+      // Paramecium should visibly recoil/defend. Keep it tiny and smooth (calm
+      // overlay), but move the rendered hero a few px away from the predator so the
+      // attack does not read as a passive kiss.
+      if (params.enableHero !== false && aquarium?.didinium?.length) {
+        let rx = 0, ry = 0;
+        for (const d of aquarium.didinium) {
+          const contact = Math.max(0, d.contactTimer ?? 0);
+          if (contact <= 0) continue;
+          const dx = cx - d.x;
+          const dy = cy - d.y;
+          const dl = Math.hypot(dx, dy) || 1;
+          const env = Math.min(1, contact / 0.35);
+          const kick = Math.min(5, baseR * 0.16) * env;
+          rx += (dx / dl) * kick;
+          ry += (dy / dl) * kick;
+        }
+        if (rx !== 0 || ry !== 0) {
+          cx += rx;
+          cy += ry;
+          for (let i = 0; i < smoothedPoints.length; i++) {
+            smoothedPoints[i] = [smoothedPoints[i][0] + rx, smoothedPoints[i][1] + ry];
+          }
+        }
+      }
+
       const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
 
       // Smooth via Catmull-Rom (4 segments per span for smoothness)
