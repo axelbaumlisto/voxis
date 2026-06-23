@@ -4,7 +4,7 @@
  *
  * Paramecium hero + Euglena swimmer + Vorticella stalked zooid + Didinium predator.
  * Diatoms stay off here to keep the overlay readable; this theme is about the four
- * named hero organisms sharing the same 320×160 pond.
+ * named hero organisms sharing the same 340×170 pond.
  */
 import { createCellRenderer } from "../../renderers/cell";
 import type { ThemeApi, ThemeInstance } from "../../contract";
@@ -44,9 +44,9 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
 
       // predator swimmer: Didinium
       didiniumCount: 1,
-      didiniumSpeed: 0.65,
-      didiniumSpeedActive: 1.15,
-      didiniumScale: 2.1,
+      didiniumSpeed: 0.7,
+      didiniumSpeedActive: 1.2,
+      didiniumScale: 2.45,
 
       ...userParams,
     },

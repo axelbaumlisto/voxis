@@ -4823,9 +4823,9 @@ function mount(container, api) {
       vorticellaScale: 2.1,
       vorticellaContractRate: 1,
       didiniumCount: 1,
-      didiniumSpeed: 0.65,
-      didiniumSpeedActive: 1.15,
-      didiniumScale: 2.1,
+      didiniumSpeed: 0.7,
+      didiniumSpeedActive: 1.2,
+      didiniumScale: 2.45,
       ...userParams
     }
   });
