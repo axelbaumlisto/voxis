@@ -779,7 +779,7 @@ describe("aquarium layer Phase 2 diatoms", () => {
           migrateState: 0,
           attach: 1,
           migrateTimer: 3.4162731326185165,
-          migrateInterval: 12,
+          migrateInterval: 540,
           migrateTargetX: 38.4,
           migrateCount: 0,
         },
@@ -1673,8 +1673,9 @@ describe("aquarium layer Phase 4 vorticella", () => {
     const startX = cell[0].anchorX;
     let sawDetached = false;
     let maxDx = 0;
-    for (let i = 0; i < 900; i++) { // ~90s
-      cell = updateVorticella(cell, frame({ dt: 0.1, width: 240, height: 80, activity: 0.1 }), view);
+    // migration is now RARE (mean ~900s), so run a long horizon (~50min) to catch one event
+    for (let i = 0; i < 6000; i++) {
+      cell = updateVorticella(cell, frame({ dt: 0.5, width: 240, height: 80, activity: 0.1 }), view);
       if ((cell[0].attach ?? 1) < 0.5) sawDetached = true;
       maxDx = Math.max(maxDx, Math.abs((cell[0].anchorX ?? startX) - startX));
       expect(cell[0].anchorX).toBeGreaterThanOrEqual(0);
@@ -1685,7 +1686,7 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(maxDx).toBeGreaterThan(20);       // it relocated to a meaningfully different spot
     // deterministic: a fresh identical run lands at the same place
     let again = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
-    for (let i = 0; i < 900; i++) again = updateVorticella(again, frame({ dt: 0.1, width: 240, height: 80, activity: 0.1 }), view);
+    for (let i = 0; i < 6000; i++) again = updateVorticella(again, frame({ dt: 0.5, width: 240, height: 80, activity: 0.1 }), view);
     expect(again[0].anchorX).toBe(cell[0].anchorX);
   });
 

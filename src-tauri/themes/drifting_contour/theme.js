@@ -2670,7 +2670,7 @@ var MIG_SWIM = 16;
 var MIG_ATTACH = 0.7;
 function drawMigrateInterval(cellSeed, migrateCount) {
   const u = Math.max(0.0001, seededUnit(cellSeed, migrateCount, 1831565813));
-  return clamp(-Math.log(u) * 20, 12, 50);
+  return clamp(-Math.log(u) * 900, 540, 2400);
 }
 function vorticellaLegAmount(leg, timer) {
   if (leg === 1) {
@@ -2856,7 +2856,7 @@ function updateVorticella(vorticella, frame, view) {
     let migrateState = Math.max(0, Math.min(3, Math.floor(finiteOr(cell.migrateState, 0))));
     let attach = clamp01(finiteOr(cell.attach, 1));
     let migrateTimer = Math.max(0, finiteOr(cell.migrateTimer, 0));
-    let migrateInterval = Math.max(8, finiteOr(cell.migrateInterval, 30));
+    let migrateInterval = Math.max(8, finiteOr(cell.migrateInterval, 900));
     let migrateTargetX = finiteOr(cell.migrateTargetX, finite(cell.anchorX, 0));
     let migrateCount = Math.max(0, Math.floor(finiteOr(cell.migrateCount, 0)));
     let anchorX = finite(cell.anchorX, 0);
