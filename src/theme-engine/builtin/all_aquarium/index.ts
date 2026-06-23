@@ -30,11 +30,11 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // free swimmer: Euglena
       euglenaCount: 1,
       euglenaSpeed: 0.12,
-      euglenaSpeedActive: 0.48,
+      euglenaSpeedActive: 0.3,
       euglenaScale: 2.2,
       euglenaGravitaxis: 0.08,
       euglenaPhototaxis: 0.28,
-      euglenaRotDiffusion: 0.04,
+      euglenaRotDiffusion: 0,
 
       // sessile stalked organism: Vorticella
       vorticellaCount: 1,
