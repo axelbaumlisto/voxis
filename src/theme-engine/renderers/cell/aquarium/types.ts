@@ -50,6 +50,13 @@ export interface AquariumParamsView {
     readonly scale: number;
     readonly alongFrac: number;
   };
+  readonly didinium: {
+    readonly count: number;
+    readonly speed: number;
+    readonly speedActive: number;
+    readonly scale: number;
+    readonly hueOffset: number;
+  };
 }
 
 export interface AquariumSeedPoint {
@@ -132,9 +139,34 @@ export interface VorticellaState extends AquariumSeedPoint {
   readonly migrateCount?: number;
 }
 
+export interface DidiniumState extends AquariumSeedPoint {
+  readonly heading: number;
+  readonly swimSpeed: number;
+  /** Axial spin phase (cycles) — the body rotates as it swims. */
+  readonly rollPhase: number;
+  readonly rollRate: number;
+  /** Pectinelle (ciliary girdle) metachronal beat phase (cycles). */
+  readonly beatPhase: number;
+  readonly beatRate: number;
+  /** Terminal contractile-vacuole pulse phase (cycles). */
+  readonly cvPhase?: number;
+  readonly cvRate?: number;
+  /** Birth-stable avoiding-reaction handedness (Jennings: always the same side). */
+  readonly turnSide?: number;
+  /** Discrete avoiding-reaction event index (deterministic). */
+  readonly avoidIndex?: number;
+  readonly avoidFrom?: number;
+  readonly avoidTo?: number;
+  /** Progress [0,1] through the current eased avoiding-reaction back-turn. */
+  readonly avoidProgress?: number;
+  /** Stable per-cell deterministic noise key. */
+  readonly noiseSeed?: number;
+}
+
 export interface AquariumLayerState {
   readonly seed: number;
   readonly diatoms: readonly DiatomState[];
   readonly euglena: readonly EuglenaState[];
   readonly vorticella: readonly VorticellaState[];
+  readonly didinium: readonly DidiniumState[];
 }

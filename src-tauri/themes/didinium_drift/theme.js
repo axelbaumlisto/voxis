@@ -4545,7 +4545,7 @@ function createCellRenderer(container, opts) {
     }
   };
 }
-// src/theme-engine/builtin/vorticella_bloom/index.ts
+// src/theme-engine/builtin/didinium_drift/index.ts
 function mount(container, api) {
   const userParams = api.params && typeof api.params === "object" ? api.params : {};
   const renderer = createCellRenderer(container, {
@@ -4555,14 +4555,16 @@ function mount(container, api) {
     params: {
       enableHero: false,
       enableAquarium: true,
-      aquariumSeed: 3,
+      aquariumSeed: 5,
       aquariumAlpha: 0.92,
       aquariumActivityBoost: 0.6,
       diatomCount: 0,
       euglenaCount: 0,
-      vorticellaCount: 1,
-      vorticellaContractRate: 1.2,
-      vorticellaScale: 1.8,
+      vorticellaCount: 0,
+      didiniumCount: 1,
+      didiniumSpeed: 0.35,
+      didiniumSpeedActive: 1.1,
+      didiniumScale: 3.2,
       ...userParams
     }
   });

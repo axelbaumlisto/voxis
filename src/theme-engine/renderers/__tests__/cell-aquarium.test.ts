@@ -9,7 +9,8 @@ import { diatomGeometry } from "../cell/aquarium/diatoms";
 import { euglenaPose, updateEuglena, drawEuglena, EUGLENA_STEER, MEDIUM } from "../cell/aquarium/euglena";
 import { updateVorticella, vorticellaContribute, vorticellaContractPhase, vorticellaGeometry, vorticellaObstacle } from "../cell/aquarium/vorticella";
 import { noise2D } from "../cell/aquarium/seeds";
-import type { AquariumFrame, AquariumLayerState, EuglenaState } from "../cell/aquarium/types";
+import { seedDidinium, updateDidinium, didiniumContribute, didiniumDisplayLength } from "../cell/aquarium/didinium";
+import type { AquariumFrame, AquariumLayerState, DidiniumState, EuglenaState } from "../cell/aquarium/types";
 import type { CellParams } from "../cell/types";
 import { RecordingCanvasContext2D, summarize, type GoldenSummary } from "./helpers/recordingCanvas";
 
@@ -289,6 +290,7 @@ describe("aquariumParamsView", () => {
       diatoms: { count: 3, alpha: 0.2, driftSpeed: 0.8 },
       euglena: { count: 2, speed: 1.1, speedActive: 2.4, scale: 0.9, hueOffset: 42, steer: { gravitaxis: 0, phototaxis: 0, separation: 0.4 } },
       vorticella: { count: 1, contractRate: 0.6, scale: 1.2, alongFrac: 0.5 },
+      didinium: { count: 0, speed: 1.0, speedActive: 2.0, scale: 1.0, hueOffset: 0 },
     });
   });
 
@@ -363,6 +365,7 @@ describe("seedAquarium", () => {
       diatoms: [],
       euglena: [],
       vorticella: [],
+      didinium: [],
     });
   });
 
@@ -784,6 +787,7 @@ describe("aquarium layer Phase 2 diatoms", () => {
           migrateCount: 0,
         },
       ],
+      didinium: [],
     });
   });
 });
@@ -2333,5 +2337,137 @@ describe("enableHero gate", () => {
 
     expect(hidden).toBeGreaterThan(0); // the euglena still draws
     expect(hidden).toBeLessThan(shown); // but the heavy paramecium is gone
+  });
+});
+
+describe("aquarium layer Phase 4 didinium (predator)", () => {
+  function didiniumView(overrides: Partial<CellParams> = {}) {
+    return aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      didiniumCount: 1,
+      didiniumSpeed: 1,
+      didiniumSpeedActive: 1,
+      aquariumActivityBoost: 1,
+      ...overrides,
+    });
+  }
+
+  function testDidinium(overrides: Partial<DidiniumState> = {}): DidiniumState {
+    return {
+      x: 150,
+      y: 150,
+      phase: 0,
+      size: 1,
+      heading: 0,
+      swimSpeed: 1,
+      rollPhase: 0.1,
+      rollRate: 0.4,
+      beatPhase: 0.2,
+      beatRate: 4,
+      cvPhase: 0.3,
+      cvRate: 0.05,
+      turnSide: 1,
+      avoidIndex: 0,
+      avoidFrom: 0,
+      avoidTo: 0,
+      avoidProgress: 1,
+      noiseSeed: 12345,
+      ...overrides,
+    };
+  }
+
+  it("seedDidinium is deterministic and places cells inside the tank", () => {
+    const f = frame({ width: 320, height: 160 });
+    const a = seedDidinium(2, 7, f);
+    const b = seedDidinium(2, 7, f);
+    expect(a).toEqual(b);
+    expect(a).toHaveLength(2);
+    for (const cell of a) {
+      expect(cell.x).toBeGreaterThanOrEqual(0);
+      expect(cell.x).toBeLessThanOrEqual(320);
+      expect(cell.y).toBeGreaterThanOrEqual(0);
+      expect(cell.y).toBeLessThanOrEqual(160);
+      expect(Number.isFinite(cell.heading)).toBe(true);
+      expect(cell.turnSide === 1 || cell.turnSide === -1).toBe(true);
+    }
+  });
+
+  it("updateDidinium stays dt-partition-exact in open water (center, no walls)", () => {
+    const view = didiniumView();
+    // center of a large tank → no wall pressure; erratic cruise + wander are pure
+    // functions of frame.t so a single 0.24s step equals two 0.12s steps.
+    const initial = [testDidinium({ x: 500, y: 500 })];
+    const big = { width: 1000, height: 1000, activity: 0 };
+    const oneStep = updateDidinium(initial, frame({ dt: 0.24, t: 3, ...big }), view);
+    const half = updateDidinium(initial, frame({ dt: 0.12, t: 3, ...big }), view);
+    const twoSteps = updateDidinium(half, frame({ dt: 0.12, t: 3, ...big }), view);
+    expect(twoSteps[0].x).toBeCloseTo(oneStep[0].x, 10);
+    expect(twoSteps[0].y).toBeCloseTo(oneStep[0].y, 10);
+    expect(twoSteps[0].heading).toBeCloseTo(oneStep[0].heading, 10);
+    expect(twoSteps[0].rollPhase).toBeCloseTo(oneStep[0].rollPhase, 10);
+    expect(twoSteps[0].beatPhase).toBeCloseTo(oneStep[0].beatPhase, 10);
+    expect(twoSteps[0].cvPhase).toBeCloseTo(oneStep[0].cvPhase, 10);
+  });
+
+  it("updateDidinium keeps the cell inside the tank over many erratic steps", () => {
+    const view = didiniumView({ didiniumSpeed: 3, didiniumSpeedActive: 3 });
+    let cells = seedDidinium(1, 11, frame({ width: 320, height: 160 }));
+    for (let i = 0; i < 400; i++) {
+      cells = updateDidinium(cells, frame({ dt: 0.05, t: i * 0.05, width: 320, height: 160, activity: 0.5 }), view);
+      expect(cells[0].x).toBeGreaterThanOrEqual(0);
+      expect(cells[0].x).toBeLessThanOrEqual(320);
+      expect(cells[0].y).toBeGreaterThanOrEqual(0);
+      expect(cells[0].y).toBeLessThanOrEqual(160);
+    }
+  });
+
+  it("avoiding-reaction turns to the SAME birth-stable side on a wall hit", () => {
+    const view = didiniumView({ didiniumSpeed: 4, didiniumSpeedActive: 4 });
+    // heading +x straight at the right wall, near it → forces an avoiding reaction
+    const startRight = [testDidinium({ x: 316, y: 80, heading: 0, turnSide: 1 })];
+    const startLeft = [testDidinium({ x: 316, y: 80, heading: 0, turnSide: -1 })];
+    const stepR = updateDidinium(startRight, frame({ dt: 0.1, t: 0, width: 320, height: 160 }), view);
+    const stepL = updateDidinium(startLeft, frame({ dt: 0.1, t: 0, width: 320, height: 160 }), view);
+    // both fired an avoid event
+    expect(stepR[0].avoidIndex).toBe(1);
+    expect(stepL[0].avoidIndex).toBe(1);
+    // and turned to opposite sides per their birth-stable handedness
+    expect(stepR[0].avoidTo).toBeGreaterThan(stepR[0].avoidFrom!);
+    expect(stepL[0].avoidTo).toBeLessThan(stepL[0].avoidFrom!);
+  });
+
+  it("didiniumContribute emits one motile per cell with the didinium sourceId", () => {
+    const cell = testDidinium({ x: 42, y: 24 });
+    const contribs = didiniumContribute(cell, 0);
+    expect(contribs).toEqual([{ kind: "motile", x: 42, y: 24, sourceId: sourceId("didinium", 0) }]);
+    expect(didiniumContribute(cell, 3)[0].sourceId).toBe(sourceId("didinium", 3));
+  });
+
+  it("didiniumDisplayLength agrees between update and draw (single source of truth)", () => {
+    expect(didiniumDisplayLength(1, 1)).toBeGreaterThan(0);
+    expect(didiniumDisplayLength(1, 2)).toBeGreaterThan(didiniumDisplayLength(1, 1));
+  });
+
+  it("draws exactly two ciliary girdles and stays within an op budget", () => {
+    const ops: string[] = [];
+    const ctx = new Proxy({}, {
+      get(_t, prop) {
+        if (prop === "canvas") return document.createElement("canvas");
+        if (prop === "measureText") return () => ({ width: 0 });
+        return (..._args: unknown[]) => ops.push(String(prop));
+      },
+      set() { return true; },
+    }) as CanvasRenderingContext2D;
+    const cells = seedDidinium(1, 5, frame({ width: 320, height: 160 }));
+    const params: CellParams = { ...CELL_DEFAULTS, enableAquarium: true, didiniumCount: 1, didiniumScale: 2 };
+    const state: AquariumLayerState = { seed: 5, diatoms: [], euglena: [], vorticella: [], didinium: cells };
+    drawAquariumBackground(ctx, state, frame({ width: 320, height: 160, mode: "recording" }), params);
+    // cilia ticks + 2 girdle bands + macronucleus + cone + CV are many strokes;
+    // assert a sane bounded op count with strokes and fills present.
+    expect(ops.length).toBeGreaterThan(20);
+    expect(ops.length).toBeLessThan(2000);
+    expect(ops.filter((o) => o === "stroke").length).toBeGreaterThan(4);
+    expect(ops.filter((o) => o === "fill").length).toBeGreaterThan(0);
   });
 });

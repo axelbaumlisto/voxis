@@ -113,6 +113,11 @@ export const CELL_DEFAULTS: CellParams = {
   vorticellaContractRate: 1.0,
   vorticellaScale: 1.0,
   vorticellaAlongFrac: 0.5,
+  didiniumCount: 0,
+  didiniumSpeed: 1.0,
+  didiniumSpeedActive: 2.0,
+  didiniumScale: 1.0,
+  didiniumHueOffset: 0,
   // H4 ambient flow field: OFF by default (dark-launch). flowStrength folds the
   // body-size^2 doublet length scale so the render path passes raw swim speed.
   enableFlowField: false,

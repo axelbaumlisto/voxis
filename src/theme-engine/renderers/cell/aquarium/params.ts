@@ -57,5 +57,12 @@ export function aquariumParamsView(params: CellParams): AquariumParamsView {
       scale: nonNegative(params.vorticellaScale, 1.0),
       alongFrac: Math.min(1, Math.max(0, finiteOr(params.vorticellaAlongFrac, 0.5))),
     },
+    didinium: {
+      count: nonNegativeInt(params.didiniumCount, 0),
+      speed: nonNegative(params.didiniumSpeed, 1.0),
+      speedActive: nonNegative(params.didiniumSpeedActive, 2.0),
+      scale: nonNegative(params.didiniumScale, 1.0),
+      hueOffset: finiteOr(params.didiniumHueOffset, 0),
+    },
   };
 }

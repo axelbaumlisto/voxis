@@ -458,6 +458,16 @@ export interface CellParams {
   vorticellaContractRate?: number;
   /** Vorticella size scalar. */
   vorticellaScale?: number;
+  /** Number of didinium (predator ciliate) companions. Default 0 = none. */
+  didiniumCount?: number;
+  /** Didinium idle swim speed (body-lengths/sec). Default 1.0. */
+  didiniumSpeed?: number;
+  /** Didinium active swim speed (body-lengths/sec). Default 2.0. */
+  didiniumSpeedActive?: number;
+  /** Didinium size scalar. Default 1.0. */
+  didiniumScale?: number;
+  /** Didinium palette offset from its cool darkfield base hue (degrees). Default 0. */
+  didiniumHueOffset?: number;
   /** H4 (OPT, default off): advect ambient motes by the body's dipolar wake so a
    * swimming cell visibly drags the surrounding fluid. */
   enableFlowField?: boolean;
