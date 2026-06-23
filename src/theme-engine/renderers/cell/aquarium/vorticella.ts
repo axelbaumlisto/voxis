@@ -68,8 +68,10 @@ const MIG_ATTACH = 0.7; // s to regrow the stalk at the new spot
 
 /** Deterministic rare interval (s) a zooid stays anchored before migrating as a telotroch. */
 function drawMigrateInterval(cellSeed: number, migrateCount: number): number {
+  // a settled zooid only rarely detaches and swims off (no real disturbance in this scene).
+  // ~45x rarer than before: mean ~900s, range ~10-40 min, so it mostly just sits and feeds.
   const u = Math.max(1e-4, seededUnit(cellSeed, migrateCount, 0x6d2b79f5));
-  return clamp(-Math.log(u) * 20, 12, 50);
+  return clamp(-Math.log(u) * 900, 540, 2400);
 }
 
 /** Contraction amount s in [0,1] from the absolute-time leg/timer state. */
@@ -284,7 +286,7 @@ export function updateVorticella(
     let migrateState = Math.max(0, Math.min(3, Math.floor(finiteOr(cell.migrateState, 0))));
     let attach = clamp01(finiteOr(cell.attach, 1));
     let migrateTimer = Math.max(0, finiteOr(cell.migrateTimer, 0));
-    let migrateInterval = Math.max(8, finiteOr(cell.migrateInterval, 30));
+    let migrateInterval = Math.max(8, finiteOr(cell.migrateInterval, 900));
     let migrateTargetX = finiteOr(cell.migrateTargetX, finite(cell.anchorX, 0));
     let migrateCount = Math.max(0, Math.floor(finiteOr(cell.migrateCount, 0)));
     let anchorX = finite(cell.anchorX, 0);
