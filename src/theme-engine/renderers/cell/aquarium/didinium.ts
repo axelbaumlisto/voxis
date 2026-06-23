@@ -38,9 +38,12 @@ const HELIX_LEAN = 0.2; // corkscrew lean angle (rad); thin helix, coupled to th
 // t (unlike the old linear-in-t side*CURVE_RATE*t, which grew without bound and
 // made the partition error climb with t).
 const CURVE_FREQ = 0.09; // Hz-ish; how fast the one-sided turning bias varies
-const CURVE_BIAS = 0.9; // max one-sided lean (rad)
-const WALL_LOOK = 2.6; // body-lengths of anticipatory wall lookahead: look FAR ahead so the
-                     // cell banks away early and never reaches the clamp (no edge-hugging)
+const CURVE_BIAS = 0.32; // max one-sided lean (rad) — gentle, so it does not by itself loop
+const WALL_LOOK = 0.7; // body-lengths of anticipatory wall lookahead. MUST be small enough
+                     // that the tank centre is genuine open water (zero wall pressure):
+                     // the tank is only ~2.5 body-heights tall, so a large look made
+                     // pressure>0 everywhere → the avoiding reaction re-fired forever and
+                     // the cell circled the perimeter. Small look = bank only when close.
 const BACKUP_SECONDS = 0.22; // brief reverse jerk that opens the avoiding reaction
 const AVOID_SECONDS = 0.6; // eased duration of the fixed-side back-turn after the reverse
 const AVOID_TURN_MIN = (2 * Math.PI) / 3; // ~120° sharp re-orient
@@ -225,7 +228,9 @@ export function updateDidinium(
     // wall) so the cell smoothly turns BEFORE it ever reaches the clamp — no edge
     // hugging and no hard billiard flip. Turn AWAY from the wall (toward the
     // inward normal) on the fixed per-cell side, not a blind fixed magnitude.
-    const hitWall = wallPressure > 0.45 && avoidProgress >= 1;
+    // with the small look, single-wall pressure maxes ~0.15 at the clamp; trigger
+    // the eased Jennings turn just before contact (the clamp branch is the backstop).
+    const hitWall = wallPressure > 0.12 && avoidProgress >= 1;
     if (hitWall) {
       avoidIndex += 1;
       const magU = noise2D(nseed ^ 0x2f31a7d5, avoidIndex, 0.71);

@@ -3299,8 +3299,8 @@ var WANDER_FREQ = 0.17;
 var WANDER_RAD = 0.32;
 var HELIX_LEAN = 0.2;
 var CURVE_FREQ = 0.09;
-var CURVE_BIAS = 0.9;
-var WALL_LOOK = 2.6;
+var CURVE_BIAS = 0.32;
+var WALL_LOOK = 0.7;
 var BACKUP_SECONDS = 0.22;
 var AVOID_SECONDS = 0.6;
 var AVOID_TURN_MIN = 2 * Math.PI / 3;
@@ -3431,7 +3431,7 @@ function updateDidinium(didinium, frame, view) {
     let avoidTo = finiteOr(cell.avoidTo, heading);
     let avoidProgress = clamp01(finiteOr(cell.avoidProgress, 1));
     const side = finiteOr(cell.turnSide, 1) < 0 ? -1 : 1;
-    const hitWall = wallPressure > 0.45 && avoidProgress >= 1;
+    const hitWall = wallPressure > 0.12 && avoidProgress >= 1;
     if (hitWall) {
       avoidIndex += 1;
       const magU = noise2D2(nseed ^ 791783381, avoidIndex, 0.71);
