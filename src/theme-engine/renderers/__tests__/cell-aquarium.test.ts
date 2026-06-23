@@ -2451,9 +2451,11 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
 
   it("draws exactly two ciliary girdles and stays within an op budget", () => {
     const ops: string[] = [];
+    const gradient = { addColorStop: () => ops.push("addColorStop") };
     const ctx = new Proxy({}, {
       get(_t, prop) {
         if (prop === "canvas") return document.createElement("canvas");
+        if (prop === "createRadialGradient" || prop === "createLinearGradient") return () => { ops.push(String(prop)); return gradient; };
         if (prop === "measureText") return () => ({ width: 0 });
         return (..._args: unknown[]) => ops.push(String(prop));
       },

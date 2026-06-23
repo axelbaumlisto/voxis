@@ -17,12 +17,13 @@ const ASPECT = 1.35; // length : width
 const GIRDLE_A_U = 0.46; // anterior girdle position (shoulder), u ∈ [-1(post), +1(snout)]
 const GIRDLE_P_U = -0.16; // posterior girdle position (just below mid-body)
 const SHOULDER_U = 0.52; // where the barrel meets the cone snout
-const BRUSH_ROWS = 5; // dorsal brushes (brosse) per girdle
 
 // ── swim constants ──────────────────────────────────────────────────────────
 const STOPGO_FREQ = 0.42; // Hz-ish; erratic cruise stop/dart modulation (phase-fn of frame.t)
-const WANDER_FREQ = 0.21; // slow heading wander (phase-fn of frame.t)
-const WANDER_RAD = 0.5; // max wander heading swing (rad) at full noise
+const WANDER_FREQ = 0.31; // heading wander (phase-fn of frame.t)
+const WANDER_RAD = 0.7; // max wander heading swing (rad) at full noise
+const SPIRAL_FREQ = 0.9; // helical swim path frequency (phase-fn of frame.t)
+const SPIRAL_RAD = 0.45; // lateral helical excursion as a fraction of body length
 const WALL_LOOK = 2.0; // body-lengths of anticipatory wall lookahead
 const AVOID_SECONDS = 0.7; // eased duration of the "avoiding reaction" back-turn
 const AVOID_TURN_MIN = (2 * Math.PI) / 3; // ~120° sharp re-orient
@@ -106,7 +107,7 @@ export function seedDidinium(count: number, seed: number, frame: AquariumFrame, 
       heading,
       swimSpeed: 0.85 + seededUnit(seed, i, salt ^ 0x2fda92a1) * 0.3,
       rollPhase: seededUnit(seed, i, salt ^ 0x4207e617),
-      rollRate: 0.35 + seededUnit(seed, i, salt ^ 0x14c8af21) * 0.25, // axial spin (rev/s)
+      rollRate: 0.7 + seededUnit(seed, i, salt ^ 0x14c8af21) * 0.4, // axial spin (rev/s) — constantly rotating
       beatPhase: seededUnit(seed, i, salt ^ 0x27d4eb2f),
       beatRate: 4.0 + seededUnit(seed, i, salt ^ 0x752f7c59) * 1.5, // pectinelle beat (rendered Hz, capped)
       cvPhase: seededUnit(seed, i, salt ^ 0x3da17c45),
@@ -166,7 +167,7 @@ export function updateDidinium(
     // dependent) → dt-partition exact at fixed frame.t. noise raised to a power
     // makes most of the time fast with occasional near-stops.
     const stopgo = noise2D(nseed ^ 0x53705f00, t * STOPGO_FREQ, 0.13);
-    const cruiseEnv = 0.18 + 0.82 * Math.pow(stopgo, 2.0); // ∈ [0.18,1], biased fast
+    const cruiseEnv = 0.05 + 0.95 * Math.pow(stopgo, 2.2); // near-full stops + fast darts
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L * cruiseEnv;
 
     // ── slow heading wander as a PHASE-FUNCTION of absolute frame.t (NOT an
@@ -222,8 +223,16 @@ export function updateDidinium(
     const eh = heading + wander;
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
-    let nextX = px0 + ux * vPx * dt;
-    let nextY = py0 + uy * vPx * dt;
+    // ── helical/spiral swim: a lateral drift that reverses cyclically, so the
+    // path corkscrews instead of running straight (Didinium's signature). The
+    // lateral velocity is a pure function of frame.t (cos), so integrating it as
+    // a velocity keeps dt-partition exact: ∫ over [t,t+dt] is taken at the step's
+    // fixed t (consistent with the cruise term). nx,ny is the heading normal.
+    const spiralVLat = Math.cos(TAU * t * SPIRAL_FREQ) * SPIRAL_RAD * L; // px/s lateral
+    const nx = -uy;
+    const ny = ux;
+    let nextX = px0 + (ux * vPx + nx * spiralVLat) * dt;
+    let nextY = py0 + (uy * vPx + ny * spiralVLat) * dt;
     nextX = clamp(nextX, 0, safeWidth);
     nextY = clamp(nextY, 0, safeHeight);
 
@@ -236,6 +245,8 @@ export function updateDidinium(
       y: nextY,
       phase: heading,
       heading,
+      // axial roll synchronised with the helical path so the girdles visibly
+      // sweep as the body corkscrews (faster than before for a clear rotation read).
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + Math.max(0, finite(cell.rollRate, 0)) * act * dt),
       beatPhase: wrapUnit(finiteOr(cell.beatPhase, 0) + beatEff * dt),
       cvPhase: wrapUnit(finiteOr(cell.cvPhase, 0) + Math.max(0, finiteOr(cell.cvRate, 0)) * act * dt),
@@ -297,12 +308,12 @@ export function drawDidinium(
     const roll = wrapUnit(finite(cell.rollPhase, 0));
     const rollAng = roll * TAU;
     const rollCos = Math.cos(rollAng);
-    const widthMul = 0.9 + 0.1 * Math.abs(rollCos); // near-circular cross-section
+    const widthMul = 0.78 + 0.22 * Math.abs(rollCos); // stronger axial-roll foreshortening
 
     const halfWidthAt = (u: number): number => wMax * widthMul * normHalfWidth(u);
 
     // ── body outline (closed barrel + cone snout), cosine-clustered samples ──
-    const SAMP = 30;
+    const SAMP = 46;
     const upper: { x: number; y: number }[] = [];
     const lower: { x: number; y: number }[] = [];
     for (let i = 0; i <= SAMP; i++) {
@@ -313,143 +324,163 @@ export function drawDidinium(
     }
     const outline = [...upper, ...lower.reverse()];
 
-    // ── body fill: faint luminous cool glow (more TRANSPARENT than Vorticella) ──
+    // ── body: LUMINOUS cool blue-white granule-scattering glow (darkfield) ──
+    // A radial gradient inside the clipped outline makes the whole zooid glow
+    // edge-to-edge instead of a flat grey card. Brightest mid-body, easing out.
+    ctx.save();
     drawPolyline(ctx, outline, true);
-    ctx.fillStyle = `hsla(${hue}, 30%, 80%, ${alpha * 0.34})`;
-    ctx.fill();
-    // dim scattering rim
-    ctx.strokeStyle = `hsla(${hue}, 36%, 88%, ${alpha * 0.5})`;
-    ctx.lineWidth = Math.max(0.6, wMax * 0.1);
-    ctx.stroke();
+    ctx.clip();
+    const glowR = Math.max(1, halfLength * 1.05);
+    const grad = ctx.createRadialGradient(cx, cy, glowR * 0.1, cx, cy, glowR);
+    grad.addColorStop(0, `hsla(${hue}, 26%, 92%, ${alpha * 0.66})`);
+    grad.addColorStop(0.62, `hsla(${hue + 2}, 30%, 84%, ${alpha * 0.5})`);
+    grad.addColorStop(1, `hsla(${hue + 4}, 34%, 74%, ${alpha * 0.16})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
 
-    // faint granular endoplasm stipple (sparse, birth-stable) so the body is not
-    // a flat wash — but kept light to preserve transparency.
+    // dense two-layer granular endoplasm stipple (coarse + fine), birth-stable,
+    // so the body scatters like packed cytoplasm (clipped to the outline).
     const gSeed = finiteOr(cell.noiseSeed, 0) | 0;
-    const gCount = Math.round(clamp(L * 1.4, 16, 64));
-    ctx.fillStyle = `hsla(${hue}, 26%, 86%, ${alpha * 0.16})`;
+    const gCount = Math.round(clamp(L * 4, 40, 150));
+    ctx.fillStyle = `hsla(${hue}, 24%, 90%, ${alpha * 0.30})`;
     for (let g = 0; g < gCount; g++) {
-      const gu = (seededUnit(gSeed, g, 0x51bd0e77) * 2 - 1) * 0.86;
-      const gs = (seededUnit(gSeed, g, 0x9a1f2b3c) * 2 - 1) * 0.8;
+      const gu = (seededUnit(gSeed, g, 0x51bd0e77) * 2 - 1) * 0.9;
+      const gs = (seededUnit(gSeed, g, 0x9a1f2b3c) * 2 - 1) * 0.92;
       const hw = halfWidthAt(gu);
       const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
-      const r = 0.4 + seededUnit(gSeed, g, 0x2cd9a14b) * 0.7;
+      const r = 0.5 + seededUnit(gSeed, g, 0x2cd9a14b) * 0.9;
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, TAU);
       ctx.fill();
     }
+    const gCount2 = Math.round(clamp(L * 2.5, 24, 96));
+    ctx.fillStyle = `hsla(${hue + 4}, 20%, 94%, ${alpha * 0.14})`;
+    for (let g = 0; g < gCount2; g++) {
+      const gu = (seededUnit(gSeed, g, 0x3da17c45) * 2 - 1) * 0.9;
+      const gs = (seededUnit(gSeed, g, 0x59e2b7a3) * 2 - 1) * 0.92;
+      const hw = halfWidthAt(gu);
+      const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
+      const r = 0.3 + seededUnit(gSeed, g, 0x14c8af21) * 0.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
 
-    // ── horseshoe / sausage macronucleus (cool band, curved along the body) ──
+    // dim scattering rim (interior > rim, darkfield)
+    drawPolyline(ctx, outline, true);
+    ctx.strokeStyle = `hsla(${hue}, 34%, 90%, ${alpha * 0.4})`;
+    ctx.lineWidth = Math.max(0.6, wMax * 0.08);
+    ctx.stroke();
+
+    // ── bold horseshoe / sausage macronucleus (cool band, deep C-bow) ──
     {
-      const muStart = -0.5;
-      const muEnd = 0.2;
+      const muStart = -0.55;
+      const muEnd = 0.35; // spans ~0.6L
       const macro: { x: number; y: number }[] = [];
-      for (let k = 0; k <= 14; k++) {
-        const u = muStart + (muEnd - muStart) * (k / 14);
-        const bow = Math.sin((k / 14) * Math.PI) * 0.42; // horseshoe bow toward one side
+      for (let k = 0; k <= 18; k++) {
+        const u = muStart + (muEnd - muStart) * (k / 18);
+        const bow = Math.sin((k / 18) * Math.PI) * 0.6; // deeper horseshoe bow
         const lat = bow * halfWidthAt(u) * rollCos;
         macro.push(transform(cx, cy, ux, uy, halfLength * u, lat));
       }
-      ctx.strokeStyle = `hsla(${hue - 4}, 22%, 84%, ${alpha * 0.62})`;
-      ctx.lineWidth = Math.max(0.8, wMax * 0.22);
+      // soft underglow
+      ctx.strokeStyle = `hsla(${hue - 2}, 20%, 88%, ${alpha * 0.34})`;
+      ctx.lineWidth = Math.max(1.4, wMax * 0.4);
+      drawPolyline(ctx, macro, false);
+      ctx.stroke();
+      // bright core
+      ctx.strokeStyle = `hsla(${hue - 4}, 24%, 86%, ${alpha * 0.7})`;
+      ctx.lineWidth = Math.max(0.9, wMax * 0.22);
       drawPolyline(ctx, macro, false);
       ctx.stroke();
     }
 
-    // ── two transverse pectinelle girdles (the brightest darkfield feature) ──
-    // Each girdle is a band of short radial cilia ticks around the body cross-
-    // section at that u. Depth-shaded under roll: near side bright, far side dim.
+    // ── two TRANSVERSE pectinelle girdles = bright encircling ciliary rings ──
+    // Each girdle is a full hoop (0..2π) around the body cross-section, projected
+    // as a thin ellipse (wide along the body normal, foreshortened along-axis).
+    // Many SHORT radial cilia ticks fringe it; depth-shaded by roll (near bright /
+    // far dim) so the ring visibly sweeps as the body rotates. Metachronal wave
+    // runs around the ring. NO forward sweep — ticks are radial (not blades).
     const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
-    const drawGirdle = (gu: number) => {
+    const RING_TILT = 0.34; // along-axis foreshortening of the projected ring
+    const drawGirdle = (gu: number, seatHue: number) => {
       const hw = halfWidthAt(gu);
       const baseAlong = halfLength * gu;
-      const ticks = Math.max(8, Math.round(hw * 1.6));
-      for (let s = 0; s <= ticks; s++) {
-        // parametrize around the ring: theta is the roll angle of each tick
-        const theta = (s / ticks) * Math.PI - Math.PI / 2; // -90°..+90° (the visible silhouette span)
-        const lat = Math.sin(theta) * hw;
-        // depth: front (near) when cos(theta+rollAng) > 0
-        const depth = Math.cos(theta + rollAng); // [-1,1], 1 = nearest the viewer
-        const front = 0.5 + 0.5 * depth;
-        // metachronal beat travels around the ring
-        const wave = 0.5 + 0.5 * Math.sin(TAU * beat - theta * 2.2);
-        const cilLen = hw * (0.32 + 0.26 * wave);
-        const base = transform(cx, cy, ux, uy, baseAlong, lat);
-        // cilia tick points slightly outward + forward (toward the snout) — beating
-        const tipAlong = baseAlong + cilLen * 0.35;
-        const tipLat = lat + Math.sign(lat || 1) * cilLen * 0.5;
-        const tip = transform(cx, cy, ux, uy, tipAlong, tipLat);
-        ctx.strokeStyle = `hsla(${hue + 6}, 44%, 90%, ${alpha * (0.2 + 0.7 * front)})`;
-        ctx.lineWidth = Math.max(0.5, wMax * 0.07);
-        ctx.beginPath();
-        ctx.moveTo(base.x, base.y);
-        ctx.lineTo(tip.x, tip.y);
-        ctx.stroke();
+      const NT = 40;
+      // faint elliptical seat ring first
+      const seat: { x: number; y: number }[] = [];
+      for (let s = 0; s <= NT; s++) {
+        const phi = (s / NT) * TAU;
+        const lat = Math.cos(phi) * hw;
+        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
+        seat.push(transform(cx, cy, ux, uy, along, lat));
       }
-      // a faint band line marking the girdle seat
-      const band: { x: number; y: number }[] = [];
-      for (let s = 0; s <= 12; s++) {
-        const theta = (s / 12) * Math.PI - Math.PI / 2;
-        band.push(transform(cx, cy, ux, uy, baseAlong, Math.sin(theta) * hw));
-      }
-      ctx.strokeStyle = `hsla(${hue + 4}, 40%, 92%, ${alpha * 0.4})`;
+      ctx.strokeStyle = `hsla(${seatHue}, 38%, 92%, ${alpha * 0.34})`;
       ctx.lineWidth = Math.max(0.4, wMax * 0.05);
-      drawPolyline(ctx, band, false);
+      drawPolyline(ctx, seat, false);
       ctx.stroke();
-    };
-    drawGirdle(GIRDLE_A_U);
-    drawGirdle(GIRDLE_P_U);
-
-    // ── dorsal brushes (brosse): short tufts on the dorsal side below each girdle ──
-    const dorsalSign = rollCos >= 0 ? 1 : -1; // dorsal side faces the viewer w/ roll
-    const drawBrushes = (gu: number) => {
-      const bu = gu - 0.1; // just below the girdle
-      const hw = halfWidthAt(bu);
-      for (let r = 0; r < BRUSH_ROWS; r++) {
-        const along = halfLength * (bu - r * 0.03);
-        const lat = dorsalSign * hw * 0.7;
+      // radial cilia fringe
+      ctx.lineWidth = Math.max(0.45, wMax * 0.05);
+      for (let s = 0; s < NT; s++) {
+        const phi = (s / NT) * TAU;
+        const lat = Math.cos(phi) * hw;
+        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
+        const depth = Math.cos(phi + rollAng); // 1 = nearest viewer
+        const front = 0.5 + 0.5 * depth;
+        const wave = 0.5 + 0.5 * Math.sin(TAU * beat - phi * 3.0); // metachronal
+        const cilLen = hw * (0.12 + 0.08 * wave); // SHORT ticks (not blades)
+        // outward radial direction of this ring point (in screen space)
         const base = transform(cx, cy, ux, uy, along, lat);
-        const tip = transform(cx, cy, ux, uy, along + hw * 0.12, lat + dorsalSign * hw * 0.28);
-        ctx.strokeStyle = `hsla(${hue + 8}, 38%, 88%, ${alpha * 0.3})`;
-        ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+        const outLat = Math.cos(phi);
+        const outAlong = Math.sin(phi) * RING_TILT;
+        const tip = transform(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
+        ctx.strokeStyle = `hsla(${seatHue + 4}, 46%, 93%, ${alpha * (0.14 + 0.66 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
         ctx.stroke();
       }
     };
-    drawBrushes(GIRDLE_A_U);
-    drawBrushes(GIRDLE_P_U);
+    drawGirdle(GIRDLE_A_U, hue + 6);
+    drawGirdle(GIRDLE_P_U, hue + 6);
 
-    // ── apical cone snout (cytostome cone), tip closed at rest ──
+    // ── apical cone snout (cytostome cone), filled, protruding, closed at rest ──
     {
-      const tip = transform(cx, cy, ux, uy, halfLength * 1.0, 0);
-      const shL = transform(cx, cy, ux, uy, halfLength * SHOULDER_U, halfWidthAt(SHOULDER_U));
-      const shR = transform(cx, cy, ux, uy, halfLength * SHOULDER_U, -halfWidthAt(SHOULDER_U));
-      ctx.strokeStyle = `hsla(${hue + 2}, 34%, 88%, ${alpha * 0.5})`;
-      ctx.lineWidth = Math.max(0.5, wMax * 0.07);
+      const coneBaseU = SHOULDER_U;
+      const tip = transform(cx, cy, ux, uy, halfLength * 1.04, 0);
+      const shL = transform(cx, cy, ux, uy, halfLength * coneBaseU, halfWidthAt(coneBaseU));
+      const shR = transform(cx, cy, ux, uy, halfLength * coneBaseU, -halfWidthAt(coneBaseU));
+      // filled cone with the body glow so it reads as a solid protrusion
       ctx.beginPath();
       ctx.moveTo(shL.x, shL.y);
       ctx.lineTo(tip.x, tip.y);
       ctx.lineTo(shR.x, shR.y);
+      ctx.closePath();
+      ctx.fillStyle = `hsla(${hue + 2}, 28%, 88%, ${alpha * 0.4})`;
+      ctx.fill();
+      ctx.strokeStyle = `hsla(${hue + 4}, 36%, 92%, ${alpha * 0.55})`;
+      ctx.lineWidth = Math.max(0.5, wMax * 0.06);
       ctx.stroke();
-      // faint apical dot (closed cytostome), not a gaping mouth
-      ctx.fillStyle = `hsla(${hue}, 30%, 80%, ${alpha * 0.4})`;
+      // bright apical pip (closed cytostome), not a gaping mouth
+      ctx.fillStyle = `hsla(${hue + 4}, 40%, 95%, ${alpha * 0.6})`;
       ctx.beginPath();
-      ctx.arc(tip.x, tip.y, Math.max(0.5, wMax * 0.1), 0, TAU);
+      ctx.arc(tip.x, tip.y, Math.max(0.5, wMax * 0.09), 0, TAU);
       ctx.fill();
     }
 
-    // ── terminal contractile vacuole at the aboral (posterior) pole ──
+    // ── terminal contractile vacuole at the aboral (posterior) pole, refractile ──
     {
       const cvPulse = 0.5 - 0.5 * Math.cos(TAU * wrapUnit(finiteOr(cell.cvPhase, 0)));
-      const cvR = Math.max(0.6, wMax * (0.24 + 0.14 * cvPulse));
-      const p = transform(cx, cy, ux, uy, -halfLength * 0.86, 0);
-      ctx.fillStyle = `hsla(${hue + 2}, 32%, 92%, ${alpha * 0.42})`;
+      const cvR = Math.max(0.5, wMax * (0.13 + 0.06 * cvPulse)); // small, ~0.15×
+      const p = transform(cx, cy, ux, uy, -halfLength * 0.78, 0); // inboard
+      ctx.fillStyle = `hsla(${hue + 2}, 30%, 93%, ${alpha * 0.26})`;
       ctx.beginPath();
       ctx.arc(p.x, p.y, cvR, 0, TAU);
       ctx.fill();
-      ctx.strokeStyle = `hsla(${hue + 4}, 40%, 94%, ${alpha * 0.5})`;
-      ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+      // refractile ring (annulus), not a solid eye
+      ctx.strokeStyle = `hsla(${hue + 4}, 42%, 95%, ${alpha * 0.5})`;
+      ctx.lineWidth = Math.max(0.4, wMax * 0.04);
       ctx.beginPath();
       ctx.arc(p.x, p.y, cvR, 0, TAU);
       ctx.stroke();

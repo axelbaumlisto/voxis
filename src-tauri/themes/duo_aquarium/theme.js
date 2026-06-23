@@ -3293,10 +3293,11 @@ var ASPECT = 1.35;
 var GIRDLE_A_U = 0.46;
 var GIRDLE_P_U = -0.16;
 var SHOULDER_U = 0.52;
-var BRUSH_ROWS = 5;
 var STOPGO_FREQ = 0.42;
-var WANDER_FREQ = 0.21;
-var WANDER_RAD = 0.5;
+var WANDER_FREQ = 0.31;
+var WANDER_RAD = 0.7;
+var SPIRAL_FREQ = 0.9;
+var SPIRAL_RAD = 0.45;
 var WALL_LOOK = 2;
 var AVOID_SECONDS = 0.7;
 var AVOID_TURN_MIN = 2 * Math.PI / 3;
@@ -3357,7 +3358,7 @@ function seedDidinium(count, seed, frame, salt = DIDINIUM_SALT) {
       heading,
       swimSpeed: 0.85 + seededUnit(seed, i, salt ^ 802853537) * 0.3,
       rollPhase: seededUnit(seed, i, salt ^ 1107813911),
-      rollRate: 0.35 + seededUnit(seed, i, salt ^ 348696353) * 0.25,
+      rollRate: 0.7 + seededUnit(seed, i, salt ^ 348696353) * 0.4,
       beatPhase: seededUnit(seed, i, salt ^ 668265263),
       beatRate: 4 + seededUnit(seed, i, salt ^ 1966046297) * 1.5,
       cvPhase: seededUnit(seed, i, salt ^ 1033993285),
@@ -3398,7 +3399,7 @@ function updateDidinium(didinium, frame, view) {
     const px0 = finite(cell.x, 0);
     const py0 = finite(cell.y, 0);
     const stopgo = noise2D2(nseed ^ 1399873280, t * STOPGO_FREQ, 0.13);
-    const cruiseEnv = 0.18 + 0.82 * Math.pow(stopgo, 2);
+    const cruiseEnv = 0.05 + 0.95 * Math.pow(stopgo, 2.2);
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L * cruiseEnv;
     const wander = (noise2D2(nseed ^ 447978529, t * WANDER_FREQ, 0.61) * 2 - 1) * WANDER_RAD;
     let wallPressure = 0;
@@ -3450,8 +3451,11 @@ function updateDidinium(didinium, frame, view) {
     const eh = heading + wander;
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
-    let nextX = px0 + ux * vPx * dt;
-    let nextY = py0 + uy * vPx * dt;
+    const spiralVLat = Math.cos(TAU2 * t * SPIRAL_FREQ) * SPIRAL_RAD * L;
+    const nx = -uy;
+    const ny = ux;
+    let nextX = px0 + (ux * vPx + nx * spiralVLat) * dt;
+    let nextY = py0 + (uy * vPx + ny * spiralVLat) * dt;
     nextX = clamp(nextX, 0, safeWidth);
     nextY = clamp(nextY, 0, safeHeight);
     const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
@@ -3509,9 +3513,9 @@ function drawDidinium(ctx, didinium, frame, view) {
     const roll = wrapUnit(finite(cell.rollPhase, 0));
     const rollAng = roll * TAU2;
     const rollCos = Math.cos(rollAng);
-    const widthMul = 0.9 + 0.1 * Math.abs(rollCos);
+    const widthMul = 0.78 + 0.22 * Math.abs(rollCos);
     const halfWidthAt = (u) => wMax * widthMul * normHalfWidth2(u);
-    const SAMP = 30;
+    const SAMP = 46;
     const upper = [];
     const lower = [];
     for (let i = 0;i <= SAMP; i++) {
@@ -3521,120 +3525,134 @@ function drawDidinium(ctx, didinium, frame, view) {
       lower.push(transform3(cx, cy, ux, uy, halfLength * u, -hw));
     }
     const outline = [...upper, ...lower.reverse()];
+    ctx.save();
     drawPolyline4(ctx, outline, true);
-    ctx.fillStyle = `hsla(${hue}, 30%, 80%, ${alpha * 0.34})`;
-    ctx.fill();
-    ctx.strokeStyle = `hsla(${hue}, 36%, 88%, ${alpha * 0.5})`;
-    ctx.lineWidth = Math.max(0.6, wMax * 0.1);
-    ctx.stroke();
+    ctx.clip();
+    const glowR = Math.max(1, halfLength * 1.05);
+    const grad = ctx.createRadialGradient(cx, cy, glowR * 0.1, cx, cy, glowR);
+    grad.addColorStop(0, `hsla(${hue}, 26%, 92%, ${alpha * 0.66})`);
+    grad.addColorStop(0.62, `hsla(${hue + 2}, 30%, 84%, ${alpha * 0.5})`);
+    grad.addColorStop(1, `hsla(${hue + 4}, 34%, 74%, ${alpha * 0.16})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
     const gSeed = finiteOr(cell.noiseSeed, 0) | 0;
-    const gCount = Math.round(clamp(L * 1.4, 16, 64));
-    ctx.fillStyle = `hsla(${hue}, 26%, 86%, ${alpha * 0.16})`;
+    const gCount = Math.round(clamp(L * 4, 40, 150));
+    ctx.fillStyle = `hsla(${hue}, 24%, 90%, ${alpha * 0.3})`;
     for (let g = 0;g < gCount; g++) {
-      const gu = (seededUnit(gSeed, g, 1371344503) * 2 - 1) * 0.86;
-      const gs = (seededUnit(gSeed, g, 2585733948) * 2 - 1) * 0.8;
+      const gu = (seededUnit(gSeed, g, 1371344503) * 2 - 1) * 0.9;
+      const gs = (seededUnit(gSeed, g, 2585733948) * 2 - 1) * 0.92;
       const hw = halfWidthAt(gu);
       const p = transform3(cx, cy, ux, uy, halfLength * gu, gs * hw);
-      const r = 0.4 + seededUnit(gSeed, g, 752460107) * 0.7;
+      const r = 0.5 + seededUnit(gSeed, g, 752460107) * 0.9;
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, TAU2);
       ctx.fill();
     }
+    const gCount2 = Math.round(clamp(L * 2.5, 24, 96));
+    ctx.fillStyle = `hsla(${hue + 4}, 20%, 94%, ${alpha * 0.14})`;
+    for (let g = 0;g < gCount2; g++) {
+      const gu = (seededUnit(gSeed, g, 1033993285) * 2 - 1) * 0.9;
+      const gs = (seededUnit(gSeed, g, 1508030371) * 2 - 1) * 0.92;
+      const hw = halfWidthAt(gu);
+      const p = transform3(cx, cy, ux, uy, halfLength * gu, gs * hw);
+      const r = 0.3 + seededUnit(gSeed, g, 348696353) * 0.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, TAU2);
+      ctx.fill();
+    }
+    ctx.restore();
+    drawPolyline4(ctx, outline, true);
+    ctx.strokeStyle = `hsla(${hue}, 34%, 90%, ${alpha * 0.4})`;
+    ctx.lineWidth = Math.max(0.6, wMax * 0.08);
+    ctx.stroke();
     {
-      const muStart = -0.5;
-      const muEnd = 0.2;
+      const muStart = -0.55;
+      const muEnd = 0.35;
       const macro = [];
-      for (let k = 0;k <= 14; k++) {
-        const u = muStart + (muEnd - muStart) * (k / 14);
-        const bow = Math.sin(k / 14 * Math.PI) * 0.42;
+      for (let k = 0;k <= 18; k++) {
+        const u = muStart + (muEnd - muStart) * (k / 18);
+        const bow = Math.sin(k / 18 * Math.PI) * 0.6;
         const lat = bow * halfWidthAt(u) * rollCos;
         macro.push(transform3(cx, cy, ux, uy, halfLength * u, lat));
       }
-      ctx.strokeStyle = `hsla(${hue - 4}, 22%, 84%, ${alpha * 0.62})`;
-      ctx.lineWidth = Math.max(0.8, wMax * 0.22);
+      ctx.strokeStyle = `hsla(${hue - 2}, 20%, 88%, ${alpha * 0.34})`;
+      ctx.lineWidth = Math.max(1.4, wMax * 0.4);
+      drawPolyline4(ctx, macro, false);
+      ctx.stroke();
+      ctx.strokeStyle = `hsla(${hue - 4}, 24%, 86%, ${alpha * 0.7})`;
+      ctx.lineWidth = Math.max(0.9, wMax * 0.22);
       drawPolyline4(ctx, macro, false);
       ctx.stroke();
     }
     const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
-    const drawGirdle = (gu) => {
+    const RING_TILT = 0.34;
+    const drawGirdle = (gu, seatHue) => {
       const hw = halfWidthAt(gu);
       const baseAlong = halfLength * gu;
-      const ticks = Math.max(8, Math.round(hw * 1.6));
-      for (let s = 0;s <= ticks; s++) {
-        const theta = s / ticks * Math.PI - Math.PI / 2;
-        const lat = Math.sin(theta) * hw;
-        const depth = Math.cos(theta + rollAng);
-        const front = 0.5 + 0.5 * depth;
-        const wave = 0.5 + 0.5 * Math.sin(TAU2 * beat - theta * 2.2);
-        const cilLen = hw * (0.32 + 0.26 * wave);
-        const base = transform3(cx, cy, ux, uy, baseAlong, lat);
-        const tipAlong = baseAlong + cilLen * 0.35;
-        const tipLat = lat + Math.sign(lat || 1) * cilLen * 0.5;
-        const tip = transform3(cx, cy, ux, uy, tipAlong, tipLat);
-        ctx.strokeStyle = `hsla(${hue + 6}, 44%, 90%, ${alpha * (0.2 + 0.7 * front)})`;
-        ctx.lineWidth = Math.max(0.5, wMax * 0.07);
-        ctx.beginPath();
-        ctx.moveTo(base.x, base.y);
-        ctx.lineTo(tip.x, tip.y);
-        ctx.stroke();
+      const NT = 40;
+      const seat = [];
+      for (let s = 0;s <= NT; s++) {
+        const phi = s / NT * TAU2;
+        const lat = Math.cos(phi) * hw;
+        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
+        seat.push(transform3(cx, cy, ux, uy, along, lat));
       }
-      const band = [];
-      for (let s = 0;s <= 12; s++) {
-        const theta = s / 12 * Math.PI - Math.PI / 2;
-        band.push(transform3(cx, cy, ux, uy, baseAlong, Math.sin(theta) * hw));
-      }
-      ctx.strokeStyle = `hsla(${hue + 4}, 40%, 92%, ${alpha * 0.4})`;
+      ctx.strokeStyle = `hsla(${seatHue}, 38%, 92%, ${alpha * 0.34})`;
       ctx.lineWidth = Math.max(0.4, wMax * 0.05);
-      drawPolyline4(ctx, band, false);
+      drawPolyline4(ctx, seat, false);
       ctx.stroke();
-    };
-    drawGirdle(GIRDLE_A_U);
-    drawGirdle(GIRDLE_P_U);
-    const dorsalSign = rollCos >= 0 ? 1 : -1;
-    const drawBrushes = (gu) => {
-      const bu = gu - 0.1;
-      const hw = halfWidthAt(bu);
-      for (let r = 0;r < BRUSH_ROWS; r++) {
-        const along = halfLength * (bu - r * 0.03);
-        const lat = dorsalSign * hw * 0.7;
+      ctx.lineWidth = Math.max(0.45, wMax * 0.05);
+      for (let s = 0;s < NT; s++) {
+        const phi = s / NT * TAU2;
+        const lat = Math.cos(phi) * hw;
+        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
+        const depth = Math.cos(phi + rollAng);
+        const front = 0.5 + 0.5 * depth;
+        const wave = 0.5 + 0.5 * Math.sin(TAU2 * beat - phi * 3);
+        const cilLen = hw * (0.12 + 0.08 * wave);
         const base = transform3(cx, cy, ux, uy, along, lat);
-        const tip = transform3(cx, cy, ux, uy, along + hw * 0.12, lat + dorsalSign * hw * 0.28);
-        ctx.strokeStyle = `hsla(${hue + 8}, 38%, 88%, ${alpha * 0.3})`;
-        ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+        const outLat = Math.cos(phi);
+        const outAlong = Math.sin(phi) * RING_TILT;
+        const tip = transform3(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
+        ctx.strokeStyle = `hsla(${seatHue + 4}, 46%, 93%, ${alpha * (0.14 + 0.66 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
         ctx.stroke();
       }
     };
-    drawBrushes(GIRDLE_A_U);
-    drawBrushes(GIRDLE_P_U);
+    drawGirdle(GIRDLE_A_U, hue + 6);
+    drawGirdle(GIRDLE_P_U, hue + 6);
     {
-      const tip = transform3(cx, cy, ux, uy, halfLength * 1, 0);
-      const shL = transform3(cx, cy, ux, uy, halfLength * SHOULDER_U, halfWidthAt(SHOULDER_U));
-      const shR = transform3(cx, cy, ux, uy, halfLength * SHOULDER_U, -halfWidthAt(SHOULDER_U));
-      ctx.strokeStyle = `hsla(${hue + 2}, 34%, 88%, ${alpha * 0.5})`;
-      ctx.lineWidth = Math.max(0.5, wMax * 0.07);
+      const coneBaseU = SHOULDER_U;
+      const tip = transform3(cx, cy, ux, uy, halfLength * 1.04, 0);
+      const shL = transform3(cx, cy, ux, uy, halfLength * coneBaseU, halfWidthAt(coneBaseU));
+      const shR = transform3(cx, cy, ux, uy, halfLength * coneBaseU, -halfWidthAt(coneBaseU));
       ctx.beginPath();
       ctx.moveTo(shL.x, shL.y);
       ctx.lineTo(tip.x, tip.y);
       ctx.lineTo(shR.x, shR.y);
+      ctx.closePath();
+      ctx.fillStyle = `hsla(${hue + 2}, 28%, 88%, ${alpha * 0.4})`;
+      ctx.fill();
+      ctx.strokeStyle = `hsla(${hue + 4}, 36%, 92%, ${alpha * 0.55})`;
+      ctx.lineWidth = Math.max(0.5, wMax * 0.06);
       ctx.stroke();
-      ctx.fillStyle = `hsla(${hue}, 30%, 80%, ${alpha * 0.4})`;
+      ctx.fillStyle = `hsla(${hue + 4}, 40%, 95%, ${alpha * 0.6})`;
       ctx.beginPath();
-      ctx.arc(tip.x, tip.y, Math.max(0.5, wMax * 0.1), 0, TAU2);
+      ctx.arc(tip.x, tip.y, Math.max(0.5, wMax * 0.09), 0, TAU2);
       ctx.fill();
     }
     {
       const cvPulse = 0.5 - 0.5 * Math.cos(TAU2 * wrapUnit(finiteOr(cell.cvPhase, 0)));
-      const cvR = Math.max(0.6, wMax * (0.24 + 0.14 * cvPulse));
-      const p = transform3(cx, cy, ux, uy, -halfLength * 0.86, 0);
-      ctx.fillStyle = `hsla(${hue + 2}, 32%, 92%, ${alpha * 0.42})`;
+      const cvR = Math.max(0.5, wMax * (0.13 + 0.06 * cvPulse));
+      const p = transform3(cx, cy, ux, uy, -halfLength * 0.78, 0);
+      ctx.fillStyle = `hsla(${hue + 2}, 30%, 93%, ${alpha * 0.26})`;
       ctx.beginPath();
       ctx.arc(p.x, p.y, cvR, 0, TAU2);
       ctx.fill();
-      ctx.strokeStyle = `hsla(${hue + 4}, 40%, 94%, ${alpha * 0.5})`;
-      ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+      ctx.strokeStyle = `hsla(${hue + 4}, 42%, 95%, ${alpha * 0.5})`;
+      ctx.lineWidth = Math.max(0.4, wMax * 0.04);
       ctx.beginPath();
       ctx.arc(p.x, p.y, cvR, 0, TAU2);
       ctx.stroke();
