@@ -216,7 +216,7 @@ export function seedVorticella(count: number, seed: number, frame: AquariumFrame
       // contraction boundary (timer < 1.5 < min interval) so dt-partition stays exact
       contractLeg: 0,
       contractTimer: seededUnit(seed, i, salt ^ 0x29ab7f15) * 1.5,
-      voiceTimer: 0,
+      voiceEnv: 0,
       migrateState: 0,
       attach: 1,
       migrateTimer: seededUnit(seed, i, salt ^ 0x71fa9c3d) * 6, // staggered start
@@ -245,26 +245,18 @@ export function updateVorticella(
     // absolute-time contraction state machine (real dt; legs advance with carry)
     let leg = Math.max(0, Math.min(3, Math.floor(finiteOr(cell.contractLeg, 0))));
     let timer = Math.max(0, finiteOr(cell.contractTimer, 0)) + dt;
-    let voiceTimer = Math.max(0, finiteOr(cell.voiceTimer, 0));
-    // A SOLITARY zooid with no predator/prey around has NOTHING to react to, so it must
-    // NOT contract on its own (no spontaneous/Poisson firing). The startle reflex fires
-    // ONLY in response to a real stimulus: (a) the user's voice while recording, and
-    // (b) a motile cell passing close (in multi-organism themes). Metabolic cyclosis &
-    // cilia beat stay decoupled/unchanged.
-    // VOICE = MECHANICAL STIMULUS: while recording, the voice perturbs the water and the
-    // zooid twitches/balls-up — a biologically honest "recording is on" indicator.
-    if (frame.mode === "recording") {
-      // drive off the INSTANTANEOUS loudness (audioLevel), not the heavily-smoothed
-      // `activity` scalar (which barely moves while speaking -> felt unresponsive).
-      const loud = clamp01(Math.max(finite(frame.audioLevel, 0), finite(frame.activity, 0)));
-      // only accumulate "stimulus" while there is actual sound, so it twitches WHEN you
-      // speak (not on a fixed metronome); louder -> the timer fills faster.
-      voiceTimer += dt * (0.25 + 2.2 * loud);
-      const voiceInterval = 1.6; // stimulus needed to fire a startle (filled fast when loud)
-      if (leg === 0 && voiceTimer >= voiceInterval) { leg = 1; timer = 0; voiceTimer = 0; }
-    } else {
-      voiceTimer = 0;
-    }
+    // RECORDING = a gentle "feeding current", NOT a startle. Experts (protistology + UX)
+    // rejected the discrete voice-contraction as a jerky/annoying twitch. Instead the zooid
+    // eases into an ACTIVE FEEDING POSTURE while recording — a smooth attack/release
+    // envelope `voiceEnv` that the draw uses to (slightly) open the peristome wider,
+    // brighten the oral wreath + body glow, and sway a touch more. Continuous, no jerk.
+    // A baseline floor (0.4) means recording reads as "on" even if audio metering is silent;
+    // louder voice eases it higher. Metabolic cyclosis & cilia beat stay decoupled.
+    let voiceEnv = clamp01(finiteOr(cell.voiceEnv, 0));
+    const loud = clamp01(Math.max(finite(frame.audioLevel, 0), finite(frame.activity, 0)));
+    const voiceTarget = frame.mode === "recording" ? Math.max(0.4, loud) : 0;
+    const voiceTau = voiceTarget > voiceEnv ? 0.30 : 1.4; // ease in ~0.3s, ease out ~1.4s -> no flicker
+    voiceEnv = clamp01(voiceEnv + (voiceTarget - voiceEnv) * (1 - Math.exp(-dt / voiceTau)));
     // MECHANOSENSITIVE reflex: a motile cell passing close to the bell triggers a
     // contraction (the iconic Vorticella startle). Only while extended and past a
     // short refractory, so a lingering cell does not cause a spasm storm.
@@ -332,7 +324,7 @@ export function updateVorticella(
       contractPhase: clamp01(vorticellaLegAmount(leg, timer)),
       contractLeg: leg,
       contractTimer: timer,
-      voiceTimer,
+      voiceEnv,
       oralWreathPhase: wrapUnit(cell.oralWreathPhase + oralHz * dt),
       swayPhase: wrapUnit(finiteOr(cell.swayPhase, 0) + Math.max(0, finiteOr(cell.swayRate, 0.12)) * swayMul * dt),
       migrateState,
@@ -400,7 +392,11 @@ export function drawVorticella(
     const breathMod = (u: number): number => 1
       + 0.035 * Math.sin(TAU * 0.075 * tt + bp0 + 2.4 * u)
       + 0.025 * Math.sin(TAU * 0.115 * tt + bp1);
-    const dir = baseDir + lean + sway + wobble + nod;
+    // RECORDING feeding-posture envelope (smooth, set in updateVorticella): eases the
+    // peristome wider, brightens the wreath/body, and adds a little sway while recording.
+    const vEnv = clamp01(finiteOr(cell.voiceEnv, 0));
+    const glow = 1 + 0.20 * vEnv; // body + crown brighten gently while recording (darkfield scatter swell)
+    const dir = baseDir + lean + sway * (1 + 0.5 * vEnv) + wobble + nod;
     const ux = Math.cos(dir), uy = Math.sin(dir);
     const nx = -uy, ny = ux;
     const anchorX = finite(cell.anchorX, 0);
@@ -420,7 +416,8 @@ export function drawVorticella(
     });
     const neck = geom.bellCenter;           // base of the bell (top of stalk)
     const rimC = { x: neck.x + ux * drawBellH + nx * (periOff + skewAmt) * D, y: neck.y + uy * drawBellH + ny * (periOff + skewAmt) * D }; // peristome centre, off-axis + follows the body skew
-    const open = 1 - 0.7 * s;               // peristome closes as it contracts (open in [0.3,1])
+    // peristome closes as it contracts; while recording it eases a little WIDER (feeding).
+    const open = (1 - 0.7 * s) * (1 + 0.14 * vEnv);
     // everted collar: a rolled rim only slightly wider than the shoulder (~1.28D body-max
     // 1.16D -> ~10% overhang) so it reads CONTINUOUS with the bell, not a floating saucer.
     const Rrim = 0.80 * D * open; // everted peristomial collar clearly overhangs the body shoulder
@@ -539,8 +536,8 @@ export function drawVorticella(
     // DARKFIELD (real micrograph): Vorticella's endoplasm is DENSELY GRANULAR -> it
     // scatters strongly -> the whole zooid GLOWS cool blue-white edge-to-edge (NOT a black
     // hollow shell). The body fill is a luminous cool glow; granules add bright texture.
-    cyto.addColorStop(0, `hsla(200, 16%, 94%, ${alpha * 0.62})`);
-    cyto.addColorStop(1, `hsla(200, 20%, 86%, ${alpha * 0.74})`);
+    cyto.addColorStop(0, `hsla(200, 16%, 94%, ${alpha * 0.62 * glow})`);
+    cyto.addColorStop(1, `hsla(200, 20%, 86%, ${alpha * 0.74 * glow})`);
     ctx.fillStyle = cyto;
     ctx.fill();
     // granular endoplasm + soft DIC-style relief, CLIPPED to the bell, so the body reads
@@ -747,7 +744,7 @@ export function drawVorticella(
         spiral.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline(ctx, spiral, false);
-      ctx.strokeStyle = `hsla(198, 18%, 94%, ${alpha * 0.48 * crownFade})`; // beating ciliary wreath = among the brightest darkfield features
+      ctx.strokeStyle = `hsla(198, 18%, 94%, ${alpha * 0.48 * crownFade * glow})`; // beating ciliary wreath = among the brightest darkfield features
       ctx.lineWidth = Math.max(0.75, D * 0.03);
       ctx.stroke();
       // second, inner membranelle row (phase-offset) so the AZM reads as a
@@ -762,7 +759,7 @@ export function drawVorticella(
         spiral2.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline(ctx, spiral2, false);
-      ctx.strokeStyle = `hsla(198, 18%, 92%, ${alpha * 0.34 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 18%, 92%, ${alpha * 0.34 * crownFade * glow})`;
       ctx.lineWidth = Math.max(0.75, D * 0.022);
       ctx.stroke();
       const cyt = { x: rimC.x + nx * cytLat + ux * cytDep, y: rimC.y + ny * cytLat + uy * cytDep };
@@ -784,12 +781,12 @@ export function drawVorticella(
         bandPts.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline(ctx, bandPts, true);
-      ctx.strokeStyle = `hsla(198, 16%, 93%, ${alpha * 0.26 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 16%, 93%, ${alpha * 0.26 * crownFade * glow})`;
       ctx.lineWidth = Math.max(1.0, D * 0.11);
       ctx.stroke();
       // fine, faint individual cilia splayed OUTWARD over the everted lip (not a vertical comb)
       const M = Math.max(8, Math.round(D * 0.7));
-      ctx.strokeStyle = `hsla(198, 16%, 93%, ${alpha * 0.30 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 16%, 93%, ${alpha * 0.30 * crownFade * glow})`;
       ctx.lineWidth = Math.max(0.5, D * 0.018);
       const cilS = (Math.round(finite(cell.restLength, 10) * 2048) ^ 0x51a3) >>> 0;
       for (let i = 0; i < M; i++) {

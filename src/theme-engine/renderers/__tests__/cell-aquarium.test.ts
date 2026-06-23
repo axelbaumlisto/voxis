@@ -775,7 +775,7 @@ describe("aquarium layer Phase 2 diatoms", () => {
           swayRate: 0.10676003030734138,
           contractLeg: 0,
           contractTimer: 0.6783055094536394,
-          voiceTimer: 0.07850000000000001,
+          voiceEnv: 0.09211096506563159,
           migrateState: 0,
           attach: 1,
           migrateTimer: 3.4162731326185165,
@@ -1633,18 +1633,18 @@ describe("aquarium layer Phase 4 vorticella", () => {
       vorticellaContractRate: 1.0,
     };
     const view = aquariumParamsView(params);
-    let cell = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
+    const seeded = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
+    // a motile cell parked on the bell = the real mechanical stimulus that fires the startle
+    const obs = vorticellaObstacle(seeded[0], view.vorticella.scale, 80);
+    let cell = seeded.map((c) => ({ ...c, contractTimer: 1.1 })); // past the 1s refractory
     const dt = 0.05;
     let peak = 0;
     let collapseSteps = Infinity; // steps from first s>0.5 to s>0.95
     let crossed = -1;
-    const phases: number[] = [];
-    // recording + loud voice = the mechanical stimulus that fires the startle
-    const recF = frame({ dt, width: 240, height: 80, mode: "recording", activity: 0.9, audioLevel: 0.9 });
-    for (let i = 0; i < 600; i++) {
-      cell = updateVorticella(cell, recF, view);
+    const stimF = frame({ dt, width: 240, height: 80, interaction: buildField([{ kind: "motile", x: obs.x, y: obs.y, sourceId: sourceId("euglena", 0) }]) });
+    for (let i = 0; i < 200; i++) {
+      cell = updateVorticella(cell, stimF, view);
       const s = cell[0].contractPhase;
-      phases.push(s);
       peak = Math.max(peak, s);
       if (crossed < 0 && s > 0.5) crossed = i;
       if (crossed >= 0 && s > 0.95 && collapseSteps === Infinity) collapseSteps = i - crossed;
@@ -1655,20 +1655,9 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(peak).toBeGreaterThan(0.95);
     // BALLISTIC: from half to full collapse in <= ~0.15s (<=3 steps) — a snap, not a ramp
     expect(collapseSteps).toBeLessThanOrEqual(3);
-    // QUIET recording -> startles are rare, so it is extended most of the time
-    let quiet = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
-    const quietPhases: number[] = [];
-    const quietF = frame({ dt, width: 240, height: 80, mode: "recording", activity: 0.0, audioLevel: 0.0 });
-    for (let i = 0; i < 600; i++) { quiet = updateVorticella(quiet, quietF, view); quietPhases.push(quiet[0].contractPhase); }
-    const extendedFrac = quietPhases.filter((s) => s < 0.05).length / quietPhases.length;
-    expect(extendedFrac).toBeGreaterThan(0.6);
-    // LOUD recording startles more often than quiet (responsive to the voice)
-    const loudContractions = phases.filter((s) => s > 0.95).length;
-    const quietContractions = quietPhases.filter((s) => s > 0.95).length;
-    expect(loudContractions).toBeGreaterThan(quietContractions);
     // deterministic
-    const again = updateVorticella(seedAquarium(frame({ width: 240, height: 80 }), params).vorticella, recF, view);
-    expect(again[0].contractPhase).toBe(updateVorticella(seedAquarium(frame({ width: 240, height: 80 }), params).vorticella, recF, view)[0].contractPhase);
+    const again = updateVorticella(seeded.map((c) => ({ ...c, contractTimer: 1.1 })), stimF, view);
+    expect(again[0].contractPhase).toBe(updateVorticella(seeded.map((c) => ({ ...c, contractTimer: 1.1 })), stimF, view)[0].contractPhase);
   });
 
   it("telotroch migration: a vorticella detaches, relocates to a new floor X, and re-anchors", () => {
@@ -1765,7 +1754,7 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(emptyField).toEqual(noMotiles);
   });
 
-  it("voice startle: recording makes the vorticella contract; idle never accumulates voiceTimer", () => {
+  it("voice envelope: recording eases voiceEnv up (no contraction); idle keeps it at 0", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,
       enableAquarium: true,
@@ -1775,22 +1764,27 @@ describe("aquarium layer Phase 4 vorticella", () => {
     };
     const view = aquariumParamsView(params);
     const seeded = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
-    const peakRecording = (activity: number): number => {
-      let cell = seeded;
-      let peak = 0;
-      const f = frame({ dt: 0.05, width: 240, height: 80, mode: "recording", activity });
-      for (let i = 0; i < 200; i++) { cell = updateVorticella(cell, f, view); peak = Math.max(peak, cell[0].contractPhase); }
-      return peak;
-    };
-    // recording (loud) -> the voice-stimulus reflex fires a full contraction
-    expect(peakRecording(0.9)).toBeGreaterThan(0.95);
-    // idle at the SAME activity -> the voice path is OFF (voiceTimer never accumulates)
+    // recording -> voiceEnv eases UP toward the active feeding posture, WITHOUT any
+    // contraction (the body never balls up just from the voice).
+    let cell = seeded;
+    let peak = 0;
+    const recF = frame({ dt: 0.05, width: 240, height: 80, mode: "recording", activity: 0.9, audioLevel: 0.9 });
+    for (let i = 0; i < 60; i++) { cell = updateVorticella(cell, recF, view); peak = Math.max(peak, cell[0].contractPhase); }
+    expect(cell[0].voiceEnv ?? 0).toBeGreaterThan(0.7); // eased up to the active posture
+    expect(peak).toBeLessThan(0.05);                    // and it did NOT contract from the voice
+    // idle -> voiceEnv stays at rest (0); no active posture
     let idleCell = seeded;
-    const idleF = frame({ dt: 0.05, width: 240, height: 80, mode: "idle", activity: 0.9 });
-    for (let i = 0; i < 30; i++) idleCell = updateVorticella(idleCell, idleF, view);
-    expect(idleCell[0].voiceTimer ?? 0).toBe(0);
+    const idleF = frame({ dt: 0.05, width: 240, height: 80, mode: "idle", activity: 0.9, audioLevel: 0.9 });
+    for (let i = 0; i < 60; i++) idleCell = updateVorticella(idleCell, idleF, view);
+    expect(idleCell[0].voiceEnv ?? 0).toBe(0);
+    // releases back toward 0 when recording stops
+    let rel = cell;
+    for (let i = 0; i < 120; i++) rel = updateVorticella(rel, idleF, view);
+    expect(rel[0].voiceEnv ?? 1).toBeLessThan(0.05);
     // deterministic
-    expect(peakRecording(0.9)).toBe(peakRecording(0.9));
+    let again = seeded;
+    for (let i = 0; i < 60; i++) again = updateVorticella(again, recF, view);
+    expect(again[0].voiceEnv).toBe(cell[0].voiceEnv);
   });
 
   it("mechanosensitive field self-excludes this vorticella source id", () => {
