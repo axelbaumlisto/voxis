@@ -3,7 +3,7 @@ import { sourceId } from "./interaction";
 import type { FieldContribution, FieldKind } from "./interaction";
 import type { AquariumFrame, AquariumParamsView, DidiniumState } from "./types";
 import { mix32, noise2D, seededUnit } from "./seeds";
-import { TAU, clamp, clamp01, finite, finiteOr, wrapUnit } from "./util";
+import { TAU, clamp, clamp01, finite, finiteOr, smoothstep, wrapUnit } from "./util";
 
 /** Frozen per-species deterministic salt for Didinium seeding. */
 export const DIDINIUM_SALT = 0x0d1d1c0a;
@@ -94,7 +94,7 @@ function bodyShape(u: number): number {
     // cone base width MUST equal the body shoulder width (0.72) for a C0/C1-smooth
     // join — a mismatch here read as a kink/notch in the silhouette.
     const wShoulder = 0.72;
-    return wShoulder * Math.pow(1 - q, 1.25); // blunt cone, smoothly continuing the shoulder
+    return wShoulder * (0.07 + 0.93 * Math.pow(1 - q, 1.35)); // blunt rounded cone tip, not a needle point
   }
   // ovoid body: moderately narrow anterior shoulder, full belly widest ~40% down,
   // BROADLY ROUNDED posterior (real D. nasutum is plump/egg-shaped, not a flat
@@ -452,25 +452,31 @@ export function drawDidinium(
     // so the body scatters like packed cytoplasm (clipped to the outline).
     const gSeed = finiteOr(cell.noiseSeed, 0) | 0;
     const gCount = Math.round(clamp(L * 6, 60, 220)); // denser packed endoplasm (real cytoplasm is crowded)
-    ctx.fillStyle = `hsla(${hue}, 24%, 90%, ${alpha * 0.34})`;
     for (let g = 0; g < gCount; g++) {
       const gu = (seededUnit(gSeed, g, 0x51bd0e77) * 2 - 1) * 0.9;
       const gs = (seededUnit(gSeed, g, 0x9a1f2b3c) * 2 - 1) * 0.92;
       const hw = halfWidthAt(gu);
       const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
       const r = 0.5 + seededUnit(gSeed, g, 0x2cd9a14b) * 0.9;
+      // Leave a very subtle lower-contrast lane at the two pectinelle latitudes so
+      // the ciliary bands separate from endoplasm stipple without drawing chords.
+      const nearGirdle = Math.min(Math.abs(gu - GIRDLE_A_U), Math.abs(gu - GIRDLE_P_U));
+      const lane = smoothstep(clamp01(1 - nearGirdle / 0.075));
+      ctx.fillStyle = `hsla(${hue}, 22%, ${90 - 8 * lane}%, ${alpha * (0.34 - 0.12 * lane)})`;
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, TAU);
       ctx.fill();
     }
     const gCount2 = Math.round(clamp(L * 4, 40, 150));
-    ctx.fillStyle = `hsla(${hue + 4}, 20%, 94%, ${alpha * 0.16})`;
     for (let g = 0; g < gCount2; g++) {
       const gu = (seededUnit(gSeed, g, 0x3da17c45) * 2 - 1) * 0.9;
       const gs = (seededUnit(gSeed, g, 0x59e2b7a3) * 2 - 1) * 0.92;
       const hw = halfWidthAt(gu);
       const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
       const r = 0.3 + seededUnit(gSeed, g, 0x14c8af21) * 0.5;
+      const nearGirdle = Math.min(Math.abs(gu - GIRDLE_A_U), Math.abs(gu - GIRDLE_P_U));
+      const lane = smoothstep(clamp01(1 - nearGirdle / 0.075));
+      ctx.fillStyle = `hsla(${hue + 4}, 18%, ${94 - 6 * lane}%, ${alpha * (0.16 - 0.07 * lane)})`;
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, TAU);
       ctx.fill();
@@ -605,21 +611,27 @@ export function drawDidinium(
         // spikes). No rim gating — length is small enough everywhere that no tick
         // ever reads as a construction line or a spur.
         const cilLen = hw * (0.042 + 0.022 * wave) * (1 + jit);
-        const base = transform(cx, cy, ux, uy, along, lat);
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
-        const tip = transform(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
+        // Dot-band only: NO line segment. Add seeded thickness/jitter around the
+        // mathematical ring so particles form a fuzzy pectinelle BELT, not an
+        // unnaturally straight row of dots.
+        const bandJ1 = (seededUnit(gSeedR, s + gi * 131, 0x7c2a9b11) - 0.5) * hw * 0.34;
+        const bandJ2 = (seededUnit(gSeedR, s + gi * 131, 0x4e11c3a7) - 0.5) * hw * 0.34;
+        const base = transform(cx, cy, ux, uy, along + bandJ1 * 0.55, lat + bandJ2);
+        ctx.fillStyle = `hsla(${seatHue}, 34%, 94%, ${alpha * (0.07 + 0.22 * front)})`;
+        ctx.beginPath();
+        ctx.arc(base.x, base.y, Math.max(0.42, wMax * 0.052), 0, TAU);
+        ctx.fill();
         if (s % 2 === 0) {
-          ctx.fillStyle = `hsla(${seatHue}, 34%, 94%, ${alpha * (0.09 + 0.24 * front)})`;
+          const bandJ3 = (seededUnit(gSeedR, s + gi * 149, 0x2f7d5a91) - 0.5) * hw * 0.32;
+          const bandJ4 = (seededUnit(gSeedR, s + gi * 149, 0x61b4d829) - 0.5) * hw * 0.32;
+          const dust = transform(cx, cy, ux, uy, along + outAlong * cilLen * 0.35 + bandJ3 * 0.45, lat + outLat * cilLen * 0.35 + bandJ4);
+          ctx.fillStyle = `hsla(${seatHue}, 36%, 96%, ${alpha * (0.05 + 0.15 * front)})`;
           ctx.beginPath();
-          ctx.arc(base.x, base.y, Math.max(0.35, wMax * 0.032), 0, TAU);
+          ctx.arc(dust.x, dust.y, Math.max(0.28, wMax * 0.03), 0, TAU);
           ctx.fill();
         }
-        ctx.strokeStyle = `hsla(${seatHue}, 44%, 96%, ${alpha * (0.2 + 0.78 * front)})`;
-        ctx.beginPath();
-        ctx.moveTo(base.x, base.y);
-        ctx.lineTo(tip.x, tip.y);
-        ctx.stroke();
       }
     };
     drawGirdle(GIRDLE_A_U, hue + 6, 0);
@@ -637,16 +649,13 @@ export function drawDidinium(
         const hw = halfWidthAt(bu);
         const lat = Math.cos(phi) * hw * 0.62;
         const along = halfLength * bu + Math.sin(phi) * hw * 0.34 * 0.62;
-        const base = transform(cx, cy, ux, uy, along, lat);
-        // tiny tick that stays INSIDE the silhouette (no antenna projecting past
-        // the rim): short, mostly along-axis, minimal lateral flare.
-        const tip = transform(cx, cy, ux, uy, along + hw * 0.035, lat + Math.sign(lat || 1) * hw * 0.035);
-        ctx.strokeStyle = `hsla(${hue + 8}, 34%, 92%, ${alpha * 0.42 * front})`;
-        ctx.lineWidth = Math.max(0.35, wMax * 0.03);
+        // clavate brush dot INSIDE the silhouette (no antenna line): visible in zoom,
+        // but contained and biologically reads as brosse rows behind the girdle.
+        const dot = transform(cx, cy, ux, uy, along + hw * 0.028, lat + Math.sign(lat || 1) * hw * 0.028);
+        ctx.fillStyle = `hsla(${hue + 8}, 34%, 92%, ${alpha * 0.48 * front})`;
         ctx.beginPath();
-        ctx.moveTo(base.x, base.y);
-        ctx.lineTo(tip.x, tip.y);
-        ctx.stroke();
+        ctx.arc(dot.x, dot.y, Math.max(0.28, wMax * 0.026), 0, TAU);
+        ctx.fill();
       }
     };
     drawBrushes(GIRDLE_A_U);
@@ -660,21 +669,17 @@ export function drawDidinium(
     {
       const coneBaseU = SHOULDER_U;
       const tip = transform(cx, cy, ux, uy, halfLength * 1.02, 0); // on-axis apex
-      // nematodesmal striae: VERY faint SHORT hints near the apex only (not full
-      // base->apex lines, which read as straight interior construction lines / a
-      // triangulation fan). Just a few short converging ticks just below the tip.
-      ctx.strokeStyle = `hsla(${hue + 4}, 20%, 90%, ${alpha * 0.08})`;
-      ctx.lineWidth = Math.max(0.3, wMax * 0.025);
+      // nematodesmal striae: only a few dim mottled dots near the cone axis.
+      // No converging line segments — those read as a triangular construction fan.
       const NS = 4;
       for (let k = 1; k < NS; k++) {
         const f = k / NS;
-        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU) * 0.5;
-        // start partway up the cone, end at the apex — a short hint, not a full line
-        const mid = transform(cx, cy, ux, uy, halfLength * (coneBaseU + (1.02 - coneBaseU) * 0.55), lat * 0.45);
+        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU) * 0.22;
+        const dot = transform(cx, cy, ux, uy, halfLength * (coneBaseU + (1.02 - coneBaseU) * 0.62), lat);
+        ctx.fillStyle = `hsla(${hue + 4}, 14%, 88%, ${alpha * 0.08})`;
         ctx.beginPath();
-        ctx.moveTo(mid.x, mid.y);
-        ctx.lineTo(tip.x, tip.y);
-        ctx.stroke();
+        ctx.arc(dot.x, dot.y, Math.max(0.2, wMax * 0.018), 0, TAU);
+        ctx.fill();
       }
       // collar of forward-flared cilia at the cone base — the prominent anterior
       // wreath seen in the micrographs where the snout joins the body.

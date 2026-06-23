@@ -3326,7 +3326,7 @@ function bodyShape2(u) {
   if (u >= SHOULDER_U) {
     const q = (u - SHOULDER_U) / (1 - SHOULDER_U);
     const wShoulder = 0.72;
-    return wShoulder * Math.pow(1 - q, 1.25);
+    return wShoulder * (0.07 + 0.93 * Math.pow(1 - q, 1.35));
   }
   const t = (u - SHOULDER_U) / (-1 - SHOULDER_U);
   const tp = 0.45;
@@ -3567,25 +3567,29 @@ function drawDidinium(ctx, didinium, frame, view) {
     ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
     const gSeed = finiteOr(cell.noiseSeed, 0) | 0;
     const gCount = Math.round(clamp(L * 6, 60, 220));
-    ctx.fillStyle = `hsla(${hue}, 24%, 90%, ${alpha * 0.34})`;
     for (let g = 0;g < gCount; g++) {
       const gu = (seededUnit(gSeed, g, 1371344503) * 2 - 1) * 0.9;
       const gs = (seededUnit(gSeed, g, 2585733948) * 2 - 1) * 0.92;
       const hw = halfWidthAt(gu);
       const p = transform3(cx, cy, ux, uy, halfLength * gu, gs * hw);
       const r = 0.5 + seededUnit(gSeed, g, 752460107) * 0.9;
+      const nearGirdle = Math.min(Math.abs(gu - GIRDLE_A_U), Math.abs(gu - GIRDLE_P_U));
+      const lane = smoothstep2(clamp01(1 - nearGirdle / 0.075));
+      ctx.fillStyle = `hsla(${hue}, 22%, ${90 - 8 * lane}%, ${alpha * (0.34 - 0.12 * lane)})`;
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, TAU2);
       ctx.fill();
     }
     const gCount2 = Math.round(clamp(L * 4, 40, 150));
-    ctx.fillStyle = `hsla(${hue + 4}, 20%, 94%, ${alpha * 0.16})`;
     for (let g = 0;g < gCount2; g++) {
       const gu = (seededUnit(gSeed, g, 1033993285) * 2 - 1) * 0.9;
       const gs = (seededUnit(gSeed, g, 1508030371) * 2 - 1) * 0.92;
       const hw = halfWidthAt(gu);
       const p = transform3(cx, cy, ux, uy, halfLength * gu, gs * hw);
       const r = 0.3 + seededUnit(gSeed, g, 348696353) * 0.5;
+      const nearGirdle = Math.min(Math.abs(gu - GIRDLE_A_U), Math.abs(gu - GIRDLE_P_U));
+      const lane = smoothstep2(clamp01(1 - nearGirdle / 0.075));
+      ctx.fillStyle = `hsla(${hue + 4}, 18%, ${94 - 6 * lane}%, ${alpha * (0.16 - 0.07 * lane)})`;
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, TAU2);
       ctx.fill();
@@ -3681,21 +3685,24 @@ function drawDidinium(ctx, didinium, frame, view) {
         const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
         const wave = 0.5 + 0.5 * Math.sin(TAU2 * beat - phi * 3);
         const cilLen = hw * (0.042 + 0.022 * wave) * (1 + jit);
-        const base = transform3(cx, cy, ux, uy, along, lat);
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
-        const tip = transform3(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
+        const bandJ1 = (seededUnit(gSeedR, s + gi * 131, 2083166993) - 0.5) * hw * 0.34;
+        const bandJ2 = (seededUnit(gSeedR, s + gi * 131, 1309787047) - 0.5) * hw * 0.34;
+        const base = transform3(cx, cy, ux, uy, along + bandJ1 * 0.55, lat + bandJ2);
+        ctx.fillStyle = `hsla(${seatHue}, 34%, 94%, ${alpha * (0.07 + 0.22 * front)})`;
+        ctx.beginPath();
+        ctx.arc(base.x, base.y, Math.max(0.42, wMax * 0.052), 0, TAU2);
+        ctx.fill();
         if (s % 2 === 0) {
-          ctx.fillStyle = `hsla(${seatHue}, 34%, 94%, ${alpha * (0.09 + 0.24 * front)})`;
+          const bandJ3 = (seededUnit(gSeedR, s + gi * 149, 796744337) - 0.5) * hw * 0.32;
+          const bandJ4 = (seededUnit(gSeedR, s + gi * 149, 1639241769) - 0.5) * hw * 0.32;
+          const dust = transform3(cx, cy, ux, uy, along + outAlong * cilLen * 0.35 + bandJ3 * 0.45, lat + outLat * cilLen * 0.35 + bandJ4);
+          ctx.fillStyle = `hsla(${seatHue}, 36%, 96%, ${alpha * (0.05 + 0.15 * front)})`;
           ctx.beginPath();
-          ctx.arc(base.x, base.y, Math.max(0.35, wMax * 0.032), 0, TAU2);
+          ctx.arc(dust.x, dust.y, Math.max(0.28, wMax * 0.03), 0, TAU2);
           ctx.fill();
         }
-        ctx.strokeStyle = `hsla(${seatHue}, 44%, 96%, ${alpha * (0.2 + 0.78 * front)})`;
-        ctx.beginPath();
-        ctx.moveTo(base.x, base.y);
-        ctx.lineTo(tip.x, tip.y);
-        ctx.stroke();
       }
     };
     drawGirdle(GIRDLE_A_U, hue + 6, 0);
@@ -3711,14 +3718,11 @@ function drawDidinium(ctx, didinium, frame, view) {
         const hw = halfWidthAt(bu);
         const lat = Math.cos(phi) * hw * 0.62;
         const along = halfLength * bu + Math.sin(phi) * hw * 0.34 * 0.62;
-        const base = transform3(cx, cy, ux, uy, along, lat);
-        const tip = transform3(cx, cy, ux, uy, along + hw * 0.035, lat + Math.sign(lat || 1) * hw * 0.035);
-        ctx.strokeStyle = `hsla(${hue + 8}, 34%, 92%, ${alpha * 0.42 * front})`;
-        ctx.lineWidth = Math.max(0.35, wMax * 0.03);
+        const dot = transform3(cx, cy, ux, uy, along + hw * 0.028, lat + Math.sign(lat || 1) * hw * 0.028);
+        ctx.fillStyle = `hsla(${hue + 8}, 34%, 92%, ${alpha * 0.48 * front})`;
         ctx.beginPath();
-        ctx.moveTo(base.x, base.y);
-        ctx.lineTo(tip.x, tip.y);
-        ctx.stroke();
+        ctx.arc(dot.x, dot.y, Math.max(0.28, wMax * 0.026), 0, TAU2);
+        ctx.fill();
       }
     };
     drawBrushes(GIRDLE_A_U);
@@ -3726,17 +3730,15 @@ function drawDidinium(ctx, didinium, frame, view) {
     {
       const coneBaseU = SHOULDER_U;
       const tip = transform3(cx, cy, ux, uy, halfLength * 1.02, 0);
-      ctx.strokeStyle = `hsla(${hue + 4}, 20%, 90%, ${alpha * 0.08})`;
-      ctx.lineWidth = Math.max(0.3, wMax * 0.025);
       const NS = 4;
       for (let k = 1;k < NS; k++) {
         const f = k / NS;
-        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU) * 0.5;
-        const mid = transform3(cx, cy, ux, uy, halfLength * (coneBaseU + (1.02 - coneBaseU) * 0.55), lat * 0.45);
+        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU) * 0.22;
+        const dot = transform3(cx, cy, ux, uy, halfLength * (coneBaseU + (1.02 - coneBaseU) * 0.62), lat);
+        ctx.fillStyle = `hsla(${hue + 4}, 14%, 88%, ${alpha * 0.08})`;
         ctx.beginPath();
-        ctx.moveTo(mid.x, mid.y);
-        ctx.lineTo(tip.x, tip.y);
-        ctx.stroke();
+        ctx.arc(dot.x, dot.y, Math.max(0.2, wMax * 0.018), 0, TAU2);
+        ctx.fill();
       }
       const collarHw = halfWidthAt(coneBaseU);
       ctx.lineWidth = Math.max(0.35, wMax * 0.03);
