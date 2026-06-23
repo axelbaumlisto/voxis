@@ -3631,18 +3631,14 @@ function drawDidinium(ctx, didinium, frame, view) {
         tx /= tl;
         ty /= tl;
         const nx2 = -ty, ny2 = tx;
-        const th = halfTh * taper;
+        const th = halfTh * (0.55 + 0.45 * taper);
         const p = macro[k];
         left.push({ x: p.x + nx2 * th, y: p.y + ny2 * th });
         right.push({ x: p.x - nx2 * th, y: p.y - ny2 * th });
       }
       const ribbon = [...left, ...right.reverse()];
-      drawPolyline4(ctx, macro, false);
-      ctx.strokeStyle = `hsla(${hue - 6}, 22%, 70%, ${alpha * 0.3})`;
-      ctx.lineWidth = Math.max(2.2, wMax * 0.62);
-      ctx.stroke();
       drawPolyline4(ctx, ribbon, true);
-      ctx.fillStyle = `hsla(${hue - 8}, 6%, 78%, ${alpha * 0.88})`;
+      ctx.fillStyle = `hsla(${hue - 8}, 6%, 76%, ${alpha * 0.9})`;
       ctx.fill();
       ctx.save();
       drawPolyline4(ctx, ribbon, true);
@@ -3673,29 +3669,6 @@ function drawDidinium(ctx, didinium, frame, view) {
       const hw = halfWidthAt(gu);
       const baseAlong = halfLength * gu;
       const NT = 96;
-      const seat = [];
-      for (let s = 0;s <= NT; s++) {
-        const phi = s / NT * TAU2;
-        if (Math.cos(phi + rollAng) < -0.05) {
-          if (seat.length > 1) {
-            drawPolyline4(ctx, seat, false);
-            ctx.strokeStyle = `hsla(${seatHue}, 30%, 90%, ${alpha * 0.14})`;
-            ctx.lineWidth = Math.max(0.3, wMax * 0.02);
-            ctx.stroke();
-          }
-          seat.length = 0;
-          continue;
-        }
-        const lat = Math.cos(phi) * hw;
-        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
-        seat.push(transform3(cx, cy, ux, uy, along, lat));
-      }
-      if (seat.length > 1) {
-        drawPolyline4(ctx, seat, false);
-        ctx.strokeStyle = `hsla(${seatHue}, 30%, 90%, ${alpha * 0.14})`;
-        ctx.lineWidth = Math.max(0.3, wMax * 0.02);
-        ctx.stroke();
-      }
       ctx.lineWidth = Math.max(0.3, wMax * 0.026);
       for (let s = 0;s < NT; s++) {
         const phi = s / NT * TAU2;
@@ -3712,7 +3685,9 @@ function drawDidinium(ctx, didinium, frame, view) {
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
         const tip = transform3(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
-        ctx.strokeStyle = `hsla(${seatHue}, 40%, 93%, ${alpha * (0.1 + 0.5 * front)})`;
+        const rim = Math.abs(Math.cos(phi));
+        const rimW = rim * rim;
+        ctx.strokeStyle = `hsla(${seatHue}, 40%, 93%, ${alpha * (0.1 + 0.5 * front) * rimW})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
