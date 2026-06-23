@@ -3324,15 +3324,15 @@ function didiniumDisplayLength(size, scale) {
 function bodyShape2(u) {
   if (u >= SHOULDER_U) {
     const q = (u - SHOULDER_U) / (1 - SHOULDER_U);
-    const wShoulder = 0.9;
-    return wShoulder * Math.pow(1 - q, 1.15);
+    const wShoulder = 0.72;
+    return wShoulder * Math.pow(1 - q, 1.25);
   }
   const t = (u - SHOULDER_U) / (-1 - SHOULDER_U);
   const tp = 0.42;
   if (t <= tp) {
     return 0.72 + 0.28 * Math.sin(t / tp * (Math.PI / 2));
   }
-  return 0.4 + 0.6 * Math.cos((t - tp) / (1 - tp) * (Math.PI / 2));
+  return 0.46 + 0.54 * Math.cos((t - tp) / (1 - tp) * (Math.PI / 2));
 }
 var BODY_SHAPE_MAX2 = (() => {
   let m = 0;
@@ -3628,7 +3628,7 @@ function drawDidinium(ctx, didinium, frame, view) {
       ctx.lineWidth = Math.max(2.2, wMax * 0.62);
       ctx.stroke();
       drawPolyline4(ctx, ribbon, true);
-      ctx.fillStyle = `hsla(${hue - 4}, 30%, 82%, ${alpha * 0.86})`;
+      ctx.fillStyle = `hsla(${hue - 6}, 14%, 80%, ${alpha * 0.86})`;
       ctx.fill();
       ctx.save();
       drawPolyline4(ctx, ribbon, true);
@@ -3641,19 +3641,19 @@ function drawDidinium(ctx, didinium, frame, view) {
         const jx = (seededUnit(mnSeed, m, 752460107) - 0.5) * halfTh * 1.2;
         const jy = (seededUnit(mnSeed, m, 2585733948) - 0.5) * halfTh * 1.2;
         const r = halfTh * (0.4 + 0.5 * seededUnit(mnSeed, m, 348696353));
-        ctx.fillStyle = dark ? `hsla(${hue - 10}, 26%, 60%, ${alpha * 0.58})` : `hsla(${hue + 2}, 36%, 96%, ${alpha * 0.5})`;
+        ctx.fillStyle = dark ? `hsla(${hue - 8}, 16%, 58%, ${alpha * 0.52})` : `hsla(${hue}, 16%, 88%, ${alpha * 0.44})`;
         ctx.beginPath();
         ctx.arc(c0.x + jx, c0.y + jy, r, 0, TAU2);
         ctx.fill();
       }
       ctx.restore();
       drawPolyline4(ctx, ribbon, true);
-      ctx.strokeStyle = `hsla(${hue - 2}, 34%, 90%, ${alpha * 0.4})`;
+      ctx.strokeStyle = `hsla(${hue - 2}, 18%, 90%, ${alpha * 0.36})`;
       ctx.lineWidth = Math.max(0.4, wMax * 0.04);
       ctx.stroke();
     }
     const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
-    const RING_TILT = 0.18;
+    const RING_TILT = 0.1;
     const gSeedR = finiteOr(cell.noiseSeed, 0) | 0;
     const drawGirdle = (gu, seatHue, gi) => {
       const hw = halfWidthAt(gu);
