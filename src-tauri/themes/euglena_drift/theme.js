@@ -3706,9 +3706,9 @@ function drawDidinium(ctx, didinium, frame, view) {
         const lat = Math.cos(phi) * hw * 0.62;
         const along = halfLength * bu + Math.sin(phi) * hw * 0.34 * 0.62;
         const base = transform3(cx, cy, ux, uy, along, lat);
-        const tip = transform3(cx, cy, ux, uy, along + hw * 0.06, lat + Math.sign(lat || 1) * hw * 0.16);
-        ctx.strokeStyle = `hsla(${hue + 8}, 40%, 90%, ${alpha * 0.34 * front})`;
-        ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+        const tip = transform3(cx, cy, ux, uy, along + hw * 0.04, lat + Math.sign(lat || 1) * hw * 0.05);
+        ctx.strokeStyle = `hsla(${hue + 8}, 32%, 90%, ${alpha * 0.26 * front})`;
+        ctx.lineWidth = Math.max(0.35, wMax * 0.03);
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
@@ -3720,20 +3720,20 @@ function drawDidinium(ctx, didinium, frame, view) {
     {
       const coneBaseU = SHOULDER_U;
       const tip = transform3(cx, cy, ux, uy, halfLength * 1.02, 0);
-      ctx.strokeStyle = `hsla(${hue + 4}, 32%, 94%, ${alpha * 0.32})`;
-      ctx.lineWidth = Math.max(0.35, wMax * 0.035);
-      const NS = 5;
+      ctx.strokeStyle = `hsla(${hue + 4}, 26%, 93%, ${alpha * 0.14})`;
+      ctx.lineWidth = Math.max(0.3, wMax * 0.025);
+      const NS = 4;
       for (let k = 1;k < NS; k++) {
         const f = k / NS;
-        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU);
-        const base = transform3(cx, cy, ux, uy, halfLength * coneBaseU, lat);
+        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU) * 0.5;
+        const mid = transform3(cx, cy, ux, uy, halfLength * (coneBaseU + (1.02 - coneBaseU) * 0.55), lat * 0.45);
         ctx.beginPath();
-        ctx.moveTo(base.x, base.y);
+        ctx.moveTo(mid.x, mid.y);
         ctx.lineTo(tip.x, tip.y);
         ctx.stroke();
       }
       const collarHw = halfWidthAt(coneBaseU);
-      ctx.lineWidth = Math.max(0.45, wMax * 0.05);
+      ctx.lineWidth = Math.max(0.35, wMax * 0.03);
       for (let s = 0;s <= 10; s++) {
         const f = s / 10;
         const lat = (f * 2 - 1) * collarHw;
@@ -3742,8 +3742,8 @@ function drawDidinium(ctx, didinium, frame, view) {
           continue;
         const front = clamp01(0.5 + 0.5 * depth);
         const base = transform3(cx, cy, ux, uy, halfLength * coneBaseU, lat);
-        const tipC = transform3(cx, cy, ux, uy, halfLength * (coneBaseU + 0.08), lat + Math.sign(lat || 1) * collarHw * 0.22);
-        ctx.strokeStyle = `hsla(${hue + 6}, 44%, 93%, ${alpha * (0.16 + 0.5 * front)})`;
+        const tipC = transform3(cx, cy, ux, uy, halfLength * (coneBaseU + 0.05), lat + Math.sign(lat || 1) * collarHw * 0.08);
+        ctx.strokeStyle = `hsla(${hue + 6}, 36%, 93%, ${alpha * (0.12 + 0.36 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tipC.x, tipC.y);

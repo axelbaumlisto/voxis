@@ -632,9 +632,11 @@ export function drawDidinium(
         const lat = Math.cos(phi) * hw * 0.62;
         const along = halfLength * bu + Math.sin(phi) * hw * 0.34 * 0.62;
         const base = transform(cx, cy, ux, uy, along, lat);
-        const tip = transform(cx, cy, ux, uy, along + hw * 0.06, lat + Math.sign(lat || 1) * hw * 0.16);
-        ctx.strokeStyle = `hsla(${hue + 8}, 40%, 90%, ${alpha * 0.34 * front})`;
-        ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+        // tiny tick that stays INSIDE the silhouette (no antenna projecting past
+        // the rim): short, mostly along-axis, minimal lateral flare.
+        const tip = transform(cx, cy, ux, uy, along + hw * 0.04, lat + Math.sign(lat || 1) * hw * 0.05);
+        ctx.strokeStyle = `hsla(${hue + 8}, 32%, 90%, ${alpha * 0.26 * front})`;
+        ctx.lineWidth = Math.max(0.35, wMax * 0.03);
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
@@ -652,24 +654,26 @@ export function drawDidinium(
     {
       const coneBaseU = SHOULDER_U;
       const tip = transform(cx, cy, ux, uy, halfLength * 1.02, 0); // on-axis apex
-      // nematodesmal striae: faint longitudinal lines fanning from the cone base to
-      // the apex (the palisade of stiff rods supporting the proboscis).
-      ctx.strokeStyle = `hsla(${hue + 4}, 32%, 94%, ${alpha * 0.32})`;
-      ctx.lineWidth = Math.max(0.35, wMax * 0.035);
-      const NS = 5;
+      // nematodesmal striae: VERY faint SHORT hints near the apex only (not full
+      // base->apex lines, which read as straight interior construction lines / a
+      // triangulation fan). Just a few short converging ticks just below the tip.
+      ctx.strokeStyle = `hsla(${hue + 4}, 26%, 93%, ${alpha * 0.14})`;
+      ctx.lineWidth = Math.max(0.3, wMax * 0.025);
+      const NS = 4;
       for (let k = 1; k < NS; k++) {
-        const f = k / NS; // across the cone base
-        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU);
-        const base = transform(cx, cy, ux, uy, halfLength * coneBaseU, lat);
+        const f = k / NS;
+        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU) * 0.5;
+        // start partway up the cone, end at the apex — a short hint, not a full line
+        const mid = transform(cx, cy, ux, uy, halfLength * (coneBaseU + (1.02 - coneBaseU) * 0.55), lat * 0.45);
         ctx.beginPath();
-        ctx.moveTo(base.x, base.y);
+        ctx.moveTo(mid.x, mid.y);
         ctx.lineTo(tip.x, tip.y);
         ctx.stroke();
       }
       // collar of forward-flared cilia at the cone base — the prominent anterior
       // wreath seen in the micrographs where the snout joins the body.
       const collarHw = halfWidthAt(coneBaseU);
-      ctx.lineWidth = Math.max(0.45, wMax * 0.05);
+      ctx.lineWidth = Math.max(0.35, wMax * 0.03);
       for (let s = 0; s <= 10; s++) {
         const f = s / 10;
         const lat = (f * 2 - 1) * collarHw;
@@ -677,9 +681,10 @@ export function drawDidinium(
         if (depth < -0.2) continue;
         const front = clamp01(0.5 + 0.5 * depth);
         const base = transform(cx, cy, ux, uy, halfLength * coneBaseU, lat);
-        // flare slightly outward + forward (toward the snout)
-        const tipC = transform(cx, cy, ux, uy, halfLength * (coneBaseU + 0.08), lat + Math.sign(lat || 1) * collarHw * 0.22);
-        ctx.strokeStyle = `hsla(${hue + 6}, 44%, 93%, ${alpha * (0.16 + 0.5 * front)})`;
+        // short collar tick that stays inside the silhouette (minimal flare) so it
+        // reads as a wreath, not projecting antennae.
+        const tipC = transform(cx, cy, ux, uy, halfLength * (coneBaseU + 0.05), lat + Math.sign(lat || 1) * collarHw * 0.08);
+        ctx.strokeStyle = `hsla(${hue + 6}, 36%, 93%, ${alpha * (0.12 + 0.36 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tipC.x, tipC.y);
