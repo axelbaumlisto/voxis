@@ -1,6 +1,6 @@
 import type { AquariumFrame, AquariumParamsView, VorticellaState } from "./types";
-import { sourceId } from "./interaction";
-import type { FieldContribution, FieldKind } from "./interaction";
+import { KIND_ID, sourceId } from "./interaction";
+import type { FieldContribution, FieldKind, Motile } from "./interaction";
 import { seededUnit, noise2D } from "./seeds";
 import { TAU, clamp, clamp01, finite, finiteOr, smoothstep, wrapUnit } from "./util";
 
@@ -166,6 +166,30 @@ export function vorticellaObstacle(
 
 export const VORTICELLA_RELEVANT_FIELDS: ReadonlySet<FieldKind> = new Set(["motile"]);
 
+function motileKindId(motile: Motile): number {
+  return Math.floor(Math.max(0, finiteOr(motile.sourceId, 0)) / (1 << 20));
+}
+
+function vorticellaTriggerRadius(obsRadius: number, motile: Motile): number {
+  const radius = Math.max(0, finiteOr(motile.radius, 0));
+  const hasMetadata = radius > 0 || motile.strength !== undefined || motile.role !== undefined;
+  if (!hasMetadata) return obsRadius * 1.25; // point-only legacy fallback
+
+  const kind = motileKindId(motile);
+  const strengthFallback = kind === KIND_ID.hero ? 1
+    : kind === KIND_ID.didinium ? 0.75
+      : kind === KIND_ID.euglena ? 0.35
+        : 0.5;
+  const strength = clamp(finiteOr(motile.strength, strengthFallback), 0.15, 1.5);
+  const baseMul = kind === KIND_ID.euglena ? 1.05 : 1.12;
+  const bodyMul = kind === KIND_ID.hero ? 0.9
+    : kind === KIND_ID.didinium ? 0.8
+      : kind === KIND_ID.euglena ? 0.35
+        : 0.6;
+
+  return obsRadius * baseMul + radius * bodyMul * strength;
+}
+
 export function vorticellaContribute(
   cell: VorticellaState,
   scale: number,
@@ -265,10 +289,11 @@ export function updateVorticella(
     const motiles = frame.interaction?.motiles.filter((motile) => motile.sourceId !== sourceId("vorticella", idx));
     if (motiles && motiles.length > 0 && leg === 0 && timer > 1.0) {
       const obs = vorticellaObstacle(cell, view.vorticella.scale, frame.height);
-      const trigR = obs.radius * 1.25;
       for (let mi = 0; mi < motiles.length; mi++) {
-        const mdx = finite(motiles[mi].x, 0) - obs.x;
-        const mdy = finite(motiles[mi].y, 0) - obs.y;
+        const motile = motiles[mi];
+        const trigR = vorticellaTriggerRadius(obs.radius, motile);
+        const mdx = finite(motile.x, 0) - obs.x;
+        const mdy = finite(motile.y, 0) - obs.y;
         if (mdx * mdx + mdy * mdy < trigR * trigR) { leg = 1; timer = 0; break; }
       }
     }

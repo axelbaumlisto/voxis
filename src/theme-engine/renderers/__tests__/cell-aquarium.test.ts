@@ -1753,6 +1753,32 @@ describe("aquarium layer Phase 4 vorticella", () => {
     expect(stepsTo90(true)).toBe(withM);
   });
 
+  it("mechanosensitive trigger is radius/strength-aware: hero/Didinium trigger farther than Euglena", () => {
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumSeed: 51,
+      vorticellaCount: 1,
+      vorticellaContractRate: 1.0,
+    };
+    const view = aquariumParamsView(params);
+    const seeded = seedAquarium(frame({ width: 240, height: 80 }), params).vorticella;
+    const initial = seeded.map((cell) => ({ ...cell, contractLeg: 0, contractTimer: 1.1 }));
+    const obs = vorticellaObstacle(initial[0], view.vorticella.scale, 80);
+    const base = { dt: 0.05, width: 240, height: 80, activity: 0.2 };
+    const atDistance = (d: number, motile: Parameters<typeof buildField>[0][number]) => updateVorticella(
+      initial,
+      frame({ ...base, interaction: buildField([{ ...motile, x: obs.x + d, y: obs.y }]) }),
+      view,
+    )[0].contractLeg;
+
+    const probeD = obs.radius * 1.25 + 4;
+    expect(atDistance(probeD, { kind: "motile", x: 0, y: 0, sourceId: sourceId("hero", 0), radius: 30, strength: 1, role: "prey" })).toBe(1);
+    expect(atDistance(probeD, { kind: "motile", x: 0, y: 0, sourceId: sourceId("didinium", 0), radius: 20, strength: 0.75, role: "predator" })).toBe(1);
+    expect(atDistance(probeD, { kind: "motile", x: 0, y: 0, sourceId: sourceId("euglena", 0), radius: 12, strength: 0.35, role: "neutral" })).toBe(0);
+    expect(atDistance(obs.radius * 1.02, { kind: "motile", x: 0, y: 0, sourceId: sourceId("euglena", 0), radius: 12, strength: 0.35, role: "neutral" })).toBe(1);
+  });
+
   it("mechanosensitive field path triggers from motiles and empty field matches no motiles", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,
