@@ -118,9 +118,9 @@ export function seedDidinium(count: number, seed: number, frame: AquariumFrame, 
   const safeWidth = Math.max(0, finite(frame.width, 0));
   const safeHeight = Math.max(0, finite(frame.height, 0));
   for (let i = 0; i < count; i++) {
-    const dir = seededUnit(seed, i, salt ^ 0x68bc21eb) < 0.5 ? 0 : Math.PI;
-    const tilt = (seededUnit(seed, i, salt ^ 0x1b9c4e3d) - 0.5) * 0.6;
-    const heading = dir + tilt;
+    // full 360° random initial heading (NOT just horizontal {0,π}) so the cell
+    // explores the whole tank vertically too, not a mid-height horizontal ping-pong.
+    const heading = seededUnit(seed, i, salt ^ 0x68bc21eb) * TAU;
     out.push({
       x: (0.2 + 0.6 * seededUnit(seed, i, salt)) * safeWidth, // start mid-water
       y: (0.25 + 0.5 * seededUnit(seed, i, salt ^ 0x51ed270b)) * safeHeight,
@@ -220,7 +220,10 @@ export function updateDidinium(
     let avoidTo = finiteOr(cell.avoidTo, heading);
     let avoidProgress = clamp01(finiteOr(cell.avoidProgress, 1));
     const side = finiteOr(cell.turnSide, 1) < 0 ? -1 : 1;
-    const hitWall = wallPressure > 0.85 && avoidProgress >= 1; // close to a wall, not mid-turn
+    // single-wall pressure peaks at ~1-margin/look (≈0.57 here) since the centroid
+    // is clamped at `margin`; 0.85 only ever fired in corners. 0.5 lets the
+    // Jennings avoiding reaction trigger on a plain single-wall approach too.
+    const hitWall = wallPressure > 0.5 && avoidProgress >= 1; // close to a wall, not mid-turn
     if (hitWall) {
       avoidIndex += 1;
       const magU = noise2D(nseed ^ 0x2f31a7d5, avoidIndex, 0.71);
@@ -253,15 +256,15 @@ export function updateDidinium(
       heading += wrapPi(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
 
-    // ── travel heading = base + slow wander + PERSISTENT one-sided curvature.
-    // Real Didinium "constantly leans to one side" → a looping spiral search path,
-    // not a wavy straight line. The curvature is applied as side*CURVE_RATE*t,
-    // evaluated at the step's fixed t, so the travel direction sweeps steadily
-    // into a wide spiral while the slow wander drifts the spiral centre (epicyclic
-    // search). The body is drawn along THIS travel heading (snout leads the path).
-    // NOTE: linear-in-t → a 2-step approximation, NOT bit-exact under dt-partition
-    // like the bounded phase terms; the dedicated partition test stays on the
-    // constant-heading pure-forward open-water cruise.
+    // ── travel heading = base + slow wander + BOUNDED one-sided turning bias.
+    // Real Didinium "constantly leans to one side" between straight runs. curveEnv
+    // is a slow bounded noise envelope of absolute frame.t: near 0 the cell runs
+    // near-straight (directed gait), rising it leans to its fixed side — so the
+    // path alternates runs and gentle turns instead of one permanent loop. Bounded
+    // (no linear-in-t growth) so it is frame-rate independent; the partition error
+    // stays sub-pixel and non-secular (does NOT climb with t). Forward-Euler with a
+    // time-varying direction is not strictly bit-exact, so the dedicated partition
+    // test stays on the constant-heading pure-forward open-water cruise.
     const curveEnv = clamp01(noise2D(nseed ^ 0x77c1a2b3, t * CURVE_FREQ, 0.29));
     const curve = side * CURVE_BIAS * curveEnv;
     const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) + curve;

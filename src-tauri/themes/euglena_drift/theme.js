@@ -3353,9 +3353,7 @@ function seedDidinium(count, seed, frame, salt = DIDINIUM_SALT) {
   const safeWidth = Math.max(0, finite(frame.width, 0));
   const safeHeight = Math.max(0, finite(frame.height, 0));
   for (let i = 0;i < count; i++) {
-    const dir = seededUnit(seed, i, salt ^ 1757159915) < 0.5 ? 0 : Math.PI;
-    const tilt = (seededUnit(seed, i, salt ^ 463228477) - 0.5) * 0.6;
-    const heading = dir + tilt;
+    const heading = seededUnit(seed, i, salt ^ 1757159915) * TAU2;
     out.push({
       x: (0.2 + 0.6 * seededUnit(seed, i, salt)) * safeWidth,
       y: (0.25 + 0.5 * seededUnit(seed, i, salt ^ 1374496523)) * safeHeight,
@@ -3433,7 +3431,7 @@ function updateDidinium(didinium, frame, view) {
     let avoidTo = finiteOr(cell.avoidTo, heading);
     let avoidProgress = clamp01(finiteOr(cell.avoidProgress, 1));
     const side = finiteOr(cell.turnSide, 1) < 0 ? -1 : 1;
-    const hitWall = wallPressure > 0.85 && avoidProgress >= 1;
+    const hitWall = wallPressure > 0.5 && avoidProgress >= 1;
     if (hitWall) {
       avoidIndex += 1;
       const magU = noise2D2(nseed ^ 791783381, avoidIndex, 0.71);
