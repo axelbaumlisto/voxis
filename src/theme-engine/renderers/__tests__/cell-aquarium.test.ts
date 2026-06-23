@@ -2432,9 +2432,10 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
     // both fired an avoid event
     expect(stepR[0].avoidIndex).toBe(1);
     expect(stepL[0].avoidIndex).toBe(1);
-    // and turned to opposite sides per their birth-stable handedness
-    expect(stepR[0].avoidTo).toBeGreaterThan(stepR[0].avoidFrom!);
-    expect(stepL[0].avoidTo).toBeLessThan(stepL[0].avoidFrom!);
+    // the avoiding reaction turns toward the inward normal (away from the wall),
+    // offset by the fixed per-cell side: the +1 cell sweeps to a larger angle than
+    // the -1 cell, so birth-stable handedness still determines turn direction.
+    expect(stepR[0].avoidTo).toBeGreaterThan(stepL[0].avoidTo!);
   });
 
   it("didiniumContribute emits one motile per cell with the didinium sourceId", () => {

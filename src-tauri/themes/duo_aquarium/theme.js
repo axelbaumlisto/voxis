@@ -3300,7 +3300,7 @@ var WANDER_RAD = 0.32;
 var HELIX_LEAN = 0.2;
 var CURVE_FREQ = 0.09;
 var CURVE_BIAS = 0.9;
-var WALL_LOOK = 1.4;
+var WALL_LOOK = 2.6;
 var BACKUP_SECONDS = 0.22;
 var AVOID_SECONDS = 0.6;
 var AVOID_TURN_MIN = 2 * Math.PI / 3;
@@ -3431,13 +3431,14 @@ function updateDidinium(didinium, frame, view) {
     let avoidTo = finiteOr(cell.avoidTo, heading);
     let avoidProgress = clamp01(finiteOr(cell.avoidProgress, 1));
     const side = finiteOr(cell.turnSide, 1) < 0 ? -1 : 1;
-    const hitWall = wallPressure > 0.5 && avoidProgress >= 1;
+    const hitWall = wallPressure > 0.45 && avoidProgress >= 1;
     if (hitWall) {
       avoidIndex += 1;
       const magU = noise2D2(nseed ^ 791783381, avoidIndex, 0.71);
       const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
       avoidFrom = heading;
-      avoidTo = heading + side * magnitude;
+      const inward = Math.atan2(wallAwayY, wallAwayX);
+      avoidTo = inward + side * magnitude * 0.5;
       avoidProgress = 0;
     }
     const avoidTotal = BACKUP_SECONDS + AVOID_SECONDS;
@@ -3477,14 +3478,14 @@ function updateDidinium(didinium, frame, view) {
     const margin = Math.min(L * 0.6, safeWidth * 0.45, safeHeight * 0.45);
     nextX = clamp(nextX, margin, safeWidth - margin);
     nextY = clamp(nextY, margin, safeHeight - margin);
-    if (nextX !== rawX || nextY !== rawY) {
-      let hx = Math.cos(heading);
-      let hy = Math.sin(heading);
-      if (nextX !== rawX)
-        hx = -hx;
-      if (nextY !== rawY)
-        hy = -hy;
-      heading = Math.atan2(hy, hx);
+    if ((nextX !== rawX || nextY !== rawY) && avoidProgress >= 1) {
+      avoidIndex += 1;
+      const magU = noise2D2(nseed ^ 791783381, avoidIndex, 0.71);
+      const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
+      avoidFrom = heading;
+      const inward = Math.atan2(wallAwayY, wallAwayX);
+      avoidTo = inward + side * magnitude * 0.5;
+      avoidProgress = 0;
     }
     const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
     return {

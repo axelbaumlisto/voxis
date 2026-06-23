@@ -39,7 +39,8 @@ const HELIX_LEAN = 0.2; // corkscrew lean angle (rad); thin helix, coupled to th
 // made the partition error climb with t).
 const CURVE_FREQ = 0.09; // Hz-ish; how fast the one-sided turning bias varies
 const CURVE_BIAS = 0.9; // max one-sided lean (rad)
-const WALL_LOOK = 1.4; // body-lengths of anticipatory wall lookahead (tank is short)
+const WALL_LOOK = 2.6; // body-lengths of anticipatory wall lookahead: look FAR ahead so the
+                     // cell banks away early and never reaches the clamp (no edge-hugging)
 const BACKUP_SECONDS = 0.22; // brief reverse jerk that opens the avoiding reaction
 const AVOID_SECONDS = 0.6; // eased duration of the fixed-side back-turn after the reverse
 const AVOID_TURN_MIN = (2 * Math.PI) / 3; // ~120° sharp re-orient
@@ -220,16 +221,20 @@ export function updateDidinium(
     let avoidTo = finiteOr(cell.avoidTo, heading);
     let avoidProgress = clamp01(finiteOr(cell.avoidProgress, 1));
     const side = finiteOr(cell.turnSide, 1) < 0 ? -1 : 1;
-    // single-wall pressure peaks at ~1-margin/look (≈0.57 here) since the centroid
-    // is clamped at `margin`; 0.85 only ever fired in corners. 0.5 lets the
-    // Jennings avoiding reaction trigger on a plain single-wall approach too.
-    const hitWall = wallPressure > 0.5 && avoidProgress >= 1; // close to a wall, not mid-turn
+    // Trigger the Jennings avoiding reaction EARLY (while still well away from the
+    // wall) so the cell smoothly turns BEFORE it ever reaches the clamp — no edge
+    // hugging and no hard billiard flip. Turn AWAY from the wall (toward the
+    // inward normal) on the fixed per-cell side, not a blind fixed magnitude.
+    const hitWall = wallPressure > 0.45 && avoidProgress >= 1;
     if (hitWall) {
       avoidIndex += 1;
       const magU = noise2D(nseed ^ 0x2f31a7d5, avoidIndex, 0.71);
       const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
       avoidFrom = heading;
-      avoidTo = heading + side * magnitude; // always the same side (Jennings)
+      // bias the turn toward the inward direction (away from the wall) so it
+      // reliably clears the wall, then add the fixed-side Jennings sweep.
+      const inward = Math.atan2(wallAwayY, wallAwayX);
+      avoidTo = inward + side * magnitude * 0.5;
       avoidProgress = 0;
     }
 
@@ -294,18 +299,20 @@ export function updateDidinium(
     const margin = Math.min(L * 0.6, safeWidth * 0.45, safeHeight * 0.45);
     nextX = clamp(nextX, margin, safeWidth - margin);
     nextY = clamp(nextY, margin, safeHeight - margin);
-    // Billiard REFLECTION on an actual wall hit: when a coordinate is clamped the
-    // wall-normal velocity component would otherwise be silently dropped, making
-    // the cell glide frictionlessly ALONG the wall (rail-glide). Reflect the base
-    // heading off the hit wall(s) so it bounces inward on the next step. Discrete
-    // wall event, gated on a real clamp — open water never clamps, so the pure-
-    // forward dt-partition path is unaffected.
-    if (nextX !== rawX || nextY !== rawY) {
-      let hx = Math.cos(heading);
-      let hy = Math.sin(heading);
-      if (nextX !== rawX) hx = -hx;
-      if (nextY !== rawY) hy = -hy;
-      heading = Math.atan2(hy, hx);
+    // Safety net only: if the cell still reaches the clamp (e.g. spawned in a
+    // corner), KICK OFF the smooth avoiding reaction toward the inward normal
+    // instead of a hard instantaneous heading flip (the flip read as the axis
+    // "snapping"/skipping rather than turning). The eased turn above then carries
+    // it inward over AVOID_SECONDS. Gated on a real clamp — open water never
+    // clamps, so the dt-partition pure-forward path is unaffected.
+    if ((nextX !== rawX || nextY !== rawY) && avoidProgress >= 1) {
+      avoidIndex += 1;
+      const magU = noise2D(nseed ^ 0x2f31a7d5, avoidIndex, 0.71);
+      const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
+      avoidFrom = heading;
+      const inward = Math.atan2(wallAwayY, wallAwayX);
+      avoidTo = inward + side * magnitude * 0.5;
+      avoidProgress = 0;
     }
 
     // beat freq capped so the metachronal girdle shimmer stays < Nyquist.
