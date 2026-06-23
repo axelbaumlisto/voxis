@@ -26,11 +26,12 @@ const BRUSH_ROWS = 5; // dorsal brushes (brosse) per girdle
 // punctuated by stops + a fixed-side avoiding reaction that BACKS UP first.
 // (bioRxiv 2025.09.12.675801; Jennings 1902; Berdan; cavac/Rosetta)
 const STOPGO_FREQ = 0.5; // Hz-ish; erratic cruise stop/dart modulation (phase-fn of frame.t)
-const WANDER_FREQ = 0.14; // slow purposeful heading drift (phase-fn of frame.t)
-const WANDER_RAD = 1.1; // open-water heading swing (rad): wide enough that the travel
+const WANDER_FREQ = 0.1; // slow purposeful heading drift (phase-fn of frame.t): low so
+                       // straight runs last longer (real Didinium darts in long runs)
+const WANDER_RAD = 0.78; // open-water heading swing (rad): wide enough that the travel
                       // direction MEANDERS in 2D mid-tank (not a dead-straight shot that
-                      // only turns at walls). Two-sided noise → cannot loop; pure fn of t
-                      // → partition-exact.
+                      // only turns at walls), but not so wide that turns stack into a
+                      // loop. Two-sided noise → cannot loop; pure fn of t → partition-exact.
 const HELIX_LEAN = 0.2; // corkscrew lean angle (rad); thin helix, coupled to the axial spin
 // One-sided turning BIAS as a BOUNDED slow phase-function of frame.t: a slow
 // noise envelope (0..1) scaled by a max lean angle and the fixed per-cell side.
