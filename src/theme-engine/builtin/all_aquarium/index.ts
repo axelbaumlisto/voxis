@@ -29,9 +29,9 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
 
       // free swimmer: Euglena
       euglenaCount: 1,
-      euglenaSpeed: 0.18,
-      euglenaSpeedActive: 1.15,
-      euglenaScale: 1.25,
+      euglenaSpeed: 0.12,
+      euglenaSpeedActive: 0.75,
+      euglenaScale: 0.62,
       euglenaGravitaxis: 0.15,
       euglenaPhototaxis: 0.45,
       euglenaRotDiffusion: 0.08,
