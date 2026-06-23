@@ -195,6 +195,9 @@ export function updateDidinium(
     let heading = finite(cell.heading, 0);
     const px0 = finite(cell.x, 0);
     const py0 = finite(cell.y, 0);
+    const wasContacting = finiteOr(cell.contactTimer, 0) > 0;
+    let contactTimer = Math.max(0, finiteOr(cell.contactTimer, 0) - dt);
+    let huntCooldown = Math.max(0, finiteOr(cell.huntCooldown, 0) - dt);
 
     // ── erratic cruise: fast cruise punctuated by abrupt slow-downs ("stops").
     // Phase-function of ABSOLUTE frame.t only (never accumulated, never position-
@@ -278,6 +281,70 @@ export function updateDidinium(
       heading += wrapPi(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
 
+    // ── group interaction: Didinium is a Paramecium predator, not just a decorative
+    // independent swimmer. Consume the pre-update InteractionField:
+    // • social hero ellipse = prey target → soft pursuit from mid range;
+    // • circle obstacles (Vorticella bell) = obstacle → bank away.
+    // Both are gated to open-ish water and avoidProgress==1 so wall/avoidance
+    // reactions still dominate, and defaults/no-hero solo themes stay no-op.
+    const field = frame.interaction;
+    const prey = (field?.obstacles ?? []).find((obs) => obs.shape === "ellipse" && obs.social);
+    let preyData: { q: number; surfaceX: number; surfaceY: number; preyX: number; preyY: number } | null = null;
+    if (prey && prey.shape === "ellipse") {
+      const hh = finiteOr(prey.heading, 0);
+      const ch = Math.cos(hh), sh = Math.sin(hh);
+      const dx = px0 - prey.x;
+      const dy = py0 - prey.y;
+      const localX = dx * ch + dy * sh;
+      const localY = -dx * sh + dy * ch;
+      const A = Math.max(1e-3, finiteOr(prey.halfLen, 1) + L * 0.38);
+      const B = Math.max(1e-3, finiteOr(prey.halfWid, 1) + L * 0.38);
+      const q = Math.sqrt((localX * localX) / (A * A) + (localY * localY) / (B * B)) || 1e-6;
+      const targetQ = 1.08; // surface stand-off: outside the expanded prey ellipse
+      const sx = localX * (targetQ / q);
+      const sy = localY * (targetQ / q);
+      const surfaceX = prey.x + sx * ch - sy * sh;
+      const surfaceY = prey.y + sx * sh + sy * ch;
+      preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y };
+      if (q < 1.08 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
+        contactTimer = 0.72 + seededUnit(nseed, 0, 0x2a91f00d) * 0.28;
+      }
+    }
+    let obstaclePressure = 0;
+    let obstacleAwayX = 0;
+    let obstacleAwayY = 0;
+    for (const obs of field?.obstacles ?? []) {
+      if (obs.shape !== "circle") continue;
+      const dx = px0 - obs.x;
+      const dy = py0 - obs.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const reach = obs.radius + L * 1.25;
+      if (d < reach) {
+        const p = 1 - d / reach;
+        obstaclePressure += p;
+        obstacleAwayX += (dx / d) * p;
+        obstacleAwayY += (dy / d) * p;
+      }
+    }
+    if (obstaclePressure > 1e-4 && avoidProgress >= 1) {
+      const desired = Math.atan2(obstacleAwayY, obstacleAwayX);
+      const turnK = 2.5 + 5.0 * Math.min(1, obstaclePressure);
+      heading += wrapPi(desired - heading) * (1 - Math.exp(-turnK * dt));
+    } else if (avoidProgress >= 1 && wallPressure < 0.2 && contactTimer <= 0) {
+      if (preyData) {
+        const dx = preyData.surfaceX - px0;
+        const dy = preyData.surfaceY - py0;
+        const d = Math.hypot(dx, dy) || 1;
+        const sense = Math.max(110, L * 3.0);
+        if (d < sense) {
+          const hunt = clamp01((sense - d) / (sense * 0.7));
+          const desired = Math.atan2(dy, dx); // aim at prey SURFACE, not centroid
+          const turnK = 1.2 + 2.8 * hunt;
+          heading += wrapPi(desired - heading) * (1 - Math.exp(-turnK * dt)) * hunt;
+        }
+      }
+    }
+
     // ── travel heading = base + slow wander + BOUNDED one-sided turning bias.
     // Real Didinium "constantly leans to one side" between straight runs. curveEnv
     // is a slow bounded noise envelope of absolute frame.t: near 0 the cell runs
@@ -307,6 +374,14 @@ export function updateDidinium(
     const rawY = py0 + uy * vSigned * dt;
     let nextX = rawX;
     let nextY = rawY;
+    if (contactTimer > 0 && preyData) {
+      // Surface latch/stand-off: hold the predator on the prey boundary with its
+      // snout aimed into the Paramecium. This reads as a contact/attack beat
+      // instead of the grey Didinium body sinking into the hero.
+      nextX = preyData.surfaceX;
+      nextY = preyData.surfaceY;
+      heading = Math.atan2(preyData.preyY - nextY, preyData.preyX - nextX);
+    }
     // Keep the whole BODY on-canvas: clamp the centroid inset by half a body
     // length (not to 0), so the cell never slides half-off the wall. Wall-only
     // safety net — in open water nextX/Y are far inside, so this is a no-op and
@@ -325,13 +400,23 @@ export function updateDidinium(
     // "snapping"/skipping rather than turning). The eased turn above then carries
     // it inward over AVOID_SECONDS. Gated on a real clamp — open water never
     // clamps, so the dt-partition pure-forward path is unaffected.
-    if ((nextX !== rawX || nextY !== rawY) && avoidProgress >= 1) {
+    if ((nextX !== rawX || nextY !== rawY) && avoidProgress >= 1 && contactTimer <= 0) {
       avoidIndex += 1;
       const magU = noise2D(nseed ^ 0x2f31a7d5, avoidIndex, 0.71);
       const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
       avoidFrom = heading;
       const inward = Math.atan2(wallAwayY, wallAwayX);
       avoidTo = inward + side * magnitude * 0.5;
+      avoidProgress = 0;
+    }
+
+    if (wasContacting && contactTimer <= 0) {
+      // Release after a short attack beat: turn away and cool down so the predator
+      // does not immediately re-latch / buzz-saw through the hero.
+      huntCooldown = 1.6 + seededUnit(nseed, 0, 0x4a1b7c29) * 0.9;
+      avoidIndex += 1;
+      avoidFrom = heading;
+      avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 0x359a71d1)));
       avoidProgress = 0;
     }
 
@@ -345,7 +430,7 @@ export function updateDidinium(
       // phase carries the TRAVEL heading (snout leads the PATH); the fast helix
       // lean is left OUT of the body orientation so the body axis holds near the
       // helix axis instead of wagging (critic C). base `heading` = cruise dir.
-      phase: travel,
+      phase: contactTimer > 0 ? heading : travel,
       heading,
       // visible axial roll: advance at the SAME un-scaled spinFreq (rollRate) as
       // the helix-lean clock, so the rendered girdle spin and the path corkscrew
@@ -358,6 +443,8 @@ export function updateDidinium(
       avoidFrom,
       avoidTo,
       avoidProgress,
+      contactTimer,
+      huntCooldown,
     };
   });
 }
