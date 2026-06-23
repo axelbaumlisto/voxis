@@ -3472,8 +3472,9 @@ function updateDidinium(didinium, frame, view) {
     const vSigned = reversing ? -vPx * 0.6 : vPx;
     let nextX = px0 + ux * vSigned * dt;
     let nextY = py0 + uy * vSigned * dt;
-    nextX = clamp(nextX, 0, safeWidth);
-    nextY = clamp(nextY, 0, safeHeight);
+    const margin = Math.min(L * 0.6, safeWidth * 0.45, safeHeight * 0.45);
+    nextX = clamp(nextX, margin, safeWidth - margin);
+    nextY = clamp(nextY, margin, safeHeight - margin);
     const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
     return {
       ...cell,
@@ -3665,8 +3666,8 @@ function drawDidinium(ctx, didinium, frame, view) {
         if (Math.cos(phi + rollAng) < -0.05) {
           if (seat.length > 1) {
             drawPolyline4(ctx, seat, false);
-            ctx.strokeStyle = `hsla(${seatHue}, 44%, 94%, ${alpha * 0.5})`;
-            ctx.lineWidth = Math.max(0.5, wMax * 0.06);
+            ctx.strokeStyle = `hsla(${seatHue}, 40%, 92%, ${alpha * 0.34})`;
+            ctx.lineWidth = Math.max(0.4, wMax * 0.035);
             ctx.stroke();
           }
           seat.length = 0;
@@ -3678,11 +3679,11 @@ function drawDidinium(ctx, didinium, frame, view) {
       }
       if (seat.length > 1) {
         drawPolyline4(ctx, seat, false);
-        ctx.strokeStyle = `hsla(${seatHue}, 44%, 94%, ${alpha * 0.5})`;
-        ctx.lineWidth = Math.max(0.5, wMax * 0.06);
+        ctx.strokeStyle = `hsla(${seatHue}, 40%, 92%, ${alpha * 0.34})`;
+        ctx.lineWidth = Math.max(0.4, wMax * 0.035);
         ctx.stroke();
       }
-      ctx.lineWidth = Math.max(0.4, wMax * 0.045);
+      ctx.lineWidth = Math.max(0.3, wMax * 0.03);
       for (let s = 0;s < NT; s++) {
         const phi = s / NT * TAU2;
         const depth = Math.cos(phi + rollAng);
@@ -3693,7 +3694,7 @@ function drawDidinium(ctx, didinium, frame, view) {
         const lat = Math.cos(phi) * hw;
         const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
         const wave = 0.5 + 0.5 * Math.sin(TAU2 * beat - phi * 3);
-        const cilLen = hw * (0.16 + 0.12 * wave) * (1 + jit);
+        const cilLen = hw * (0.09 + 0.06 * wave) * (1 + jit);
         const base = transform3(cx, cy, ux, uy, along, lat);
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
