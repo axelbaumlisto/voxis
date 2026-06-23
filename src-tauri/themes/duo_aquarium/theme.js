@@ -3297,7 +3297,7 @@ var STOPGO_FREQ = 0.42;
 var WANDER_FREQ = 0.31;
 var WANDER_RAD = 0.7;
 var SPIRAL_FREQ = 0.9;
-var SPIRAL_RAD = 0.45;
+var SPIRAL_YAW = 0.42;
 var WALL_LOOK = 2;
 var AVOID_SECONDS = 0.7;
 var AVOID_TURN_MIN = 2 * Math.PI / 3;
@@ -3448,14 +3448,12 @@ function updateDidinium(didinium, frame, view) {
       const turnK = 1 + 2.5 * Math.min(1, wallPressure);
       heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
-    const eh = heading + wander;
+    const yaw = Math.sin(TAU2 * t * SPIRAL_FREQ) * SPIRAL_YAW;
+    const eh = heading + wander + yaw;
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
-    const spiralVLat = Math.cos(TAU2 * t * SPIRAL_FREQ) * SPIRAL_RAD * L;
-    const nx = -uy;
-    const ny = ux;
-    let nextX = px0 + (ux * vPx + nx * spiralVLat) * dt;
-    let nextY = py0 + (uy * vPx + ny * spiralVLat) * dt;
+    let nextX = px0 + ux * vPx * dt;
+    let nextY = py0 + uy * vPx * dt;
     nextX = clamp(nextX, 0, safeWidth);
     nextY = clamp(nextY, 0, safeHeight);
     const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
@@ -3463,7 +3461,7 @@ function updateDidinium(didinium, frame, view) {
       ...cell,
       x: nextX,
       y: nextY,
-      phase: heading,
+      phase: eh,
       heading,
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + Math.max(0, finite(cell.rollRate, 0)) * act * dt),
       beatPhase: wrapUnit(finiteOr(cell.beatPhase, 0) + beatEff * dt),
@@ -3505,7 +3503,7 @@ function drawDidinium(ctx, didinium, frame, view) {
     const L = didiniumDisplayLength(finite(cell.size, 1), scale);
     const halfLength = L / 2;
     const wMax = L / ASPECT / 2;
-    const heading = finite(cell.heading, 0);
+    const heading = finiteOr(cell.phase, finite(cell.heading, 0));
     const ux = Math.cos(heading);
     const uy = Math.sin(heading);
     const cx = finite(cell.x, 0);
@@ -3513,7 +3511,7 @@ function drawDidinium(ctx, didinium, frame, view) {
     const roll = wrapUnit(finite(cell.rollPhase, 0));
     const rollAng = roll * TAU2;
     const rollCos = Math.cos(rollAng);
-    const widthMul = 0.78 + 0.22 * Math.abs(rollCos);
+    const widthMul = 0.6 + 0.4 * Math.abs(rollCos);
     const halfWidthAt = (u) => wMax * widthMul * normHalfWidth2(u);
     const SAMP = 46;
     const upper = [];
@@ -3561,68 +3559,71 @@ function drawDidinium(ctx, didinium, frame, view) {
       ctx.fill();
     }
     ctx.restore();
-    drawPolyline4(ctx, outline, true);
-    ctx.strokeStyle = `hsla(${hue}, 34%, 90%, ${alpha * 0.4})`;
-    ctx.lineWidth = Math.max(0.6, wMax * 0.08);
-    ctx.stroke();
+    for (let i = 0;i < upper.length - 1; i++) {
+      const u = -Math.cos(Math.PI * i / SAMP);
+      const flank = 1 - Math.abs(u);
+      const a = alpha * (0.12 + 0.3 * flank);
+      ctx.strokeStyle = `hsla(${hue + 2}, 32%, 92%, ${a})`;
+      ctx.lineWidth = Math.max(0.5, wMax * 0.07);
+      ctx.beginPath();
+      ctx.moveTo(upper[i].x, upper[i].y);
+      ctx.lineTo(upper[i + 1].x, upper[i + 1].y);
+      ctx.moveTo(lower[i].x, lower[i].y);
+      ctx.lineTo(lower[i + 1].x, lower[i + 1].y);
+      ctx.stroke();
+    }
     {
-      const muStart = -0.55;
-      const muEnd = 0.35;
+      const muStart = -0.58;
+      const muEnd = 0.4;
+      const bowDepth = 0.55 * (0.4 + 0.6 * Math.abs(rollCos));
       const macro = [];
       for (let k = 0;k <= 18; k++) {
         const u = muStart + (muEnd - muStart) * (k / 18);
-        const bow = Math.sin(k / 18 * Math.PI) * 0.6;
-        const lat = bow * halfWidthAt(u) * rollCos;
+        const bow = Math.sin(k / 18 * Math.PI) * bowDepth;
+        const lat = bow * halfWidthAt(u) * (rollCos >= 0 ? 1 : -1);
         macro.push(transform3(cx, cy, ux, uy, halfLength * u, lat));
       }
-      ctx.strokeStyle = `hsla(${hue - 2}, 20%, 88%, ${alpha * 0.34})`;
-      ctx.lineWidth = Math.max(1.4, wMax * 0.4);
+      ctx.strokeStyle = `hsla(${hue - 2}, 20%, 88%, ${alpha * 0.26})`;
+      ctx.lineWidth = Math.max(1.4, wMax * 0.42);
       drawPolyline4(ctx, macro, false);
       ctx.stroke();
-      ctx.strokeStyle = `hsla(${hue - 4}, 24%, 86%, ${alpha * 0.7})`;
-      ctx.lineWidth = Math.max(0.9, wMax * 0.22);
+      ctx.strokeStyle = `hsla(${hue - 4}, 24%, 86%, ${alpha * 0.42})`;
+      ctx.lineWidth = Math.max(0.9, wMax * 0.2);
       drawPolyline4(ctx, macro, false);
       ctx.stroke();
     }
     const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
     const RING_TILT = 0.34;
-    const drawGirdle = (gu, seatHue) => {
+    const gSeedR = finiteOr(cell.noiseSeed, 0) | 0;
+    const drawGirdle = (gu, seatHue, gi) => {
       const hw = halfWidthAt(gu);
       const baseAlong = halfLength * gu;
-      const NT = 40;
-      const seat = [];
-      for (let s = 0;s <= NT; s++) {
-        const phi = s / NT * TAU2;
-        const lat = Math.cos(phi) * hw;
-        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
-        seat.push(transform3(cx, cy, ux, uy, along, lat));
-      }
-      ctx.strokeStyle = `hsla(${seatHue}, 38%, 92%, ${alpha * 0.34})`;
-      ctx.lineWidth = Math.max(0.4, wMax * 0.05);
-      drawPolyline4(ctx, seat, false);
-      ctx.stroke();
+      const NT = 44;
       ctx.lineWidth = Math.max(0.45, wMax * 0.05);
       for (let s = 0;s < NT; s++) {
         const phi = s / NT * TAU2;
+        const depth = Math.cos(phi + rollAng);
+        if (depth < -0.15)
+          continue;
+        const front = clamp01(0.5 + 0.5 * depth);
+        const jit = (seededUnit(gSeedR, s + gi * 97, 752460107) - 0.5) * 0.12;
         const lat = Math.cos(phi) * hw;
         const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
-        const depth = Math.cos(phi + rollAng);
-        const front = 0.5 + 0.5 * depth;
         const wave = 0.5 + 0.5 * Math.sin(TAU2 * beat - phi * 3);
-        const cilLen = hw * (0.12 + 0.08 * wave);
+        const cilLen = hw * (0.12 + 0.1 * wave) * (1 + jit);
         const base = transform3(cx, cy, ux, uy, along, lat);
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
         const tip = transform3(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
-        ctx.strokeStyle = `hsla(${seatHue + 4}, 46%, 93%, ${alpha * (0.14 + 0.66 * front)})`;
+        ctx.strokeStyle = `hsla(${seatHue}, 46%, 93%, ${alpha * (0.12 + 0.7 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
         ctx.stroke();
       }
     };
-    drawGirdle(GIRDLE_A_U, hue + 6);
-    drawGirdle(GIRDLE_P_U, hue + 6);
+    drawGirdle(GIRDLE_A_U, hue + 6, 0);
+    drawGirdle(GIRDLE_P_U, hue + 6, 1);
     {
       const coneBaseU = SHOULDER_U;
       const tip = transform3(cx, cy, ux, uy, halfLength * 1.04, 0);

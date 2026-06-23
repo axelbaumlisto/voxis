@@ -22,8 +22,8 @@ const SHOULDER_U = 0.52; // where the barrel meets the cone snout
 const STOPGO_FREQ = 0.42; // Hz-ish; erratic cruise stop/dart modulation (phase-fn of frame.t)
 const WANDER_FREQ = 0.31; // heading wander (phase-fn of frame.t)
 const WANDER_RAD = 0.7; // max wander heading swing (rad) at full noise
-const SPIRAL_FREQ = 0.9; // helical swim path frequency (phase-fn of frame.t)
-const SPIRAL_RAD = 0.45; // lateral helical excursion as a fraction of body length
+const SPIRAL_FREQ = 0.9; // helical swim yaw frequency (phase-fn of frame.t)
+const SPIRAL_YAW = 0.42; // heading-yaw weave amplitude (rad) — snout always leads
 const WALL_LOOK = 2.0; // body-lengths of anticipatory wall lookahead
 const AVOID_SECONDS = 0.7; // eased duration of the "avoiding reaction" back-turn
 const AVOID_TURN_MIN = (2 * Math.PI) / 3; // ~120° sharp re-orient
@@ -219,20 +219,17 @@ export function updateDidinium(
       heading += wrapPi(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
 
-    // effective swim heading = base + frame.t-phase wander (constant at fixed t)
-    const eh = heading + wander;
+    // effective swim heading = base + frame.t-phase wander + helical YAW weave.
+    // The yaw makes the snout sweep side-to-side so the PATH corkscrews while the
+    // body always leads snout-first (no sideways crab). Motion is pure-forward
+    // along this heading, so a single 0.24s step == two 0.12s steps at fixed t
+    // (yaw/wander are pure functions of frame.t → constant across the partition).
+    const yaw = Math.sin(TAU * t * SPIRAL_FREQ) * SPIRAL_YAW;
+    const eh = heading + wander + yaw;
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
-    // ── helical/spiral swim: a lateral drift that reverses cyclically, so the
-    // path corkscrews instead of running straight (Didinium's signature). The
-    // lateral velocity is a pure function of frame.t (cos), so integrating it as
-    // a velocity keeps dt-partition exact: ∫ over [t,t+dt] is taken at the step's
-    // fixed t (consistent with the cruise term). nx,ny is the heading normal.
-    const spiralVLat = Math.cos(TAU * t * SPIRAL_FREQ) * SPIRAL_RAD * L; // px/s lateral
-    const nx = -uy;
-    const ny = ux;
-    let nextX = px0 + (ux * vPx + nx * spiralVLat) * dt;
-    let nextY = py0 + (uy * vPx + ny * spiralVLat) * dt;
+    let nextX = px0 + ux * vPx * dt;
+    let nextY = py0 + uy * vPx * dt;
     nextX = clamp(nextX, 0, safeWidth);
     nextY = clamp(nextY, 0, safeHeight);
 
@@ -243,7 +240,9 @@ export function updateDidinium(
       ...cell,
       x: nextX,
       y: nextY,
-      phase: heading,
+      // phase carries the TRAVEL heading (snout-leading) for the draw layer; the
+      // base `heading` stays the slowly-varying cruise direction (wall-modified).
+      phase: eh,
       heading,
       // axial roll synchronised with the helical path so the girdles visibly
       // sweep as the body corkscrews (faster than before for a clear rotation read).
@@ -300,7 +299,9 @@ export function drawDidinium(
     const L = didiniumDisplayLength(finite(cell.size, 1), scale);
     const halfLength = L / 2;
     const wMax = (L / ASPECT) / 2; // half of body width
-    const heading = finite(cell.heading, 0);
+    // orient the body along the TRAVEL heading (phase) so the snout always leads
+    // the actual motion (no sideways crab); falls back to heading at seed.
+    const heading = finiteOr(cell.phase, finite(cell.heading, 0));
     const ux = Math.cos(heading);
     const uy = Math.sin(heading);
     const cx = finite(cell.x, 0);
@@ -308,7 +309,7 @@ export function drawDidinium(
     const roll = wrapUnit(finite(cell.rollPhase, 0));
     const rollAng = roll * TAU;
     const rollCos = Math.cos(rollAng);
-    const widthMul = 0.78 + 0.22 * Math.abs(rollCos); // stronger axial-roll foreshortening
+    const widthMul = 0.6 + 0.4 * Math.abs(rollCos); // strong axial-roll foreshortening (silhouette breathes)
 
     const halfWidthAt = (u: number): number => wMax * widthMul * normHalfWidth(u);
 
@@ -367,31 +368,42 @@ export function drawDidinium(
     }
     ctx.restore();
 
-    // dim scattering rim (interior > rim, darkfield)
-    drawPolyline(ctx, outline, true);
-    ctx.strokeStyle = `hsla(${hue}, 34%, 90%, ${alpha * 0.4})`;
-    ctx.lineWidth = Math.max(0.6, wMax * 0.08);
-    ctx.stroke();
+    // feathered scattering rim (no hard ink line): brighter on the flanks, dim at
+    // the poles — darkfield bands are fuzzy, not geometric construction lines.
+    for (let i = 0; i < upper.length - 1; i++) {
+      const u = -Math.cos((Math.PI * i) / SAMP);
+      const flank = 1 - Math.abs(u); // bright mid-body flanks, dim toward poles
+      const a = alpha * (0.12 + 0.3 * flank);
+      ctx.strokeStyle = `hsla(${hue + 2}, 32%, 92%, ${a})`;
+      ctx.lineWidth = Math.max(0.5, wMax * 0.07);
+      ctx.beginPath();
+      ctx.moveTo(upper[i].x, upper[i].y);
+      ctx.lineTo(upper[i + 1].x, upper[i + 1].y);
+      ctx.moveTo(lower[i].x, lower[i].y);
+      ctx.lineTo(lower[i + 1].x, lower[i + 1].y);
+      ctx.stroke();
+    }
 
-    // ── bold horseshoe / sausage macronucleus (cool band, deep C-bow) ──
+    // ── horseshoe / sausage macronucleus (soft cool band, fades when edge-on) ──
     {
-      const muStart = -0.55;
-      const muEnd = 0.35; // spans ~0.6L
+      const muStart = -0.58;
+      const muEnd = 0.4; // spans ~0.6L
+      const bowDepth = 0.55 * (0.4 + 0.6 * Math.abs(rollCos)); // floor so it never collapses to a strut
       const macro: { x: number; y: number }[] = [];
       for (let k = 0; k <= 18; k++) {
         const u = muStart + (muEnd - muStart) * (k / 18);
-        const bow = Math.sin((k / 18) * Math.PI) * 0.6; // deeper horseshoe bow
-        const lat = bow * halfWidthAt(u) * rollCos;
+        const bow = Math.sin((k / 18) * Math.PI) * bowDepth;
+        const lat = bow * halfWidthAt(u) * (rollCos >= 0 ? 1 : -1);
         macro.push(transform(cx, cy, ux, uy, halfLength * u, lat));
       }
       // soft underglow
-      ctx.strokeStyle = `hsla(${hue - 2}, 20%, 88%, ${alpha * 0.34})`;
-      ctx.lineWidth = Math.max(1.4, wMax * 0.4);
+      ctx.strokeStyle = `hsla(${hue - 2}, 20%, 88%, ${alpha * 0.26})`;
+      ctx.lineWidth = Math.max(1.4, wMax * 0.42);
       drawPolyline(ctx, macro, false);
       ctx.stroke();
-      // bright core
-      ctx.strokeStyle = `hsla(${hue - 4}, 24%, 86%, ${alpha * 0.7})`;
-      ctx.lineWidth = Math.max(0.9, wMax * 0.22);
+      // dimmer core (was a hot bar)
+      ctx.strokeStyle = `hsla(${hue - 4}, 24%, 86%, ${alpha * 0.42})`;
+      ctx.lineWidth = Math.max(0.9, wMax * 0.2);
       drawPolyline(ctx, macro, false);
       ctx.stroke();
     }
@@ -402,48 +414,41 @@ export function drawDidinium(
     // Many SHORT radial cilia ticks fringe it; depth-shaded by roll (near bright /
     // far dim) so the ring visibly sweeps as the body rotates. Metachronal wave
     // runs around the ring. NO forward sweep — ticks are radial (not blades).
+    // No drawn seat-ellipse (that read as a wireframe hoop). Instead a fuzzy band
+    // of short cilia ticks, with the FAR half of the ring clipped (invisible), so
+    // each girdle reads as a bright scattering crescent on the near face that
+    // sweeps as the body rolls. Many faint jittered ticks, metachronal wave.
     const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
     const RING_TILT = 0.34; // along-axis foreshortening of the projected ring
-    const drawGirdle = (gu: number, seatHue: number) => {
+    const gSeedR = finiteOr(cell.noiseSeed, 0) | 0;
+    const drawGirdle = (gu: number, seatHue: number, gi: number) => {
       const hw = halfWidthAt(gu);
       const baseAlong = halfLength * gu;
-      const NT = 40;
-      // faint elliptical seat ring first
-      const seat: { x: number; y: number }[] = [];
-      for (let s = 0; s <= NT; s++) {
-        const phi = (s / NT) * TAU;
-        const lat = Math.cos(phi) * hw;
-        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
-        seat.push(transform(cx, cy, ux, uy, along, lat));
-      }
-      ctx.strokeStyle = `hsla(${seatHue}, 38%, 92%, ${alpha * 0.34})`;
-      ctx.lineWidth = Math.max(0.4, wMax * 0.05);
-      drawPolyline(ctx, seat, false);
-      ctx.stroke();
-      // radial cilia fringe
+      const NT = 44;
       ctx.lineWidth = Math.max(0.45, wMax * 0.05);
       for (let s = 0; s < NT; s++) {
         const phi = (s / NT) * TAU;
+        const depth = Math.cos(phi + rollAng); // 1 = nearest viewer
+        if (depth < -0.15) continue; // clip the FAR arc → no wireframe back-side
+        const front = clamp01(0.5 + 0.5 * depth);
+        const jit = (seededUnit(gSeedR, s + gi * 97, 0x2cd9a14b) - 0.5) * 0.12;
         const lat = Math.cos(phi) * hw;
         const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
-        const depth = Math.cos(phi + rollAng); // 1 = nearest viewer
-        const front = 0.5 + 0.5 * depth;
         const wave = 0.5 + 0.5 * Math.sin(TAU * beat - phi * 3.0); // metachronal
-        const cilLen = hw * (0.12 + 0.08 * wave); // SHORT ticks (not blades)
-        // outward radial direction of this ring point (in screen space)
+        const cilLen = hw * (0.12 + 0.1 * wave) * (1 + jit);
         const base = transform(cx, cy, ux, uy, along, lat);
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
         const tip = transform(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
-        ctx.strokeStyle = `hsla(${seatHue + 4}, 46%, 93%, ${alpha * (0.14 + 0.66 * front)})`;
+        ctx.strokeStyle = `hsla(${seatHue}, 46%, 93%, ${alpha * (0.12 + 0.7 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
         ctx.stroke();
       }
     };
-    drawGirdle(GIRDLE_A_U, hue + 6);
-    drawGirdle(GIRDLE_P_U, hue + 6);
+    drawGirdle(GIRDLE_A_U, hue + 6, 0);
+    drawGirdle(GIRDLE_P_U, hue + 6, 1);
 
     // ── apical cone snout (cytostome cone), filled, protruding, closed at rest ──
     {
