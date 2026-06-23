@@ -165,8 +165,19 @@ export const DIDINIUM_RELEVANT_FIELDS: ReadonlySet<FieldKind> = new Set(["obstac
  * SOLO so nothing consumes this yet — the seam exists for the later predator
  * phase. Didinium itself consumes only obstacles (walls handled inline).
  */
-export function didiniumContribute(cell: DidiniumState, idx: number): FieldContribution[] {
-  return [{ kind: "motile", x: finite(cell.x, 0), y: finite(cell.y, 0), sourceId: sourceId("didinium", idx) }];
+export function didiniumContribute(cell: DidiniumState, idx: number, scale = 1): FieldContribution[] {
+  const length = didiniumDisplayLength(finite(cell.size, 1), scale);
+  return [{
+    kind: "motile",
+    x: finite(cell.x, 0),
+    y: finite(cell.y, 0),
+    heading: finiteOr(cell.heading, finiteOr(cell.phase, 0)),
+    radius: length * 0.35,
+    speed: Math.max(0, finiteOr(cell.swimSpeed, 0)),
+    role: "predator",
+    strength: 0.75,
+    sourceId: sourceId("didinium", idx),
+  }];
 }
 
 export function updateDidinium(

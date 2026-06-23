@@ -487,8 +487,19 @@ const SEPARATION_RANGE_BODY_LENGTHS = 1.6; // soft steer only; no hard push / no
 
 export const EUGLENA_RELEVANT_FIELDS: ReadonlySet<FieldKind> = new Set(["obstacle", "wake", "motile"]);
 
-export function euglenaContribute(cell: EuglenaState, idx: number): FieldContribution[] {
-  return [{ kind: "motile", x: cell.x, y: cell.y, sourceId: sourceId("euglena", idx) }];
+export function euglenaContribute(cell: EuglenaState, idx: number, scale = 1): FieldContribution[] {
+  const length = euglenaDisplayLength(finite(cell.size, 1), scale);
+  return [{
+    kind: "motile",
+    x: cell.x,
+    y: cell.y,
+    heading: finiteOr(cell.heading, finiteOr(cell.phase, 0)),
+    radius: length * 0.18,
+    speed: Math.max(0, finiteOr(cell.swimSpeed, 0)),
+    role: "neutral",
+    strength: 0.35,
+    sourceId: sourceId("euglena", idx),
+  }];
 }
 
 export function updateEuglena(

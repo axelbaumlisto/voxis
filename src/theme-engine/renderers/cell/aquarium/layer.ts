@@ -36,6 +36,11 @@ export function heroContribute(hero: AquariumFrame["hero"]): FieldContribution[]
       kind: "motile",
       x: hero.x,
       y: hero.y,
+      heading: hero.heading ?? 0,
+      radius: Math.max(hero.halfWid ?? hero.radius, (hero.halfLen ?? hero.radius) * 0.35),
+      speed: 0,
+      role: "prey",
+      strength: 1,
       sourceId: heroId,
     },
   ];
@@ -48,6 +53,8 @@ export function buildAquariumInteractionField(
   vorticellaScale: number,
   frameHeight: number,
   didinium?: readonly AquariumLayerState["didinium"][number][] | undefined,
+  euglenaScale = 1,
+  didiniumScale = 1,
 ): InteractionField {
   const contribs: FieldContribution[] = [];
   if (vorticella) {
@@ -57,12 +64,12 @@ export function buildAquariumInteractionField(
   }
   if (euglena) {
     for (let i = 0; i < euglena.length; i++) {
-      contribs.push(...euglenaContribute(euglena[i], i));
+      contribs.push(...euglenaContribute(euglena[i], i, euglenaScale));
     }
   }
   if (didinium) {
     for (let i = 0; i < didinium.length; i++) {
-      contribs.push(...didiniumContribute(didinium[i], i));
+      contribs.push(...didiniumContribute(didinium[i], i, didiniumScale));
     }
   }
   contribs.push(...heroContribute(hero));
@@ -94,7 +101,16 @@ export function updateAquarium(
   const preUpdateEuglena = view.euglena.count > 0 && aquarium.euglena.length > 0 ? aquarium.euglena : undefined;
   const preUpdateVorticella = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella : undefined;
   const preUpdateDidinium = view.didinium.count > 0 && aquarium.didinium.length > 0 ? aquarium.didinium : undefined;
-  const interaction = buildAquariumInteractionField(preUpdateEuglena, preUpdateVorticella, frame.hero, view.vorticella.scale, frame.height, preUpdateDidinium);
+  const interaction = buildAquariumInteractionField(
+    preUpdateEuglena,
+    preUpdateVorticella,
+    frame.hero,
+    view.vorticella.scale,
+    frame.height,
+    preUpdateDidinium,
+    view.euglena.scale,
+    view.didinium.scale,
+  );
   const interactionFrame = { ...frame, interaction };
   const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, interactionFrame, cfgBySpecies.euglena) : aquarium.euglena;
   const vorticella = view.vorticella.count > 0

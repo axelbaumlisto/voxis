@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CELL_DEFAULTS } from "../../defaults";
-import { euglenaContribute, EUGLENA_RELEVANT_FIELDS } from "../euglena";
+import { euglenaContribute, euglenaDisplayLength, EUGLENA_RELEVANT_FIELDS } from "../euglena";
+import { didiniumContribute, didiniumDisplayLength } from "../didinium";
 import { heroConsumeObstacles } from "../hero";
 import { buildField, KIND_ID, sourceId } from "../interaction";
 import type { FieldContribution, ObstacleCircle } from "../interaction";
@@ -143,10 +144,15 @@ describe("aquarium interaction field vocabulary", () => {
       radius: obstacle.radius,
       sourceId: sourceId("vorticella", 0),
     }]);
-    expect(euglenaContribute(initial.euglena[0], 0)).toEqual([{
+    expect(euglenaContribute(initial.euglena[0], 0, 1.4)).toEqual([{
       kind: "motile",
       x: initial.euglena[0].x,
       y: initial.euglena[0].y,
+      heading: initial.euglena[0].heading,
+      radius: euglenaDisplayLength(initial.euglena[0].size, 1.4) * 0.18,
+      speed: initial.euglena[0].swimSpeed,
+      role: "neutral",
+      strength: 0.35,
       sourceId: sourceId("euglena", 0),
     }]);
     expect(heroContribute(hero)).toEqual([
@@ -162,8 +168,41 @@ describe("aquarium interaction field vocabulary", () => {
         sourceId: sourceId("hero", 0),
       },
       { kind: "wake", x: hero.x, y: hero.y, heading: hero.heading, sourceId: sourceId("hero", 0) },
-      { kind: "motile", x: hero.x, y: hero.y, sourceId: sourceId("hero", 0) },
+      {
+        kind: "motile",
+        x: hero.x,
+        y: hero.y,
+        heading: hero.heading,
+        radius: Math.max(hero.halfWid, hero.halfLen * 0.35),
+        speed: 0,
+        role: "prey",
+        strength: 1,
+        sourceId: sourceId("hero", 0),
+      },
     ]);
+    const didinium = {
+      x: 66,
+      y: 44,
+      phase: 0.4,
+      size: 1.2,
+      heading: 0.7,
+      swimSpeed: 0.9,
+      rollPhase: 0,
+      rollRate: 0.7,
+      beatPhase: 0,
+      beatRate: 4,
+    };
+    expect(didiniumContribute(didinium, 0, 1.8)).toEqual([{
+      kind: "motile",
+      x: 66,
+      y: 44,
+      heading: 0.7,
+      radius: didiniumDisplayLength(1.2, 1.8) * 0.35,
+      speed: 0.9,
+      role: "predator",
+      strength: 0.75,
+      sourceId: sourceId("didinium", 0),
+    }]);
     expect([...EUGLENA_RELEVANT_FIELDS]).toEqual(["obstacle", "wake", "motile"]);
     expect([...VORTICELLA_RELEVANT_FIELDS]).toEqual(["motile"]);
   });
@@ -237,10 +276,10 @@ describe("aquarium interaction field vocabulary", () => {
 
     const referenceContribs: FieldContribution[] = [
       ...initial.vorticella.flatMap((v, i) => vorticellaContribute(v, 1.2, seedFrame.height, i)),
-      ...initial.euglena.flatMap((e, i) => euglenaContribute(e, i)),
+      ...initial.euglena.flatMap((e, i) => euglenaContribute(e, i, 1.4)),
       ...heroContribute(seedFrame.hero),
     ];
-    const field = buildAquariumInteractionField(initial.euglena, initial.vorticella, seedFrame.hero, 1.2, seedFrame.height);
+    const field = buildAquariumInteractionField(initial.euglena, initial.vorticella, seedFrame.hero, 1.2, seedFrame.height, undefined, 1.4);
 
     expect(field).toEqual(buildField(referenceContribs));
     expect(field.obstacles.map((contrib) => contrib.sourceId)).toEqual([

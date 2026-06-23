@@ -30,6 +30,16 @@ export type Motile = {
   readonly x: number;
   readonly y: number;
   readonly sourceId: number;
+  /** Optional body-axis heading (radians), for consumers that need orientation-aware reactions. */
+  readonly heading?: number;
+  /** Optional effective interaction radius (px). Point-only motiles remain valid when omitted. */
+  readonly radius?: number;
+  /** Optional speed proxy (body-lengths/sec or local renderer units), for strength heuristics. */
+  readonly speed?: number;
+  /** Optional semantic role; species/sourceId remains authoritative for dispatch. */
+  readonly role?: "prey" | "predator" | "neutral";
+  /** Optional interaction strength multiplier; consumers must fall back when omitted. */
+  readonly strength?: number;
 };
 
 export type Wake = {

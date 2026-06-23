@@ -2215,8 +2215,19 @@ var TUMBLE_RATE_MIN = 0.045;
 var TUMBLE_RATE_MAX = 0.16;
 var SEPARATION_RANGE_BODY_LENGTHS = 1.6;
 var EUGLENA_RELEVANT_FIELDS = new Set(["obstacle", "wake", "motile"]);
-function euglenaContribute(cell, idx) {
-  return [{ kind: "motile", x: cell.x, y: cell.y, sourceId: sourceId("euglena", idx) }];
+function euglenaContribute(cell, idx, scale = 1) {
+  const length = euglenaDisplayLength(finite(cell.size, 1), scale);
+  return [{
+    kind: "motile",
+    x: cell.x,
+    y: cell.y,
+    heading: finiteOr(cell.heading, finiteOr(cell.phase, 0)),
+    radius: length * 0.18,
+    speed: Math.max(0, finiteOr(cell.swimSpeed, 0)),
+    role: "neutral",
+    strength: 0.35,
+    sourceId: sourceId("euglena", idx)
+  }];
 }
 function updateEuglena(euglena, frame, view) {
   if (euglena.length === 0)
@@ -3379,8 +3390,19 @@ function seedDidinium(count, seed, frame, salt = DIDINIUM_SALT) {
   return out;
 }
 var DIDINIUM_RELEVANT_FIELDS = new Set(["obstacle"]);
-function didiniumContribute(cell, idx) {
-  return [{ kind: "motile", x: finite(cell.x, 0), y: finite(cell.y, 0), sourceId: sourceId("didinium", idx) }];
+function didiniumContribute(cell, idx, scale = 1) {
+  const length = didiniumDisplayLength(finite(cell.size, 1), scale);
+  return [{
+    kind: "motile",
+    x: finite(cell.x, 0),
+    y: finite(cell.y, 0),
+    heading: finiteOr(cell.heading, finiteOr(cell.phase, 0)),
+    radius: length * 0.35,
+    speed: Math.max(0, finiteOr(cell.swimSpeed, 0)),
+    role: "predator",
+    strength: 0.75,
+    sourceId: sourceId("didinium", idx)
+  }];
 }
 function updateDidinium(didinium, frame, view) {
   if (didinium.length === 0)
@@ -4022,11 +4044,16 @@ function heroContribute(hero) {
       kind: "motile",
       x: hero.x,
       y: hero.y,
+      heading: hero.heading ?? 0,
+      radius: Math.max(hero.halfWid ?? hero.radius, (hero.halfLen ?? hero.radius) * 0.35),
+      speed: 0,
+      role: "prey",
+      strength: 1,
       sourceId: heroId
     }
   ];
 }
-function buildAquariumInteractionField(euglena, vorticella, hero, vorticellaScale, frameHeight, didinium) {
+function buildAquariumInteractionField(euglena, vorticella, hero, vorticellaScale, frameHeight, didinium, euglenaScale = 1, didiniumScale = 1) {
   const contribs = [];
   if (vorticella) {
     for (let i = 0;i < vorticella.length; i++) {
@@ -4035,12 +4062,12 @@ function buildAquariumInteractionField(euglena, vorticella, hero, vorticellaScal
   }
   if (euglena) {
     for (let i = 0;i < euglena.length; i++) {
-      contribs.push(...euglenaContribute(euglena[i], i));
+      contribs.push(...euglenaContribute(euglena[i], i, euglenaScale));
     }
   }
   if (didinium) {
     for (let i = 0;i < didinium.length; i++) {
-      contribs.push(...didiniumContribute(didinium[i], i));
+      contribs.push(...didiniumContribute(didinium[i], i, didiniumScale));
     }
   }
   contribs.push(...heroContribute(hero));
@@ -4065,7 +4092,7 @@ function updateAquarium(aquarium, frame, params) {
   const preUpdateEuglena = view.euglena.count > 0 && aquarium.euglena.length > 0 ? aquarium.euglena : undefined;
   const preUpdateVorticella = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella : undefined;
   const preUpdateDidinium = view.didinium.count > 0 && aquarium.didinium.length > 0 ? aquarium.didinium : undefined;
-  const interaction = buildAquariumInteractionField(preUpdateEuglena, preUpdateVorticella, frame.hero, view.vorticella.scale, frame.height, preUpdateDidinium);
+  const interaction = buildAquariumInteractionField(preUpdateEuglena, preUpdateVorticella, frame.hero, view.vorticella.scale, frame.height, preUpdateDidinium, view.euglena.scale, view.didinium.scale);
   const interactionFrame = { ...frame, interaction };
   const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, interactionFrame, cfgBySpecies.euglena) : aquarium.euglena;
   const vorticella = view.vorticella.count > 0 ? REGISTRY.vorticella.update(aquarium.vorticella, interactionFrame, cfgBySpecies.vorticella) : aquarium.vorticella;

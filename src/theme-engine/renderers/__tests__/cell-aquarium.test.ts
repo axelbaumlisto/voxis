@@ -2475,10 +2475,20 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
     expect(q).toBeLessThan(1.2);
   });
 
-  it("didiniumContribute emits one motile per cell with the didinium sourceId", () => {
-    const cell = testDidinium({ x: 42, y: 24 });
-    const contribs = didiniumContribute(cell, 0);
-    expect(contribs).toEqual([{ kind: "motile", x: 42, y: 24, sourceId: sourceId("didinium", 0) }]);
+  it("didiniumContribute emits one metadata-rich motile per cell with the didinium sourceId", () => {
+    const cell = testDidinium({ x: 42, y: 24, heading: 0.7, swimSpeed: 0.9, size: 1.2 });
+    const contribs = didiniumContribute(cell, 0, 1.8);
+    expect(contribs).toEqual([{
+      kind: "motile",
+      x: 42,
+      y: 24,
+      heading: 0.7,
+      radius: didiniumDisplayLength(1.2, 1.8) * 0.35,
+      speed: 0.9,
+      role: "predator",
+      strength: 0.75,
+      sourceId: sourceId("didinium", 0),
+    }]);
     expect(didiniumContribute(cell, 3)[0].sourceId).toBe(sourceId("didinium", 3));
   });
 
