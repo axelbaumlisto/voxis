@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CELL_DEFAULTS } from "../../defaults";
 import { euglenaContribute, euglenaDisplayLength, EUGLENA_RELEVANT_FIELDS } from "../euglena";
-import { didiniumContribute, didiniumDisplayLength } from "../didinium";
+import { didiniumContribute, didiniumDisplayLength, DIDINIUM_RELEVANT_FIELDS } from "../didinium";
 import { heroConsumeObstacles } from "../hero";
 import { buildField, KIND_ID, sourceId } from "../interaction";
 import type { FieldContribution, ObstacleCircle } from "../interaction";
@@ -205,6 +205,7 @@ describe("aquarium interaction field vocabulary", () => {
     }]);
     expect([...EUGLENA_RELEVANT_FIELDS]).toEqual(["obstacle", "wake", "motile"]);
     expect([...VORTICELLA_RELEVANT_FIELDS]).toEqual(["motile"]);
+    expect([...DIDINIUM_RELEVANT_FIELDS]).toEqual(["obstacle", "motile"]);
   });
 
   it("hero hard-clamp consume matches legacy vorticella obstacle loop to 1e-10", () => {

@@ -2452,14 +2452,29 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
     expect(Math.abs(next[0].heading)).toBeLessThan(Math.abs(initial[0].heading));
   });
 
-  it("banks away from vorticella circle obstacles", () => {
-    const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0 });
+  it("banks away from vorticella circle obstacles and resolves the shell boundedly", () => {
+    const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0, didiniumScale: 2 });
     const initial = [testDidinium({ x: 150, y: 80, heading: 0, phase: 0 })];
-    const interaction = buildField([
-      { kind: "obstacle", shape: "circle", x: 175, y: 80, radius: 18, sourceId: sourceId("vorticella", 0) },
-    ]);
+    const obstacle = { kind: "obstacle" as const, shape: "circle" as const, x: 175, y: 80, radius: 18, sourceId: sourceId("vorticella", 0) };
+    const interaction = buildField([obstacle]);
     const next = updateDidinium(initial, frame({ dt: 0.2, t: 2, width: 340, height: 170, interaction }), view);
     expect(Math.abs(next[0].heading)).toBeGreaterThan(1.5);
+    const beforeD = Math.hypot(initial[0].x - obstacle.x, initial[0].y - obstacle.y);
+    const afterD = Math.hypot(next[0].x - obstacle.x, next[0].y - obstacle.y);
+    expect(afterD).toBeGreaterThan(beforeD);
+    expect(Math.hypot(next[0].x - initial[0].x, next[0].y - initial[0].y)).toBeLessThanOrEqual(didiniumDisplayLength(1, 2) * 0.35 + 1e-6);
+  });
+
+  it("softly avoids Euglena motiles without hunting or latching them", () => {
+    const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0, didiniumScale: 2 });
+    const initial = [testDidinium({ x: 150, y: 80, heading: 0, phase: 0 })];
+    const interaction = buildField([
+      { kind: "motile", x: 175, y: 80, radius: 8, role: "neutral", sourceId: sourceId("euglena", 0) },
+    ]);
+    const next = updateDidinium(initial, frame({ dt: 0.2, t: 2, width: 340, height: 170, interaction }), view);
+    expect(Math.abs(next[0].heading)).toBeGreaterThan(0.3);
+    expect(next[0].contactTimer ?? 0).toBe(0);
+    expect(next[0].huntCooldown ?? 0).toBe(0);
   });
 
   it("latches on the hero surface instead of sinking into the prey ellipse", () => {
