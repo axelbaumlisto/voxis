@@ -452,16 +452,38 @@ export function drawDidinium(
         const lat = bow * halfWidthAt(u) * side2;
         macro.push(transform(cx, cy, ux, uy, halfLength * u, lat));
       }
-      // soft underglow (wide, dark-cool halo to set the C off from the endoplasm)
-      ctx.strokeStyle = `hsla(${hue - 6}, 22%, 70%, ${alpha * 0.34})`;
-      ctx.lineWidth = Math.max(1.8, wMax * 0.52);
+      // FILLED SAUSAGE: offset the centerline perpendicular to its local tangent
+      // by a half-thickness that tapers to rounded ends, building a closed ribbon
+      // — a solid worm-like macronucleus (Berdan DIC), not a hollow stroked tube.
+      const halfTh = Math.max(1.2, wMax * 0.2); // half-thickness of the sausage
+      const left: { x: number; y: number }[] = [];
+      const right: { x: number; y: number }[] = [];
+      for (let k = 0; k <= MN; k++) {
+        const f = k / MN;
+        const taper = Math.pow(Math.sin(Math.max(0, Math.min(1, f)) * Math.PI), 0.45); // rounded ends
+        const a = macro[Math.max(0, k - 1)];
+        const b = macro[Math.min(MN, k + 1)];
+        let tx = b.x - a.x, ty = b.y - a.y;
+        const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+        const nx2 = -ty, ny2 = tx; // perpendicular to the centerline tangent
+        const th = halfTh * taper;
+        const p = macro[k];
+        left.push({ x: p.x + nx2 * th, y: p.y + ny2 * th });
+        right.push({ x: p.x - nx2 * th, y: p.y - ny2 * th });
+      }
+      const ribbon = [...left, ...right.reverse()];
+      // soft dark-cool underglow halo to set the C off from the bright endoplasm
       drawPolyline(ctx, macro, false);
+      ctx.strokeStyle = `hsla(${hue - 6}, 22%, 70%, ${alpha * 0.3})`;
+      ctx.lineWidth = Math.max(2.2, wMax * 0.62);
       ctx.stroke();
-      // DOMINANT bright C core — the single headline DIC interior landmark; drawn
-      // brighter than the girdle crescents so it reads as the primary structure.
-      ctx.strokeStyle = `hsla(${hue - 4}, 30%, 82%, ${alpha * 0.9})`;
-      ctx.lineWidth = Math.max(1.2, wMax * 0.28);
-      drawPolyline(ctx, macro, false);
+      // DOMINANT solid filled C — the single headline DIC interior landmark
+      drawPolyline(ctx, ribbon, true);
+      ctx.fillStyle = `hsla(${hue - 4}, 30%, 82%, ${alpha * 0.86})`;
+      ctx.fill();
+      // faint brighter rim on the filled body for refractile relief
+      ctx.strokeStyle = `hsla(${hue - 2}, 34%, 90%, ${alpha * 0.4})`;
+      ctx.lineWidth = Math.max(0.4, wMax * 0.04);
       ctx.stroke();
     }
 
