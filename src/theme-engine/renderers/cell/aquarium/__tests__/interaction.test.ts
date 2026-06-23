@@ -50,7 +50,7 @@ function legacyHeroVorticellaClampDelta(
 
 describe("aquarium interaction field vocabulary", () => {
   it("freezes sourceId namespace packing", () => {
-    expect(KIND_ID).toEqual({ diatom: 0, euglena: 1, vorticella: 2, hero: 3 });
+    expect(KIND_ID).toEqual({ diatom: 0, euglena: 1, vorticella: 2, hero: 3, didinium: 4 });
     expect(sourceId("diatom", 0)).toBe(0);
     expect(sourceId("euglena", 0)).toBe(1 << 20);
     expect(sourceId("euglena", 1)).toBe((1 << 20) | 1);

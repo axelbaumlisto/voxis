@@ -1,6 +1,6 @@
 import type { AquariumFrame } from "./types";
 
-export const KIND_ID = { diatom: 0, euglena: 1, vorticella: 2, hero: 3 } as const;
+export const KIND_ID = { diatom: 0, euglena: 1, vorticella: 2, hero: 3, didinium: 4 } as const;
 
 export type FieldKind = "obstacle" | "wake" | "motile";
 

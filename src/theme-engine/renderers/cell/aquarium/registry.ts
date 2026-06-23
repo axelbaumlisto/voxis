@@ -7,12 +7,14 @@ import type {
   AquariumLayerState,
   AquariumParamsView,
   DiatomState,
+  DidiniumState,
   EuglenaState,
   VorticellaState,
 } from "./types";
 import { seedVorticella, updateVorticella, drawVorticella } from "./vorticella";
+import { seedDidinium, updateDidinium, drawDidinium } from "./didinium";
 
-export type Species = "diatom" | "euglena" | "vorticella";
+export type Species = "diatom" | "euglena" | "vorticella" | "didinium";
 
 export interface SceneInstance {
   species: Species;
@@ -47,12 +49,14 @@ interface RegistryStateMap {
   diatom: DiatomState;
   euglena: EuglenaState;
   vorticella: VorticellaState;
+  didinium: DidiniumState;
 }
 
 interface RegistrySlotMap {
   diatom: "diatoms";
   euglena: "euglena";
   vorticella: "vorticella";
+  didinium: "didinium";
 }
 
 type AquariumRegistry = { [K in Species]: OrganismRegistryEntry<RegistryStateMap[K], RegistrySlotMap[K]> };
@@ -61,6 +65,13 @@ type AquariumLayerCfg = Pick<AquariumParamsView, "activityBoost" | "seed"> & { r
 type DiatomCfg = AquariumParamsView["diatoms"] & AquariumLayerCfg;
 type EuglenaCfg = AquariumParamsView["euglena"] & AquariumLayerCfg & Pick<AquariumParamsView, "medium">;
 type VorticellaCfg = AquariumParamsView["vorticella"] & AquariumLayerCfg;
+type DidiniumCfg = AquariumParamsView["didinium"] & AquariumLayerCfg;
+
+// Zeroed sibling blocks so each per-species view leaves only its own block live.
+const ZERO_DIATOMS = { count: 0, alpha: 0, driftSpeed: 0 } as const;
+const ZERO_EUGLENA = { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 } as const;
+const ZERO_VORTICELLA = { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 } as const;
+const ZERO_DIDINIUM = { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 0 } as const;
 
 function viewForDiatom(cfg: DiatomCfg): AquariumParamsView {
   return {
@@ -69,8 +80,9 @@ function viewForDiatom(cfg: DiatomCfg): AquariumParamsView {
     alpha: cfg.aquariumAlpha,
     activityBoost: cfg.activityBoost,
     diatoms: cfg,
-    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 },
-    vorticella: { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 },
+    euglena: ZERO_EUGLENA,
+    vorticella: ZERO_VORTICELLA,
+    didinium: ZERO_DIDINIUM,
   };
 }
 
@@ -81,9 +93,10 @@ function viewForEuglena(cfg: EuglenaCfg): AquariumParamsView {
     alpha: cfg.aquariumAlpha,
     activityBoost: cfg.activityBoost,
     medium: cfg.medium,
-    diatoms: { count: 0, alpha: 0, driftSpeed: 0 },
+    diatoms: ZERO_DIATOMS,
     euglena: cfg,
-    vorticella: { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 },
+    vorticella: ZERO_VORTICELLA,
+    didinium: ZERO_DIDINIUM,
   };
 }
 
@@ -93,9 +106,23 @@ function viewForVorticella(cfg: VorticellaCfg): AquariumParamsView {
     seed: cfg.seed,
     alpha: cfg.aquariumAlpha,
     activityBoost: cfg.activityBoost,
-    diatoms: { count: 0, alpha: 0, driftSpeed: 0 },
-    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 },
+    diatoms: ZERO_DIATOMS,
+    euglena: ZERO_EUGLENA,
     vorticella: cfg,
+    didinium: ZERO_DIDINIUM,
+  };
+}
+
+function viewForDidinium(cfg: DidiniumCfg): AquariumParamsView {
+  return {
+    enabled: true,
+    seed: cfg.seed,
+    alpha: cfg.aquariumAlpha,
+    activityBoost: cfg.activityBoost,
+    diatoms: ZERO_DIATOMS,
+    euglena: ZERO_EUGLENA,
+    vorticella: ZERO_VORTICELLA,
+    didinium: cfg,
   };
 }
 
@@ -123,6 +150,14 @@ export const REGISTRY: AquariumRegistry = {
     seed: (count, seed, frame, cfg) => seedVorticella(count, seed, frame, (cfg as AquariumParamsView["vorticella"]).alongFrac),
     update: (states, frame, cfg) => updateVorticella(states, frame, viewForVorticella(cfg as VorticellaCfg)),
     draw: (ctx, states, frame, cfg) => drawVorticella(ctx, states, frame, viewForVorticella(cfg as VorticellaCfg)),
+  },
+  didinium: {
+    salt: 0x0d1d1c0a,
+    z: 3,
+    slot: "didinium",
+    seed: (count, seed, frame) => seedDidinium(count, seed, frame),
+    update: (states, frame, cfg) => updateDidinium(states, frame, viewForDidinium(cfg as DidiniumCfg)),
+    draw: (ctx, states, frame, cfg) => drawDidinium(ctx, states, frame, viewForDidinium(cfg as DidiniumCfg)),
   },
 };
 
@@ -157,6 +192,13 @@ export function sceneFromParams(params: CellParams): SceneSpec {
       species: "vorticella",
       count: view.vorticella.count,
       cfg: { ...view.vorticella, seed: view.seed, aquariumAlpha: view.alpha, activityBoost: view.activityBoost },
+    });
+  }
+  if (view.didinium.count > 0) {
+    instances.push({
+      species: "didinium",
+      count: view.didinium.count,
+      cfg: { ...view.didinium, seed: view.seed, aquariumAlpha: view.alpha, activityBoost: view.activityBoost },
     });
   }
 

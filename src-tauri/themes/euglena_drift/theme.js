@@ -1554,6 +1554,11 @@ var CELL_DEFAULTS = {
   vorticellaContractRate: 1,
   vorticellaScale: 1,
   vorticellaAlongFrac: 0.5,
+  didiniumCount: 0,
+  didiniumSpeed: 1,
+  didiniumSpeedActive: 2,
+  didiniumScale: 1,
+  didiniumHueOffset: 0,
   enableFlowField: false,
   flowMoteCount: 0,
   flowStrength: 300,
@@ -1692,12 +1697,19 @@ function aquariumParamsView(params) {
       contractRate: nonNegative(params.vorticellaContractRate, 1),
       scale: nonNegative(params.vorticellaScale, 1),
       alongFrac: Math.min(1, Math.max(0, finiteOr(params.vorticellaAlongFrac, 0.5)))
+    },
+    didinium: {
+      count: nonNegativeInt(params.didiniumCount, 0),
+      speed: nonNegative(params.didiniumSpeed, 1),
+      speedActive: nonNegative(params.didiniumSpeedActive, 2),
+      scale: nonNegative(params.didiniumScale, 1),
+      hueOffset: finiteOr(params.didiniumHueOffset, 0)
     }
   };
 }
 
 // src/theme-engine/renderers/cell/aquarium/interaction.ts
-var KIND_ID = { diatom: 0, euglena: 1, vorticella: 2, hero: 3 };
+var KIND_ID = { diatom: 0, euglena: 1, vorticella: 2, hero: 3, didinium: 4 };
 function buildField(contribs) {
   const obstacles = [];
   const motiles = [];
@@ -3275,7 +3287,367 @@ function drawVorticella(ctx, vorticella, frame, view) {
   ctx.restore();
 }
 
+// src/theme-engine/renderers/cell/aquarium/didinium.ts
+var DIDINIUM_SALT = 220011530;
+var ASPECT = 1.35;
+var GIRDLE_A_U = 0.46;
+var GIRDLE_P_U = -0.16;
+var SHOULDER_U = 0.52;
+var BRUSH_ROWS = 5;
+var STOPGO_FREQ = 0.42;
+var WANDER_FREQ = 0.21;
+var WANDER_RAD = 0.5;
+var WALL_LOOK = 2;
+var AVOID_SECONDS = 0.7;
+var AVOID_TURN_MIN = 2 * Math.PI / 3;
+var AVOID_TURN_MAX = 5 * Math.PI / 6;
+function didiniumModeView(mode) {
+  switch (mode) {
+    case "recording":
+      return { motionMul: 1.2, alphaMul: 1.08 };
+    case "transcribing":
+      return { motionMul: 0.35, alphaMul: 0.8 };
+    case "error":
+      return { motionMul: 0.15, alphaMul: 0.55 };
+    case "idle":
+    default:
+      return { motionMul: 1, alphaMul: 1 };
+  }
+}
+function didiniumDisplayLength(size, scale) {
+  const s = Math.max(0.1, finite(scale, 1));
+  return Math.max(7, Math.min(34 * s, (16 + finite(size, 1) * 4) * s));
+}
+function bodyShape2(u) {
+  if (u >= SHOULDER_U) {
+    const q = (u - SHOULDER_U) / (1 - SHOULDER_U);
+    const wShoulder = 0.9;
+    return wShoulder * Math.pow(1 - q, 0.85);
+  }
+  const t = (u - SHOULDER_U) / (-1 - SHOULDER_U);
+  const belly = Math.sin(Math.PI * clamp01(t * 0.86 + 0.07));
+  return 0.62 + 0.38 * belly;
+}
+var BODY_SHAPE_MAX2 = (() => {
+  let m = 0;
+  for (let i = 0;i <= 400; i++) {
+    const u = -1 + i / 400 * 2;
+    m = Math.max(m, bodyShape2(u));
+  }
+  return m;
+})();
+function normHalfWidth2(u) {
+  return bodyShape2(u) / BODY_SHAPE_MAX2;
+}
+function seedDidinium(count, seed, frame, salt = DIDINIUM_SALT) {
+  if (count <= 0)
+    return [];
+  const out = [];
+  const safeWidth = Math.max(0, finite(frame.width, 0));
+  const safeHeight = Math.max(0, finite(frame.height, 0));
+  for (let i = 0;i < count; i++) {
+    const dir = seededUnit(seed, i, salt ^ 1757159915) < 0.5 ? 0 : Math.PI;
+    const tilt = (seededUnit(seed, i, salt ^ 463228477) - 0.5) * 0.6;
+    const heading = dir + tilt;
+    out.push({
+      x: (0.2 + 0.6 * seededUnit(seed, i, salt)) * safeWidth,
+      y: (0.25 + 0.5 * seededUnit(seed, i, salt ^ 1374496523)) * safeHeight,
+      phase: heading,
+      size: 0.5 + seededUnit(seed, i, salt ^ 48610963),
+      heading,
+      swimSpeed: 0.85 + seededUnit(seed, i, salt ^ 802853537) * 0.3,
+      rollPhase: seededUnit(seed, i, salt ^ 1107813911),
+      rollRate: 0.35 + seededUnit(seed, i, salt ^ 348696353) * 0.25,
+      beatPhase: seededUnit(seed, i, salt ^ 668265263),
+      beatRate: 4 + seededUnit(seed, i, salt ^ 1966046297) * 1.5,
+      cvPhase: seededUnit(seed, i, salt ^ 1033993285),
+      cvRate: 0.045 + seededUnit(seed, i, salt ^ 1508030371) * 0.02,
+      turnSide: seededUnit(seed, i, salt ^ 2050968865) < 0.5 ? -1 : 1,
+      avoidIndex: 0,
+      avoidFrom: heading,
+      avoidTo: heading,
+      avoidProgress: 1,
+      noiseSeed: mix32(seed ^ Math.imul(i + 1, 2654435761) ^ salt) >>> 0
+    });
+  }
+  return out;
+}
+var DIDINIUM_RELEVANT_FIELDS = new Set(["obstacle"]);
+function didiniumContribute(cell, idx) {
+  return [{ kind: "motile", x: finite(cell.x, 0), y: finite(cell.y, 0), sourceId: sourceId("didinium", idx) }];
+}
+function updateDidinium(didinium, frame, view) {
+  if (didinium.length === 0)
+    return didinium;
+  const dt = Math.max(0, finite(frame.dt, 0));
+  const safeWidth = Math.max(0, finite(frame.width, 0));
+  const safeHeight = Math.max(0, finite(frame.height, 0));
+  const activityMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
+  const modeView = didiniumModeView(frame.mode);
+  const vIdleBL = Math.max(0, finite(view.didinium.speed, 0));
+  const vActiveBL = Math.max(0, finite(view.didinium.speedActive, vIdleBL));
+  const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
+  const act = modeView.motionMul * (1 + 0.7 * activityMix);
+  const scale = view.didinium.scale;
+  const t = finite(frame.t, 0);
+  const wrapPi2 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  return didinium.map((cell, _idx) => {
+    const L = didiniumDisplayLength(finite(cell.size, 1), scale);
+    const nseed = finiteOr(cell.noiseSeed, 0) | 0;
+    let heading = finite(cell.heading, 0);
+    const px0 = finite(cell.x, 0);
+    const py0 = finite(cell.y, 0);
+    const stopgo = noise2D2(nseed ^ 1399873280, t * STOPGO_FREQ, 0.13);
+    const cruiseEnv = 0.18 + 0.82 * Math.pow(stopgo, 2);
+    const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L * cruiseEnv;
+    const wander = (noise2D2(nseed ^ 447978529, t * WANDER_FREQ, 0.61) * 2 - 1) * WANDER_RAD;
+    let wallPressure = 0;
+    let wallAwayX = 0;
+    let wallAwayY = 0;
+    const look = L * WALL_LOOK;
+    if (px0 < look) {
+      wallAwayX += 1 - px0 / look;
+      wallPressure += 1 - px0 / look;
+    }
+    if (safeWidth - px0 < look) {
+      wallAwayX -= 1 - (safeWidth - px0) / look;
+      wallPressure += 1 - (safeWidth - px0) / look;
+    }
+    if (py0 < look) {
+      wallAwayY += 1 - py0 / look;
+      wallPressure += 1 - py0 / look;
+    }
+    if (safeHeight - py0 < look) {
+      wallAwayY -= 1 - (safeHeight - py0) / look;
+      wallPressure += 1 - (safeHeight - py0) / look;
+    }
+    let avoidIndex = Math.max(0, Math.floor(finiteOr(cell.avoidIndex, 0)));
+    let avoidFrom = finiteOr(cell.avoidFrom, heading);
+    let avoidTo = finiteOr(cell.avoidTo, heading);
+    let avoidProgress = clamp01(finiteOr(cell.avoidProgress, 1));
+    const side = finiteOr(cell.turnSide, 1) < 0 ? -1 : 1;
+    const hitWall = wallPressure > 0.85 && avoidProgress >= 1;
+    if (hitWall) {
+      avoidIndex += 1;
+      const magU = noise2D2(nseed ^ 791783381, avoidIndex, 0.71);
+      const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
+      avoidFrom = heading;
+      avoidTo = heading + side * magnitude;
+      avoidProgress = 0;
+    }
+    if (avoidProgress < 1) {
+      const next = Math.min(1, avoidProgress + dt / AVOID_SECONDS);
+      const turnK = 6;
+      heading += wrapPi2(avoidTo - heading) * (1 - Math.exp(-turnK * dt));
+      if (next >= 1)
+        heading = avoidTo;
+      avoidProgress = next;
+    } else if (wallPressure > 0.000001) {
+      const desired = Math.atan2(Math.sin(heading) + wallAwayY, Math.cos(heading) + wallAwayX);
+      const turnK = 1 + 2.5 * Math.min(1, wallPressure);
+      heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
+    }
+    const eh = heading + wander;
+    const ux = Math.cos(eh);
+    const uy = Math.sin(eh);
+    let nextX = px0 + ux * vPx * dt;
+    let nextY = py0 + uy * vPx * dt;
+    nextX = clamp(nextX, 0, safeWidth);
+    nextY = clamp(nextY, 0, safeHeight);
+    const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
+    return {
+      ...cell,
+      x: nextX,
+      y: nextY,
+      phase: heading,
+      heading,
+      rollPhase: wrapUnit(finite(cell.rollPhase, 0) + Math.max(0, finite(cell.rollRate, 0)) * act * dt),
+      beatPhase: wrapUnit(finiteOr(cell.beatPhase, 0) + beatEff * dt),
+      cvPhase: wrapUnit(finiteOr(cell.cvPhase, 0) + Math.max(0, finiteOr(cell.cvRate, 0)) * act * dt),
+      avoidIndex,
+      avoidFrom,
+      avoidTo,
+      avoidProgress
+    };
+  });
+}
+function transform3(cx, cy, ux, uy, along, lateral) {
+  const nx = -uy;
+  const ny = ux;
+  return { x: cx + ux * along + nx * lateral, y: cy + uy * along + ny * lateral };
+}
+function drawPolyline4(ctx, points, close) {
+  if (points.length === 0)
+    return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1;i < points.length; i++)
+    ctx.lineTo(points[i].x, points[i].y);
+  if (close)
+    ctx.closePath();
+}
+function drawDidinium(ctx, didinium, frame, view) {
+  if (!view.enabled || didinium.length === 0 || view.didinium.count <= 0)
+    return;
+  const alpha = Math.max(0, Math.min(1, view.alpha * 0.9 * didiniumModeView(frame.mode).alphaMul));
+  if (alpha <= 0)
+    return;
+  const scale = Math.max(0.1, finite(view.didinium.scale, 1));
+  const hue = 200 + finite(view.didinium.hueOffset, 0);
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  didinium.forEach((cell) => {
+    const L = didiniumDisplayLength(finite(cell.size, 1), scale);
+    const halfLength = L / 2;
+    const wMax = L / ASPECT / 2;
+    const heading = finite(cell.heading, 0);
+    const ux = Math.cos(heading);
+    const uy = Math.sin(heading);
+    const cx = finite(cell.x, 0);
+    const cy = finite(cell.y, 0);
+    const roll = wrapUnit(finite(cell.rollPhase, 0));
+    const rollAng = roll * TAU2;
+    const rollCos = Math.cos(rollAng);
+    const widthMul = 0.9 + 0.1 * Math.abs(rollCos);
+    const halfWidthAt = (u) => wMax * widthMul * normHalfWidth2(u);
+    const SAMP = 30;
+    const upper = [];
+    const lower = [];
+    for (let i = 0;i <= SAMP; i++) {
+      const u = -Math.cos(Math.PI * i / SAMP);
+      const hw = halfWidthAt(u);
+      upper.push(transform3(cx, cy, ux, uy, halfLength * u, hw));
+      lower.push(transform3(cx, cy, ux, uy, halfLength * u, -hw));
+    }
+    const outline = [...upper, ...lower.reverse()];
+    drawPolyline4(ctx, outline, true);
+    ctx.fillStyle = `hsla(${hue}, 30%, 80%, ${alpha * 0.34})`;
+    ctx.fill();
+    ctx.strokeStyle = `hsla(${hue}, 36%, 88%, ${alpha * 0.5})`;
+    ctx.lineWidth = Math.max(0.6, wMax * 0.1);
+    ctx.stroke();
+    const gSeed = finiteOr(cell.noiseSeed, 0) | 0;
+    const gCount = Math.round(clamp(L * 1.4, 16, 64));
+    ctx.fillStyle = `hsla(${hue}, 26%, 86%, ${alpha * 0.16})`;
+    for (let g = 0;g < gCount; g++) {
+      const gu = (seededUnit(gSeed, g, 1371344503) * 2 - 1) * 0.86;
+      const gs = (seededUnit(gSeed, g, 2585733948) * 2 - 1) * 0.8;
+      const hw = halfWidthAt(gu);
+      const p = transform3(cx, cy, ux, uy, halfLength * gu, gs * hw);
+      const r = 0.4 + seededUnit(gSeed, g, 752460107) * 0.7;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, TAU2);
+      ctx.fill();
+    }
+    {
+      const muStart = -0.5;
+      const muEnd = 0.2;
+      const macro = [];
+      for (let k = 0;k <= 14; k++) {
+        const u = muStart + (muEnd - muStart) * (k / 14);
+        const bow = Math.sin(k / 14 * Math.PI) * 0.42;
+        const lat = bow * halfWidthAt(u) * rollCos;
+        macro.push(transform3(cx, cy, ux, uy, halfLength * u, lat));
+      }
+      ctx.strokeStyle = `hsla(${hue - 4}, 22%, 84%, ${alpha * 0.62})`;
+      ctx.lineWidth = Math.max(0.8, wMax * 0.22);
+      drawPolyline4(ctx, macro, false);
+      ctx.stroke();
+    }
+    const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
+    const drawGirdle = (gu) => {
+      const hw = halfWidthAt(gu);
+      const baseAlong = halfLength * gu;
+      const ticks = Math.max(8, Math.round(hw * 1.6));
+      for (let s = 0;s <= ticks; s++) {
+        const theta = s / ticks * Math.PI - Math.PI / 2;
+        const lat = Math.sin(theta) * hw;
+        const depth = Math.cos(theta + rollAng);
+        const front = 0.5 + 0.5 * depth;
+        const wave = 0.5 + 0.5 * Math.sin(TAU2 * beat - theta * 2.2);
+        const cilLen = hw * (0.32 + 0.26 * wave);
+        const base = transform3(cx, cy, ux, uy, baseAlong, lat);
+        const tipAlong = baseAlong + cilLen * 0.35;
+        const tipLat = lat + Math.sign(lat || 1) * cilLen * 0.5;
+        const tip = transform3(cx, cy, ux, uy, tipAlong, tipLat);
+        ctx.strokeStyle = `hsla(${hue + 6}, 44%, 90%, ${alpha * (0.2 + 0.7 * front)})`;
+        ctx.lineWidth = Math.max(0.5, wMax * 0.07);
+        ctx.beginPath();
+        ctx.moveTo(base.x, base.y);
+        ctx.lineTo(tip.x, tip.y);
+        ctx.stroke();
+      }
+      const band = [];
+      for (let s = 0;s <= 12; s++) {
+        const theta = s / 12 * Math.PI - Math.PI / 2;
+        band.push(transform3(cx, cy, ux, uy, baseAlong, Math.sin(theta) * hw));
+      }
+      ctx.strokeStyle = `hsla(${hue + 4}, 40%, 92%, ${alpha * 0.4})`;
+      ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+      drawPolyline4(ctx, band, false);
+      ctx.stroke();
+    };
+    drawGirdle(GIRDLE_A_U);
+    drawGirdle(GIRDLE_P_U);
+    const dorsalSign = rollCos >= 0 ? 1 : -1;
+    const drawBrushes = (gu) => {
+      const bu = gu - 0.1;
+      const hw = halfWidthAt(bu);
+      for (let r = 0;r < BRUSH_ROWS; r++) {
+        const along = halfLength * (bu - r * 0.03);
+        const lat = dorsalSign * hw * 0.7;
+        const base = transform3(cx, cy, ux, uy, along, lat);
+        const tip = transform3(cx, cy, ux, uy, along + hw * 0.12, lat + dorsalSign * hw * 0.28);
+        ctx.strokeStyle = `hsla(${hue + 8}, 38%, 88%, ${alpha * 0.3})`;
+        ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+        ctx.beginPath();
+        ctx.moveTo(base.x, base.y);
+        ctx.lineTo(tip.x, tip.y);
+        ctx.stroke();
+      }
+    };
+    drawBrushes(GIRDLE_A_U);
+    drawBrushes(GIRDLE_P_U);
+    {
+      const tip = transform3(cx, cy, ux, uy, halfLength * 1, 0);
+      const shL = transform3(cx, cy, ux, uy, halfLength * SHOULDER_U, halfWidthAt(SHOULDER_U));
+      const shR = transform3(cx, cy, ux, uy, halfLength * SHOULDER_U, -halfWidthAt(SHOULDER_U));
+      ctx.strokeStyle = `hsla(${hue + 2}, 34%, 88%, ${alpha * 0.5})`;
+      ctx.lineWidth = Math.max(0.5, wMax * 0.07);
+      ctx.beginPath();
+      ctx.moveTo(shL.x, shL.y);
+      ctx.lineTo(tip.x, tip.y);
+      ctx.lineTo(shR.x, shR.y);
+      ctx.stroke();
+      ctx.fillStyle = `hsla(${hue}, 30%, 80%, ${alpha * 0.4})`;
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, Math.max(0.5, wMax * 0.1), 0, TAU2);
+      ctx.fill();
+    }
+    {
+      const cvPulse = 0.5 - 0.5 * Math.cos(TAU2 * wrapUnit(finiteOr(cell.cvPhase, 0)));
+      const cvR = Math.max(0.6, wMax * (0.24 + 0.14 * cvPulse));
+      const p = transform3(cx, cy, ux, uy, -halfLength * 0.86, 0);
+      ctx.fillStyle = `hsla(${hue + 2}, 32%, 92%, ${alpha * 0.42})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, cvR, 0, TAU2);
+      ctx.fill();
+      ctx.strokeStyle = `hsla(${hue + 4}, 40%, 94%, ${alpha * 0.5})`;
+      ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, cvR, 0, TAU2);
+      ctx.stroke();
+    }
+  });
+  ctx.restore();
+}
+
 // src/theme-engine/renderers/cell/aquarium/registry.ts
+var ZERO_DIATOMS = { count: 0, alpha: 0, driftSpeed: 0 };
+var ZERO_EUGLENA = { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 };
+var ZERO_VORTICELLA = { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 };
+var ZERO_DIDINIUM = { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 0 };
 function viewForDiatom(cfg) {
   return {
     enabled: true,
@@ -3283,8 +3655,9 @@ function viewForDiatom(cfg) {
     alpha: cfg.aquariumAlpha,
     activityBoost: cfg.activityBoost,
     diatoms: cfg,
-    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 },
-    vorticella: { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 }
+    euglena: ZERO_EUGLENA,
+    vorticella: ZERO_VORTICELLA,
+    didinium: ZERO_DIDINIUM
   };
 }
 function viewForEuglena(cfg) {
@@ -3294,9 +3667,10 @@ function viewForEuglena(cfg) {
     alpha: cfg.aquariumAlpha,
     activityBoost: cfg.activityBoost,
     medium: cfg.medium,
-    diatoms: { count: 0, alpha: 0, driftSpeed: 0 },
+    diatoms: ZERO_DIATOMS,
     euglena: cfg,
-    vorticella: { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 }
+    vorticella: ZERO_VORTICELLA,
+    didinium: ZERO_DIDINIUM
   };
 }
 function viewForVorticella(cfg) {
@@ -3305,9 +3679,22 @@ function viewForVorticella(cfg) {
     seed: cfg.seed,
     alpha: cfg.aquariumAlpha,
     activityBoost: cfg.activityBoost,
-    diatoms: { count: 0, alpha: 0, driftSpeed: 0 },
-    euglena: { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 },
-    vorticella: cfg
+    diatoms: ZERO_DIATOMS,
+    euglena: ZERO_EUGLENA,
+    vorticella: cfg,
+    didinium: ZERO_DIDINIUM
+  };
+}
+function viewForDidinium(cfg) {
+  return {
+    enabled: true,
+    seed: cfg.seed,
+    alpha: cfg.aquariumAlpha,
+    activityBoost: cfg.activityBoost,
+    diatoms: ZERO_DIATOMS,
+    euglena: ZERO_EUGLENA,
+    vorticella: ZERO_VORTICELLA,
+    didinium: cfg
   };
 }
 var REGISTRY = {
@@ -3334,6 +3721,14 @@ var REGISTRY = {
     seed: (count, seed, frame, cfg) => seedVorticella(count, seed, frame, cfg.alongFrac),
     update: (states, frame, cfg) => updateVorticella(states, frame, viewForVorticella(cfg)),
     draw: (ctx, states, frame, cfg) => drawVorticella(ctx, states, frame, viewForVorticella(cfg))
+  },
+  didinium: {
+    salt: 220011530,
+    z: 3,
+    slot: "didinium",
+    seed: (count, seed, frame) => seedDidinium(count, seed, frame),
+    update: (states, frame, cfg) => updateDidinium(states, frame, viewForDidinium(cfg)),
+    draw: (ctx, states, frame, cfg) => drawDidinium(ctx, states, frame, viewForDidinium(cfg))
   }
 };
 function sceneFromParams(params) {
@@ -3366,6 +3761,13 @@ function sceneFromParams(params) {
       species: "vorticella",
       count: view.vorticella.count,
       cfg: { ...view.vorticella, seed: view.seed, aquariumAlpha: view.alpha, activityBoost: view.activityBoost }
+    });
+  }
+  if (view.didinium.count > 0) {
+    instances.push({
+      species: "didinium",
+      count: view.didinium.count,
+      cfg: { ...view.didinium, seed: view.seed, aquariumAlpha: view.alpha, activityBoost: view.activityBoost }
     });
   }
   return { seed: view.seed | 0, instances };
@@ -3403,7 +3805,7 @@ function heroContribute(hero) {
     }
   ];
 }
-function buildAquariumInteractionField(euglena, vorticella, hero, vorticellaScale, frameHeight) {
+function buildAquariumInteractionField(euglena, vorticella, hero, vorticellaScale, frameHeight, didinium) {
   const contribs = [];
   if (vorticella) {
     for (let i = 0;i < vorticella.length; i++) {
@@ -3415,12 +3817,17 @@ function buildAquariumInteractionField(euglena, vorticella, hero, vorticellaScal
       contribs.push(...euglenaContribute(euglena[i], i));
     }
   }
+  if (didinium) {
+    for (let i = 0;i < didinium.length; i++) {
+      contribs.push(...didiniumContribute(didinium[i], i));
+    }
+  }
   contribs.push(...heroContribute(hero));
   return buildField(contribs);
 }
 function seedAquarium(frame, params) {
   const scene = sceneFromParams(params);
-  const state = { seed: scene.seed, diatoms: [], euglena: [], vorticella: [] };
+  const state = { seed: scene.seed, diatoms: [], euglena: [], vorticella: [], didinium: [] };
   for (const instance of scene.instances) {
     const entry = REGISTRY[instance.species];
     state[entry.slot] = entry.seed(instance.count, scene.seed, frame, instance.cfg);
@@ -3436,11 +3843,13 @@ function updateAquarium(aquarium, frame, params) {
   const diatoms = view.diatoms.count > 0 ? REGISTRY.diatom.update(aquarium.diatoms, frame, cfgBySpecies.diatom) : aquarium.diatoms;
   const preUpdateEuglena = view.euglena.count > 0 && aquarium.euglena.length > 0 ? aquarium.euglena : undefined;
   const preUpdateVorticella = view.vorticella.count > 0 && aquarium.vorticella.length > 0 ? aquarium.vorticella : undefined;
-  const interaction = buildAquariumInteractionField(preUpdateEuglena, preUpdateVorticella, frame.hero, view.vorticella.scale, frame.height);
+  const preUpdateDidinium = view.didinium.count > 0 && aquarium.didinium.length > 0 ? aquarium.didinium : undefined;
+  const interaction = buildAquariumInteractionField(preUpdateEuglena, preUpdateVorticella, frame.hero, view.vorticella.scale, frame.height, preUpdateDidinium);
   const interactionFrame = { ...frame, interaction };
   const euglena = view.euglena.count > 0 ? REGISTRY.euglena.update(aquarium.euglena, interactionFrame, cfgBySpecies.euglena) : aquarium.euglena;
   const vorticella = view.vorticella.count > 0 ? REGISTRY.vorticella.update(aquarium.vorticella, interactionFrame, cfgBySpecies.vorticella) : aquarium.vorticella;
-  return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella ? aquarium : { ...aquarium, diatoms, euglena, vorticella };
+  const didinium = view.didinium.count > 0 ? REGISTRY.didinium.update(aquarium.didinium, interactionFrame, cfgBySpecies.didinium) : aquarium.didinium;
+  return diatoms === aquarium.diatoms && euglena === aquarium.euglena && vorticella === aquarium.vorticella && didinium === aquarium.didinium ? aquarium : { ...aquarium, diatoms, euglena, vorticella, didinium };
 }
 function drawAquariumBackground(ctx, aquarium, frame, params) {
   const view = aquariumParamsView(params);

@@ -1,0 +1,10 @@
+{
+  "manifest_version": 2,
+  "id": "didinium_drift",
+  "name": "Didinium Drift",
+  "description": "A single Didinium nasutum — a stout barrel-bodied ciliate predator with a conical snout, two shimmering transverse ciliary girdles and a horseshoe macronucleus, swimming erratically and rotating on its long axis. No paramecium; the didinium is the whole organism.",
+  "api_version": 1,
+  "overlay_width": 320,
+  "overlay_height": 160,
+  "entry": "theme.js"
+}

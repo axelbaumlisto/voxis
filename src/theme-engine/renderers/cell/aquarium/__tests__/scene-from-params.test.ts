@@ -109,16 +109,19 @@ describe("aquarium scene registry", () => {
       diatom: 0x0d1a70cd,
       euglena: 0x0e091eaa,
       vorticella: 0x070271ca,
+      didinium: 0x0d1d1c0a,
     });
     expect(Object.fromEntries(Object.entries(REGISTRY).map(([species, entry]) => [species, entry.z]))).toEqual({
       diatom: 0,
       euglena: 1,
       vorticella: 2,
+      didinium: 3,
     });
     expect(Object.fromEntries(Object.entries(REGISTRY).map(([species, entry]) => [species, entry.slot]))).toEqual({
       diatom: "diatoms",
       euglena: "euglena",
       vorticella: "vorticella",
+      didinium: "didinium",
     });
   });
 
@@ -142,7 +145,7 @@ describe("aquarium scene registry", () => {
   });
 
   it("keeps production seed/draw dispatch data-driven for non-interacting organisms", () => {
-    const validSlots = new Set(["diatoms", "euglena", "vorticella"]);
+    const validSlots = new Set(["diatoms", "euglena", "vorticella", "didinium"]);
     for (const entry of Object.values(REGISTRY)) {
       expect(validSlots.has(entry.slot)).toBe(true);
       expect(entry.seed).toEqual(expect.any(Function));
@@ -151,7 +154,7 @@ describe("aquarium scene registry", () => {
     }
 
     const scene = sceneFromParams(multiOrganismParams());
-    const expected: AquariumLayerState = { seed: scene.seed, diatoms: [], euglena: [], vorticella: [] };
+    const expected: AquariumLayerState = { seed: scene.seed, diatoms: [], euglena: [], vorticella: [], didinium: [] };
     for (const instance of scene.instances) {
       const entry = REGISTRY[instance.species];
       expected[entry.slot] = entry.seed(instance.count, scene.seed, registryFrame, instance.cfg) as never;
