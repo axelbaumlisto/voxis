@@ -13,7 +13,7 @@ export const DIDINIUM_SALT = 0x0d1d1c0a;
 // (pectinelles): anterior at the shoulder, posterior just below mid-body. A
 // conical apical snout (cytostome cone, closed at rest). Horseshoe macronucleus.
 // Terminal contractile vacuole at the aboral (posterior) pole.
-const ASPECT = 1.35; // length : width
+const ASPECT = 1.15; // length : width (real D. nasutum is nearly round, ~1.1-1.2:1)
 const GIRDLE_A_U = 0.46; // anterior girdle position (shoulder), u ∈ [-1(post), +1(snout)]
 const GIRDLE_P_U = -0.16; // posterior girdle position (just below mid-body)
 const SHOULDER_U = 0.6; // where the barrel meets the cone snout (short, blunt cone)
@@ -29,7 +29,12 @@ const STOPGO_FREQ = 0.5; // Hz-ish; erratic cruise stop/dart modulation (phase-f
 const WANDER_FREQ = 0.17; // slow purposeful heading drift (phase-fn of frame.t)
 const WANDER_RAD = 0.32; // gentle heading drift swing (rad) — was a too-random 0.7
 const HELIX_LEAN = 0.2; // corkscrew lean angle (rad); thin helix, coupled to the axial spin
-const WALL_LOOK = 2.0; // body-lengths of anticipatory wall lookahead
+const CURVE_RATE = 0.5; // rad/s persistent one-sided turning → the real "leaning to one
+                       // side" spiral search path. Applied as side*CURVE_RATE*t,
+                       // a pure frame.t function (constant within a step) so the
+                       // open-water path stays dt-partition exact while the heading
+                       // sweeps over frames into a wide spiral.
+const WALL_LOOK = 1.4; // body-lengths of anticipatory wall lookahead (tank is short)
 const BACKUP_SECONDS = 0.22; // brief reverse jerk that opens the avoiding reaction
 const AVOID_SECONDS = 0.6; // eased duration of the fixed-side back-turn after the reverse
 const AVOID_TURN_MIN = (2 * Math.PI) / 3; // ~120° sharp re-orient
@@ -241,22 +246,25 @@ export function updateDidinium(
       heading += wrapPi(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
 
-    // Effective swim heading = base heading + slow wander + a THIN corkscrew LEAN.
-    // The lean is a small constant-amplitude offset (~11°) rotating at the axial
-    // SPIN frequency, so the velocity vector traces a tight cone around the mean
-    // heading = a real thin helix (pitch>>radius), NOT a fat planar S-wag. It is a
-    // pure function of frame.t (spin freq = rollRate*act is constant within a
-    // frame), so the open-water path stays dt-partition exact; the per-cell phase
-    // keeps the visual roll and the path lean on ONE clock and de-syncs cells.
-    const spinFreq = Math.max(0, finite(cell.rollRate, 0)) * act; // rev/s, same rate as the visual roll
-    // phase seed is a FIXED per-cell constant (NOT the evolving rollPhase state):
-    // the lean must be a pure function of frame.t so the open-water path stays
-    // dt-partition exact. Cells still de-sync via the seed, and the lean shares the
-    // spin frequency so it reads as one coherent corkscrew with the visual roll.
+    // ── travel heading = base + slow wander + PERSISTENT one-sided curvature.
+    // Real Didinium "constantly leans to one side" → a looping spiral search path,
+    // not a wavy straight line. The curvature is applied as side*CURVE_RATE*t (a
+    // pure frame.t function: constant within a step → open-water dt-partition
+    // exact) so the travel direction sweeps steadily into a wide spiral while the
+    // slow wander drifts the spiral centre (epicyclic search). The body is drawn
+    // along THIS travel heading (snout leads the path).
+    const curve = side * CURVE_RATE * t;
+    const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) + curve;
+    // ── thin corkscrew LEAN at the axial SPIN frequency: a small constant-
+    // amplitude offset so the velocity traces a tight cone (thin helix, pitch >>
+    // radius). Spin freq is set by the cilia beat chirality, ~speed-independent
+    // (NOT scaled by audio) — real Ω≈0.7 rev/s. Fixed per-cell phase seed keeps it
+    // a pure frame.t function (partition exact) and de-syncs cells.
+    const spinFreq = Math.max(0, finite(cell.rollRate, 0)); // rev/s, decoupled from activity
     const spinSeed = seededUnit(nseed, 0, 0x6c8e9cf5);
     const spinAng = TAU * (spinSeed + spinFreq * t);
-    const lean = Math.sin(spinAng) * HELIX_LEAN * cruiseEnv;
-    const eh = heading + wander * (0.3 + 0.7 * cruiseEnv) + lean;
+    const lean = Math.sin(spinAng) * HELIX_LEAN; // speed-independent radius
+    const eh = travel + lean; // velocity direction (travel + fast helix lean)
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
     const vSigned = reversing ? -vPx * 0.6 : vPx; // brief reverse jerk
@@ -272,9 +280,10 @@ export function updateDidinium(
       ...cell,
       x: nextX,
       y: nextY,
-      // phase carries the TRAVEL heading (snout-leading) for the draw layer; the
-      // base `heading` stays the slowly-varying cruise direction (wall-modified).
-      phase: eh,
+      // phase carries the TRAVEL heading (snout leads the PATH); the fast helix
+      // lean is left OUT of the body orientation so the body axis holds near the
+      // helix axis instead of wagging (critic C). base `heading` = cruise dir.
+      phase: travel,
       heading,
       // axial roll synchronised with the helical path so the girdles visibly
       // sweep as the body corkscrews (faster than before for a clear rotation read).
@@ -341,7 +350,11 @@ export function drawDidinium(
     const roll = wrapUnit(finite(cell.rollPhase, 0));
     const rollAng = roll * TAU;
     const rollCos = Math.cos(rollAng);
-    const widthMul = 0.6 + 0.4 * Math.abs(rollCos); // strong axial-roll foreshortening (silhouette breathes)
+    // near-constant silhouette: a barrel spinning about its long axis keeps a
+    // round cross-section, so only a slight (8%) breathing — the roll is carried
+    // by the depth-shaded girdle ticks, NOT by squashing the whole body (which
+    // read as a non-physical fat wobble). (math critic S4)
+    const widthMul = 0.96 + 0.04 * Math.abs(rollCos);
 
     const halfWidthAt = (u: number): number => wMax * widthMul * normHalfWidth(u);
 

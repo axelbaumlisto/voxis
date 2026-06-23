@@ -3289,7 +3289,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
 
 // src/theme-engine/renderers/cell/aquarium/didinium.ts
 var DIDINIUM_SALT = 220011530;
-var ASPECT = 1.35;
+var ASPECT = 1.15;
 var GIRDLE_A_U = 0.46;
 var GIRDLE_P_U = -0.16;
 var SHOULDER_U = 0.6;
@@ -3298,7 +3298,8 @@ var STOPGO_FREQ = 0.5;
 var WANDER_FREQ = 0.17;
 var WANDER_RAD = 0.32;
 var HELIX_LEAN = 0.2;
-var WALL_LOOK = 2;
+var CURVE_RATE = 0.5;
+var WALL_LOOK = 1.4;
 var BACKUP_SECONDS = 0.22;
 var AVOID_SECONDS = 0.6;
 var AVOID_TURN_MIN = 2 * Math.PI / 3;
@@ -3459,11 +3460,13 @@ function updateDidinium(didinium, frame, view) {
       const turnK = 1 + 2.5 * Math.min(1, wallPressure);
       heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
-    const spinFreq = Math.max(0, finite(cell.rollRate, 0)) * act;
+    const curve = side * CURVE_RATE * t;
+    const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) + curve;
+    const spinFreq = Math.max(0, finite(cell.rollRate, 0));
     const spinSeed = seededUnit(nseed, 0, 1821285621);
     const spinAng = TAU2 * (spinSeed + spinFreq * t);
-    const lean = Math.sin(spinAng) * HELIX_LEAN * cruiseEnv;
-    const eh = heading + wander * (0.3 + 0.7 * cruiseEnv) + lean;
+    const lean = Math.sin(spinAng) * HELIX_LEAN;
+    const eh = travel + lean;
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
     const vSigned = reversing ? -vPx * 0.6 : vPx;
@@ -3476,7 +3479,7 @@ function updateDidinium(didinium, frame, view) {
       ...cell,
       x: nextX,
       y: nextY,
-      phase: eh,
+      phase: travel,
       heading,
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + Math.max(0, finite(cell.rollRate, 0)) * act * dt),
       beatPhase: wrapUnit(finiteOr(cell.beatPhase, 0) + beatEff * dt),
@@ -3526,7 +3529,7 @@ function drawDidinium(ctx, didinium, frame, view) {
     const roll = wrapUnit(finite(cell.rollPhase, 0));
     const rollAng = roll * TAU2;
     const rollCos = Math.cos(rollAng);
-    const widthMul = 0.6 + 0.4 * Math.abs(rollCos);
+    const widthMul = 0.96 + 0.04 * Math.abs(rollCos);
     const halfWidthAt = (u) => wMax * widthMul * normHalfWidth2(u);
     const SAMP = 46;
     const upper = [];
