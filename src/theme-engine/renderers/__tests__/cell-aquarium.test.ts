@@ -1391,6 +1391,29 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(heroOnly[0]).toEqual(noField[0]);
   });
 
+  it("steers away from a nearby Didinium motile hazard without predation semantics", () => {
+    const start = [testEuglena({ x: 150, y: 150, heading: 0, swimSpeed: 0, burstRate: 0 })];
+    const baseParams = { ...CELL_DEFAULTS, enableAquarium: true, euglenaCount: 1, euglenaSpeed: 1, euglenaSpeedActive: 1, aquariumActivityBoost: 1 };
+    const interaction = buildField([
+      { kind: "motile", x: 150, y: 163, radius: 12, role: "predator", sourceId: sourceId("didinium", 0) },
+    ]);
+    const next = updateEuglena(start, frame({ dt: 0.5, width: 300, height: 300, activity: 0, interaction }), aquariumParamsView(baseParams));
+    expect(next[0].heading).toBeLessThan(-0.05);
+  });
+
+  it("ignores a far Didinium motile hazard", () => {
+    const start = [testEuglena({ x: 150, y: 150, heading: 0, swimSpeed: 0, burstRate: 0 })];
+    const baseParams = { ...CELL_DEFAULTS, enableAquarium: true, euglenaCount: 1, euglenaSpeed: 1, euglenaSpeedActive: 1, aquariumActivityBoost: 1 };
+    const far = buildField([
+      { kind: "motile", x: 280, y: 280, radius: 12, role: "predator", sourceId: sourceId("didinium", 0) },
+    ]);
+    const withFar = updateEuglena(start, frame({ dt: 0.5, width: 300, height: 300, activity: 0, interaction: far }), aquariumParamsView(baseParams));
+    const noField = updateEuglena(start, frame({ dt: 0.5, width: 300, height: 300, activity: 0 }), aquariumParamsView(baseParams));
+    expect(withFar[0].heading).toBeCloseTo(noField[0].heading, 10);
+    expect(withFar[0].x).toBeCloseTo(noField[0].x, 10);
+    expect(withFar[0].y).toBeCloseTo(noField[0].y, 10);
+  });
+
   it("updateEuglena is dt-partition invariant across phase wrap", () => {
     const view = aquariumParamsView({
       ...CELL_DEFAULTS,

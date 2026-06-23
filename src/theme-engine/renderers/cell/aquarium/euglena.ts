@@ -484,6 +484,7 @@ const TUMBLE_MAX_RAD = (5 * Math.PI) / 6; // 150°
 const TUMBLE_RATE_MIN = 0.045;      // heavy-tail clamped slow end: ~22s max cycle
 const TUMBLE_RATE_MAX = 0.16;       // fast end: ~6.25s min cycle
 const SEPARATION_RANGE_BODY_LENGTHS = 1.6; // soft steer only; no hard push / no overlap clamp
+const DIDINIUM_HAZARD_WEIGHT = 0.55; // neutral moving hazard: soft steer only, no panic/predation
 
 export const EUGLENA_RELEVANT_FIELDS: ReadonlySet<FieldKind> = new Set(["obstacle", "wake", "motile"]);
 
@@ -540,6 +541,7 @@ export function updateEuglena(
     const sameSpeciesMotiles = field?.motiles.filter((motile) => (
       (motile.sourceId >> 20) === KIND_ID.euglena && motile.sourceId !== selfId
     ));
+    const didiniumHazards = field?.motiles.filter((motile) => (motile.sourceId >> 20) === KIND_ID.didinium);
     const circleObstacles = fieldObstacles?.filter((obstacle) => obstacle.shape === "circle");
     const socialEllipse = fieldObstacles?.find((obstacle): obstacle is ObstacleEllipse => obstacle.shape === "ellipse" && obstacle.social === true);
     const socialWake = socialEllipse
@@ -663,6 +665,26 @@ export function updateEuglena(
           }
         }
       }
+      // Didinium is a predator-class ciliate in the same drop, but Euglena is not
+      // its prey in this theme. Treat nearby Didinium motiles as neutral moving
+      // hazards: soft low-priority avoidance only, no hard bounce and no panic.
+      if (didiniumHazards && didiniumHazards.length > 0) {
+        for (let hi = 0; hi < didiniumHazards.length; hi++) {
+          const hazard = didiniumHazards[hi];
+          const hdx = px0 - finite(hazard.x, 0);
+          const hdy = py0 - finite(hazard.y, 0);
+          const hd = Math.hypot(hdx, hdy) || 1e-6;
+          const hazardRadius = Math.max(0, finiteOr(hazard.radius, L * 0.35));
+          const reach = Math.max(L * 1.2, L * 0.75 + hazardRadius * 1.25 + 8);
+          if (hd < reach) {
+            const prox = (reach - hd) / reach;
+            const w = DIDINIUM_HAZARD_WEIGHT * prox;
+            sx += (hdx / hd) * w;
+            sy += (hdy / hd) * w;
+          }
+        }
+      }
+
       // static obstacles (e.g. a sessile vorticella): steer AROUND them, well
       // before contact, scaled by proximity. (Hard non-overlap push below.)
       const obstacles = circleObstacles;
