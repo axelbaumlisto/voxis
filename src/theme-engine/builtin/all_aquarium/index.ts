@@ -20,33 +20,33 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     params: {
       ...PARAMECIUM_CELL_PARAMS,
       // Shrink the paramecium hero so all four organisms are visible at once.
-      radiusFraction: 0.24,
+      radiusFraction: 0.20,
       enableAquarium: true,
-      aquariumSeed: 23,
-      aquariumAlpha: 0.72,
-      aquariumActivityBoost: 0.85,
+      aquariumSeed: 41,
+      aquariumAlpha: 0.70,
+      aquariumActivityBoost: 0.65,
       diatomCount: 0,
 
       // free swimmer: Euglena
       euglenaCount: 1,
-      euglenaSpeed: 0.18,
-      euglenaSpeedActive: 1.15,
-      euglenaScale: 2.45,
+      euglenaSpeed: 0.13,
+      euglenaSpeedActive: 0.75,
+      euglenaScale: 2.0,
       euglenaGravitaxis: 0.15,
       euglenaPhototaxis: 0.45,
       euglenaRotDiffusion: 0.08,
 
       // sessile stalked organism: Vorticella
       vorticellaCount: 1,
-      vorticellaAlongFrac: 0.14,
+      vorticellaAlongFrac: 0.10,
       vorticellaScale: 1.05,
       vorticellaContractRate: 1.0,
 
       // predator swimmer: Didinium
       didiniumCount: 1,
-      didiniumSpeed: 0.7,
-      didiniumSpeedActive: 1.2,
-      didiniumScale: 1.84,
+      didiniumSpeed: 0.45,
+      didiniumSpeedActive: 0.75,
+      didiniumScale: 1.55,
 
       ...userParams,
     },
