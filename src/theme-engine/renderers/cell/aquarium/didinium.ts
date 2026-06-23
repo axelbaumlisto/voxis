@@ -16,7 +16,8 @@ export const DIDINIUM_SALT = 0x0d1d1c0a;
 const ASPECT = 1.35; // length : width
 const GIRDLE_A_U = 0.46; // anterior girdle position (shoulder), u ∈ [-1(post), +1(snout)]
 const GIRDLE_P_U = -0.16; // posterior girdle position (just below mid-body)
-const SHOULDER_U = 0.52; // where the barrel meets the cone snout
+const SHOULDER_U = 0.6; // where the barrel meets the cone snout (short, blunt cone)
+const BRUSH_ROWS = 5; // dorsal brushes (brosse) per girdle
 
 // ── swim constants ──────────────────────────────────────────────────────────
 const STOPGO_FREQ = 0.42; // Hz-ish; erratic cruise stop/dart modulation (phase-fn of frame.t)
@@ -68,7 +69,7 @@ function bodyShape(u: number): number {
     // slightly concave flanks (a cone, not a dome).
     const q = (u - SHOULDER_U) / (1 - SHOULDER_U); // 0 at shoulder, 1 at tip
     const wShoulder = 0.9; // flattened shoulder is a touch narrower than the belly
-    return wShoulder * Math.pow(1 - q, 0.85);
+    return wShoulder * Math.pow(1 - q, 1.15); // blunter, shorter cone (not a witch-hat)
   }
   // barrel body: flat-ish sides, widest mid, rounded posterior.
   const t = (u - SHOULDER_U) / (-1 - SHOULDER_U); // 0 at shoulder, 1 at aboral pole
@@ -167,7 +168,9 @@ export function updateDidinium(
     // dependent) → dt-partition exact at fixed frame.t. noise raised to a power
     // makes most of the time fast with occasional near-stops.
     const stopgo = noise2D(nseed ^ 0x53705f00, t * STOPGO_FREQ, 0.13);
-    const cruiseEnv = 0.05 + 0.95 * Math.pow(stopgo, 2.2); // near-full stops + fast darts
+    // biased MOSTLY FAST with occasional near-stops (Didinium is a fast swimmer):
+    // 1-(1-x)^p spends most of its range near 1, dipping to ~0 only briefly.
+    const cruiseEnv = 0.05 + 0.95 * (1 - Math.pow(1 - stopgo, 2.2));
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L * cruiseEnv;
 
     // ── slow heading wander as a PHASE-FUNCTION of absolute frame.t (NOT an
@@ -224,8 +227,11 @@ export function updateDidinium(
     // body always leads snout-first (no sideways crab). Motion is pure-forward
     // along this heading, so a single 0.24s step == two 0.12s steps at fixed t
     // (yaw/wander are pure functions of frame.t → constant across the partition).
-    const yaw = Math.sin(TAU * t * SPIRAL_FREQ) * SPIRAL_YAW;
-    const eh = heading + wander + yaw;
+    // per-cell yaw phase (so multiple didinia don't weave in lockstep), gated by
+    // cruiseEnv so the snout doesn't wag in place during a near-stop.
+    const yawPhase = seededUnit(nseed, 0, 0x6c8e9cf5) * TAU;
+    const yaw = Math.sin(TAU * t * SPIRAL_FREQ + yawPhase) * SPIRAL_YAW * cruiseEnv;
+    const eh = heading + (wander + yaw) * (0.3 + 0.7 * cruiseEnv);
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
     let nextX = px0 + ux * vPx * dt;
@@ -373,7 +379,7 @@ export function drawDidinium(
     for (let i = 0; i < upper.length - 1; i++) {
       const u = -Math.cos((Math.PI * i) / SAMP);
       const flank = 1 - Math.abs(u); // bright mid-body flanks, dim toward poles
-      const a = alpha * (0.12 + 0.3 * flank);
+      const a = alpha * (0.1 + 0.18 * flank * flank); // dimmer, squared falloff (rim < interior)
       ctx.strokeStyle = `hsla(${hue + 2}, 32%, 92%, ${a})`;
       ctx.lineWidth = Math.max(0.5, wMax * 0.07);
       ctx.beginPath();
@@ -450,6 +456,31 @@ export function drawDidinium(
     drawGirdle(GIRDLE_A_U, hue + 6, 0);
     drawGirdle(GIRDLE_P_U, hue + 6, 1);
 
+    // ── dorsal brushes (brosse): short clavate tick rows behind each girdle, on
+    // the NEAR hemisphere only (depth-gated) — a named D. nasutum diagnostic. ──
+    const drawBrushes = (gu: number) => {
+      const phi = rollAng; // dorsal landmark rides the near face as the body rolls
+      const depth = Math.cos(phi); // near when > 0
+      if (depth < 0) return; // hidden on the far hemisphere
+      const front = clamp01(0.5 + 0.5 * depth);
+      for (let r = 0; r < BRUSH_ROWS; r++) {
+        const bu = gu - 0.06 - r * 0.035; // a few rows just behind the girdle
+        const hw = halfWidthAt(bu);
+        const lat = Math.cos(phi) * hw * 0.62;
+        const along = halfLength * bu + Math.sin(phi) * hw * 0.34 * 0.62;
+        const base = transform(cx, cy, ux, uy, along, lat);
+        const tip = transform(cx, cy, ux, uy, along + hw * 0.06, lat + Math.sign(lat || 1) * hw * 0.16);
+        ctx.strokeStyle = `hsla(${hue + 8}, 40%, 90%, ${alpha * 0.34 * front})`;
+        ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+        ctx.beginPath();
+        ctx.moveTo(base.x, base.y);
+        ctx.lineTo(tip.x, tip.y);
+        ctx.stroke();
+      }
+    };
+    drawBrushes(GIRDLE_A_U);
+    drawBrushes(GIRDLE_P_U);
+
     // ── apical cone snout (cytostome cone), filled, protruding, closed at rest ──
     {
       const coneBaseU = SHOULDER_U;
@@ -464,8 +495,14 @@ export function drawDidinium(
       ctx.closePath();
       ctx.fillStyle = `hsla(${hue + 2}, 28%, 88%, ${alpha * 0.4})`;
       ctx.fill();
-      ctx.strokeStyle = `hsla(${hue + 4}, 36%, 92%, ${alpha * 0.55})`;
-      ctx.lineWidth = Math.max(0.5, wMax * 0.06);
+      // feathered cone flanks (no hard straight outline) — only the two flank edges,
+      // dim, so the cone scatters like the body rather than a constructed triangle.
+      ctx.strokeStyle = `hsla(${hue + 4}, 34%, 92%, ${alpha * 0.28})`;
+      ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+      ctx.beginPath();
+      ctx.moveTo(shL.x, shL.y);
+      ctx.lineTo(tip.x, tip.y);
+      ctx.lineTo(shR.x, shR.y);
       ctx.stroke();
       // bright apical pip (closed cytostome), not a gaping mouth
       ctx.fillStyle = `hsla(${hue + 4}, 40%, 95%, ${alpha * 0.6})`;

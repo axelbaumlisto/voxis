@@ -3292,7 +3292,8 @@ var DIDINIUM_SALT = 220011530;
 var ASPECT = 1.35;
 var GIRDLE_A_U = 0.46;
 var GIRDLE_P_U = -0.16;
-var SHOULDER_U = 0.52;
+var SHOULDER_U = 0.6;
+var BRUSH_ROWS = 5;
 var STOPGO_FREQ = 0.42;
 var WANDER_FREQ = 0.31;
 var WANDER_RAD = 0.7;
@@ -3323,7 +3324,7 @@ function bodyShape2(u) {
   if (u >= SHOULDER_U) {
     const q = (u - SHOULDER_U) / (1 - SHOULDER_U);
     const wShoulder = 0.9;
-    return wShoulder * Math.pow(1 - q, 0.85);
+    return wShoulder * Math.pow(1 - q, 1.15);
   }
   const t = (u - SHOULDER_U) / (-1 - SHOULDER_U);
   const belly = Math.sin(Math.PI * clamp01(t * 0.86 + 0.07));
@@ -3399,7 +3400,7 @@ function updateDidinium(didinium, frame, view) {
     const px0 = finite(cell.x, 0);
     const py0 = finite(cell.y, 0);
     const stopgo = noise2D2(nseed ^ 1399873280, t * STOPGO_FREQ, 0.13);
-    const cruiseEnv = 0.05 + 0.95 * Math.pow(stopgo, 2.2);
+    const cruiseEnv = 0.05 + 0.95 * (1 - Math.pow(1 - stopgo, 2.2));
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L * cruiseEnv;
     const wander = (noise2D2(nseed ^ 447978529, t * WANDER_FREQ, 0.61) * 2 - 1) * WANDER_RAD;
     let wallPressure = 0;
@@ -3448,8 +3449,9 @@ function updateDidinium(didinium, frame, view) {
       const turnK = 1 + 2.5 * Math.min(1, wallPressure);
       heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
-    const yaw = Math.sin(TAU2 * t * SPIRAL_FREQ) * SPIRAL_YAW;
-    const eh = heading + wander + yaw;
+    const yawPhase = seededUnit(nseed, 0, 1821285621) * TAU2;
+    const yaw = Math.sin(TAU2 * t * SPIRAL_FREQ + yawPhase) * SPIRAL_YAW * cruiseEnv;
+    const eh = heading + (wander + yaw) * (0.3 + 0.7 * cruiseEnv);
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
     let nextX = px0 + ux * vPx * dt;
@@ -3562,7 +3564,7 @@ function drawDidinium(ctx, didinium, frame, view) {
     for (let i = 0;i < upper.length - 1; i++) {
       const u = -Math.cos(Math.PI * i / SAMP);
       const flank = 1 - Math.abs(u);
-      const a = alpha * (0.12 + 0.3 * flank);
+      const a = alpha * (0.1 + 0.18 * flank * flank);
       ctx.strokeStyle = `hsla(${hue + 2}, 32%, 92%, ${a})`;
       ctx.lineWidth = Math.max(0.5, wMax * 0.07);
       ctx.beginPath();
@@ -3624,6 +3626,29 @@ function drawDidinium(ctx, didinium, frame, view) {
     };
     drawGirdle(GIRDLE_A_U, hue + 6, 0);
     drawGirdle(GIRDLE_P_U, hue + 6, 1);
+    const drawBrushes = (gu) => {
+      const phi = rollAng;
+      const depth = Math.cos(phi);
+      if (depth < 0)
+        return;
+      const front = clamp01(0.5 + 0.5 * depth);
+      for (let r = 0;r < BRUSH_ROWS; r++) {
+        const bu = gu - 0.06 - r * 0.035;
+        const hw = halfWidthAt(bu);
+        const lat = Math.cos(phi) * hw * 0.62;
+        const along = halfLength * bu + Math.sin(phi) * hw * 0.34 * 0.62;
+        const base = transform3(cx, cy, ux, uy, along, lat);
+        const tip = transform3(cx, cy, ux, uy, along + hw * 0.06, lat + Math.sign(lat || 1) * hw * 0.16);
+        ctx.strokeStyle = `hsla(${hue + 8}, 40%, 90%, ${alpha * 0.34 * front})`;
+        ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+        ctx.beginPath();
+        ctx.moveTo(base.x, base.y);
+        ctx.lineTo(tip.x, tip.y);
+        ctx.stroke();
+      }
+    };
+    drawBrushes(GIRDLE_A_U);
+    drawBrushes(GIRDLE_P_U);
     {
       const coneBaseU = SHOULDER_U;
       const tip = transform3(cx, cy, ux, uy, halfLength * 1.04, 0);
@@ -3636,8 +3661,12 @@ function drawDidinium(ctx, didinium, frame, view) {
       ctx.closePath();
       ctx.fillStyle = `hsla(${hue + 2}, 28%, 88%, ${alpha * 0.4})`;
       ctx.fill();
-      ctx.strokeStyle = `hsla(${hue + 4}, 36%, 92%, ${alpha * 0.55})`;
-      ctx.lineWidth = Math.max(0.5, wMax * 0.06);
+      ctx.strokeStyle = `hsla(${hue + 4}, 34%, 92%, ${alpha * 0.28})`;
+      ctx.lineWidth = Math.max(0.4, wMax * 0.05);
+      ctx.beginPath();
+      ctx.moveTo(shL.x, shL.y);
+      ctx.lineTo(tip.x, tip.y);
+      ctx.lineTo(shR.x, shR.y);
       ctx.stroke();
       ctx.fillStyle = `hsla(${hue + 4}, 40%, 95%, ${alpha * 0.6})`;
       ctx.beginPath();
