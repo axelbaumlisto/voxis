@@ -34,7 +34,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       didiniumCount: 1,
       didiniumSpeed: 0.9,         // body-lengths/sec cruise (real ~11 BL/s but that mills frantically in a 320px tank; calm glide reads better)
       didiniumSpeedActive: 1.6,   // a little faster while recording/active
-      didiniumScale: 3.2,
+      didiniumScale: 2.7,
       ...userParams,
     },
   });

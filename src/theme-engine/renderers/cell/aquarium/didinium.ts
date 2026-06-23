@@ -43,7 +43,7 @@ const HELIX_LEAN = 0.2; // corkscrew lean angle (rad); thin helix, coupled to th
 // made the partition error climb with t).
 const CURVE_FREQ = 0.09; // Hz-ish; how fast the one-sided turning bias varies
 const CURVE_BIAS = 0.32; // max one-sided lean (rad) — gentle, so it does not by itself loop
-const WALL_LOOK = 0.7; // body-lengths of anticipatory wall lookahead. MUST be small enough
+const WALL_LOOK = 1.25; // body-lengths of anticipatory wall lookahead. MUST be small enough
                      // that the tank centre is genuine open water (zero wall pressure):
                      // the tank is only ~2.5 body-heights tall, so a large look made
                      // pressure>0 everywhere → the avoiding reaction re-fired forever and
@@ -104,10 +104,11 @@ function bodyShape(u: number): number {
   if (t <= tp) {
     return 0.72 + 0.28 * Math.sin((t / tp) * (Math.PI / 2)); // shoulder 0.72 -> belly 1.0
   }
-  // belly 1.0 -> BROADLY ROUNDED aboral pole: a high floor (0.62) + a gentle
-  // quarter-cosine keeps the posterior a full hemispherical dome (NOT a pointed
-  // lemon tip). Real D. nasutum has a bluntly rounded aboral end.
-  return 0.62 + 0.38 * Math.cos(((t - tp) / (1 - tp)) * (Math.PI / 2));
+  // belly 1.0 -> ROUNDED aboral DOME: a quarter-circle profile (sqrt) that reaches
+  // 0 at the pole with a VERTICAL tangent, i.e. the outline closes as a smooth
+  // hemispherical cap (NOT a flat truncated floor, NOT a pointed lemon tip).
+  const s = (t - tp) / (1 - tp); // 0 at belly, 1 at aboral pole
+  return Math.sqrt(Math.max(0, 1 - s * s));
 }
 
 const BODY_SHAPE_MAX = (() => {
@@ -269,7 +270,11 @@ export function updateDidinium(
     } else if (wallPressure > 1e-6) {
       // gentle anticipatory bank away before an actual hit (gated near walls only)
       const desired = Math.atan2(Math.sin(heading) + wallAwayY, Math.cos(heading) + wallAwayX);
-      const turnK = 1.0 + 2.5 * Math.min(1, wallPressure);
+      // strong, scaled anticipatory bank: with the larger look there is real
+      // runway between first wall pressure and the clamp, so a firm turn here wins
+      // the race and the cell veers away BEFORE it ever reaches the boundary (no
+      // rail-glide). turnK grows steeply with pressure.
+      const turnK = 3.0 + 7.0 * Math.min(1, wallPressure);
       heading += wrapPi(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
 
@@ -308,7 +313,10 @@ export function updateDidinium(
     // the dt-partition pure-forward path is unaffected.
     // half-extent incl. the protruding cone snout (tip at ~1.14*halfLength) so the
     // proboscis never poked off-canvas either.
-    const margin = Math.min(L * 0.6, safeWidth * 0.45, safeHeight * 0.45);
+    // cone apex and aboral dome both reach ~0.51*L from the centroid, so 0.55*L
+    // keeps the whole body on-canvas with a little slack while leaving more open
+    // water (a smaller margin = a bigger zero-wall-pressure centre).
+    const margin = Math.min(L * 0.55, safeWidth * 0.45, safeHeight * 0.45);
     nextX = clamp(nextX, margin, safeWidth - margin);
     nextY = clamp(nextY, margin, safeHeight - margin);
     // Safety net only: if the cell still reaches the clamp (e.g. spawned in a
@@ -645,30 +653,14 @@ export function drawDidinium(
     drawBrushes(GIRDLE_A_U);
     drawBrushes(GIRDLE_P_U);
 
-    // ── apical cone snout (cytostome cone), filled, protruding, closed at rest ──
+    // ── apical cone snout (cytostome cone) detailing. The cone SILHOUETTE is
+    // already drawn by the body outline (bodyShape covers u up to +1), so we do
+    // NOT draw a separate filled triangle here — that duplicated geometry with a
+    // different (straight) profile and read as a detached angular flap. We only
+    // add interior detail: nematodesmal striae, a subtle base collar, the pip.
     {
       const coneBaseU = SHOULDER_U;
-      const tip = transform(cx, cy, ux, uy, halfLength * 1.02, 0); // blunt shouldered cone (not a thin spike)
-      const shL = transform(cx, cy, ux, uy, halfLength * coneBaseU, halfWidthAt(coneBaseU));
-      const shR = transform(cx, cy, ux, uy, halfLength * coneBaseU, -halfWidthAt(coneBaseU));
-      // filled cone with the body glow so it reads as a solid protrusion
-      ctx.beginPath();
-      ctx.moveTo(shL.x, shL.y);
-      ctx.lineTo(tip.x, tip.y);
-      ctx.lineTo(shR.x, shR.y);
-      ctx.closePath();
-      ctx.fillStyle = `hsla(${hue + 2}, 28%, 90%, ${alpha * 0.52})`;
-      ctx.fill();
-      // feathered cone flanks (no hard straight outline) — only the two flank edges,
-      // VERY faint so the cone scatters like the body rather than a constructed
-      // triangle with hard construction lines.
-      ctx.strokeStyle = `hsla(${hue + 4}, 28%, 92%, ${alpha * 0.18})`;
-      ctx.lineWidth = Math.max(0.4, wMax * 0.035);
-      ctx.beginPath();
-      ctx.moveTo(shL.x, shL.y);
-      ctx.lineTo(tip.x, tip.y);
-      ctx.lineTo(shR.x, shR.y);
-      ctx.stroke();
+      const tip = transform(cx, cy, ux, uy, halfLength * 1.02, 0); // on-axis apex
       // nematodesmal striae: faint longitudinal lines fanning from the cone base to
       // the apex (the palisade of stiff rods supporting the proboscis).
       ctx.strokeStyle = `hsla(${hue + 4}, 32%, 94%, ${alpha * 0.32})`;
