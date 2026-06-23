@@ -29,12 +29,12 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
 
       // free swimmer: Euglena
       euglenaCount: 1,
-      euglenaSpeed: 0.13,
-      euglenaSpeedActive: 0.75,
-      euglenaScale: 2.0,
-      euglenaGravitaxis: 0.15,
-      euglenaPhototaxis: 0.45,
-      euglenaRotDiffusion: 0.08,
+      euglenaSpeed: 0.12,
+      euglenaSpeedActive: 0.48,
+      euglenaScale: 2.2,
+      euglenaGravitaxis: 0.08,
+      euglenaPhototaxis: 0.28,
+      euglenaRotDiffusion: 0.04,
 
       // sessile stalked organism: Vorticella
       vorticellaCount: 1,
@@ -45,8 +45,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // predator swimmer: Didinium
       didiniumCount: 1,
       didiniumSpeed: 0.45,
-      didiniumSpeedActive: 0.75,
-      didiniumScale: 1.55,
+      didiniumSpeedActive: 0.65,
+      didiniumScale: 1.65,
 
       ...userParams,
     },

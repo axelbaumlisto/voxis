@@ -2464,7 +2464,7 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
 
   it("latches on the hero surface instead of sinking into the prey ellipse", () => {
     const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0, didiniumScale: 2 });
-    const initial = [testDidinium({ x: 230, y: 80, heading: Math.PI, phase: Math.PI })];
+    const initial = [testDidinium({ x: 240, y: 80, heading: Math.PI, phase: Math.PI })];
     const prey = { kind: "obstacle" as const, shape: "ellipse" as const, x: 200, y: 80, halfLen: 38, halfWid: 14, heading: 0, social: true, sourceId: sourceId("hero", 0) };
     const interaction = buildField([prey]);
     const next = updateDidinium(initial, frame({ dt: 0.1, t: 2, width: 340, height: 170, interaction }), view);

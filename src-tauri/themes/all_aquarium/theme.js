@@ -3467,6 +3467,7 @@ function updateDidinium(didinium, frame, view) {
     const field = frame.interaction;
     const prey = (field?.obstacles ?? []).find((obs) => obs.shape === "ellipse" && obs.social);
     let preyData = null;
+    let huntWeight = 0;
     if (prey && prey.shape === "ellipse") {
       const hh = finiteOr(prey.heading, 0);
       const ch = Math.cos(hh), sh = Math.sin(hh);
@@ -3477,14 +3478,14 @@ function updateDidinium(didinium, frame, view) {
       const A = Math.max(0.001, finiteOr(prey.halfLen, 1) + L * 0.38);
       const B = Math.max(0.001, finiteOr(prey.halfWid, 1) + L * 0.38);
       const q = Math.sqrt(localX * localX / (A * A) + localY * localY / (B * B)) || 0.000001;
-      const targetQ = 1.08;
+      const targetQ = 1.18;
       const sx = localX * (targetQ / q);
       const sy = localY * (targetQ / q);
       const surfaceX = prey.x + sx * ch - sy * sh;
       const surfaceY = prey.y + sx * sh + sy * ch;
       preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y };
-      if (q < 1.08 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
-        contactTimer = 0.72 + seededUnit(nseed, 0, 714207245) * 0.28;
+      if (q < 1.24 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
+        contactTimer = 0.95 + seededUnit(nseed, 0, 714207245) * 0.25;
       }
     }
     let obstaclePressure = 0;
@@ -3513,18 +3514,20 @@ function updateDidinium(didinium, frame, view) {
         const dx = preyData.surfaceX - px0;
         const dy = preyData.surfaceY - py0;
         const d = Math.hypot(dx, dy) || 1;
-        const sense = Math.max(110, L * 3);
+        const sense = Math.max(140, L * 4);
         if (d < sense) {
-          const hunt = clamp01((sense - d) / (sense * 0.7));
+          const hunt = clamp01((sense - d) / (sense * 0.75));
+          huntWeight = hunt;
           const desired = Math.atan2(dy, dx);
-          const turnK = 1.2 + 2.8 * hunt;
+          const turnK = 2 + 4.5 * hunt;
           heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt)) * hunt;
         }
       }
     }
     const curveEnv = clamp01(noise2D2(nseed ^ 2009178803, t * CURVE_FREQ, 0.29));
     const curve = side * CURVE_BIAS * curveEnv;
-    const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) + curve;
+    const huntSuppression = 1 - 0.75 * huntWeight;
+    const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) * huntSuppression + curve * huntSuppression;
     const spinFreq = Math.max(0, finite(cell.rollRate, 0));
     const spinSeed = seededUnit(nseed, 0, 1821285621);
     const spinAng = TAU2 * (spinSeed + spinFreq * t);
@@ -3538,8 +3541,14 @@ function updateDidinium(didinium, frame, view) {
     let nextX = rawX;
     let nextY = rawY;
     if (contactTimer > 0 && preyData) {
-      nextX = preyData.surfaceX;
-      nextY = preyData.surfaceY;
+      const corrX = preyData.surfaceX - nextX;
+      const corrY = preyData.surfaceY - nextY;
+      const corrL = Math.hypot(corrX, corrY) || 1;
+      const maxStep = L * (preyData.q < 1 ? 0.38 : 0.16);
+      const kLatch = 1 - Math.exp(-12 * dt);
+      const step = Math.min(maxStep, corrL * kLatch);
+      nextX += corrX / corrL * step;
+      nextY += corrY / corrL * step;
       heading = Math.atan2(preyData.preyY - nextY, preyData.preyX - nextX);
     }
     const margin = Math.min(L * 0.55, safeWidth * 0.45, safeHeight * 0.45);
@@ -3555,7 +3564,7 @@ function updateDidinium(didinium, frame, view) {
       avoidProgress = 0;
     }
     if (wasContacting && contactTimer <= 0) {
-      huntCooldown = 1.6 + seededUnit(nseed, 0, 1243315241) * 0.9;
+      huntCooldown = 2.5 + seededUnit(nseed, 0, 1243315241) * 1;
       avoidIndex += 1;
       avoidFrom = heading;
       avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 899314129)));
@@ -4091,32 +4100,64 @@ function drawAquariumForeground(ctx, aquarium, _frame, params) {
     const ux = Math.cos(heading), uy = Math.sin(heading);
     const snoutX = d.x + ux * L * 0.52;
     const snoutY = d.y + uy * L * 0.52;
-    const env = Math.min(1, contact / 0.35);
-    ctx.strokeStyle = `hsla(198, 40%, 96%, ${alpha * 0.62 * env})`;
-    ctx.lineWidth = Math.max(0.55, L * 0.022);
-    for (let k = -1;k <= 1; k++) {
-      const side = k * L * 0.035;
+    const env = Math.min(1, contact / 0.45);
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.rotate(heading);
+    ctx.strokeStyle = `hsla(222, 42%, 94%, ${alpha * 0.72 * env})`;
+    ctx.lineWidth = Math.max(0.65, L * 0.022);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, L * 0.5, L * 0.22, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(214, 48%, 97%, ${alpha * 0.72 * env})`;
+    ctx.lineWidth = Math.max(0.7, L * 0.022);
+    for (const gx of [L * 0.18, -L * 0.12]) {
+      ctx.beginPath();
+      ctx.moveTo(gx, -L * 0.2);
+      ctx.lineTo(gx, L * 0.2);
+      ctx.stroke();
+    }
+    ctx.restore();
+    const pierceLen = Math.min(24, Math.max(18, L * 0.55));
+    const px = snoutX + ux * pierceLen;
+    const py = snoutY + uy * pierceLen;
+    ctx.fillStyle = `hsla(205, 18%, 15%, ${alpha * 0.55 * env})`;
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(1.3, L * 0.065), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `hsla(210, 14%, 10%, ${alpha * 0.42 * env})`;
+    ctx.lineWidth = Math.max(1, L * 0.035);
+    ctx.beginPath();
+    ctx.arc(px - ux * 1.5, py - uy * 1.5, Math.max(3, L * 0.16), heading + Math.PI * 0.62, heading + Math.PI * 1.38);
+    ctx.stroke();
+    for (const [side, aMul, wMul] of [[-L * 0.055, 0.55, 0.8], [0, 1, 1.25], [L * 0.055, 0.55, 0.8]]) {
       const sx = snoutX - uy * side;
       const sy = snoutY + ux * side;
+      ctx.strokeStyle = `hsla(198, 52%, 98%, ${alpha * 0.95 * env * aMul})`;
+      ctx.lineWidth = Math.max(0.75, L * 0.026) * wMul;
       ctx.beginPath();
       ctx.moveTo(sx, sy);
-      ctx.lineTo(sx + ux * Math.min(10, L * 0.22), sy + uy * Math.min(10, L * 0.22));
+      ctx.lineTo(px, py);
       ctx.stroke();
     }
-    const fanAlpha = alpha * 0.62 * env;
-    ctx.strokeStyle = `hsla(42, 44%, 94%, ${fanAlpha})`;
-    ctx.lineWidth = 0.75;
-    for (let k = 0;k < 9; k++) {
-      const a = heading + Math.PI + (k - 4) * 0.16;
-      const len = 4 + k % 3 * 1.6;
+    const fanAlpha = alpha * 0.9 * env;
+    ctx.lineWidth = 0.9;
+    for (let k = 0;k < 19; k++) {
+      if (k % 4 === 1)
+        continue;
+      const jitter = Math.sin((k + 1) * 12.9898) * 0.09;
+      const a = heading + Math.PI + (k - 9) * 0.11 + jitter;
+      const len = 8.5 + k * 7 % 7 * 1.35;
+      const aJ = 0.75 + 0.25 * Math.abs(Math.sin((k + 3) * 4.17));
+      ctx.strokeStyle = `hsla(42, 46%, 95%, ${fanAlpha * aJ})`;
       ctx.beginPath();
-      ctx.moveTo(snoutX, snoutY);
-      ctx.lineTo(snoutX + Math.cos(a) * len, snoutY + Math.sin(a) * len);
+      ctx.moveTo(px, py);
+      ctx.lineTo(px + Math.cos(a) * len, py + Math.sin(a) * len);
       ctx.stroke();
     }
-    ctx.fillStyle = `hsla(44, 48%, 96%, ${alpha * 0.55 * env})`;
+    ctx.fillStyle = `hsla(44, 52%, 97%, ${alpha * 0.86 * env})`;
     ctx.beginPath();
-    ctx.arc(snoutX, snoutY, Math.max(1, L * 0.045), 0, Math.PI * 2);
+    ctx.arc(px, py, Math.max(1.2, L * 0.055), 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
@@ -4232,6 +4273,9 @@ function createCellRenderer(container, opts) {
   let baseline = 0;
   let drift01 = 0;
   let aquarium = null;
+  let predatorEnv = 0;
+  let predatorNx = 1;
+  let predatorNy = 0;
   let wander = null;
   let bodyHeading = 0;
   let interiorHeading = 0;
@@ -4427,7 +4471,8 @@ function createCellRenderer(container, opts) {
         drawAquariumBackground(ctx, aquarium, aquariumFrame, params);
       }
       if (params.enableHero !== false && aquarium?.didinium?.length) {
-        let rx = 0, ry = 0;
+        let targetEnv = 0;
+        let nxSum = 0, nySum = 0;
         for (const d of aquarium.didinium) {
           const contact = Math.max(0, d.contactTimer ?? 0);
           if (contact <= 0)
@@ -4436,11 +4481,25 @@ function createCellRenderer(container, opts) {
           const dy = cy - d.y;
           const dl = Math.hypot(dx, dy) || 1;
           const env = Math.min(1, contact / 0.35);
-          const kick = Math.min(5, baseR * 0.16) * env;
-          rx += dx / dl * kick;
-          ry += dy / dl * kick;
+          targetEnv = Math.max(targetEnv, env);
+          nxSum += dx / dl * env;
+          nySum += dy / dl * env;
         }
-        if (rx !== 0 || ry !== 0) {
+        const tau = targetEnv > predatorEnv ? 0.08 : 0.75;
+        const a = 1 - Math.exp(-dt / tau);
+        predatorEnv += (targetEnv - predatorEnv) * a;
+        if (nxSum !== 0 || nySum !== 0) {
+          const nl = Math.hypot(nxSum, nySum) || 1;
+          predatorNx += (nxSum / nl - predatorNx) * a;
+          predatorNy += (nySum / nl - predatorNy) * a;
+          const pl = Math.hypot(predatorNx, predatorNy) || 1;
+          predatorNx /= pl;
+          predatorNy /= pl;
+        }
+        const kick = Math.min(10, baseR * 0.34) * predatorEnv;
+        const rx = predatorNx * kick;
+        const ry = predatorNy * kick;
+        if (kick > 0.01) {
           cx += rx;
           cy += ry;
           for (let i = 0;i < smoothedPoints.length; i++) {
@@ -4974,20 +5033,20 @@ function mount(container, api) {
       aquariumActivityBoost: 0.65,
       diatomCount: 0,
       euglenaCount: 1,
-      euglenaSpeed: 0.13,
-      euglenaSpeedActive: 0.75,
-      euglenaScale: 2,
-      euglenaGravitaxis: 0.15,
-      euglenaPhototaxis: 0.45,
-      euglenaRotDiffusion: 0.08,
+      euglenaSpeed: 0.12,
+      euglenaSpeedActive: 0.48,
+      euglenaScale: 2.2,
+      euglenaGravitaxis: 0.08,
+      euglenaPhototaxis: 0.28,
+      euglenaRotDiffusion: 0.04,
       vorticellaCount: 1,
       vorticellaAlongFrac: 0.1,
       vorticellaScale: 1.05,
       vorticellaContractRate: 1,
       didiniumCount: 1,
       didiniumSpeed: 0.45,
-      didiniumSpeedActive: 0.75,
-      didiniumScale: 1.55,
+      didiniumSpeedActive: 0.65,
+      didiniumScale: 1.65,
       ...userParams
     }
   });

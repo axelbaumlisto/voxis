@@ -132,6 +132,12 @@ export function createCellRenderer(
   let baseline = 0; // slow-tracking audio baseline for startle edge detection
   let drift01 = 0; // smoothed drift activation (0=centered, 1=full drift)
   let aquarium: AquariumLayerState | null = null;
+  // Predator contact response envelope for the Paramecium hero. Unlike the raw
+  // Didinium contactTimer, this persists and releases smoothly after the predator
+  // detaches, so the prey visibly keeps defending/recovering for ~1s.
+  let predatorEnv = 0;
+  let predatorNx = 1;
+  let predatorNy = 0;
 
   // Reynolds-style integrated wander state (replaces position=noise(t), which
   // oscillated about the centre and kept "returning"). Lazily initialised at
@@ -510,7 +516,8 @@ export function createCellRenderer(
       // overlay), but move the rendered hero a few px away from the predator so the
       // attack does not read as a passive kiss.
       if (params.enableHero !== false && aquarium?.didinium?.length) {
-        let rx = 0, ry = 0;
+        let targetEnv = 0;
+        let nxSum = 0, nySum = 0;
         for (const d of aquarium.didinium) {
           const contact = Math.max(0, d.contactTimer ?? 0);
           if (contact <= 0) continue;
@@ -518,11 +525,25 @@ export function createCellRenderer(
           const dy = cy - d.y;
           const dl = Math.hypot(dx, dy) || 1;
           const env = Math.min(1, contact / 0.35);
-          const kick = Math.min(5, baseR * 0.16) * env;
-          rx += (dx / dl) * kick;
-          ry += (dy / dl) * kick;
+          targetEnv = Math.max(targetEnv, env);
+          nxSum += (dx / dl) * env;
+          nySum += (dy / dl) * env;
         }
-        if (rx !== 0 || ry !== 0) {
+        const tau = targetEnv > predatorEnv ? 0.08 : 0.75;
+        const a = 1 - Math.exp(-dt / tau);
+        predatorEnv += (targetEnv - predatorEnv) * a;
+        if (nxSum !== 0 || nySum !== 0) {
+          const nl = Math.hypot(nxSum, nySum) || 1;
+          predatorNx += (nxSum / nl - predatorNx) * a;
+          predatorNy += (nySum / nl - predatorNy) * a;
+          const pl = Math.hypot(predatorNx, predatorNy) || 1;
+          predatorNx /= pl;
+          predatorNy /= pl;
+        }
+        const kick = Math.min(10, baseR * 0.34) * predatorEnv;
+        const rx = predatorNx * kick;
+        const ry = predatorNy * kick;
+        if (kick > 0.01) {
           cx += rx;
           cy += ry;
           for (let i = 0; i < smoothedPoints.length; i++) {

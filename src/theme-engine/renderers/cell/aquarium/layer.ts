@@ -150,37 +150,79 @@ export function drawAquariumForeground(
     const ux = Math.cos(heading), uy = Math.sin(heading);
     const snoutX = d.x + ux * L * 0.52;
     const snoutY = d.y + uy * L * 0.52;
-    const env = Math.min(1, contact / 0.35);
+    const env = Math.min(1, contact / 0.45);
 
-    // Didinium toxicyst / attachment filaments: short, cool darkfield glints.
-    ctx.strokeStyle = `hsla(198, 40%, 96%, ${alpha * 0.62 * env})`;
-    ctx.lineWidth = Math.max(0.55, L * 0.022);
-    for (let k = -1; k <= 1; k++) {
-      const side = k * L * 0.035;
+    // Foreground Didinium silhouette cue: a faint barrel outline + two girdle marks
+    // above the hero so the predator remains a distinct cell during latch, not a
+    // grey patch on the Paramecium flank.
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.rotate(heading);
+    ctx.strokeStyle = `hsla(222, 42%, 94%, ${alpha * 0.72 * env})`;
+    ctx.lineWidth = Math.max(0.65, L * 0.022);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, L * 0.50, L * 0.22, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(214, 48%, 97%, ${alpha * 0.72 * env})`;
+    ctx.lineWidth = Math.max(0.7, L * 0.022);
+    for (const gx of [L * 0.18, -L * 0.12]) {
+      ctx.beginPath();
+      ctx.moveTo(gx, -L * 0.20);
+      ctx.lineTo(gx, L * 0.20);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Directional attack point: push the luminous contact slightly INTO the prey
+    // surface so the cue reads as piercing/attachment, not a centered kiss.
+    const pierceLen = Math.min(24, Math.max(18, L * 0.55));
+    const px = snoutX + ux * pierceLen;
+    const py = snoutY + uy * pierceLen;
+
+    // Dark puncture/dent first: a tiny shadow + crescent under the contact glow.
+    ctx.fillStyle = `hsla(205, 18%, 15%, ${alpha * 0.55 * env})`;
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(1.3, L * 0.065), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `hsla(210, 14%, 10%, ${alpha * 0.42 * env})`;
+    ctx.lineWidth = Math.max(1.0, L * 0.035);
+    ctx.beginPath();
+    ctx.arc(px - ux * 1.5, py - uy * 1.5, Math.max(3.0, L * 0.16), heading + Math.PI * 0.62, heading + Math.PI * 1.38);
+    ctx.stroke();
+
+    // Didinium toxicyst / attachment filaments: one dominant central piercing
+    // line plus two fainter side attachment lines (not a moustache).
+    for (const [side, aMul, wMul] of [[-L * 0.055, 0.55, 0.8], [0, 1.0, 1.25], [L * 0.055, 0.55, 0.8]] as const) {
       const sx = snoutX - uy * side;
       const sy = snoutY + ux * side;
+      ctx.strokeStyle = `hsla(198, 52%, 98%, ${alpha * 0.95 * env * aMul})`;
+      ctx.lineWidth = Math.max(0.75, L * 0.026) * wMul;
       ctx.beginPath();
       ctx.moveTo(sx, sy);
-      ctx.lineTo(sx + ux * Math.min(10, L * 0.22), sy + uy * Math.min(10, L * 0.22));
+      ctx.lineTo(px, py);
       ctx.stroke();
     }
 
-    // Paramecium defensive trichocyst sparkle at contact: warm, tiny, decays fast.
-    const fanAlpha = alpha * 0.62 * env;
-    ctx.strokeStyle = `hsla(42, 44%, 94%, ${fanAlpha})`;
-    ctx.lineWidth = 0.75;
-    for (let k = 0; k < 9; k++) {
-      const a = heading + Math.PI + (k - 4) * 0.16;
-      const len = 4.0 + (k % 3) * 1.6;
+    // Paramecium defensive trichocyst burst: asymmetric fan AWAY from predator,
+    // not a regular radial UI sparkle.
+    const fanAlpha = alpha * 0.9 * env;
+    ctx.lineWidth = 0.9;
+    for (let k = 0; k < 19; k++) {
+      if (k % 4 === 1) continue; // irregular gaps: biological, not UI starburst
+      const jitter = Math.sin((k + 1) * 12.9898) * 0.09;
+      const a = heading + Math.PI + (k - 9) * 0.11 + jitter;
+      const len = 8.5 + ((k * 7) % 7) * 1.35;
+      const aJ = 0.75 + 0.25 * Math.abs(Math.sin((k + 3) * 4.17));
+      ctx.strokeStyle = `hsla(42, 46%, 95%, ${fanAlpha * aJ})`;
       ctx.beginPath();
-      ctx.moveTo(snoutX, snoutY);
-      ctx.lineTo(snoutX + Math.cos(a) * len, snoutY + Math.sin(a) * len);
+      ctx.moveTo(px, py);
+      ctx.lineTo(px + Math.cos(a) * len, py + Math.sin(a) * len);
       ctx.stroke();
     }
 
-    ctx.fillStyle = `hsla(44, 48%, 96%, ${alpha * 0.55 * env})`;
+    ctx.fillStyle = `hsla(44, 52%, 97%, ${alpha * 0.86 * env})`;
     ctx.beginPath();
-    ctx.arc(snoutX, snoutY, Math.max(1, L * 0.045), 0, Math.PI * 2);
+    ctx.arc(px, py, Math.max(1.2, L * 0.055), 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
