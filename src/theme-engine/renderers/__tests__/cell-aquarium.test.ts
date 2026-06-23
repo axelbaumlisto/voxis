@@ -2468,7 +2468,7 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
     // cilia ticks + 2 girdle bands + macronucleus + cone + CV are many strokes;
     // assert a sane bounded op count with strokes and fills present.
     expect(ops.length).toBeGreaterThan(20);
-    expect(ops.length).toBeLessThan(2000);
+    expect(ops.length).toBeLessThan(2600);
     expect(ops.filter((o) => o === "stroke").length).toBeGreaterThan(4);
     expect(ops.filter((o) => o === "fill").length).toBeGreaterThan(0);
   });

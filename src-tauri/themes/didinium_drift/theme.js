@@ -3289,10 +3289,10 @@ function drawVorticella(ctx, vorticella, frame, view) {
 
 // src/theme-engine/renderers/cell/aquarium/didinium.ts
 var DIDINIUM_SALT = 220011530;
-var ASPECT = 1.15;
+var ASPECT = 1.28;
 var GIRDLE_A_U = 0.46;
 var GIRDLE_P_U = -0.16;
-var SHOULDER_U = 0.6;
+var SHOULDER_U = 0.54;
 var BRUSH_ROWS = 5;
 var STOPGO_FREQ = 0.5;
 var WANDER_FREQ = 0.17;
@@ -3531,7 +3531,7 @@ function drawDidinium(ctx, didinium, frame, view) {
     const rollCos = Math.cos(rollAng);
     const widthMul = 0.96 + 0.04 * Math.abs(rollCos);
     const halfWidthAt = (u) => wMax * widthMul * normHalfWidth2(u);
-    const SAMP = 46;
+    const SAMP = 64;
     const upper = [];
     const lower = [];
     for (let i = 0;i <= SAMP; i++) {
@@ -3601,39 +3601,62 @@ function drawDidinium(ctx, didinium, frame, view) {
         const lat = bow * halfWidthAt(u) * (rollCos >= 0 ? 1 : -1);
         macro.push(transform3(cx, cy, ux, uy, halfLength * u, lat));
       }
-      ctx.strokeStyle = `hsla(${hue - 2}, 20%, 88%, ${alpha * 0.26})`;
-      ctx.lineWidth = Math.max(1.4, wMax * 0.42);
+      ctx.strokeStyle = `hsla(${hue - 2}, 20%, 88%, ${alpha * 0.3})`;
+      ctx.lineWidth = Math.max(1.6, wMax * 0.46);
       drawPolyline4(ctx, macro, false);
       ctx.stroke();
-      ctx.strokeStyle = `hsla(${hue - 4}, 24%, 86%, ${alpha * 0.42})`;
-      ctx.lineWidth = Math.max(0.9, wMax * 0.2);
+      ctx.strokeStyle = `hsla(${hue - 4}, 26%, 84%, ${alpha * 0.66})`;
+      ctx.lineWidth = Math.max(1, wMax * 0.24);
       drawPolyline4(ctx, macro, false);
       ctx.stroke();
     }
     const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
-    const RING_TILT = 0.34;
+    const RING_TILT = 0.18;
     const gSeedR = finiteOr(cell.noiseSeed, 0) | 0;
     const drawGirdle = (gu, seatHue, gi) => {
       const hw = halfWidthAt(gu);
       const baseAlong = halfLength * gu;
-      const NT = 44;
-      ctx.lineWidth = Math.max(0.45, wMax * 0.05);
+      const NT = 72;
+      const seat = [];
+      for (let s = 0;s <= NT; s++) {
+        const phi = s / NT * TAU2;
+        if (Math.cos(phi + rollAng) < -0.05) {
+          if (seat.length > 1) {
+            drawPolyline4(ctx, seat, false);
+            ctx.strokeStyle = `hsla(${seatHue}, 44%, 94%, ${alpha * 0.5})`;
+            ctx.lineWidth = Math.max(0.5, wMax * 0.06);
+            ctx.stroke();
+          }
+          seat.length = 0;
+          continue;
+        }
+        const lat = Math.cos(phi) * hw;
+        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
+        seat.push(transform3(cx, cy, ux, uy, along, lat));
+      }
+      if (seat.length > 1) {
+        drawPolyline4(ctx, seat, false);
+        ctx.strokeStyle = `hsla(${seatHue}, 44%, 94%, ${alpha * 0.5})`;
+        ctx.lineWidth = Math.max(0.5, wMax * 0.06);
+        ctx.stroke();
+      }
+      ctx.lineWidth = Math.max(0.4, wMax * 0.045);
       for (let s = 0;s < NT; s++) {
         const phi = s / NT * TAU2;
         const depth = Math.cos(phi + rollAng);
-        if (depth < -0.15)
+        if (depth < -0.1)
           continue;
         const front = clamp01(0.5 + 0.5 * depth);
-        const jit = (seededUnit(gSeedR, s + gi * 97, 752460107) - 0.5) * 0.12;
+        const jit = (seededUnit(gSeedR, s + gi * 97, 752460107) - 0.5) * 0.1;
         const lat = Math.cos(phi) * hw;
         const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
         const wave = 0.5 + 0.5 * Math.sin(TAU2 * beat - phi * 3);
-        const cilLen = hw * (0.12 + 0.1 * wave) * (1 + jit);
+        const cilLen = hw * (0.16 + 0.12 * wave) * (1 + jit);
         const base = transform3(cx, cy, ux, uy, along, lat);
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
         const tip = transform3(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
-        ctx.strokeStyle = `hsla(${seatHue}, 46%, 93%, ${alpha * (0.12 + 0.7 * front)})`;
+        ctx.strokeStyle = `hsla(${seatHue}, 46%, 94%, ${alpha * (0.14 + 0.74 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);

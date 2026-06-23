@@ -13,10 +13,10 @@ export const DIDINIUM_SALT = 0x0d1d1c0a;
 // (pectinelles): anterior at the shoulder, posterior just below mid-body. A
 // conical apical snout (cytostome cone, closed at rest). Horseshoe macronucleus.
 // Terminal contractile vacuole at the aboral (posterior) pole.
-const ASPECT = 1.15; // length : width (real D. nasutum is nearly round, ~1.1-1.2:1)
+const ASPECT = 1.28; // length : width (real D. nasutum ~1.25-1.3:1)
 const GIRDLE_A_U = 0.46; // anterior girdle position (shoulder), u ∈ [-1(post), +1(snout)]
 const GIRDLE_P_U = -0.16; // posterior girdle position (just below mid-body)
-const SHOULDER_U = 0.6; // where the barrel meets the cone snout (short, blunt cone)
+const SHOULDER_U = 0.54; // where the barrel meets the cone snout (a real, visible cone)
 const BRUSH_ROWS = 5; // dorsal brushes (brosse) per girdle
 
 // ── swim constants (grounded in real D. nasutum kinematics) ───────────────────
@@ -363,7 +363,7 @@ export function drawDidinium(
     const halfWidthAt = (u: number): number => wMax * widthMul * normHalfWidth(u);
 
     // ── body outline (closed barrel + cone snout), cosine-clustered samples ──
-    const SAMP = 46;
+    const SAMP = 64; // higher → smooth rounded silhouette (no faceting)
     const upper: { x: number; y: number }[] = [];
     const lower: { x: number; y: number }[] = [];
     for (let i = 0; i <= SAMP; i++) {
@@ -446,13 +446,13 @@ export function drawDidinium(
         macro.push(transform(cx, cy, ux, uy, halfLength * u, lat));
       }
       // soft underglow
-      ctx.strokeStyle = `hsla(${hue - 2}, 20%, 88%, ${alpha * 0.26})`;
-      ctx.lineWidth = Math.max(1.4, wMax * 0.42);
+      ctx.strokeStyle = `hsla(${hue - 2}, 20%, 88%, ${alpha * 0.3})`;
+      ctx.lineWidth = Math.max(1.6, wMax * 0.46);
       drawPolyline(ctx, macro, false);
       ctx.stroke();
-      // dimmer core (was a hot bar)
-      ctx.strokeStyle = `hsla(${hue - 4}, 24%, 86%, ${alpha * 0.42})`;
-      ctx.lineWidth = Math.max(0.9, wMax * 0.2);
+      // legible bright C core (the headline DIC landmark)
+      ctx.strokeStyle = `hsla(${hue - 4}, 26%, 84%, ${alpha * 0.66})`;
+      ctx.lineWidth = Math.max(1.0, wMax * 0.24);
       drawPolyline(ctx, macro, false);
       ctx.stroke();
     }
@@ -468,28 +468,39 @@ export function drawDidinium(
     // each girdle reads as a bright scattering crescent on the near face that
     // sweeps as the body rolls. Many faint jittered ticks, metachronal wave.
     const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
-    const RING_TILT = 0.34; // along-axis foreshortening of the projected ring
+    const RING_TILT = 0.18; // along-axis foreshortening: low → a FLAT transverse band, not a tilted spiral
     const gSeedR = finiteOr(cell.noiseSeed, 0) | 0;
     const drawGirdle = (gu: number, seatHue: number, gi: number) => {
       const hw = halfWidthAt(gu);
       const baseAlong = halfLength * gu;
-      const NT = 44;
-      ctx.lineWidth = Math.max(0.45, wMax * 0.05);
+      const NT = 72; // DENSE fine fringe (real pectinelles are numerous close-set cilia)
+      // bright near-arc band seat line so the girdle reads as a crisp transverse
+      // BAND, not a string of separate beads (far arc skipped → no wireframe).
+      const seat: { x: number; y: number }[] = [];
+      for (let s = 0; s <= NT; s++) {
+        const phi = (s / NT) * TAU;
+        if (Math.cos(phi + rollAng) < -0.05) { if (seat.length > 1) { drawPolyline(ctx, seat, false); ctx.strokeStyle = `hsla(${seatHue}, 44%, 94%, ${alpha * 0.5})`; ctx.lineWidth = Math.max(0.5, wMax * 0.06); ctx.stroke(); } seat.length = 0; continue; }
+        const lat = Math.cos(phi) * hw;
+        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
+        seat.push(transform(cx, cy, ux, uy, along, lat));
+      }
+      if (seat.length > 1) { drawPolyline(ctx, seat, false); ctx.strokeStyle = `hsla(${seatHue}, 44%, 94%, ${alpha * 0.5})`; ctx.lineWidth = Math.max(0.5, wMax * 0.06); ctx.stroke(); }
+      ctx.lineWidth = Math.max(0.4, wMax * 0.045);
       for (let s = 0; s < NT; s++) {
         const phi = (s / NT) * TAU;
         const depth = Math.cos(phi + rollAng); // 1 = nearest viewer
-        if (depth < -0.15) continue; // clip the FAR arc → no wireframe back-side
+        if (depth < -0.1) continue; // clip the FAR arc → no wireframe back-side
         const front = clamp01(0.5 + 0.5 * depth);
-        const jit = (seededUnit(gSeedR, s + gi * 97, 0x2cd9a14b) - 0.5) * 0.12;
+        const jit = (seededUnit(gSeedR, s + gi * 97, 0x2cd9a14b) - 0.5) * 0.1;
         const lat = Math.cos(phi) * hw;
         const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
         const wave = 0.5 + 0.5 * Math.sin(TAU * beat - phi * 3.0); // metachronal
-        const cilLen = hw * (0.12 + 0.1 * wave) * (1 + jit);
+        const cilLen = hw * (0.16 + 0.12 * wave) * (1 + jit); // a touch longer/crisper
         const base = transform(cx, cy, ux, uy, along, lat);
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
         const tip = transform(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
-        ctx.strokeStyle = `hsla(${seatHue}, 46%, 93%, ${alpha * (0.12 + 0.7 * front)})`;
+        ctx.strokeStyle = `hsla(${seatHue}, 46%, 94%, ${alpha * (0.14 + 0.74 * front)})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
