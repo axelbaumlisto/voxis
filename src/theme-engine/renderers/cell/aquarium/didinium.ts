@@ -526,22 +526,18 @@ export function drawDidinium(
         let tx = b.x - a.x, ty = b.y - a.y;
         const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
         const nx2 = -ty, ny2 = tx; // perpendicular to the centerline tangent
-        const th = halfTh * taper;
+        const th = halfTh * (0.55 + 0.45 * taper); // fuller-bodied sausage (less crescent)
         const p = macro[k];
         left.push({ x: p.x + nx2 * th, y: p.y + ny2 * th });
         right.push({ x: p.x - nx2 * th, y: p.y - ny2 * th });
       }
       const ribbon = [...left, ...right.reverse()];
-      // soft dark-cool underglow halo to set the C off from the bright endoplasm
-      drawPolyline(ctx, macro, false);
-      ctx.strokeStyle = `hsla(${hue - 6}, 22%, 70%, ${alpha * 0.3})`;
-      ctx.lineWidth = Math.max(2.2, wMax * 0.62);
-      ctx.stroke();
-      // DOMINANT solid filled C — the single headline DIC interior landmark.
+      // DOMINANT SOLID filled C — the single headline DIC interior landmark.
+      // No wide underglow halo (a stroke wider than the fill made a glowing RING).
       // NEUTRAL grey (very low saturation) so it reads as solid chromatin, NOT a
-      // glowing cyan fluid lens.
+      // glowing cyan crescent.
       drawPolyline(ctx, ribbon, true);
-      ctx.fillStyle = `hsla(${hue - 8}, 6%, 78%, ${alpha * 0.88})`;
+      ctx.fillStyle = `hsla(${hue - 8}, 6%, 76%, ${alpha * 0.9})`;
       ctx.fill();
       // MOTTLED chromatin texture (clipped to the C): seeded darker/brighter
       // blobs along the centerline so it reads as a granular nucleus, not a flat
@@ -589,20 +585,10 @@ export function drawDidinium(
       const hw = halfWidthAt(gu);
       const baseAlong = halfLength * gu;
       const NT = 96; // DENSE fine fringe (real pectinelles are numerous close-set cilia)
-      // bright near-arc band seat line so the girdle reads as a crisp transverse
-      // BAND, not a string of separate beads (far arc skipped → no wireframe).
-      const seat: { x: number; y: number }[] = [];
-      for (let s = 0; s <= NT; s++) {
-        const phi = (s / NT) * TAU;
-        // VERY faint seat line: just enough to anchor the band root; the dense comb
-        // of ticks below is what should read (a bold seat line looked like a
-        // wireframe hoop). Hairline + low alpha.
-        if (Math.cos(phi + rollAng) < -0.05) { if (seat.length > 1) { drawPolyline(ctx, seat, false); ctx.strokeStyle = `hsla(${seatHue}, 30%, 90%, ${alpha * 0.14})`; ctx.lineWidth = Math.max(0.3, wMax * 0.02); ctx.stroke(); } seat.length = 0; continue; }
-        const lat = Math.cos(phi) * hw;
-        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
-        seat.push(transform(cx, cy, ux, uy, along, lat));
-      }
-      if (seat.length > 1) { drawPolyline(ctx, seat, false); ctx.strokeStyle = `hsla(${seatHue}, 30%, 90%, ${alpha * 0.14})`; ctx.lineWidth = Math.max(0.3, wMax * 0.02); ctx.stroke(); }
+      // NO seat chord line: a bright polyline spanning lat=-hw..+hw read as a
+      // straight construction line cutting across the body interior. The girdle is
+      // now ONLY the dense comb of short ticks below — a surface fringe, not a
+      // drawn hoop/chord.
       ctx.lineWidth = Math.max(0.3, wMax * 0.026); // thin fringe so it reads as a dense comb
       for (let s = 0; s < NT; s++) {
         const phi = (s / NT) * TAU;
@@ -618,7 +604,13 @@ export function drawDidinium(
         const outLat = Math.cos(phi);
         const outAlong = Math.sin(phi) * RING_TILT;
         const tip = transform(cx, cy, ux, uy, along + outAlong * cilLen, lat + outLat * cilLen);
-        ctx.strokeStyle = `hsla(${seatHue}, 40%, 93%, ${alpha * (0.1 + 0.5 * front)})`;
+        // Fade by proximity to the silhouette RIM (|cos phi|=1 at the body edge,
+        // 0 at the on-axis centre). This keeps the comb only where the transverse
+        // ring crosses the visible profile edge — a surface fringe — and removes the
+        // central ticks that read as a straight construction line through the body.
+        const rim = Math.abs(Math.cos(phi));
+        const rimW = rim * rim; // sharpen to the two edges
+        ctx.strokeStyle = `hsla(${seatHue}, 40%, 93%, ${alpha * (0.1 + 0.5 * front) * rimW})`;
         ctx.beginPath();
         ctx.moveTo(base.x, base.y);
         ctx.lineTo(tip.x, tip.y);
