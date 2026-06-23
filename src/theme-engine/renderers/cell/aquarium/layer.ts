@@ -6,7 +6,7 @@ import { REGISTRY, sceneFromParams } from "./registry";
 import type { AquariumFrame, AquariumLayerState } from "./types";
 import { euglenaContribute } from "./euglena";
 import { vorticellaContribute } from "./vorticella";
-import { didiniumContribute } from "./didinium";
+import { didiniumContribute, didiniumDisplayLength } from "./didinium";
 
 type MutableAquariumLayerState = { -readonly [K in keyof AquariumLayerState]: AquariumLayerState[K] };
 
@@ -123,4 +123,65 @@ export function drawAquariumBackground(
     const entry = REGISTRY[instance.species];
     entry.draw(ctx, aquarium[entry.slot] as never, frame, instance.cfg);
   }
+}
+
+/**
+ * Foreground overlays that must appear ABOVE the paramecium hero. Normal aquarium
+ * bodies are drawn behind the hero; predator contact cues need to remain visible
+ * at the prey surface, otherwise the Didinium latch reads as a kiss/occlusion.
+ */
+export function drawAquariumForeground(
+  ctx: CanvasRenderingContext2D,
+  aquarium: AquariumLayerState,
+  _frame: AquariumFrame,
+  params: CellParams,
+): void {
+  const view = aquariumParamsView(params);
+  if (!view.enabled || view.didinium.count <= 0) return;
+  const alpha = Math.max(0, Math.min(1, view.alpha * 0.9));
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const d of aquarium.didinium) {
+    const contact = Math.max(0, d.contactTimer ?? 0);
+    if (contact <= 0) continue;
+    const L = didiniumDisplayLength(d.size, view.didinium.scale);
+    const heading = d.phase;
+    const ux = Math.cos(heading), uy = Math.sin(heading);
+    const snoutX = d.x + ux * L * 0.52;
+    const snoutY = d.y + uy * L * 0.52;
+    const env = Math.min(1, contact / 0.35);
+
+    // Didinium toxicyst / attachment filaments: short, cool darkfield glints.
+    ctx.strokeStyle = `hsla(198, 36%, 94%, ${alpha * 0.42 * env})`;
+    ctx.lineWidth = Math.max(0.45, L * 0.018);
+    for (let k = -1; k <= 1; k++) {
+      const side = k * L * 0.035;
+      const sx = snoutX - uy * side;
+      const sy = snoutY + ux * side;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + ux * Math.min(8, L * 0.16), sy + uy * Math.min(8, L * 0.16));
+      ctx.stroke();
+    }
+
+    // Paramecium defensive trichocyst sparkle at contact: warm, tiny, decays fast.
+    const fanAlpha = alpha * 0.38 * env;
+    ctx.strokeStyle = `hsla(42, 38%, 92%, ${fanAlpha})`;
+    ctx.lineWidth = 0.55;
+    for (let k = 0; k < 9; k++) {
+      const a = heading + Math.PI + (k - 4) * 0.16;
+      const len = 2.5 + (k % 3) * 1.1;
+      ctx.beginPath();
+      ctx.moveTo(snoutX, snoutY);
+      ctx.lineTo(snoutX + Math.cos(a) * len, snoutY + Math.sin(a) * len);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = `hsla(44, 40%, 94%, ${alpha * 0.35 * env})`;
+    ctx.beginPath();
+    ctx.arc(snoutX, snoutY, Math.max(1, L * 0.045), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }

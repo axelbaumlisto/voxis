@@ -27,7 +27,7 @@ import type { CiliaMotion } from "./cilia";
 import type { CellParams, CellOptions } from "./types";
 import { CELL_DEFAULTS } from "./defaults";
 import type { AquariumLayerState, AquariumFrame } from "./aquarium/types";
-import { seedAquarium, updateAquarium, drawAquariumBackground } from "./aquarium/layer";
+import { seedAquarium, updateAquarium, drawAquariumBackground, drawAquariumForeground } from "./aquarium/layer";
 import { aquariumParamsView } from "./aquarium/params";
 import { heroConsumeObstacles } from "./aquarium/hero";
 import { buildField } from "./aquarium/interaction";
@@ -1050,6 +1050,25 @@ export function createCellRenderer(
           }
           ctx.stroke();
         }
+      }
+
+      if (params.enableAquarium && aquarium) {
+        const fgFrame: AquariumFrame = {
+          t,
+          dt,
+          width,
+          height,
+          mode: s.mode,
+          activity,
+          audioLevel,
+          startle,
+          baseHue,
+          hero: params.enableHero === false ? undefined : (() => {
+            const aspect = Math.sqrt(Math.max(1, params.bodyAspect ?? 1));
+            return { x: cx, y: cy, radius: baseR, heading: bodyHeading, halfLen: baseR * aspect, halfWid: baseR / aspect };
+          })(),
+        };
+        drawAquariumForeground(ctx, aquarium, fgFrame, params);
       }
     }
 

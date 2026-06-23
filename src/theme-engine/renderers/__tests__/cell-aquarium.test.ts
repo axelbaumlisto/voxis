@@ -2048,6 +2048,7 @@ describe("createCellRenderer aquarium gate", () => {
       seedAquarium: seed,
       updateAquarium: update,
       drawAquariumBackground: draw,
+      drawAquariumForeground: vi.fn(),
     }));
     const rafCalls: Array<() => void> = [];
     vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
@@ -2080,6 +2081,7 @@ describe("createCellRenderer aquarium gate", () => {
       seedAquarium: seed,
       updateAquarium: update,
       drawAquariumBackground: draw,
+      drawAquariumForeground: vi.fn(),
     }));
     const rafCalls: Array<() => void> = [];
     vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
@@ -2169,6 +2171,7 @@ describe("createCellRenderer aquarium gate", () => {
       seedAquarium: seed,
       updateAquarium: update,
       drawAquariumBackground: draw,
+      drawAquariumForeground: vi.fn(),
     }));
     const rafCalls: Array<() => void> = [];
     vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
@@ -2229,6 +2232,7 @@ describe("createCellRenderer aquarium gate", () => {
       seedAquarium: seed,
       updateAquarium: update,
       drawAquariumBackground: draw,
+      drawAquariumForeground: vi.fn(),
     }));
     const rafCalls: Array<() => void> = [];
     let now = 1000;
