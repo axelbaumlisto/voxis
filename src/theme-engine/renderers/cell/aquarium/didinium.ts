@@ -71,11 +71,15 @@ function bodyShape(u: number): number {
     const wShoulder = 0.9; // flattened shoulder is a touch narrower than the belly
     return wShoulder * Math.pow(1 - q, 1.15); // blunter, shorter cone (not a witch-hat)
   }
-  // barrel body: flat-ish sides, widest mid, rounded posterior.
+  // ovoid body: moderately narrow anterior shoulder, full belly widest ~40% down,
+  // BROADLY ROUNDED posterior (real D. nasutum is plump/egg-shaped, not a flat
+  // lemon). Two smooth cosine lobes meet C1-continuously at the belly peak.
   const t = (u - SHOULDER_U) / (-1 - SHOULDER_U); // 0 at shoulder, 1 at aboral pole
-  // belly bulge peaking around the lower-mid body, easing to a rounded posterior.
-  const belly = Math.sin(Math.PI * clamp01(t * 0.86 + 0.07));
-  return 0.62 + 0.38 * belly;
+  const tp = 0.42; // widest point, just below mid
+  if (t <= tp) {
+    return 0.72 + 0.28 * Math.sin((t / tp) * (Math.PI / 2)); // shoulder 0.72 -> belly 1.0
+  }
+  return 0.4 + 0.6 * Math.cos(((t - tp) / (1 - tp)) * (Math.PI / 2)); // belly 1.0 -> rounded pole 0.40
 }
 
 const BODY_SHAPE_MAX = (() => {
@@ -348,8 +352,8 @@ export function drawDidinium(
     // dense two-layer granular endoplasm stipple (coarse + fine), birth-stable,
     // so the body scatters like packed cytoplasm (clipped to the outline).
     const gSeed = finiteOr(cell.noiseSeed, 0) | 0;
-    const gCount = Math.round(clamp(L * 4, 40, 150));
-    ctx.fillStyle = `hsla(${hue}, 24%, 90%, ${alpha * 0.30})`;
+    const gCount = Math.round(clamp(L * 6, 60, 220)); // denser packed endoplasm (real cytoplasm is crowded)
+    ctx.fillStyle = `hsla(${hue}, 24%, 90%, ${alpha * 0.34})`;
     for (let g = 0; g < gCount; g++) {
       const gu = (seededUnit(gSeed, g, 0x51bd0e77) * 2 - 1) * 0.9;
       const gs = (seededUnit(gSeed, g, 0x9a1f2b3c) * 2 - 1) * 0.92;
@@ -360,8 +364,8 @@ export function drawDidinium(
       ctx.arc(p.x, p.y, r, 0, TAU);
       ctx.fill();
     }
-    const gCount2 = Math.round(clamp(L * 2.5, 24, 96));
-    ctx.fillStyle = `hsla(${hue + 4}, 20%, 94%, ${alpha * 0.14})`;
+    const gCount2 = Math.round(clamp(L * 4, 40, 150));
+    ctx.fillStyle = `hsla(${hue + 4}, 20%, 94%, ${alpha * 0.16})`;
     for (let g = 0; g < gCount2; g++) {
       const gu = (seededUnit(gSeed, g, 0x3da17c45) * 2 - 1) * 0.9;
       const gs = (seededUnit(gSeed, g, 0x59e2b7a3) * 2 - 1) * 0.92;
@@ -504,6 +508,39 @@ export function drawDidinium(
       ctx.lineTo(tip.x, tip.y);
       ctx.lineTo(shR.x, shR.y);
       ctx.stroke();
+      // nematodesmal striae: faint longitudinal lines fanning from the cone base to
+      // the apex (the palisade of stiff rods supporting the proboscis).
+      ctx.strokeStyle = `hsla(${hue + 4}, 30%, 93%, ${alpha * 0.22})`;
+      ctx.lineWidth = Math.max(0.35, wMax * 0.03);
+      const NS = 5;
+      for (let k = 1; k < NS; k++) {
+        const f = k / NS; // across the cone base
+        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU);
+        const base = transform(cx, cy, ux, uy, halfLength * coneBaseU, lat);
+        ctx.beginPath();
+        ctx.moveTo(base.x, base.y);
+        ctx.lineTo(tip.x, tip.y);
+        ctx.stroke();
+      }
+      // collar of forward-flared cilia at the cone base — the prominent anterior
+      // wreath seen in the micrographs where the snout joins the body.
+      const collarHw = halfWidthAt(coneBaseU);
+      ctx.lineWidth = Math.max(0.45, wMax * 0.05);
+      for (let s = 0; s <= 10; s++) {
+        const f = s / 10;
+        const lat = (f * 2 - 1) * collarHw;
+        const depth = Math.cos(rollAng); // collar rides the near face
+        if (depth < -0.2) continue;
+        const front = clamp01(0.5 + 0.5 * depth);
+        const base = transform(cx, cy, ux, uy, halfLength * coneBaseU, lat);
+        // flare slightly outward + forward (toward the snout)
+        const tipC = transform(cx, cy, ux, uy, halfLength * (coneBaseU + 0.08), lat + Math.sign(lat || 1) * collarHw * 0.22);
+        ctx.strokeStyle = `hsla(${hue + 6}, 44%, 93%, ${alpha * (0.16 + 0.5 * front)})`;
+        ctx.beginPath();
+        ctx.moveTo(base.x, base.y);
+        ctx.lineTo(tipC.x, tipC.y);
+        ctx.stroke();
+      }
       // bright apical pip (closed cytostome), not a gaping mouth
       ctx.fillStyle = `hsla(${hue + 4}, 40%, 95%, ${alpha * 0.6})`;
       ctx.beginPath();
