@@ -4,7 +4,7 @@
   "name": "All Aquarium",
   "description": "Paramecium, Euglena, Vorticella and Didinium together in one calm darkfield micro-aquarium.",
   "api_version": 1,
-  "overlay_width": 320,
-  "overlay_height": 160,
+  "overlay_width": 360,
+  "overlay_height": 180,
   "entry": "theme.js"
 }

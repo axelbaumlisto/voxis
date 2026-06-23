@@ -19,6 +19,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     baseHue: PARAMECIUM_BASE_HUE,
     params: {
       ...PARAMECIUM_CELL_PARAMS,
+      // Shrink the paramecium hero so all four organisms are visible at once.
+      radiusFraction: 0.24,
       enableAquarium: true,
       aquariumSeed: 23,
       aquariumAlpha: 0.72,
@@ -36,14 +38,15 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
 
       // sessile stalked organism: Vorticella
       vorticellaCount: 1,
-      vorticellaScale: 2.25,
+      vorticellaAlongFrac: 0.14,
+      vorticellaScale: 2.1,
       vorticellaContractRate: 1.0,
 
       // predator swimmer: Didinium
       didiniumCount: 1,
       didiniumSpeed: 0.65,
       didiniumSpeedActive: 1.15,
-      didiniumScale: 2.25,
+      didiniumScale: 2.1,
 
       ...userParams,
     },

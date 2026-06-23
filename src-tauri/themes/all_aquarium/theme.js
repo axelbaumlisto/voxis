@@ -4805,6 +4805,7 @@ function mount(container, api) {
     baseHue: PARAMECIUM_BASE_HUE,
     params: {
       ...PARAMECIUM_CELL_PARAMS,
+      radiusFraction: 0.24,
       enableAquarium: true,
       aquariumSeed: 23,
       aquariumAlpha: 0.72,
@@ -4818,12 +4819,13 @@ function mount(container, api) {
       euglenaPhototaxis: 0.45,
       euglenaRotDiffusion: 0.08,
       vorticellaCount: 1,
-      vorticellaScale: 2.25,
+      vorticellaAlongFrac: 0.14,
+      vorticellaScale: 2.1,
       vorticellaContractRate: 1,
       didiniumCount: 1,
       didiniumSpeed: 0.65,
       didiniumSpeedActive: 1.15,
-      didiniumScale: 2.25,
+      didiniumScale: 2.1,
       ...userParams
     }
   });
