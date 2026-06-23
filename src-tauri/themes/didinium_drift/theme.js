@@ -3300,7 +3300,7 @@ var WANDER_RAD = 0.78;
 var HELIX_LEAN = 0.2;
 var CURVE_FREQ = 0.09;
 var CURVE_BIAS = 0.32;
-var WALL_LOOK = 0.7;
+var WALL_LOOK = 1.25;
 var BACKUP_SECONDS = 0.22;
 var AVOID_SECONDS = 0.6;
 var AVOID_TURN_MIN = 2 * Math.PI / 3;
@@ -3333,7 +3333,8 @@ function bodyShape2(u) {
   if (t <= tp) {
     return 0.72 + 0.28 * Math.sin(t / tp * (Math.PI / 2));
   }
-  return 0.62 + 0.38 * Math.cos((t - tp) / (1 - tp) * (Math.PI / 2));
+  const s = (t - tp) / (1 - tp);
+  return Math.sqrt(Math.max(0, 1 - s * s));
 }
 var BODY_SHAPE_MAX2 = (() => {
   let m = 0;
@@ -3457,7 +3458,7 @@ function updateDidinium(didinium, frame, view) {
       avoidProgress = next;
     } else if (wallPressure > 0.000001) {
       const desired = Math.atan2(Math.sin(heading) + wallAwayY, Math.cos(heading) + wallAwayX);
-      const turnK = 1 + 2.5 * Math.min(1, wallPressure);
+      const turnK = 3 + 7 * Math.min(1, wallPressure);
       heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
     const curveEnv = clamp01(noise2D2(nseed ^ 2009178803, t * CURVE_FREQ, 0.29));
@@ -3475,7 +3476,7 @@ function updateDidinium(didinium, frame, view) {
     const rawY = py0 + uy * vSigned * dt;
     let nextX = rawX;
     let nextY = rawY;
-    const margin = Math.min(L * 0.6, safeWidth * 0.45, safeHeight * 0.45);
+    const margin = Math.min(L * 0.55, safeWidth * 0.45, safeHeight * 0.45);
     nextX = clamp(nextX, margin, safeWidth - margin);
     nextY = clamp(nextY, margin, safeHeight - margin);
     if ((nextX !== rawX || nextY !== rawY) && avoidProgress >= 1) {
@@ -3746,22 +3747,6 @@ function drawDidinium(ctx, didinium, frame, view) {
     {
       const coneBaseU = SHOULDER_U;
       const tip = transform3(cx, cy, ux, uy, halfLength * 1.02, 0);
-      const shL = transform3(cx, cy, ux, uy, halfLength * coneBaseU, halfWidthAt(coneBaseU));
-      const shR = transform3(cx, cy, ux, uy, halfLength * coneBaseU, -halfWidthAt(coneBaseU));
-      ctx.beginPath();
-      ctx.moveTo(shL.x, shL.y);
-      ctx.lineTo(tip.x, tip.y);
-      ctx.lineTo(shR.x, shR.y);
-      ctx.closePath();
-      ctx.fillStyle = `hsla(${hue + 2}, 28%, 90%, ${alpha * 0.52})`;
-      ctx.fill();
-      ctx.strokeStyle = `hsla(${hue + 4}, 28%, 92%, ${alpha * 0.18})`;
-      ctx.lineWidth = Math.max(0.4, wMax * 0.035);
-      ctx.beginPath();
-      ctx.moveTo(shL.x, shL.y);
-      ctx.lineTo(tip.x, tip.y);
-      ctx.lineTo(shR.x, shR.y);
-      ctx.stroke();
       ctx.strokeStyle = `hsla(${hue + 4}, 32%, 94%, ${alpha * 0.32})`;
       ctx.lineWidth = Math.max(0.35, wMax * 0.035);
       const NS = 5;
@@ -4735,7 +4720,7 @@ function mount(container, api) {
       didiniumCount: 1,
       didiniumSpeed: 0.9,
       didiniumSpeedActive: 1.6,
-      didiniumScale: 3.2,
+      didiniumScale: 2.7,
       ...userParams
     }
   });
