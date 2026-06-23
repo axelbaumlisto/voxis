@@ -4814,7 +4814,7 @@ function mount(container, api) {
       euglenaCount: 1,
       euglenaSpeed: 0.18,
       euglenaSpeedActive: 1.15,
-      euglenaScale: 1.25,
+      euglenaScale: 2.45,
       euglenaGravitaxis: 0.15,
       euglenaPhototaxis: 0.45,
       euglenaRotDiffusion: 0.08,
@@ -4825,7 +4825,7 @@ function mount(container, api) {
       didiniumCount: 1,
       didiniumSpeed: 0.7,
       didiniumSpeedActive: 1.2,
-      didiniumScale: 2.45,
+      didiniumScale: 1.84,
       ...userParams
     }
   });
