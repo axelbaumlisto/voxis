@@ -248,11 +248,13 @@ export function updateDidinium(
 
     // ── travel heading = base + slow wander + PERSISTENT one-sided curvature.
     // Real Didinium "constantly leans to one side" → a looping spiral search path,
-    // not a wavy straight line. The curvature is applied as side*CURVE_RATE*t (a
-    // pure frame.t function: constant within a step → open-water dt-partition
-    // exact) so the travel direction sweeps steadily into a wide spiral while the
-    // slow wander drifts the spiral centre (epicyclic search). The body is drawn
-    // along THIS travel heading (snout leads the path).
+    // not a wavy straight line. The curvature is applied as side*CURVE_RATE*t,
+    // evaluated at the step's fixed t, so the travel direction sweeps steadily
+    // into a wide spiral while the slow wander drifts the spiral centre (epicyclic
+    // search). The body is drawn along THIS travel heading (snout leads the path).
+    // NOTE: linear-in-t → a 2-step approximation, NOT bit-exact under dt-partition
+    // like the bounded phase terms; the dedicated partition test stays on the
+    // constant-heading pure-forward open-water cruise.
     const curve = side * CURVE_RATE * t;
     const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) + curve;
     // ── thin corkscrew LEAN at the axial SPIN frequency: a small constant-
@@ -285,9 +287,11 @@ export function updateDidinium(
       // helix axis instead of wagging (critic C). base `heading` = cruise dir.
       phase: travel,
       heading,
-      // axial roll synchronised with the helical path so the girdles visibly
-      // sweep as the body corkscrews (faster than before for a clear rotation read).
-      rollPhase: wrapUnit(finite(cell.rollPhase, 0) + Math.max(0, finite(cell.rollRate, 0)) * act * dt),
+      // visible axial roll: advance at the SAME un-scaled spinFreq (rollRate) as
+      // the helix-lean clock, so the rendered girdle spin and the path corkscrew
+      // phase-lock. NOT multiplied by `act` (spin is beat-chirality set, ~0.7
+      // rev/s, speed/audio-independent — dynamics critics round 1+2 [S4]).
+      rollPhase: wrapUnit(finite(cell.rollPhase, 0) + spinFreq * dt),
       beatPhase: wrapUnit(finiteOr(cell.beatPhase, 0) + beatEff * dt),
       cvPhase: wrapUnit(finiteOr(cell.cvPhase, 0) + Math.max(0, finiteOr(cell.cvRate, 0)) * act * dt),
       avoidIndex,

@@ -3481,7 +3481,7 @@ function updateDidinium(didinium, frame, view) {
       y: nextY,
       phase: travel,
       heading,
-      rollPhase: wrapUnit(finite(cell.rollPhase, 0) + Math.max(0, finite(cell.rollRate, 0)) * act * dt),
+      rollPhase: wrapUnit(finite(cell.rollPhase, 0) + spinFreq * dt),
       beatPhase: wrapUnit(finiteOr(cell.beatPhase, 0) + beatEff * dt),
       cvPhase: wrapUnit(finiteOr(cell.cvPhase, 0) + Math.max(0, finiteOr(cell.cvRate, 0)) * act * dt),
       avoidIndex,
