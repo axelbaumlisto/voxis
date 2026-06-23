@@ -1,5 +1,5 @@
 import type { ThemeState } from "../../../contract";
-import { sourceId } from "./interaction";
+import { KIND_ID, sourceId } from "./interaction";
 import type { FieldContribution, FieldKind } from "./interaction";
 import type { AquariumFrame, AquariumParamsView, DidiniumState } from "./types";
 import { mix32, noise2D, seededUnit } from "./seeds";
@@ -157,13 +157,13 @@ export function seedDidinium(count: number, seed: number, frame: AquariumFrame, 
   return out;
 }
 
-export const DIDINIUM_RELEVANT_FIELDS: ReadonlySet<FieldKind> = new Set(["obstacle"]);
+export const DIDINIUM_RELEVANT_FIELDS: ReadonlySet<FieldKind> = new Set(["obstacle", "motile"]);
 
 /**
  * Field contribution: Didinium emits a `motile` at its body position so other
- * organisms (e.g. a Vorticella mechanosensor) can react to it. v1 themes are
- * SOLO so nothing consumes this yet — the seam exists for the later predator
- * phase. Didinium itself consumes only obstacles (walls handled inline).
+ * organisms (e.g. a Vorticella mechanosensor) can react to it. Didinium also
+ * consumes prey/obstacle/motile fields in multi-organism themes, while SOLO
+ * themes stay inert because no interaction field is present.
  */
 export function didiniumContribute(cell: DidiniumState, idx: number, scale = 1): FieldContribution[] {
   const length = didiniumDisplayLength(finite(cell.size, 1), scale);
@@ -325,14 +325,30 @@ export function updateDidinium(
     let obstaclePressure = 0;
     let obstacleAwayX = 0;
     let obstacleAwayY = 0;
+    const circleObstacles: Array<{ x: number; y: number; radius: number }> = [];
     for (const obs of field?.obstacles ?? []) {
       if (obs.shape !== "circle") continue;
+      circleObstacles.push({ x: obs.x, y: obs.y, radius: obs.radius });
       const dx = px0 - obs.x;
       const dy = py0 - obs.y;
       const d = Math.hypot(dx, dy) || 1;
       const reach = obs.radius + L * 1.25;
       if (d < reach) {
         const p = 1 - d / reach;
+        obstaclePressure += p;
+        obstacleAwayX += (dx / d) * p;
+        obstacleAwayY += (dy / d) * p;
+      }
+    }
+    for (const motile of field?.motiles ?? []) {
+      if ((motile.sourceId >> 20) !== KIND_ID.euglena) continue;
+      const dx = px0 - motile.x;
+      const dy = py0 - motile.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const radius = Math.max(0, finiteOr(motile.radius, 0));
+      const reach = Math.max(8, 0.85 * (L + radius));
+      if (d < reach) {
+        const p = (1 - d / reach) * 0.45; // neutral deflection, not prey pursuit
         obstaclePressure += p;
         obstacleAwayX += (dx / d) * p;
         obstacleAwayY += (dy / d) * p;
@@ -412,6 +428,24 @@ export function updateDidinium(
     // keeps the whole body on-canvas with a little slack while leaving more open
     // water (a smaller margin = a bigger zero-wall-pressure centre).
     const margin = Math.min(L * 0.55, safeWidth * 0.45, safeHeight * 0.45);
+    for (const obs of circleObstacles) {
+      const dx = nextX - obs.x;
+      const dy = nextY - obs.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const minD = obs.radius + L * 0.45;
+      if (d < minD) {
+        const need = minD - d;
+        const step = Math.min(L * 0.35, need * (1 - Math.exp(-8 * dt)));
+        nextX += (dx / d) * step;
+        nextY += (dy / d) * step;
+        if (d < obs.radius + L * 0.9 && avoidProgress >= 1 && contactTimer <= 0) {
+          avoidIndex += 1;
+          avoidFrom = heading;
+          avoidTo = Math.atan2(dy, dx) + side * Math.PI * 0.55;
+          avoidProgress = 0;
+        }
+      }
+    }
     nextX = clamp(nextX, margin, safeWidth - margin);
     nextY = clamp(nextY, margin, safeHeight - margin);
     // Safety net only: if the cell still reaches the clamp (e.g. spawned in a
