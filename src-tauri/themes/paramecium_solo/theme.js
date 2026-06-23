@@ -3327,8 +3327,11 @@ function bodyShape2(u) {
     return wShoulder * Math.pow(1 - q, 1.15);
   }
   const t = (u - SHOULDER_U) / (-1 - SHOULDER_U);
-  const belly = Math.sin(Math.PI * clamp01(t * 0.86 + 0.07));
-  return 0.62 + 0.38 * belly;
+  const tp = 0.42;
+  if (t <= tp) {
+    return 0.72 + 0.28 * Math.sin(t / tp * (Math.PI / 2));
+  }
+  return 0.4 + 0.6 * Math.cos((t - tp) / (1 - tp) * (Math.PI / 2));
 }
 var BODY_SHAPE_MAX2 = (() => {
   let m = 0;
@@ -3536,8 +3539,8 @@ function drawDidinium(ctx, didinium, frame, view) {
     ctx.fillStyle = grad;
     ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
     const gSeed = finiteOr(cell.noiseSeed, 0) | 0;
-    const gCount = Math.round(clamp(L * 4, 40, 150));
-    ctx.fillStyle = `hsla(${hue}, 24%, 90%, ${alpha * 0.3})`;
+    const gCount = Math.round(clamp(L * 6, 60, 220));
+    ctx.fillStyle = `hsla(${hue}, 24%, 90%, ${alpha * 0.34})`;
     for (let g = 0;g < gCount; g++) {
       const gu = (seededUnit(gSeed, g, 1371344503) * 2 - 1) * 0.9;
       const gs = (seededUnit(gSeed, g, 2585733948) * 2 - 1) * 0.92;
@@ -3548,8 +3551,8 @@ function drawDidinium(ctx, didinium, frame, view) {
       ctx.arc(p.x, p.y, r, 0, TAU2);
       ctx.fill();
     }
-    const gCount2 = Math.round(clamp(L * 2.5, 24, 96));
-    ctx.fillStyle = `hsla(${hue + 4}, 20%, 94%, ${alpha * 0.14})`;
+    const gCount2 = Math.round(clamp(L * 4, 40, 150));
+    ctx.fillStyle = `hsla(${hue + 4}, 20%, 94%, ${alpha * 0.16})`;
     for (let g = 0;g < gCount2; g++) {
       const gu = (seededUnit(gSeed, g, 1033993285) * 2 - 1) * 0.9;
       const gs = (seededUnit(gSeed, g, 1508030371) * 2 - 1) * 0.92;
@@ -3668,6 +3671,35 @@ function drawDidinium(ctx, didinium, frame, view) {
       ctx.lineTo(tip.x, tip.y);
       ctx.lineTo(shR.x, shR.y);
       ctx.stroke();
+      ctx.strokeStyle = `hsla(${hue + 4}, 30%, 93%, ${alpha * 0.22})`;
+      ctx.lineWidth = Math.max(0.35, wMax * 0.03);
+      const NS = 5;
+      for (let k = 1;k < NS; k++) {
+        const f = k / NS;
+        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU);
+        const base = transform3(cx, cy, ux, uy, halfLength * coneBaseU, lat);
+        ctx.beginPath();
+        ctx.moveTo(base.x, base.y);
+        ctx.lineTo(tip.x, tip.y);
+        ctx.stroke();
+      }
+      const collarHw = halfWidthAt(coneBaseU);
+      ctx.lineWidth = Math.max(0.45, wMax * 0.05);
+      for (let s = 0;s <= 10; s++) {
+        const f = s / 10;
+        const lat = (f * 2 - 1) * collarHw;
+        const depth = Math.cos(rollAng);
+        if (depth < -0.2)
+          continue;
+        const front = clamp01(0.5 + 0.5 * depth);
+        const base = transform3(cx, cy, ux, uy, halfLength * coneBaseU, lat);
+        const tipC = transform3(cx, cy, ux, uy, halfLength * (coneBaseU + 0.08), lat + Math.sign(lat || 1) * collarHw * 0.22);
+        ctx.strokeStyle = `hsla(${hue + 6}, 44%, 93%, ${alpha * (0.16 + 0.5 * front)})`;
+        ctx.beginPath();
+        ctx.moveTo(base.x, base.y);
+        ctx.lineTo(tipC.x, tipC.y);
+        ctx.stroke();
+      }
       ctx.fillStyle = `hsla(${hue + 4}, 40%, 95%, ${alpha * 0.6})`;
       ctx.beginPath();
       ctx.arc(tip.x, tip.y, Math.max(0.5, wMax * 0.09), 0, TAU2);
