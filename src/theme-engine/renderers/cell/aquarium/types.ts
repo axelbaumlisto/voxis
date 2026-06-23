@@ -116,8 +116,8 @@ export interface VorticellaState extends AquariumSeedPoint {
   readonly contractLeg?: number;
   /** Seconds elapsed in the current contraction leg. */
   readonly contractTimer?: number;
-  /** Seconds of voice/recording stimulus accumulated since the last voice-startle. */
-  readonly voiceTimer?: number;
+  /** Smooth attack/release envelope [0,1] of the recording "active feeding posture". */
+  readonly voiceEnv?: number;
   /** Telotroch migration: 0=anchored,1=detaching,2=swimming,3=reattaching. */
   readonly migrateState?: number;
   /** Stalk attachment 1=fully anchored .. 0=free telotroch. */

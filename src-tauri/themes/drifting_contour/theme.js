@@ -2790,7 +2790,7 @@ function seedVorticella(count, seed, frame, alongFrac = 0.5, salt = 117600714) {
       swayRate: 0.1 + seededUnit(seed, i, salt ^ 1513062835) * 0.07,
       contractLeg: 0,
       contractTimer: seededUnit(seed, i, salt ^ 699105045) * 1.5,
-      voiceTimer: 0,
+      voiceEnv: 0,
       migrateState: 0,
       attach: 1,
       migrateTimer: seededUnit(seed, i, salt ^ 1912249405) * 6,
@@ -2812,19 +2812,11 @@ function updateVorticella(vorticella, frame, view) {
     const cellSeed = vorticellaCellSeed(finite(cell.anchorX, 0));
     let leg = Math.max(0, Math.min(3, Math.floor(finiteOr(cell.contractLeg, 0))));
     let timer = Math.max(0, finiteOr(cell.contractTimer, 0)) + dt;
-    let voiceTimer = Math.max(0, finiteOr(cell.voiceTimer, 0));
-    if (frame.mode === "recording") {
-      const loud = clamp01(Math.max(finite(frame.audioLevel, 0), finite(frame.activity, 0)));
-      voiceTimer += dt * (0.25 + 2.2 * loud);
-      const voiceInterval = 1.6;
-      if (leg === 0 && voiceTimer >= voiceInterval) {
-        leg = 1;
-        timer = 0;
-        voiceTimer = 0;
-      }
-    } else {
-      voiceTimer = 0;
-    }
+    let voiceEnv = clamp01(finiteOr(cell.voiceEnv, 0));
+    const loud = clamp01(Math.max(finite(frame.audioLevel, 0), finite(frame.activity, 0)));
+    const voiceTarget = frame.mode === "recording" ? Math.max(0.4, loud) : 0;
+    const voiceTau = voiceTarget > voiceEnv ? 0.3 : 1.4;
+    voiceEnv = clamp01(voiceEnv + (voiceTarget - voiceEnv) * (1 - Math.exp(-dt / voiceTau)));
     const motiles = frame.interaction?.motiles.filter((motile) => motile.sourceId !== sourceId("vorticella", idx));
     if (motiles && motiles.length > 0 && leg === 0 && timer > 1) {
       const obs = vorticellaObstacle(cell, view.vorticella.scale, frame.height);
@@ -2912,7 +2904,7 @@ function updateVorticella(vorticella, frame, view) {
       contractPhase: clamp01(vorticellaLegAmount(leg, timer)),
       contractLeg: leg,
       contractTimer: timer,
-      voiceTimer,
+      voiceEnv,
       oralWreathPhase: wrapUnit(cell.oralWreathPhase + oralHz * dt),
       swayPhase: wrapUnit(finiteOr(cell.swayPhase, 0) + Math.max(0, finiteOr(cell.swayRate, 0.12)) * swayMul * dt),
       migrateState,
@@ -2962,7 +2954,9 @@ function drawVorticella(ctx, vorticella, frame, view) {
     const lobePhase = seededUnit(aSeed, 5, 102) * TAU2;
     const nod = 0.035 * Math.sin(TAU2 * 0.06 * tt + seededUnit(aSeed, 6, 119) * TAU2);
     const breathMod = (u) => 1 + 0.035 * Math.sin(TAU2 * 0.075 * tt + bp0 + 2.4 * u) + 0.025 * Math.sin(TAU2 * 0.115 * tt + bp1);
-    const dir = baseDir + lean + sway + wobble + nod;
+    const vEnv = clamp01(finiteOr(cell.voiceEnv, 0));
+    const glow = 1 + 0.2 * vEnv;
+    const dir = baseDir + lean + sway * (1 + 0.5 * vEnv) + wobble + nod;
     const ux = Math.cos(dir), uy = Math.sin(dir);
     const nx = -uy, ny = ux;
     const anchorX = finite(cell.anchorX, 0);
@@ -2982,7 +2976,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
     });
     const neck = geom.bellCenter;
     const rimC = { x: neck.x + ux * drawBellH + nx * (periOff + skewAmt) * D, y: neck.y + uy * drawBellH + ny * (periOff + skewAmt) * D };
-    const open = 1 - 0.7 * s;
+    const open = (1 - 0.7 * s) * (1 + 0.14 * vEnv);
     const Rrim = 0.8 * D * open;
     const crownFade = smoothstep2(clamp01((open - 0.3) / 0.18));
     const bodyPoint = (along, lateral) => {
@@ -3060,8 +3054,8 @@ function drawVorticella(ctx, vorticella, frame, view) {
     const outline = [...left, ...right.reverse()];
     drawPolyline3(ctx, outline, true);
     const cyto = ctx.createLinearGradient(rimC.x, rimC.y, neck.x, neck.y);
-    cyto.addColorStop(0, `hsla(200, 16%, 94%, ${alpha * 0.62})`);
-    cyto.addColorStop(1, `hsla(200, 20%, 86%, ${alpha * 0.74})`);
+    cyto.addColorStop(0, `hsla(200, 16%, 94%, ${alpha * 0.62 * glow})`);
+    cyto.addColorStop(1, `hsla(200, 20%, 86%, ${alpha * 0.74 * glow})`);
     ctx.fillStyle = cyto;
     ctx.fill();
     ctx.save();
@@ -3210,7 +3204,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
         spiral.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline3(ctx, spiral, false);
-      ctx.strokeStyle = `hsla(198, 18%, 94%, ${alpha * 0.48 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 18%, 94%, ${alpha * 0.48 * crownFade * glow})`;
       ctx.lineWidth = Math.max(0.75, D * 0.03);
       ctx.stroke();
       const spiral2 = [];
@@ -3223,7 +3217,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
         spiral2.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline3(ctx, spiral2, false);
-      ctx.strokeStyle = `hsla(198, 18%, 92%, ${alpha * 0.34 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 18%, 92%, ${alpha * 0.34 * crownFade * glow})`;
       ctx.lineWidth = Math.max(0.75, D * 0.022);
       ctx.stroke();
       const cyt = { x: rimC.x + nx * cytLat + ux * cytDep, y: rimC.y + ny * cytLat + uy * cytDep };
@@ -3242,11 +3236,11 @@ function drawVorticella(ctx, vorticella, frame, view) {
         bandPts.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
       drawPolyline3(ctx, bandPts, true);
-      ctx.strokeStyle = `hsla(198, 16%, 93%, ${alpha * 0.26 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 16%, 93%, ${alpha * 0.26 * crownFade * glow})`;
       ctx.lineWidth = Math.max(1, D * 0.11);
       ctx.stroke();
       const M = Math.max(8, Math.round(D * 0.7));
-      ctx.strokeStyle = `hsla(198, 16%, 93%, ${alpha * 0.3 * crownFade})`;
+      ctx.strokeStyle = `hsla(198, 16%, 93%, ${alpha * 0.3 * crownFade * glow})`;
       ctx.lineWidth = Math.max(0.5, D * 0.018);
       const cilS = (Math.round(finite(cell.restLength, 10) * 2048) ^ 20899) >>> 0;
       for (let i = 0;i < M; i++) {
