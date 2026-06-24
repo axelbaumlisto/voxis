@@ -41,6 +41,7 @@ export interface AquariumParamsView {
     readonly speed: number;
     readonly speedActive: number;
     readonly scale: number;
+    readonly flagellumRateScale: number;
     readonly hueOffset: number;
     readonly photoIntent: number;
     readonly steer?: Partial<EuglenaSteer>;

@@ -104,6 +104,7 @@ export const CELL_DEFAULTS: CellParams = {
   euglenaSpeed: 1.0,
   euglenaSpeedActive: 2.0,
   euglenaScale: 1.0,
+  euglenaFlagellumRateScale: 1.0,
   euglenaHueOffset: 42,
   euglenaGravitaxis: 0,
   euglenaPhototaxis: 0,

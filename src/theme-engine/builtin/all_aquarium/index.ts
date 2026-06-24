@@ -32,6 +32,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       euglenaSpeed: 0.34,
       euglenaSpeedActive: 0.65,
       euglenaScale: 2.2,
+      euglenaFlagellumRateScale: 0.45,
       euglenaGravitaxis: 0.03,
       euglenaPhototaxis: 0,
       euglenaPhotoIntent: 2.4,

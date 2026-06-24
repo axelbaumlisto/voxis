@@ -1545,6 +1545,7 @@ var CELL_DEFAULTS = {
   euglenaSpeed: 1,
   euglenaSpeedActive: 2,
   euglenaScale: 1,
+  euglenaFlagellumRateScale: 1,
   euglenaHueOffset: 42,
   euglenaGravitaxis: 0,
   euglenaPhototaxis: 0,
@@ -1693,6 +1694,7 @@ function aquariumParamsView(params) {
       speed: nonNegative(params.euglenaSpeed, 1),
       speedActive: nonNegative(params.euglenaSpeedActive, 2),
       scale: nonNegative(params.euglenaScale, 1),
+      flagellumRateScale: nonNegative(params.euglenaFlagellumRateScale, 1),
       hueOffset: finiteOr(params.euglenaHueOffset, 42),
       photoIntent: nonNegative(params.euglenaPhotoIntent, 0),
       steer: euglenaSteerOverride(params)
@@ -3353,7 +3355,8 @@ function updateEuglena(euglena, frame, view) {
       const jitter = (noise2D2(noiseSeed ^ 5370206, px0 * 0.037, finite(frame.t, 0) * 0.73) * 2 - 1) * rotDiffusion * Math.sqrt(dt);
       heading += jitter;
     }
-    const fEff = Math.min(18, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
+    const flagellumRateScale = Math.max(0, finite(view.euglena.flagellumRateScale, 1));
+    const fEff = Math.min(18, Math.max(0, finite(cell.flagellumRate, 0)) * flagellumRateScale * act * beatBoost);
     const minX = wallInset;
     const maxX = Math.max(wallInset, safeWidth - wallInset);
     const minY = wallInset;
@@ -4282,7 +4285,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
 }
 // src/theme-engine/renderers/cell/aquarium/registry.ts
 var ZERO_DIATOMS = { count: 0, alpha: 0, driftSpeed: 0 };
-var ZERO_EUGLENA = { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42, photoIntent: 0 };
+var ZERO_EUGLENA = { count: 0, speed: 0, speedActive: 0, scale: 1, flagellumRateScale: 1, hueOffset: 42, photoIntent: 0 };
 var ZERO_VORTICELLA = { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 };
 var ZERO_DIDINIUM = { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 0 };
 function viewForDiatom(cfg) {
