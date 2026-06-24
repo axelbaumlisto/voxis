@@ -2635,7 +2635,7 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
     expect(stepR[0].avoidTo).toBeGreaterThan(stepL[0].avoidTo!);
   });
 
-  it("does not target-lock the hero ellipse from outside the forward encounter cone", () => {
+  it("does not latch or target-lock the hero ellipse from outside the forward encounter cone", () => {
     const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0 });
     const initial = [testDidinium({ x: 120, y: 80, heading: Math.PI, phase: Math.PI })];
     const interaction = buildField([
@@ -2643,6 +2643,9 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
     ]);
     const next = updateDidinium(initial, frame({ dt: 0.2, t: 2, width: 340, height: 170, interaction }), view);
     expect(next[0].heading).toBe(initial[0].heading);
+    expect(next[0].contactTimer ?? 0).toBe(0);
+    expect(next[0].contactDuration ?? 0).toBe(0);
+    expect(next[0].huntCooldown ?? 0).toBe(0);
   });
 
   it("hunts the hero ellipse only during a forward local encounter", () => {
@@ -2669,7 +2672,7 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
     expect(Math.hypot(next[0].x - initial[0].x, next[0].y - initial[0].y)).toBeLessThanOrEqual(didiniumDisplayLength(1, 2) * 0.35 + 1e-6);
   });
 
-  it("softly avoids Euglena motiles without hunting or latching them", () => {
+  it("softly avoids Euglena motiles without capture/latch semantics", () => {
     const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0, didiniumScale: 2 });
     const initial = [testDidinium({ x: 150, y: 80, heading: 0, phase: 0 })];
     const interaction = buildField([
@@ -2678,20 +2681,54 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
     const next = updateDidinium(initial, frame({ dt: 0.2, t: 2, width: 340, height: 170, interaction }), view);
     expect(Math.abs(next[0].heading)).toBeGreaterThan(0.3);
     expect(next[0].contactTimer ?? 0).toBe(0);
+    expect(next[0].contactDuration ?? 0).toBe(0);
     expect(next[0].huntCooldown ?? 0).toBe(0);
   });
 
-  it("latches on the hero surface instead of sinking into the prey ellipse", () => {
+  it("local forward hero encounter latches while the Didinium body stays outside the prey shell", () => {
     const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0, didiniumScale: 2 });
     const initial = [testDidinium({ x: 240, y: 80, heading: Math.PI, phase: Math.PI })];
     const prey = { kind: "obstacle" as const, shape: "ellipse" as const, x: 200, y: 80, halfLen: 38, halfWid: 14, heading: 0, social: true, sourceId: sourceId("hero", 0) };
     const interaction = buildField([prey]);
     const next = updateDidinium(initial, frame({ dt: 0.1, t: 2, width: 340, height: 170, interaction }), view);
     expect(next[0].contactTimer).toBeGreaterThan(0);
+    expect(next[0].contactDuration).toBe(next[0].contactTimer);
+    expect(next[0].huntCooldown ?? 0).toBe(0);
     const A = prey.halfLen + didiniumDisplayLength(1, 2) * 0.38;
     const q = Math.abs(next[0].x - prey.x) / A;
     expect(q).toBeGreaterThan(1.0);
     expect(q).toBeLessThan(1.2);
+  });
+
+  it("decays contact duration and enforces cooldown before another prey latch", () => {
+    const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0, didiniumScale: 2 });
+    const active = updateDidinium(
+      [testDidinium({ contactTimer: 1.2, contactDuration: 2.4, huntCooldown: 0 })],
+      frame({ dt: 0.25, t: 2, width: 340, height: 170 }),
+      view,
+    )[0];
+    expect(active.contactTimer).toBeCloseTo(0.95, 10);
+    expect(active.contactDuration).toBe(2.4);
+    expect(active.huntCooldown ?? 0).toBe(0);
+
+    const released = updateDidinium(
+      [{ ...active, contactTimer: 0.05, contactDuration: 2.4, huntCooldown: 0 }],
+      frame({ dt: 0.1, t: 2.1, width: 340, height: 170 }),
+      view,
+    )[0];
+    expect(released.contactTimer).toBe(0);
+    expect(released.contactDuration).toBe(0);
+    expect(released.huntCooldown).toBeGreaterThan(0);
+
+    const prey = { kind: "obstacle" as const, shape: "ellipse" as const, x: 200, y: 80, halfLen: 38, halfWid: 14, heading: 0, social: true, sourceId: sourceId("hero", 0) };
+    const refractory = updateDidinium(
+      [{ ...released, x: 240, y: 80, heading: Math.PI, phase: Math.PI, avoidProgress: 1 }],
+      frame({ dt: 0.1, t: 2.2, width: 340, height: 170, interaction: buildField([prey]) }),
+      view,
+    )[0];
+    expect(refractory.huntCooldown).toBeGreaterThan(0);
+    expect(refractory.contactTimer).toBe(0);
+    expect(refractory.contactDuration).toBe(0);
   });
 
   it("didiniumContribute emits one metadata-rich motile per cell with the didinium sourceId", () => {
