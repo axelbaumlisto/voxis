@@ -562,7 +562,7 @@ export function createCellRenderer(
           predatorNx /= pl;
           predatorNy /= pl;
         }
-        const kick = Math.min(10, baseR * 0.34) * predatorEnv;
+        const kick = Math.min(14, baseR * 0.48) * predatorEnv;
         const rx = predatorNx * kick;
         const ry = predatorNy * kick;
         if (kick > 0.01) {

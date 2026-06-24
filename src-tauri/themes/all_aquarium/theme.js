@@ -4609,7 +4609,7 @@ function createCellRenderer(container, opts) {
           predatorNx /= pl;
           predatorNy /= pl;
         }
-        const kick = Math.min(10, baseR * 0.34) * predatorEnv;
+        const kick = Math.min(14, baseR * 0.48) * predatorEnv;
         const rx = predatorNx * kick;
         const ry = predatorNy * kick;
         if (kick > 0.01) {
@@ -5186,16 +5186,16 @@ function mount(container, api) {
       ...PARAMECIUM_CELL_PARAMS,
       radiusFraction: 0.19,
       enableAquarium: true,
-      aquariumSeed: 41,
+      aquariumSeed: 71,
       aquariumAlpha: 0.7,
       aquariumActivityBoost: 0.65,
       diatomCount: 0,
       euglenaCount: 1,
-      euglenaSpeed: 0.12,
-      euglenaSpeedActive: 0.3,
+      euglenaSpeed: 0.08,
+      euglenaSpeedActive: 0.18,
       euglenaScale: 2.2,
-      euglenaGravitaxis: 0.08,
-      euglenaPhototaxis: 0.28,
+      euglenaGravitaxis: 0,
+      euglenaPhototaxis: 0.12,
       euglenaRotDiffusion: 0,
       vorticellaCount: 1,
       vorticellaAlongFrac: 0.12,
