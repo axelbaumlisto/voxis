@@ -379,7 +379,7 @@ export function seedEuglena(count: number, seed: number, frame: AquariumFrame, s
       flagellumPhase: seededUnit(seed, i, salt ^ 0x27d4eb2f),
       rollRate: 0.25 + seededUnit(seed, i, salt ^ 0x14c8af21) * 0.25,
       metabolyRate: 0.10 + seededUnit(seed, i, salt ^ 0x3bc85a13) * 0.06,
-      flagellumRate: 3.0 + seededUnit(seed, i, salt ^ 0x752f7c59) * 2.0, // rendered Hz; real beat ≈20-40Hz, capped later at 13Hz for anti-aliasing
+      flagellumRate: 10.0 + seededUnit(seed, i, salt ^ 0x752f7c59) * 6.0, // rendered shimmer Hz; real beat ≈20-40Hz, capped later for anti-aliasing
       spiralAmplitude: 0.12 + seededUnit(seed, i, salt ^ 0x61ab0917) * 0.06,
       cvPhase: seededUnit(seed, i, salt ^ 0x3da17c45),
       cvRate: 0.035 + seededUnit(seed, i, salt ^ 0x59e2b7a3) * 0.015,
@@ -835,8 +835,9 @@ export function updateEuglena(
         * rotDiffusion * Math.sqrt(dt);
       heading += jitter;
     }
-    // cap effective beat freq so the 2nd lasso harmonic (2f) stays < 30Hz Nyquist
-    const fEff = Math.min(13, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
+    // cap effective beat freq so the 2nd lasso harmonic stays near 60fps Nyquist;
+    // this reads as high-frequency shimmer instead of a slow tadpole-tail whip.
+    const fEff = Math.min(18, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
     return {
       ...cell,
       x: clamp(nextX, wallInset, Math.max(wallInset, safeWidth - wallInset)), // clamp, never wrap (wrapping teleported it across the tank)

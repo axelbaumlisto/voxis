@@ -48,8 +48,8 @@ const WALL_LOOK = 1.25; // body-lengths of anticipatory wall lookahead. MUST be 
                      // the tank is only ~2.5 body-heights tall, so a large look made
                      // pressure>0 everywhere → the avoiding reaction re-fired forever and
                      // the cell circled the perimeter. Small look = bank only when close.
-const BACKUP_SECONDS = 0.22; // brief reverse jerk that opens the avoiding reaction
-const AVOID_SECONDS = 0.6; // eased duration of the fixed-side back-turn after the reverse
+const BACKUP_SECONDS = 0.08; // brief reverse jerk that opens the avoiding reaction
+const AVOID_SECONDS = 0.18; // eased duration of the fixed-side back-turn after the reverse
 const AVOID_TURN_MIN = (2 * Math.PI) / 3; // ~120° sharp re-orient
 const AVOID_TURN_MAX = (5 * Math.PI) / 6; // ~150°
 
@@ -208,6 +208,7 @@ export function updateDidinium(
     const py0 = finite(cell.y, 0);
     const wasContacting = finiteOr(cell.contactTimer, 0) > 0;
     let contactTimer = Math.max(0, finiteOr(cell.contactTimer, 0) - dt);
+    let contactDuration = Math.max(0, finiteOr(cell.contactDuration, contactTimer));
     let huntCooldown = Math.max(0, finiteOr(cell.huntCooldown, 0) - dt);
 
     // ── erratic cruise: fast cruise punctuated by abrupt slow-downs ("stops").
@@ -312,7 +313,7 @@ export function updateDidinium(
       const A = Math.max(1e-3, finiteOr(prey.halfLen, 1) + L * 0.38);
       const B = Math.max(1e-3, finiteOr(prey.halfWid, 1) + L * 0.38);
       const q = Math.sqrt((localX * localX) / (A * A) + (localY * localY) / (B * B)) || 1e-6;
-      const targetQ = 1.18; // visible stand-off: predator stays clearly OUTSIDE prey silhouette
+      const targetQ = 1.03; // close latch: body stays outside while snout/filaments meet the membrane
       const sx = localX * (targetQ / q);
       const sy = localY * (targetQ / q);
       const surfaceX = prey.x + sx * ch - sy * sh;
@@ -324,7 +325,8 @@ export function updateDidinium(
       const approachDot = (Math.cos(probeHeading) * toTargetX + Math.sin(probeHeading) * toTargetY) / toTargetD;
       preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y, approachDot };
       if (q < 1.07 && approachDot > 0.55 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
-        contactTimer = 0.45 + seededUnit(nseed, 0, 0x2a91f00d) * 0.14;
+        contactDuration = 2.4 + seededUnit(nseed, 0, 0x2a91f00d) * 0.9;
+        contactTimer = contactDuration;
       }
     }
     let obstaclePressure = 0;
@@ -418,8 +420,8 @@ export function updateDidinium(
       const corrX = preyData.surfaceX - nextX;
       const corrY = preyData.surfaceY - nextY;
       const corrL = Math.hypot(corrX, corrY) || 1;
-      const maxStep = L * (preyData.q < 1 ? 0.38 : 0.04);
-      const kLatch = 1 - Math.exp(-(preyData.q < 1 ? 12 : 2.0) * dt);
+      const maxStep = L * (preyData.q < 1 ? 0.65 : 0.04);
+      const kLatch = preyData.q < 1 ? 1 : 1 - Math.exp(-2.0 * dt);
       const step = Math.min(maxStep, corrL * kLatch);
       nextX += (corrX / corrL) * step;
       nextY += (corrY / corrL) * step;
@@ -474,7 +476,7 @@ export function updateDidinium(
     if (wasContacting && contactTimer <= 0) {
       // Release after a short attack beat: turn away and cool down so the predator
       // does not immediately re-latch / buzz-saw through the hero.
-      huntCooldown = 18.0 + seededUnit(nseed, 0, 0x4a1b7c29) * 12.0;
+      huntCooldown = 22.0 + seededUnit(nseed, 0, 0x4a1b7c29) * 14.0;
       avoidIndex += 1;
       avoidFrom = heading;
       avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 0x359a71d1)));
@@ -505,6 +507,7 @@ export function updateDidinium(
       avoidTo,
       avoidProgress,
       contactTimer,
+      contactDuration: contactTimer > 0 ? contactDuration : 0,
       huntCooldown,
     };
   });

@@ -143,6 +143,12 @@ describe("aquarium interaction field vocabulary", () => {
       y: obstacle.y,
       radius: obstacle.radius,
       sourceId: sourceId("vorticella", 0),
+    }, {
+      kind: "wake",
+      x: obstacle.x,
+      y: obstacle.y,
+      heading: initial.vorticella[0].directionAngle,
+      sourceId: sourceId("vorticella", 0),
     }]);
     expect(euglenaContribute(initial.euglena[0], 0, 1.4)).toEqual([{
       kind: "motile",
@@ -288,7 +294,11 @@ describe("aquarium interaction field vocabulary", () => {
       sourceId("vorticella", 1),
       sourceId("hero", 0),
     ]);
-    expect(field.wakes.map((contrib) => contrib.sourceId)).toEqual([sourceId("hero", 0)]);
+    expect(field.wakes.map((contrib) => contrib.sourceId)).toEqual([
+      sourceId("vorticella", 0),
+      sourceId("vorticella", 1),
+      sourceId("hero", 0),
+    ]);
     expect(field.motiles.map((contrib) => contrib.sourceId)).toEqual([
       sourceId("euglena", 0),
       sourceId("euglena", 1),

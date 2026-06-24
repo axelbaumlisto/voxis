@@ -66,6 +66,31 @@ beforeEach(() => {
 // theme-engine/loader). Skip DOM-only mocks when there is no window.
 const hasDom = typeof window !== "undefined";
 
+function installLocalStorageClearShim(): void {
+  const existing = globalThis.localStorage as Storage | undefined;
+  if (existing && typeof existing.clear === "function") return;
+
+  const store = new Map<string, string>();
+  const storageLike: Storage = {
+    get length() { return store.size; },
+    clear: vi.fn(() => { store.clear(); }) as unknown as Storage["clear"],
+    getItem: vi.fn((key: string) => store.get(key) ?? null) as unknown as Storage["getItem"],
+    key: vi.fn((index: number) => Array.from(store.keys())[index] ?? null) as unknown as Storage["key"],
+    removeItem: vi.fn((key: string) => { store.delete(key); }) as unknown as Storage["removeItem"],
+    setItem: vi.fn((key: string, value: string) => { store.set(key, String(value)); }) as unknown as Storage["setItem"],
+  };
+  vi.stubGlobal("localStorage", storageLike);
+}
+
+installLocalStorageClearShim();
+
+const originalUnstubAllGlobals = vi.unstubAllGlobals.bind(vi);
+vi.unstubAllGlobals = (() => {
+  const result = originalUnstubAllGlobals();
+  installLocalStorageClearShim();
+  return result;
+}) as typeof vi.unstubAllGlobals;
+
 // Mock window.confirm
 vi.stubGlobal("confirm", vi.fn(() => true));
 

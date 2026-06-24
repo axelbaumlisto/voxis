@@ -32,8 +32,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       euglenaSpeed: 0.11,
       euglenaSpeedActive: 0.22,
       euglenaScale: 2.2,
-      euglenaGravitaxis: 0.05,
-      euglenaPhototaxis: 0.18,
+      euglenaGravitaxis: 0.03,
+      euglenaPhototaxis: 0.08,
       euglenaLoiter: 0,
       euglenaWake: 0.3,
       euglenaRotDiffusion: 0,
@@ -46,8 +46,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
 
       // predator swimmer: Didinium
       didiniumCount: 1,
-      didiniumSpeed: 0.48,
-      didiniumSpeedActive: 0.68,
+      didiniumSpeed: 1.55,
+      didiniumSpeedActive: 2.2,
       didiniumScale: 1.60,
 
       ...userParams,

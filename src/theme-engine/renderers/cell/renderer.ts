@@ -396,7 +396,7 @@ export function createCellRenderer(
         baseSwim = Math.max(params.idleSwimFrac * maxSwim, baseSwim);
       }
       const burst = useKick ? startleBurstSpeed(startle, baseR, params) : 0;
-      const predatorEscapeSpeed = predatorEnv > 0.02 ? predatorEnv * baseR * 1.25 : 0;
+      const predatorEscapeSpeed = predatorEnv > 0.02 ? predatorEnv * baseR * 1.65 : 0;
       const swimPx = baseSwim !== undefined
         ? baseSwim + burst + predatorEscapeSpeed
         : burst > 0 || predatorEscapeSpeed > 0 ? burst + predatorEscapeSpeed : undefined;
@@ -524,6 +524,55 @@ export function createCellRenderer(
         heroVortDy += (0 - heroVortDy) * a;
       }
 
+      // Predator-contact prey response: update from the previous aquarium state
+      // BEFORE publishing this frame's hero pose. Aquarium update, background,
+      // hero render, and foreground contact cues now all see the same recoiled
+      // Paramecium surface instead of a pre-recoil ghost pose.
+      if (params.enableHero !== false && aquarium?.didinium?.length) {
+        let targetEnv = 0;
+        let nxSum = 0, nySum = 0;
+        for (const d of aquarium.didinium) {
+          const contact = Math.max(0, d.contactTimer ?? 0);
+          if (contact <= 0) continue;
+          const dx = cx - d.x;
+          const dy = cy - d.y;
+          const dl = Math.hypot(dx, dy) || 1;
+          // During the first latch beat the prey is locally pinned/defending;
+          // escape ramps from elapsed contact phase, not remaining timer, so a
+          // real latch can read before the failed-strike recoil.
+          const duration = Math.max(0.001, d.contactDuration ?? contact);
+          const elapsed = Math.max(0, duration - contact);
+          const env = elapsed < 1.2 ? 0 : Math.min(1, (elapsed - 1.2) / 0.7);
+          targetEnv = Math.max(targetEnv, env);
+          nxSum += (dx / dl) * env;
+          nySum += (dy / dl) * env;
+        }
+        const tau = targetEnv > predatorEnv ? 0.08 : 0.75;
+        const a = 1 - Math.exp(-dt / tau);
+        predatorEnv += (targetEnv - predatorEnv) * a;
+        if (nxSum !== 0 || nySum !== 0) {
+          const nl = Math.hypot(nxSum, nySum) || 1;
+          predatorNx += (nxSum / nl - predatorNx) * a;
+          predatorNy += (nySum / nl - predatorNy) * a;
+          const pl = Math.hypot(predatorNx, predatorNy) || 1;
+          predatorNx /= pl;
+          predatorNy /= pl;
+        }
+        const kick = Math.min(12, baseR * 0.52) * predatorEnv;
+        const rx = predatorNx * kick;
+        const ry = predatorNy * kick;
+        if (kick > 0.01) {
+          cx += rx;
+          cy += ry;
+          for (let i = 0; i < smoothedPoints.length; i++) {
+            smoothedPoints[i] = [smoothedPoints[i][0] + rx, smoothedPoints[i][1] + ry];
+          }
+        }
+      } else if (predatorEnv > 0) {
+        const a = 1 - Math.exp(-dt / 0.75);
+        predatorEnv += (0 - predatorEnv) * a;
+      }
+
       if (params.enableAquarium) {
         const aquariumFrame: AquariumFrame = {
           t,
@@ -543,47 +592,6 @@ export function createCellRenderer(
         aquarium = aquarium ?? seedAquarium(aquariumFrame, params);
         aquarium = updateAquarium(aquarium, aquariumFrame, params);
         drawAquariumBackground(ctx, aquarium, aquariumFrame, params);
-      }
-
-      // Predator-contact prey response: when Didinium is latched to the hero, the
-      // Paramecium should visibly recoil/defend. Keep it tiny and smooth (calm
-      // overlay), but move the rendered hero a few px away from the predator so the
-      // attack does not read as a passive kiss.
-      if (params.enableHero !== false && aquarium?.didinium?.length) {
-        let targetEnv = 0;
-        let nxSum = 0, nySum = 0;
-        for (const d of aquarium.didinium) {
-          const contact = Math.max(0, d.contactTimer ?? 0);
-          if (contact <= 0) continue;
-          const dx = cx - d.x;
-          const dy = cy - d.y;
-          const dl = Math.hypot(dx, dy) || 1;
-          const env = Math.min(1, contact / 0.35);
-          targetEnv = Math.max(targetEnv, env);
-          nxSum += (dx / dl) * env;
-          nySum += (dy / dl) * env;
-        }
-        const tau = targetEnv > predatorEnv ? 0.08 : 0.75;
-        const a = 1 - Math.exp(-dt / tau);
-        predatorEnv += (targetEnv - predatorEnv) * a;
-        if (nxSum !== 0 || nySum !== 0) {
-          const nl = Math.hypot(nxSum, nySum) || 1;
-          predatorNx += (nxSum / nl - predatorNx) * a;
-          predatorNy += (nySum / nl - predatorNy) * a;
-          const pl = Math.hypot(predatorNx, predatorNy) || 1;
-          predatorNx /= pl;
-          predatorNy /= pl;
-        }
-        const kick = Math.min(10, baseR * 0.40) * predatorEnv;
-        const rx = predatorNx * kick;
-        const ry = predatorNy * kick;
-        if (kick > 0.01) {
-          cx += rx;
-          cy += ry;
-          for (let i = 0; i < smoothedPoints.length; i++) {
-            smoothedPoints[i] = [smoothedPoints[i][0] + rx, smoothedPoints[i][1] + ry];
-          }
-        }
       }
 
       if (params.enableHero !== false && aquarium?.euglena?.length) {

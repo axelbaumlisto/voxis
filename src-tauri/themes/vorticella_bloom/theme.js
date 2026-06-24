@@ -2169,7 +2169,7 @@ function seedEuglena(count, seed, frame, salt = 235478698) {
       flagellumPhase: seededUnit(seed, i, salt ^ 668265263),
       rollRate: 0.25 + seededUnit(seed, i, salt ^ 348696353) * 0.25,
       metabolyRate: 0.1 + seededUnit(seed, i, salt ^ 1002986003) * 0.06,
-      flagellumRate: 3 + seededUnit(seed, i, salt ^ 1966046297) * 2,
+      flagellumRate: 10 + seededUnit(seed, i, salt ^ 1966046297) * 6,
       spiralAmplitude: 0.12 + seededUnit(seed, i, salt ^ 1638598935) * 0.06,
       cvPhase: seededUnit(seed, i, salt ^ 1033993285),
       cvRate: 0.035 + seededUnit(seed, i, salt ^ 1508030371) * 0.015,
@@ -2493,7 +2493,7 @@ function updateEuglena(euglena, frame, view) {
       const jitter = (noise2D2(noiseSeed ^ 5370206, px0 * 0.037, finite(frame.t, 0) * 0.73) * 2 - 1) * rotDiffusion * Math.sqrt(dt);
       heading += jitter;
     }
-    const fEff = Math.min(13, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
+    const fEff = Math.min(18, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
     return {
       ...cell,
       x: clamp(nextX, wallInset, Math.max(wallInset, safeWidth - wallInset)),
@@ -2701,7 +2701,7 @@ function drawEuglena(ctx, euglena, frame, view) {
 var VC_CONTRACT = 0.02;
 var VC_HOLD = 0.02;
 var VC_RELAX = 0.33;
-var T_C = 0.08;
+var T_C = 0.033;
 var T_HOLD = 0.05;
 var T_E = 2.6;
 function vorticellaCellSeed(anchorX) {
@@ -2724,9 +2724,9 @@ function drawMigrateInterval(cellSeed, migrateCount) {
 }
 function vorticellaLegAmount(leg, timer) {
   if (leg === 1) {
-    const fast = clamp01(timer / 0.035);
-    const tail = clamp01((timer - 0.035) / Math.max(0.000001, T_C - 0.035));
-    return 0.82 * (1 - Math.pow(1 - fast, 3)) + 0.18 * (1 - Math.pow(1 - tail, 3));
+    const fast = clamp01(timer / 0.016);
+    const tail = clamp01((timer - 0.016) / Math.max(0.000001, T_C - 0.016));
+    return 0.9 * (1 - Math.pow(1 - fast, 3)) + 0.1 * (1 - Math.pow(1 - tail, 3));
   }
   if (leg === 2)
     return 1;
@@ -2822,6 +2822,12 @@ function vorticellaContribute(cell, scale, frameHeight, idx) {
     y: obstacle.y,
     radius: obstacle.radius,
     sourceId: sourceId("vorticella", idx)
+  }, {
+    kind: "wake",
+    x: obstacle.x,
+    y: obstacle.y,
+    heading: finite(cell.directionAngle, -Math.PI / 2),
+    sourceId: sourceId("vorticella", idx)
   }];
 }
 function seedVorticella(count, seed, frame, alongFrac = 0.5, salt = 117600714) {
@@ -2835,7 +2841,8 @@ function seedVorticella(count, seed, frame, alongFrac = 0.5, salt = 117600714) {
     const along = count === 1 ? clamp01(alongFrac) : seededUnit(seed, i, salt ^ 1164169887);
     const anchorX = along * safeWidth;
     const anchorY = safeHeight - inset;
-    const directionAngle = -Math.PI / 2;
+    const lean = clamp((0.5 - along) * 1.2, -0.35, 0.35);
+    const directionAngle = -Math.PI / 2 + lean;
     const restLength = 7.5 + seededUnit(seed, i, salt ^ 48610963) * 3.5;
     const cycle = seededUnit(seed, i, salt ^ 1628012333);
     vorticella.push({
@@ -3046,6 +3053,37 @@ function drawVorticella(ctx, vorticella, frame, view) {
     const open = (1 - 0.7 * s) * (1 + 0.22 * vEnv);
     const Rrim = 0.8 * D * open;
     const crownFade = smoothstep2(clamp01((open - 0.3) / 0.18));
+    if (crownFade > 0.05 && s < 0.35) {
+      ctx.save();
+      ctx.lineCap = "round";
+      const flowAlpha = alpha * crownFade * (0.08 + 0.06 * vEnv);
+      for (let k = 0;k < 6; k++) {
+        const lane = (k - 2.5) / 2.5;
+        const phase = TAU2 * wrapUnit(tt * (0.1 + k * 0.011) + seededUnit(aSeed, k, 1326500606));
+        const reach = D * (1.35 + 0.18 * k);
+        const wob = Math.sin(phase) * D * 0.08;
+        const start = {
+          x: rimC.x + ux * reach + nx * (lane * D * 0.42 + wob),
+          y: rimC.y + uy * reach + ny * (lane * D * 0.42 + wob)
+        };
+        const mid = {
+          x: rimC.x + ux * reach * 0.48 + nx * (lane * D * 0.24 - wob * 0.35),
+          y: rimC.y + uy * reach * 0.48 + ny * (lane * D * 0.24 - wob * 0.35)
+        };
+        const end = {
+          x: rimC.x + nx * lane * D * 0.1,
+          y: rimC.y + ny * lane * D * 0.1
+        };
+        ctx.strokeStyle = `hsla(198, 35%, 88%, ${flowAlpha * (0.55 + 0.45 * (1 - Math.abs(lane)))})`;
+        ctx.lineWidth = Math.max(0.35, D * 0.018);
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(mid.x, mid.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
     const bodyPoint = (along, lateral) => {
       const cl = skewAmt * D * smoothstep2(clamp01(along / Math.max(1, drawBellH)));
       return {
@@ -3356,8 +3394,8 @@ var HELIX_LEAN = 0.07;
 var CURVE_FREQ = 0.09;
 var CURVE_BIAS = 0.18;
 var WALL_LOOK = 1.25;
-var BACKUP_SECONDS = 0.22;
-var AVOID_SECONDS = 0.6;
+var BACKUP_SECONDS = 0.08;
+var AVOID_SECONDS = 0.18;
 var AVOID_TURN_MIN = 2 * Math.PI / 3;
 var AVOID_TURN_MAX = 5 * Math.PI / 6;
 function didiniumModeView(mode) {
@@ -3471,6 +3509,7 @@ function updateDidinium(didinium, frame, view) {
     const py0 = finite(cell.y, 0);
     const wasContacting = finiteOr(cell.contactTimer, 0) > 0;
     let contactTimer = Math.max(0, finiteOr(cell.contactTimer, 0) - dt);
+    let contactDuration = Math.max(0, finiteOr(cell.contactDuration, contactTimer));
     let huntCooldown = Math.max(0, finiteOr(cell.huntCooldown, 0) - dt);
     const stopgo = noise2D2(nseed ^ 1399873280, t * STOPGO_FREQ, 0.13);
     const cruiseEnv = 0.65 + 0.35 * (1 - Math.pow(1 - stopgo, 1.4));
@@ -3544,7 +3583,7 @@ function updateDidinium(didinium, frame, view) {
       const A = Math.max(0.001, finiteOr(prey.halfLen, 1) + L * 0.38);
       const B = Math.max(0.001, finiteOr(prey.halfWid, 1) + L * 0.38);
       const q = Math.sqrt(localX * localX / (A * A) + localY * localY / (B * B)) || 0.000001;
-      const targetQ = 1.18;
+      const targetQ = 1.03;
       const sx = localX * (targetQ / q);
       const sy = localY * (targetQ / q);
       const surfaceX = prey.x + sx * ch - sy * sh;
@@ -3556,7 +3595,8 @@ function updateDidinium(didinium, frame, view) {
       const approachDot = (Math.cos(probeHeading) * toTargetX + Math.sin(probeHeading) * toTargetY) / toTargetD;
       preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y, approachDot };
       if (q < 1.07 && approachDot > 0.55 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
-        contactTimer = 0.45 + seededUnit(nseed, 0, 714207245) * 0.14;
+        contactDuration = 2.4 + seededUnit(nseed, 0, 714207245) * 0.9;
+        contactTimer = contactDuration;
       }
     }
     let obstaclePressure = 0;
@@ -3634,8 +3674,8 @@ function updateDidinium(didinium, frame, view) {
       const corrX = preyData.surfaceX - nextX;
       const corrY = preyData.surfaceY - nextY;
       const corrL = Math.hypot(corrX, corrY) || 1;
-      const maxStep = L * (preyData.q < 1 ? 0.38 : 0.04);
-      const kLatch = 1 - Math.exp(-(preyData.q < 1 ? 12 : 2) * dt);
+      const maxStep = L * (preyData.q < 1 ? 0.65 : 0.04);
+      const kLatch = preyData.q < 1 ? 1 : 1 - Math.exp(-2 * dt);
       const step = Math.min(maxStep, corrL * kLatch);
       nextX += corrX / corrL * step;
       nextY += corrY / corrL * step;
@@ -3672,7 +3712,7 @@ function updateDidinium(didinium, frame, view) {
       avoidProgress = 0;
     }
     if (wasContacting && contactTimer <= 0) {
-      huntCooldown = 18 + seededUnit(nseed, 0, 1243315241) * 12;
+      huntCooldown = 22 + seededUnit(nseed, 0, 1243315241) * 14;
       avoidIndex += 1;
       avoidFrom = heading;
       avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 899314129)));
@@ -3693,6 +3733,7 @@ function updateDidinium(didinium, frame, view) {
       avoidTo,
       avoidProgress,
       contactTimer,
+      contactDuration: contactTimer > 0 ? contactDuration : 0,
       huntCooldown
     };
   });
@@ -4196,7 +4237,7 @@ function drawAquariumBackground(ctx, aquarium, frame, params) {
     entry.draw(ctx, aquarium[entry.slot], frame, instance.cfg);
   }
 }
-function drawAquariumForeground(ctx, aquarium, _frame, params) {
+function drawAquariumForeground(ctx, aquarium, frame, params) {
   const view = aquariumParamsView(params);
   if (!view.enabled || view.didinium.count <= 0)
     return;
@@ -4213,7 +4254,11 @@ function drawAquariumForeground(ctx, aquarium, _frame, params) {
     const ux = Math.cos(heading), uy = Math.sin(heading);
     const snoutX = d.x + ux * L * 0.52;
     const snoutY = d.y + uy * L * 0.52;
-    const env = Math.min(1, contact / 0.55);
+    const duration = Math.max(0.001, d.contactDuration ?? contact);
+    const elapsed = Math.max(0, duration - contact);
+    const env = Math.min(1, Math.min(elapsed / 0.25, contact / 0.25));
+    const sideEnv = Math.min(1, Math.max(0, (elapsed - 0.25) / 0.35));
+    const fanEnv = Math.min(1, Math.max(0, (elapsed - 1.2) / 0.45));
     ctx.save();
     ctx.translate(d.x, d.y);
     ctx.rotate(heading);
@@ -4231,9 +4276,26 @@ function drawAquariumForeground(ctx, aquarium, _frame, params) {
       ctx.stroke();
     }
     ctx.restore();
-    const pierceLen = Math.min(18, Math.max(14, L * 0.42));
-    const px = snoutX + ux * pierceLen;
-    const py = snoutY + uy * pierceLen;
+    let px = snoutX + ux * Math.min(18, Math.max(14, L * 0.42));
+    let py = snoutY + uy * Math.min(18, Math.max(14, L * 0.42));
+    const hero = frame.hero;
+    if (hero) {
+      const hx = Number.isFinite(hero.x) ? hero.x : 0;
+      const hy = Number.isFinite(hero.y) ? hero.y : 0;
+      const hh = Number.isFinite(hero.heading ?? 0) ? hero.heading ?? 0 : 0;
+      const ch = Math.cos(hh), sh = Math.sin(hh);
+      const dx = snoutX - hx;
+      const dy = snoutY - hy;
+      const localX = dx * ch + dy * sh;
+      const localY = -dx * sh + dy * ch;
+      const A = Math.max(0.001, Number.isFinite(hero.halfLen ?? hero.radius) ? hero.halfLen ?? hero.radius : hero.radius);
+      const B = Math.max(0.001, Number.isFinite(hero.halfWid ?? hero.radius) ? hero.halfWid ?? hero.radius : hero.radius);
+      const q = Math.sqrt(localX * localX / (A * A) + localY * localY / (B * B)) || 0.000001;
+      const sx = localX / q;
+      const sy = localY / q;
+      px = hx + sx * ch - sy * sh;
+      py = hy + sx * sh + sy * ch;
+    }
     ctx.fillStyle = `hsla(205, 18%, 15%, ${alpha * 0.55 * env})`;
     ctx.beginPath();
     ctx.arc(px, py, Math.max(1.3, L * 0.065), 0, Math.PI * 2);
@@ -4243,7 +4305,7 @@ function drawAquariumForeground(ctx, aquarium, _frame, params) {
     ctx.beginPath();
     ctx.arc(px - ux * 1.5, py - uy * 1.5, Math.max(3, L * 0.16), heading + Math.PI * 0.62, heading + Math.PI * 1.38);
     ctx.stroke();
-    for (const [side, aMul, wMul] of [[-L * 0.055, 0.55, 0.8], [0, 1, 1.25], [L * 0.055, 0.55, 0.8]]) {
+    for (const [side, aMul, wMul] of [[-L * 0.055, 0.55 * sideEnv, 0.8], [0, 1, 1.25], [L * 0.055, 0.55 * sideEnv, 0.8]]) {
       const sx = snoutX - uy * side;
       const sy = snoutY + ux * side;
       ctx.strokeStyle = `hsla(198, 52%, 98%, ${alpha * 0.95 * env * aMul})`;
@@ -4253,7 +4315,7 @@ function drawAquariumForeground(ctx, aquarium, _frame, params) {
       ctx.lineTo(px, py);
       ctx.stroke();
     }
-    const fanAlpha = alpha * 0.25 * env;
+    const fanAlpha = alpha * 0.22 * env * fanEnv;
     ctx.lineWidth = 0.75;
     for (let k = 0;k < 7; k++) {
       if (k % 5 === 1)
@@ -4506,7 +4568,7 @@ function createCellRenderer(container, opts) {
         baseSwim = Math.max(params.idleSwimFrac * maxSwim, baseSwim);
       }
       const burst = useKick ? startleBurstSpeed(startle, baseR, params) : 0;
-      const predatorEscapeSpeed = predatorEnv > 0.02 ? predatorEnv * baseR * 1.25 : 0;
+      const predatorEscapeSpeed = predatorEnv > 0.02 ? predatorEnv * baseR * 1.65 : 0;
       const swimPx = baseSwim !== undefined ? baseSwim + burst + predatorEscapeSpeed : burst > 0 || predatorEscapeSpeed > 0 ? burst + predatorEscapeSpeed : undefined;
       wander = wanderStep(wander, dt, width, height, baseR, params, swimPx);
       const driftedX = width / 2 + (wander.x - width / 2) * drift01;
@@ -4586,6 +4648,48 @@ function createCellRenderer(container, opts) {
         heroVortDx += (0 - heroVortDx) * a;
         heroVortDy += (0 - heroVortDy) * a;
       }
+      if (params.enableHero !== false && aquarium?.didinium?.length) {
+        let targetEnv = 0;
+        let nxSum = 0, nySum = 0;
+        for (const d of aquarium.didinium) {
+          const contact = Math.max(0, d.contactTimer ?? 0);
+          if (contact <= 0)
+            continue;
+          const dx = cx - d.x;
+          const dy = cy - d.y;
+          const dl = Math.hypot(dx, dy) || 1;
+          const duration = Math.max(0.001, d.contactDuration ?? contact);
+          const elapsed = Math.max(0, duration - contact);
+          const env = elapsed < 1.2 ? 0 : Math.min(1, (elapsed - 1.2) / 0.7);
+          targetEnv = Math.max(targetEnv, env);
+          nxSum += dx / dl * env;
+          nySum += dy / dl * env;
+        }
+        const tau = targetEnv > predatorEnv ? 0.08 : 0.75;
+        const a = 1 - Math.exp(-dt / tau);
+        predatorEnv += (targetEnv - predatorEnv) * a;
+        if (nxSum !== 0 || nySum !== 0) {
+          const nl = Math.hypot(nxSum, nySum) || 1;
+          predatorNx += (nxSum / nl - predatorNx) * a;
+          predatorNy += (nySum / nl - predatorNy) * a;
+          const pl = Math.hypot(predatorNx, predatorNy) || 1;
+          predatorNx /= pl;
+          predatorNy /= pl;
+        }
+        const kick = Math.min(12, baseR * 0.52) * predatorEnv;
+        const rx = predatorNx * kick;
+        const ry = predatorNy * kick;
+        if (kick > 0.01) {
+          cx += rx;
+          cy += ry;
+          for (let i = 0;i < smoothedPoints.length; i++) {
+            smoothedPoints[i] = [smoothedPoints[i][0] + rx, smoothedPoints[i][1] + ry];
+          }
+        }
+      } else if (predatorEnv > 0) {
+        const a = 1 - Math.exp(-dt / 0.75);
+        predatorEnv += (0 - predatorEnv) * a;
+      }
       if (params.enableAquarium) {
         const aquariumFrame = {
           t,
@@ -4605,43 +4709,6 @@ function createCellRenderer(container, opts) {
         aquarium = aquarium ?? seedAquarium(aquariumFrame, params);
         aquarium = updateAquarium(aquarium, aquariumFrame, params);
         drawAquariumBackground(ctx, aquarium, aquariumFrame, params);
-      }
-      if (params.enableHero !== false && aquarium?.didinium?.length) {
-        let targetEnv = 0;
-        let nxSum = 0, nySum = 0;
-        for (const d of aquarium.didinium) {
-          const contact = Math.max(0, d.contactTimer ?? 0);
-          if (contact <= 0)
-            continue;
-          const dx = cx - d.x;
-          const dy = cy - d.y;
-          const dl = Math.hypot(dx, dy) || 1;
-          const env = Math.min(1, contact / 0.35);
-          targetEnv = Math.max(targetEnv, env);
-          nxSum += dx / dl * env;
-          nySum += dy / dl * env;
-        }
-        const tau = targetEnv > predatorEnv ? 0.08 : 0.75;
-        const a = 1 - Math.exp(-dt / tau);
-        predatorEnv += (targetEnv - predatorEnv) * a;
-        if (nxSum !== 0 || nySum !== 0) {
-          const nl = Math.hypot(nxSum, nySum) || 1;
-          predatorNx += (nxSum / nl - predatorNx) * a;
-          predatorNy += (nySum / nl - predatorNy) * a;
-          const pl = Math.hypot(predatorNx, predatorNy) || 1;
-          predatorNx /= pl;
-          predatorNy /= pl;
-        }
-        const kick = Math.min(10, baseR * 0.4) * predatorEnv;
-        const rx = predatorNx * kick;
-        const ry = predatorNy * kick;
-        if (kick > 0.01) {
-          cx += rx;
-          cy += ry;
-          for (let i = 0;i < smoothedPoints.length; i++) {
-            smoothedPoints[i] = [smoothedPoints[i][0] + rx, smoothedPoints[i][1] + ry];
-          }
-        }
       }
       if (params.enableHero !== false && aquarium?.euglena?.length) {
         const aspect = Math.sqrt(Math.max(1, params.bodyAspect ?? 1));

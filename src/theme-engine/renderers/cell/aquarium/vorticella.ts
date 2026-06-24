@@ -41,7 +41,7 @@ const VC_RELAX = 0.33;    // slow re-extension window
 
 // Absolute-time spasmoneme clocks (seconds) — the collapse is power-limited and
 // cadence-INDEPENDENT, so it runs on real dt, decoupled from how often it fires.
-const T_C = 0.08;    // ballistic collapse (~5 frames @60fps; real <10ms, floored for visibility)
+const T_C = 0.033;   // near one-frame snap at 60fps; real <10ms, floored for visibility
 const T_HOLD = 0.05; // contracted hold
 const T_E = 2.6;     // slow Ca-reload re-extension
 
@@ -79,9 +79,9 @@ function vorticellaLegAmount(leg: number, timer: number): number {
   if (leg === 1) {
     // Real collapse is sub-frame; keep an 80ms readable window but put most of
     // the shortening in the first ~35ms so a sampled sheet sees the snap.
-    const fast = clamp01(timer / 0.035);
-    const tail = clamp01((timer - 0.035) / Math.max(1e-6, T_C - 0.035));
-    return 0.82 * (1 - Math.pow(1 - fast, 3)) + 0.18 * (1 - Math.pow(1 - tail, 3));
+    const fast = clamp01(timer / 0.016);
+    const tail = clamp01((timer - 0.016) / Math.max(1e-6, T_C - 0.016));
+    return 0.9 * (1 - Math.pow(1 - fast, 3)) + 0.1 * (1 - Math.pow(1 - tail, 3));
   } // ballistic ease-out
   if (leg === 2) return 1;                                                          // hold
   // stretched-exp, normalized so the tail reaches EXACTLY 0 at u=1 (was 0.086 -> a
@@ -210,6 +210,12 @@ export function vorticellaContribute(
     y: obstacle.y,
     radius: obstacle.radius,
     sourceId: sourceId("vorticella", idx),
+  }, {
+    kind: "wake",
+    x: obstacle.x,
+    y: obstacle.y,
+    heading: finite(cell.directionAngle, -Math.PI / 2),
+    sourceId: sourceId("vorticella", idx),
   }];
 }
 
@@ -225,7 +231,8 @@ export function seedVorticella(count: number, seed: number, frame: AquariumFrame
     const along = count === 1 ? clamp01(alongFrac) : seededUnit(seed, i, salt ^ 0x4563d29f);
     const anchorX = along * safeWidth;
     const anchorY = safeHeight - inset;
-    const directionAngle = -Math.PI / 2; // up
+    const lean = clamp((0.5 - along) * 1.2, -0.35, 0.35);
+    const directionAngle = -Math.PI / 2 + lean; // angled feeding posture away from nearest side wall
     const restLength = 7.5 + seededUnit(seed, i, salt ^ 0x02e5be93) * 3.5;
     const cycle = seededUnit(seed, i, salt ^ 0x61097f2d);
     vorticella.push({
@@ -457,6 +464,41 @@ export function drawVorticella(
     // smooth furl of the feeding crown as it closes — fade out over the last bit of
     // contraction instead of a hard on/off pop at full contraction (anti-flicker).
     const crownFade = smoothstep(clamp01((open - 0.30) / 0.18));
+
+    // Subtle sessile feeding-current cue: real Vorticella uses the oral crown to
+    // entrain water toward the peristome. Keep it faint so it reads as darkfield
+    // flow, not UI particles.
+    if (crownFade > 0.05 && s < 0.35) {
+      ctx.save();
+      ctx.lineCap = "round";
+      const flowAlpha = alpha * crownFade * (0.08 + 0.06 * vEnv);
+      for (let k = 0; k < 6; k++) {
+        const lane = (k - 2.5) / 2.5;
+        const phase = TAU * wrapUnit(tt * (0.10 + k * 0.011) + seededUnit(aSeed, k, 0x4f10cafe));
+        const reach = D * (1.35 + 0.18 * k);
+        const wob = Math.sin(phase) * D * 0.08;
+        const start = {
+          x: rimC.x + ux * reach + nx * (lane * D * 0.42 + wob),
+          y: rimC.y + uy * reach + ny * (lane * D * 0.42 + wob),
+        };
+        const mid = {
+          x: rimC.x + ux * reach * 0.48 + nx * (lane * D * 0.24 - wob * 0.35),
+          y: rimC.y + uy * reach * 0.48 + ny * (lane * D * 0.24 - wob * 0.35),
+        };
+        const end = {
+          x: rimC.x + nx * lane * D * 0.10,
+          y: rimC.y + ny * lane * D * 0.10,
+        };
+        ctx.strokeStyle = `hsla(198, 35%, 88%, ${flowAlpha * (0.55 + 0.45 * (1 - Math.abs(lane)))})`;
+        ctx.lineWidth = Math.max(0.35, D * 0.018);
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(mid.x, mid.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
 
     const bodyPoint = (along: number, lateral: number): AquariumPoint => {
       // body axis curves laterally toward the top (per-cell) so the bell is visibly

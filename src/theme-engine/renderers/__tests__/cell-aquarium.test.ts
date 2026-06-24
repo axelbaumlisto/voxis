@@ -216,19 +216,19 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
     expect(goldenFor(0)).toEqual({
       // Rebased for the vorticella framing + organelle-readability pass (6 rimmed food
       // vacuoles + bigger CV + taller bell change ops/hash).
-      hash: "0ecdc29565d90815",
-      opCount: 1424,
+      hash: "0dd685e0104d02bd",
+      opCount: 1456,
       counts: {
-        beginPath: 211,
-        moveTo: 59,
-        lineTo: 765,
+        beginPath: 217,
+        moveTo: 65,
+        lineTo: 777,
         closePath: 12,
         fill: 158,
-        stroke: 55,
-        save: 5,
+        stroke: 61,
+        save: 6,
         ellipse: 6,
         arc: 146,
-        restore: 5,
+        restore: 6,
         clip: 2,
       },
     });
@@ -739,10 +739,10 @@ describe("aquarium layer Phase 2 diatoms", () => {
           swimSpeed: 1.0744810068747028,
           rollPhase: 0.38560447917176877,
           metabolyPhase: 0.16642074462644874,
-          flagellumPhase: 0.3708668104294035,
+          flagellumPhase: 0.9470856113824992,
           rollRate: 0.47428053175099194,
           metabolyRate: 0.10880362844560296,
-          flagellumRate: 4.21480342419818,
+          flagellumRate: 13.644410272594541,
           spiralAmplitude: 0.13494399678893387,
           cvPhase: 0.3587615130166184,
           cvRate: 0.03837136438582093,
@@ -767,7 +767,7 @@ describe("aquarium layer Phase 2 diatoms", () => {
           size: 1.3921901939902455,
           anchorX: 38.4,
           anchorY: 79.5,
-          directionAngle: -1.5707963267948966,
+          directionAngle: -1.2207963267948965,
           restLength: 8.697909643291496,
           contractPhase: 0,
           contractCyclePhase: 0.4531427220983897,
@@ -1920,9 +1920,9 @@ describe("aquarium layer Phase 4 vorticella", () => {
 
     drawAquariumBackground(ctx, state, frame({ width: 172, height: 36 }), params);
 
-    // 3 save/restore: outer drawVorticella pass + clipped granule/relief pass + clipped interior-organelle pass
-    expect(ctx.save).toHaveBeenCalledTimes(3);
-    expect(ctx.restore).toHaveBeenCalledTimes(3);
+    // 4 save/restore: outer drawVorticella pass + feeding-current cue + clipped granule/relief pass + clipped interior-organelle pass
+    expect(ctx.save).toHaveBeenCalledTimes(4);
+    expect(ctx.restore).toHaveBeenCalledTimes(4);
     expect(ctx.clip).toHaveBeenCalled();
     expect(ctx.fill).toHaveBeenCalled();
     expect(ctx.stroke).toHaveBeenCalled();
@@ -2344,7 +2344,7 @@ describe("createCellRenderer aquarium gate", () => {
     const didiniumBase: DidiniumState = {
       x: 80, y: 18, phase: 0, size: 1, heading: 0, swimSpeed: 1,
       rollPhase: 0, rollRate: 0.5, beatPhase: 0, beatRate: 4,
-      turnSide: 1, avoidProgress: 1, contactTimer: 0.5, noiseSeed: 123,
+      turnSide: 1, avoidProgress: 1, contactTimer: 0.5, contactDuration: 2.0, noiseSeed: 123,
     };
     const states: AquariumLayerState[] = [
       { seed: 1, diatoms: [], euglena: [], vorticella: [], didinium: [didiniumBase] },
@@ -2372,8 +2372,8 @@ describe("createCellRenderer aquarium gate", () => {
     now += 1000 / 60; rafCalls.shift()?.();
     const secondHero = foreground.mock.calls[1]?.[2]?.hero;
     renderer.destroy();
-    expect(firstHero.x).toBeGreaterThan(secondHero.x);
-    expect(secondHero.x).toBeGreaterThan(172 * 0.5); // response persists after contactTimer reaches 0
+    expect(firstHero.x).toBeCloseTo(172 * 0.5, 6);
+    expect(secondHero.x).toBeGreaterThan(firstHero.x); // same-frame published hero includes previous contact response
   });
 
   it("Euglena near-touch does not trigger predator-level hero recoil", async () => {
