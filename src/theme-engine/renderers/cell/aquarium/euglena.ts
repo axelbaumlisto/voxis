@@ -534,6 +534,10 @@ export function updateEuglena(
     let ux = Math.cos(heading);
     let uy = Math.sin(heading);
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L;
+    // Keep the swimmer as a whole organism in open water, not half-on a wall.
+    // This is body-scale (not a point clamp): at overlay scale, a centroid at x=0
+    // makes the flagellum/body read as trapped on the edge.
+    const wallInset = Math.min(L * 0.8, safeWidth * 0.22, safeHeight * 0.22);
 
     const field = frame.interaction;
     const fieldObstacles = field ? field.obstacles.filter((obstacle) => obstacle.sourceId !== selfId) : undefined;
@@ -607,11 +611,15 @@ export function updateEuglena(
     {
       let sx = ux * steer.forward;
       let sy = uy * steer.forward;
-      const look = L * 2.4; // anticipate ~2.4 body-lengths ahead of every wall
-      if (px0 < look) sx += (1 - px0 / look) * steer.wall;
-      if (safeWidth - px0 < look) sx -= (1 - (safeWidth - px0) / look) * steer.wall;
-      if (py0 < look) sy += (1 - py0 / look) * steer.wall;
-      if (safeHeight - py0 < look) sy -= (1 - (safeHeight - py0) / look) * steer.wall;
+      const look = L * 2.8; // anticipate before the body/flagellum touches a wall
+      const leftGap = px0 - wallInset;
+      const rightGap = safeWidth - wallInset - px0;
+      const topGap = py0 - wallInset;
+      const bottomGap = safeHeight - wallInset - py0;
+      if (leftGap < look) sx += (1 - leftGap / look) * steer.wall;
+      if (rightGap < look) sx -= (1 - rightGap / look) * steer.wall;
+      if (topGap < look) sy += (1 - topGap / look) * steer.wall;
+      if (bottomGap < look) sy -= (1 - bottomGap / look) * steer.wall;
       // Negative gravitaxis: ACTIVE sensory up-bias, NOT buoyancy/density.
       // Short-tank fade prevents pinning: when the wall lookahead spans most of
       // the tank height, top-wall avoidance must dominate and the up-bias fades
@@ -831,8 +839,8 @@ export function updateEuglena(
     const fEff = Math.min(13, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
     return {
       ...cell,
-      x: clamp(nextX, 0, safeWidth), // clamp, never wrap (wrapping teleported it across the tank)
-      y: clamp(nextY, 0, safeHeight),
+      x: clamp(nextX, wallInset, Math.max(wallInset, safeWidth - wallInset)), // clamp, never wrap (wrapping teleported it across the tank)
+      y: clamp(nextY, wallInset, Math.max(wallInset, safeHeight - wallInset)),
       phase: heading,
       heading,
       turnProgress: finiteOr(cell.turnProgress, 2),

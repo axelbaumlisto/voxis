@@ -319,7 +319,7 @@ export function updateDidinium(
       const surfaceY = prey.y + sx * sh + sy * ch;
       preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y };
       if (q < 1.24 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
-        contactTimer = 0.95 + seededUnit(nseed, 0, 0x2a91f00d) * 0.25;
+        contactTimer = 1.25 + seededUnit(nseed, 0, 0x2a91f00d) * 0.30;
       }
     }
     let obstaclePressure = 0;
@@ -467,7 +467,7 @@ export function updateDidinium(
     if (wasContacting && contactTimer <= 0) {
       // Release after a short attack beat: turn away and cool down so the predator
       // does not immediately re-latch / buzz-saw through the hero.
-      huntCooldown = 2.5 + seededUnit(nseed, 0, 0x4a1b7c29) * 1.0;
+      huntCooldown = 6.0 + seededUnit(nseed, 0, 0x4a1b7c29) * 2.5;
       avoidIndex += 1;
       avoidFrom = heading;
       avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 0x359a71d1)));

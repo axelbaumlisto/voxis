@@ -2256,6 +2256,7 @@ function updateEuglena(euglena, frame, view) {
     let ux = Math.cos(heading);
     let uy = Math.sin(heading);
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L;
+    const wallInset = Math.min(L * 0.8, safeWidth * 0.22, safeHeight * 0.22);
     const field = frame.interaction;
     const fieldObstacles = field ? field.obstacles.filter((obstacle) => obstacle.sourceId !== selfId) : undefined;
     const fieldWakes = field ? field.wakes.filter((wake) => wake.sourceId !== selfId) : undefined;
@@ -2310,15 +2311,19 @@ function updateEuglena(euglena, frame, view) {
     {
       let sx = ux * steer.forward;
       let sy = uy * steer.forward;
-      const look = L * 2.4;
-      if (px0 < look)
-        sx += (1 - px0 / look) * steer.wall;
-      if (safeWidth - px0 < look)
-        sx -= (1 - (safeWidth - px0) / look) * steer.wall;
-      if (py0 < look)
-        sy += (1 - py0 / look) * steer.wall;
-      if (safeHeight - py0 < look)
-        sy -= (1 - (safeHeight - py0) / look) * steer.wall;
+      const look = L * 2.8;
+      const leftGap = px0 - wallInset;
+      const rightGap = safeWidth - wallInset - px0;
+      const topGap = py0 - wallInset;
+      const bottomGap = safeHeight - wallInset - py0;
+      if (leftGap < look)
+        sx += (1 - leftGap / look) * steer.wall;
+      if (rightGap < look)
+        sx -= (1 - rightGap / look) * steer.wall;
+      if (topGap < look)
+        sy += (1 - topGap / look) * steer.wall;
+      if (bottomGap < look)
+        sy -= (1 - bottomGap / look) * steer.wall;
       const gravFade = clamp01((safeHeight / Math.max(0.000001, L) - 3) / 2);
       sy -= steer.gravitaxis * gravFade;
       if (steer.phototaxis !== 0 && safeWidth > 0 && safeHeight > 0) {
@@ -2487,8 +2492,8 @@ function updateEuglena(euglena, frame, view) {
     const fEff = Math.min(13, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
     return {
       ...cell,
-      x: clamp(nextX, 0, safeWidth),
-      y: clamp(nextY, 0, safeHeight),
+      x: clamp(nextX, wallInset, Math.max(wallInset, safeWidth - wallInset)),
+      y: clamp(nextY, wallInset, Math.max(wallInset, safeHeight - wallInset)),
       phase: heading,
       heading,
       turnProgress: finiteOr(cell.turnProgress, 2),
@@ -3541,7 +3546,7 @@ function updateDidinium(didinium, frame, view) {
       const surfaceY = prey.y + sx * sh + sy * ch;
       preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y };
       if (q < 1.24 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
-        contactTimer = 0.95 + seededUnit(nseed, 0, 714207245) * 0.25;
+        contactTimer = 1.25 + seededUnit(nseed, 0, 714207245) * 0.3;
       }
     }
     let obstaclePressure = 0;
@@ -3655,7 +3660,7 @@ function updateDidinium(didinium, frame, view) {
       avoidProgress = 0;
     }
     if (wasContacting && contactTimer <= 0) {
-      huntCooldown = 2.5 + seededUnit(nseed, 0, 1243315241) * 1;
+      huntCooldown = 6 + seededUnit(nseed, 0, 1243315241) * 2.5;
       avoidIndex += 1;
       avoidFrom = heading;
       avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 899314129)));
@@ -4196,17 +4201,17 @@ function drawAquariumForeground(ctx, aquarium, _frame, params) {
     const ux = Math.cos(heading), uy = Math.sin(heading);
     const snoutX = d.x + ux * L * 0.52;
     const snoutY = d.y + uy * L * 0.52;
-    const env = Math.min(1, contact / 0.45);
+    const env = Math.min(1, contact / 0.55);
     ctx.save();
     ctx.translate(d.x, d.y);
     ctx.rotate(heading);
-    ctx.strokeStyle = `hsla(222, 42%, 94%, ${alpha * 0.72 * env})`;
-    ctx.lineWidth = Math.max(0.65, L * 0.022);
+    ctx.strokeStyle = `hsla(226, 48%, 96%, ${alpha * 0.96 * env})`;
+    ctx.lineWidth = Math.max(0.9, L * 0.03);
     ctx.beginPath();
     ctx.ellipse(0, 0, L * 0.5, L * 0.22, 0, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.strokeStyle = `hsla(214, 48%, 97%, ${alpha * 0.72 * env})`;
-    ctx.lineWidth = Math.max(0.7, L * 0.022);
+    ctx.strokeStyle = `hsla(214, 54%, 98%, ${alpha * 0.92 * env})`;
+    ctx.lineWidth = Math.max(0.9, L * 0.028);
     for (const gx of [L * 0.18, -L * 0.12]) {
       ctx.beginPath();
       ctx.moveTo(gx, -L * 0.2);
@@ -4236,14 +4241,14 @@ function drawAquariumForeground(ctx, aquarium, _frame, params) {
       ctx.lineTo(px, py);
       ctx.stroke();
     }
-    const fanAlpha = alpha * 0.9 * env;
-    ctx.lineWidth = 0.9;
-    for (let k = 0;k < 19; k++) {
-      if (k % 4 === 1)
+    const fanAlpha = alpha * 0.58 * env;
+    ctx.lineWidth = 0.85;
+    for (let k = 0;k < 13; k++) {
+      if (k % 5 === 1)
         continue;
-      const jitter = Math.sin((k + 1) * 12.9898) * 0.09;
-      const a = heading + Math.PI + (k - 9) * 0.11 + jitter;
-      const len = 8.5 + k * 7 % 7 * 1.35;
+      const jitter = Math.sin((k + 1) * 12.9898) * 0.08;
+      const a = heading + Math.PI + (k - 6) * 0.13 + jitter;
+      const len = 8 + k * 5 % 6 * 0.95;
       const aJ = 0.75 + 0.25 * Math.abs(Math.sin((k + 3) * 4.17));
       ctx.strokeStyle = `hsla(42, 46%, 95%, ${fanAlpha * aJ})`;
       ctx.beginPath();
@@ -4478,13 +4483,19 @@ function createCellRenderer(container, opts) {
         if (kick !== 0)
           wander = { ...wander, heading: wander.heading + kick };
       }
+      if (predatorEnv > 0.02) {
+        const desired = Math.atan2(predatorNy, predatorNx);
+        const turn = Math.atan2(Math.sin(desired - wander.heading), Math.cos(desired - wander.heading));
+        wander = { ...wander, heading: wander.heading + turn * (1 - Math.exp(-5 * dt)) };
+      }
       let baseSwim = params.enableActivity ? swimSpeed(activity, width, height, params) : undefined;
       if (baseSwim !== undefined && params.idleSwimFrac) {
         const maxSwim = (params.swimSpeedMaxFrac ?? 0.06) * Math.min(width, height);
         baseSwim = Math.max(params.idleSwimFrac * maxSwim, baseSwim);
       }
       const burst = useKick ? startleBurstSpeed(startle, baseR, params) : 0;
-      const swimPx = baseSwim !== undefined ? baseSwim + burst : burst > 0 ? burst : undefined;
+      const predatorEscapeSpeed = predatorEnv > 0.02 ? predatorEnv * baseR * 0.9 : 0;
+      const swimPx = baseSwim !== undefined ? baseSwim + burst + predatorEscapeSpeed : burst > 0 || predatorEscapeSpeed > 0 ? burst + predatorEscapeSpeed : undefined;
       wander = wanderStep(wander, dt, width, height, baseR, params, swimPx);
       const driftedX = width / 2 + (wander.x - width / 2) * drift01;
       const driftedY = height / 2 + (wander.y - height / 2) * drift01;
@@ -4609,7 +4620,7 @@ function createCellRenderer(container, opts) {
           predatorNx /= pl;
           predatorNy /= pl;
         }
-        const kick = Math.min(14, baseR * 0.48) * predatorEnv;
+        const kick = Math.min(8, baseR * 0.28) * predatorEnv;
         const rx = predatorNx * kick;
         const ry = predatorNy * kick;
         if (kick > 0.01) {
@@ -5186,24 +5197,24 @@ function mount(container, api) {
       ...PARAMECIUM_CELL_PARAMS,
       radiusFraction: 0.19,
       enableAquarium: true,
-      aquariumSeed: 71,
+      aquariumSeed: 13,
       aquariumAlpha: 0.7,
       aquariumActivityBoost: 0.65,
       diatomCount: 0,
       euglenaCount: 1,
-      euglenaSpeed: 0.08,
-      euglenaSpeedActive: 0.18,
+      euglenaSpeed: 0.11,
+      euglenaSpeedActive: 0.22,
       euglenaScale: 2.2,
       euglenaGravitaxis: 0,
-      euglenaPhototaxis: 0.12,
+      euglenaPhototaxis: 0.05,
       euglenaRotDiffusion: 0,
       vorticellaCount: 1,
-      vorticellaAlongFrac: 0.12,
+      vorticellaAlongFrac: 0.22,
       vorticellaScale: 1.05,
       vorticellaContractRate: 1,
       didiniumCount: 1,
-      didiniumSpeed: 0.45,
-      didiniumSpeedActive: 0.65,
+      didiniumSpeed: 0.36,
+      didiniumSpeedActive: 0.52,
       didiniumScale: 1.6,
       ...userParams
     }
