@@ -3,6 +3,7 @@ import { CELL_DEFAULTS } from "../../defaults";
 import { aquariumParamsView } from "../params";
 import { buildAquariumInteractionField, seedAquarium, updateAquarium } from "../layer";
 import { diatomGeometry } from "../diatoms";
+import { updateDidinium } from "../didinium";
 import { euglenaPose, updateEuglena } from "../euglena";
 import { updateVorticella, vorticellaGeometry } from "../vorticella";
 import type { AquariumFrame } from "../types";
@@ -156,7 +157,7 @@ describe("aquarium biology geometry contracts", () => {
 });
 
 describe("aquarium layer Phase 4.5 combined perf/golden", () => {
-  it("2-phase euglena/vorticella updates are order-independent to 1e-10", () => {
+  it("2-phase interaction consumers are order-independent to 1e-10", () => {
     const params: CellParams = {
       ...CELL_DEFAULTS,
       enableAquarium: true,
@@ -172,22 +173,36 @@ describe("aquarium layer Phase 4.5 combined perf/golden", () => {
       vorticellaContractRate: 0.8,
       vorticellaScale: 1.2,
       vorticellaAlongFrac: 0.16,
+      didiniumCount: 1,
+      didiniumSpeed: 0.9,
+      didiniumSpeedActive: 1.4,
+      didiniumScale: 1.6,
     };
     const view = aquariumParamsView(params);
     const hero = { x: 120, y: 40, radius: 14, heading: 0.2, halfLen: 18, halfWid: 11 };
     const f0 = frame({ t: 2, dt: 1 / 60, width: 240, height: 80, activity: 0.5, audioLevel: 0.25, hero });
     const initial = seedAquarium(f0, params);
-    const interaction = buildAquariumInteractionField(initial.euglena, initial.vorticella, f0.hero, view.vorticella.scale, f0.height);
+    const interaction = buildAquariumInteractionField(
+      initial.euglena,
+      initial.vorticella,
+      f0.hero,
+      view.vorticella.scale,
+      f0.height,
+      initial.didinium,
+      view.euglena.scale,
+      view.didinium.scale,
+    );
     const snapshotFrame = { ...f0, interaction };
 
     const production = updateAquarium(initial, f0, params);
     const reverse = {
       ...initial,
+      didinium: updateDidinium(initial.didinium, snapshotFrame, view),
       vorticella: updateVorticella(initial.vorticella, snapshotFrame, view),
       euglena: updateEuglena(initial.euglena, snapshotFrame, view),
     };
 
-    for (const species of ["euglena", "vorticella"] as const) {
+    for (const species of ["euglena", "vorticella", "didinium"] as const) {
       expect(production[species]).toHaveLength(reverse[species].length);
       for (let i = 0; i < production[species].length; i++) {
         for (const key of Object.keys(production[species][i]) as Array<keyof typeof production[typeof species][number]>) {

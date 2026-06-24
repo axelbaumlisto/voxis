@@ -331,6 +331,10 @@ describe("aquarium interaction field vocabulary", () => {
       vorticellaContractRate: 1.2,
       vorticellaScale: 1.2,
       vorticellaAlongFrac: 0.16,
+      didiniumCount: 1,
+      didiniumSpeed: 0.9,
+      didiniumSpeedActive: 1.4,
+      didiniumScale: 1.6,
     };
     const hero = { x: 118, y: 42, radius: 11, heading: 0.35, halfLen: 18, halfWid: 7 };
     const seedFrame = frame({ t: 4, dt: 1 / 60, mode: "recording", activity: 0.6, audioLevel: 0.4, hero });
@@ -340,9 +344,19 @@ describe("aquarium interaction field vocabulary", () => {
     const referenceContribs: FieldContribution[] = [
       ...initial.vorticella.flatMap((v, i) => vorticellaContribute(v, 1.2, seedFrame.height, i)),
       ...initial.euglena.flatMap((e, i) => euglenaContribute(e, i, 1.4)),
+      ...initial.didinium.flatMap((d, i) => didiniumContribute(d, i, 1.6)),
       ...heroContribute(seedFrame.hero),
     ];
-    const field = buildAquariumInteractionField(initial.euglena, initial.vorticella, seedFrame.hero, 1.2, seedFrame.height, undefined, 1.4);
+    const field = buildAquariumInteractionField(
+      initial.euglena,
+      initial.vorticella,
+      seedFrame.hero,
+      1.2,
+      seedFrame.height,
+      initial.didinium,
+      1.4,
+      1.6,
+    );
 
     expect(field).toEqual(buildField(referenceContribs));
     expect(field.obstacles.map((contrib) => contrib.sourceId)).toEqual([
@@ -358,12 +372,14 @@ describe("aquarium interaction field vocabulary", () => {
     expect(field.motiles.map((contrib) => contrib.sourceId)).toEqual([
       sourceId("euglena", 0),
       sourceId("euglena", 1),
+      sourceId("didinium", 0),
       sourceId("hero", 0),
     ]);
     expect(field.motiles[0].x).toBe(initial.euglena[0].x);
     expect(field.motiles[0].y).toBe(initial.euglena[0].y);
     expect(field.motiles[0].x).not.toBe(next.euglena[0].x);
     expect(field.obstacles.filter((contrib) => EUGLENA_RELEVANT_FIELDS.has(contrib.kind))).toHaveLength(3);
-    expect(field.motiles.filter((contrib) => VORTICELLA_RELEVANT_FIELDS.has(contrib.kind))).toHaveLength(3);
+    expect(field.motiles.filter((contrib) => VORTICELLA_RELEVANT_FIELDS.has(contrib.kind))).toHaveLength(4);
+    expect(field.motiles.filter((contrib) => DIDINIUM_RELEVANT_FIELDS.has(contrib.kind))).toHaveLength(4);
   });
 });

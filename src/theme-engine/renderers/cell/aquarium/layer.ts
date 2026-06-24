@@ -12,6 +12,9 @@ import { didiniumContribute } from "./didinium";
 
 type MutableAquariumLayerState = { -readonly [K in keyof AquariumLayerState]: AquariumLayerState[K] };
 
+// Intentionally assembled here with explicit species loops. The pairwise
+// interaction sources stay readable, and REGISTRY avoids a premature generic
+// contribution/lifecycle hook until real duplication justifies it.
 export function buildAquariumInteractionField(
   euglena: readonly AquariumLayerState["euglena"][number][] | undefined,
   vorticella: readonly AquariumLayerState["vorticella"][number][] | undefined,
