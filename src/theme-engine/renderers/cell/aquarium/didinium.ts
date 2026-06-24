@@ -323,8 +323,8 @@ export function updateDidinium(
       const probeHeading = heading + wander;
       const approachDot = (Math.cos(probeHeading) * toTargetX + Math.sin(probeHeading) * toTargetY) / toTargetD;
       preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y, approachDot };
-      if (q < 1.12 && approachDot > 0.35 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
-        contactTimer = 0.52 + seededUnit(nseed, 0, 0x2a91f00d) * 0.16;
+      if (q < 1.07 && approachDot > 0.55 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
+        contactTimer = 0.45 + seededUnit(nseed, 0, 0x2a91f00d) * 0.14;
       }
     }
     let obstaclePressure = 0;
@@ -368,11 +368,11 @@ export function updateDidinium(
         const dx = preyData.surfaceX - px0;
         const dy = preyData.surfaceY - py0;
         const d = Math.hypot(dx, dy) || 1;
-        const sense = clamp(L * 3.2, 48, 78);
+        const sense = clamp(L * 2.0, 32, 52);
         if (d < sense && preyData.approachDot > -0.15) {
           const cone = clamp01((preyData.approachDot + 0.15) / 0.65);
           const huntRaw = clamp01((sense - d) / (sense * 0.75)) * cone;
-          const hunt = preyData.q < 1.12 ? huntRaw : Math.min(0.55, huntRaw);
+          const hunt = preyData.q < 1.07 ? huntRaw : Math.min(0.35, huntRaw);
           huntWeight = hunt;
           const desired = Math.atan2(dy, dx); // aim at prey SURFACE, not centroid
           const turnK = 1.4 + 2.4 * hunt;
@@ -474,7 +474,7 @@ export function updateDidinium(
     if (wasContacting && contactTimer <= 0) {
       // Release after a short attack beat: turn away and cool down so the predator
       // does not immediately re-latch / buzz-saw through the hero.
-      huntCooldown = 10.0 + seededUnit(nseed, 0, 0x4a1b7c29) * 4.0;
+      huntCooldown = 18.0 + seededUnit(nseed, 0, 0x4a1b7c29) * 12.0;
       avoidIndex += 1;
       avoidFrom = heading;
       avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 0x359a71d1)));

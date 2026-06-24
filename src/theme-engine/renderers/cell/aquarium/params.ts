@@ -16,11 +16,15 @@ function euglenaSteerOverride(params: CellParams): Partial<EuglenaSteer> | undef
   const gravitaxis = nonNegative(params.euglenaGravitaxis, 0);
   const phototaxis = nonNegative(params.euglenaPhototaxis, 0);
   const separation = nonNegative(params.euglenaSeparation, 0);
-  if (gravitaxis === 0 && phototaxis === 0 && separation === 0) return undefined;
+  const hasLoiter = params.euglenaLoiter !== undefined;
+  const hasWake = params.euglenaWake !== undefined;
+  if (gravitaxis === 0 && phototaxis === 0 && separation === 0 && !hasLoiter && !hasWake) return undefined;
   return {
     gravitaxis,
     phototaxis,
     ...(separation === 0 ? {} : { separation }),
+    ...(hasLoiter ? { loiter: nonNegative(params.euglenaLoiter, 0) } : {}),
+    ...(hasWake ? { wake: nonNegative(params.euglenaWake, 0) } : {}),
   };
 }
 
