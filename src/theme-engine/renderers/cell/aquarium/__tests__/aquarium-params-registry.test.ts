@@ -65,7 +65,8 @@ describe("aquariumParamsView", () => {
       alpha: 0.25,
       activityBoost: 0.7,
       diatoms: { count: 3, alpha: 0.2, driftSpeed: 0.8 },
-      euglena: { count: 2, speed: 1.1, speedActive: 2.4, scale: 0.9, hueOffset: 42, steer: { gravitaxis: 0, phototaxis: 0, separation: 0.4 } },
+      euglena: { count: 2, speed: 1.1, speedActive: 2.4, scale: 0.9, hueOffset: 42, photoIntent: 0, steer: { gravitaxis: 0, phototaxis: 0, separation: 0.4 } },
+      medium: undefined,
       vorticella: { count: 1, contractRate: 0.6, scale: 1.2, alongFrac: 0.5 },
       didinium: { count: 0, speed: 1.0, speedActive: 2.0, scale: 1.0, hueOffset: 0 },
     });

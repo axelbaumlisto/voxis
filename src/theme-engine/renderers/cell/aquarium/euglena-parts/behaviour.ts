@@ -81,6 +81,7 @@ const TUMBLE_MIN_RAD = Math.PI / 6; // 30°
 const TUMBLE_MAX_RAD = (5 * Math.PI) / 6; // 150°
 const TUMBLE_RATE_MIN = 0.045;      // heavy-tail clamped slow end: ~22s max cycle
 const TUMBLE_RATE_MAX = 0.16;       // fast end: ~6.25s min cycle
+const PHOTO_INTENT_SECONDS = 54;    // one long open transit before reversing direction
 
 export const EUGLENA_RELEVANT_FIELDS: ReadonlySet<FieldKind> = new Set(["obstacle", "wake", "motile"]);
 
@@ -125,6 +126,7 @@ export function updateEuglena(
     let heading = finite(cell.heading, 0);
 
     const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+    const noiseSeed = finiteOr(cell.noiseSeed, 0) | 0;
     const px0 = finite(cell.x, 0);
     const py0 = finite(cell.y, 0);
     let ux = Math.cos(heading);
@@ -239,6 +241,31 @@ export function updateEuglena(
         const photoW = steer.phototaxis * response;
         sx += (ldx / ldist) * photoW;
         sy += (ldy / ldist) * photoW;
+      }
+      // Optional deterministic photo-response episode for crowded scenes: the
+      // swimmer has a readable light transit, then adapts and turns away. It is
+      // scoped by a flat theme param (default 0), so existing Euglena themes keep
+      // the old steering unless they explicitly opt in.
+      const photoIntent = Math.max(0, finite(view.euglena.photoIntent, 0));
+      if (photoIntent > 0 && safeWidth > 0 && safeHeight > 0) {
+        const t = Math.max(0, finite(frame.t, 0));
+        const cycleFloat = t / PHOTO_INTENT_SECONDS;
+        const cycle = Math.floor(cycleFloat);
+        const u = wrapUnit(cycleFloat);
+        const dir = (cycle & 1) === 0 ? -1 : 1;
+        const laneY = dir < 0
+          ? Math.min(safeHeight - wallInset, wallInset + 2)
+          : Math.max(wallInset, safeHeight - wallInset - 2);
+        const laneErr = clamp((laneY - py0) / Math.max(1, safeHeight - 2 * wallInset), -0.8, 0.8);
+        const tx = dir;
+        const ty = 0.22 * dir + 0.55 * laneErr;
+        const td = Math.hypot(tx, ty) || 1e-6;
+        const bearing = Math.atan2(ty, tx);
+        const eyeGate = 0.70 + 0.30 * Math.max(0, Math.cos(bearing - heading - TAU * finite(cell.rollPhase, 0)));
+        const legEase = 0.85 + 0.15 * Math.sin(Math.PI * Math.min(1, u));
+        const seekW = photoIntent * legEase * eyeGate;
+        sx += (tx / td) * seekW;
+        sy += (ty / td) * seekW;
       }
       if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 1e-4) {
         const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
@@ -385,7 +412,6 @@ export function updateEuglena(
     // The existing burstPhase gate still triggers the event, but each cycle uses
     // a deterministic heavy-tailed interval and a polygonal 30-150° target turn.
     // Hand-built tests with burstRate=0/undefined keep this path inert.
-    const noiseSeed = finiteOr(cell.noiseSeed, 0) | 0;
     const bphase = wrapUnit(finiteOr(cell.burstPhase, 0));
     const burstBase = Math.max(0, finiteOr(cell.burstRate, 0));
     let tumbleIndex = Math.max(0, Math.floor(finiteOr(cell.tumbleIndex, 0)));

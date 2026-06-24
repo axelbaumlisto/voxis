@@ -42,6 +42,7 @@ export interface AquariumParamsView {
     readonly speedActive: number;
     readonly scale: number;
     readonly hueOffset: number;
+    readonly photoIntent: number;
     readonly steer?: Partial<EuglenaSteer>;
   };
   readonly vorticella: {

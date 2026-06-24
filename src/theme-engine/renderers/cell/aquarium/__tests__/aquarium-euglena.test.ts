@@ -194,6 +194,55 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(once.y).toBeLessThanOrEqual(36);
   });
 
+  it("photo intent is opt-in, deterministic, and changes the transit path", () => {
+    const baseParams: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaScale: 2,
+      euglenaPhototaxis: 0,
+      euglenaLoiter: 0,
+      euglenaWake: 0,
+    };
+    const initial = [testEuglena({
+      x: 230,
+      y: 90,
+      heading: 0,
+      burstPhase: 0.4,
+      burstRate: 0,
+      tumbleProgress: 1,
+      startle: 0,
+      noiseSeed: 123,
+    })];
+    const run = (photoIntent: number) => {
+      const view = aquariumParamsView({ ...baseParams, euglenaPhotoIntent: photoIntent });
+      let cells = initial;
+      for (let i = 0; i < 60 * 4; i++) {
+        cells = updateEuglena(cells, frame({
+          t: i / 60,
+          dt: 1 / 60,
+          width: 340,
+          height: 170,
+          mode: "idle",
+          activity: 0,
+          audioLevel: 0,
+        }), view) as EuglenaState[];
+      }
+      return cells[0];
+    };
+
+    const withoutIntent = run(0);
+    const withIntent = run(1.25);
+    const repeat = run(1.25);
+
+    expect(withIntent).toEqual(repeat);
+    expect(withIntent.x).toBeLessThan(withoutIntent.x - 40);
+    expect(withIntent.y).toBeGreaterThanOrEqual(0);
+    expect(withIntent.y).toBeLessThanOrEqual(170);
+  });
+
   it("updateEuglena applies mode multipliers only through dt-integrated phase deltas", () => {
     const view = aquariumParamsView({
       ...CELL_DEFAULTS,
