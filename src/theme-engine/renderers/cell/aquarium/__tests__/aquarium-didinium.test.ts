@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CELL_DEFAULTS } from "../../defaults";
 import type { CellParams } from "../../types";
 import { didiniumContribute, didiniumDisplayLength, seedDidinium, updateDidinium } from "../didinium";
+import { didiniumContactPhase, didiniumParameciumContactPoint } from "../didinium-paramecium";
 import { buildField, sourceId } from "../interaction";
 import { drawAquariumBackground, drawAquariumForeground } from "../layer";
 import { aquariumParamsView } from "../params";
@@ -237,6 +238,46 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
   it("didiniumDisplayLength agrees between update and draw (single source of truth)", () => {
     expect(didiniumDisplayLength(1, 1)).toBeGreaterThan(0);
     expect(didiniumDisplayLength(1, 2)).toBeGreaterThan(didiniumDisplayLength(1, 1));
+  });
+
+  it("characterizes Didinium/Paramecium contact phase helpers", () => {
+    const early = didiniumContactPhase(testDidinium({ contactTimer: 1.5, contactDuration: 2 }));
+    expect(early.contact).toBe(1.5);
+    expect(early.duration).toBe(2);
+    expect(early.elapsed).toBe(0.5);
+    expect(early.env).toBe(1);
+    expect(early.sideEnv).toBeCloseTo(0.7142857143, 10);
+    expect(early.fanEnv).toBe(0);
+
+    const late = didiniumContactPhase(testDidinium({ contactTimer: 0.5, contactDuration: 2 }));
+    expect(late.env).toBe(1);
+    expect(late.sideEnv).toBe(1);
+    expect(late.fanEnv).toBeCloseTo(0.6666666667, 10);
+  });
+
+  it("projects Didinium contact onto the current Paramecium membrane", () => {
+    const hero = {
+      x: 120,
+      y: 48,
+      radius: 20,
+      heading: 0,
+      halfLen: 20 * Math.sqrt(3),
+      halfWid: 20 / Math.sqrt(3),
+    };
+    const length = didiniumDisplayLength(1, 1);
+    const didinium = testDidinium({
+      x: hero.x - hero.halfLen - length * 0.52,
+      y: hero.y,
+      phase: 0,
+      heading: 0,
+    });
+
+    const contact = didiniumParameciumContactPoint(didinium, frame({ hero }), length);
+
+    expect(contact.snoutX).toBeCloseTo(hero.x - hero.halfLen, 10);
+    expect(contact.snoutY).toBe(hero.y);
+    expect(contact.px).toBeCloseTo(hero.x - hero.halfLen, 10);
+    expect(contact.py).toBeCloseTo(hero.y, 10);
   });
 
   it("characterizes Didinium contact foreground on the current hero membrane", () => {

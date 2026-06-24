@@ -1733,6 +1733,676 @@ function sourceId(kind, instanceIndex) {
   return KIND_ID[kind] << 20 | instanceIndex;
 }
 
+// src/theme-engine/renderers/cell/aquarium/seeds.ts
+function mix32(n) {
+  let x = n | 0;
+  x ^= x >>> 16;
+  x = Math.imul(x, 2146121005);
+  x ^= x >>> 15;
+  x = Math.imul(x, 2221713035);
+  x ^= x >>> 16;
+  return x >>> 0;
+}
+function seededUnit(seed, index, salt) {
+  return mix32(seed ^ Math.imul(index + 1, 2654435761) ^ salt) / 4294967296;
+}
+function smoothstep01(t) {
+  const x = Math.max(0, Math.min(1, t));
+  return x * x * (3 - 2 * x);
+}
+function lerp2(a, b, t) {
+  return a + (b - a) * t;
+}
+function latticeUnit(seed, ix, iy) {
+  return mix32(seed ^ Math.imul(ix | 0, 2654435761) ^ Math.imul(iy | 0, 2246822507)) / 4294967296;
+}
+function noise2D2(seed, x, y) {
+  const fx = Number.isFinite(x) ? x : 0;
+  const fy = Number.isFinite(y) ? y : 0;
+  const x0 = Math.floor(fx);
+  const y0 = Math.floor(fy);
+  const tx = smoothstep01(fx - x0);
+  const ty = smoothstep01(fy - y0);
+  const v00 = latticeUnit(seed, x0, y0);
+  const v10 = latticeUnit(seed, x0 + 1, y0);
+  const v01 = latticeUnit(seed, x0, y0 + 1);
+  const v11 = latticeUnit(seed, x0 + 1, y0 + 1);
+  return lerp2(lerp2(v00, v10, tx), lerp2(v01, v11, tx), ty);
+}
+
+// src/theme-engine/renderers/cell/aquarium/didinium.ts
+var DIDINIUM_SALT = 220011530;
+var ASPECT = 1.42;
+var GIRDLE_A_U = 0.46;
+var GIRDLE_P_U = -0.16;
+var SHOULDER_U = 0.49;
+var BRUSH_ROWS = 5;
+var STOPGO_FREQ = 0.32;
+var WANDER_FREQ = 0.1;
+var WANDER_RAD = 0.42;
+var HELIX_LEAN = 0.07;
+var CURVE_FREQ = 0.09;
+var CURVE_BIAS = 0.18;
+var WALL_LOOK = 1.25;
+var BACKUP_SECONDS = 0.08;
+var AVOID_SECONDS = 0.18;
+var AVOID_TURN_MIN = 2 * Math.PI / 3;
+var AVOID_TURN_MAX = 5 * Math.PI / 6;
+function didiniumModeView(mode) {
+  switch (mode) {
+    case "recording":
+      return { motionMul: 1.2, alphaMul: 1.08 };
+    case "transcribing":
+      return { motionMul: 0.35, alphaMul: 0.8 };
+    case "error":
+      return { motionMul: 0.15, alphaMul: 0.55 };
+    case "idle":
+    default:
+      return { motionMul: 1, alphaMul: 1 };
+  }
+}
+function didiniumDisplayLength(size, scale) {
+  const s = Math.max(0.1, finite(scale, 1));
+  return Math.max(7, Math.min(34 * s, (16 + finite(size, 1) * 4) * s));
+}
+function bodyShape(u) {
+  if (u >= SHOULDER_U) {
+    const q = (u - SHOULDER_U) / (1 - SHOULDER_U);
+    const wShoulder = 0.72;
+    return wShoulder * (0.07 + 0.93 * Math.pow(1 - q, 1.35));
+  }
+  const t = (u - SHOULDER_U) / (-1 - SHOULDER_U);
+  const tp = 0.45;
+  if (t <= tp) {
+    return 0.72 + 0.28 * Math.sin(t / tp * (Math.PI / 2));
+  }
+  const s = (t - tp) / (1 - tp);
+  return Math.sqrt(Math.max(0, 1 - s * s));
+}
+var BODY_SHAPE_MAX = (() => {
+  let m = 0;
+  for (let i = 0;i <= 400; i++) {
+    const u = -1 + i / 400 * 2;
+    m = Math.max(m, bodyShape(u));
+  }
+  return m;
+})();
+function normHalfWidth(u) {
+  return bodyShape(u) / BODY_SHAPE_MAX;
+}
+function seedDidinium(count, seed, frame, salt = DIDINIUM_SALT) {
+  if (count <= 0)
+    return [];
+  const out = [];
+  const safeWidth = Math.max(0, finite(frame.width, 0));
+  const safeHeight = Math.max(0, finite(frame.height, 0));
+  for (let i = 0;i < count; i++) {
+    const heading = seededUnit(seed, i, salt ^ 1757159915) * TAU2;
+    out.push({
+      x: (0.2 + 0.6 * seededUnit(seed, i, salt)) * safeWidth,
+      y: (0.25 + 0.5 * seededUnit(seed, i, salt ^ 1374496523)) * safeHeight,
+      phase: heading,
+      size: 0.5 + seededUnit(seed, i, salt ^ 48610963),
+      heading,
+      swimSpeed: 0.85 + seededUnit(seed, i, salt ^ 802853537) * 0.3,
+      rollPhase: seededUnit(seed, i, salt ^ 1107813911),
+      rollRate: 0.6 + seededUnit(seed, i, salt ^ 348696353) * 0.24,
+      beatPhase: seededUnit(seed, i, salt ^ 668265263),
+      beatRate: 4 + seededUnit(seed, i, salt ^ 1966046297) * 1.5,
+      cvPhase: seededUnit(seed, i, salt ^ 1033993285),
+      cvRate: 0.045 + seededUnit(seed, i, salt ^ 1508030371) * 0.02,
+      turnSide: seededUnit(seed, i, salt ^ 2050968865) < 0.5 ? -1 : 1,
+      avoidIndex: 0,
+      avoidFrom: heading,
+      avoidTo: heading,
+      avoidProgress: 1,
+      noiseSeed: mix32(seed ^ Math.imul(i + 1, 2654435761) ^ salt) >>> 0
+    });
+  }
+  return out;
+}
+var DIDINIUM_RELEVANT_FIELDS = new Set(["obstacle", "motile"]);
+function didiniumContribute(cell, idx, scale = 1) {
+  const length = didiniumDisplayLength(finite(cell.size, 1), scale);
+  return [{
+    kind: "motile",
+    x: finite(cell.x, 0),
+    y: finite(cell.y, 0),
+    heading: finiteOr(cell.heading, finiteOr(cell.phase, 0)),
+    radius: length * 0.35,
+    speed: Math.max(0, finiteOr(cell.swimSpeed, 0)),
+    role: "predator",
+    strength: 0.75,
+    sourceId: sourceId("didinium", idx)
+  }];
+}
+function updateDidinium(didinium, frame, view) {
+  if (didinium.length === 0)
+    return didinium;
+  const dt = Math.max(0, finite(frame.dt, 0));
+  const safeWidth = Math.max(0, finite(frame.width, 0));
+  const safeHeight = Math.max(0, finite(frame.height, 0));
+  const activityMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
+  const modeView = didiniumModeView(frame.mode);
+  const vIdleBL = Math.max(0, finite(view.didinium.speed, 0));
+  const vActiveBL = Math.max(0, finite(view.didinium.speedActive, vIdleBL));
+  const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
+  const act = modeView.motionMul * (1 + 0.7 * activityMix);
+  const scale = view.didinium.scale;
+  const t = finite(frame.t, 0);
+  const wrapPi2 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  return didinium.map((cell, _idx) => {
+    const L = didiniumDisplayLength(finite(cell.size, 1), scale);
+    const nseed = finiteOr(cell.noiseSeed, 0) | 0;
+    let heading = finite(cell.heading, 0);
+    const px0 = finite(cell.x, 0);
+    const py0 = finite(cell.y, 0);
+    const wasContacting = finiteOr(cell.contactTimer, 0) > 0;
+    let contactTimer = Math.max(0, finiteOr(cell.contactTimer, 0) - dt);
+    let contactDuration = Math.max(0, finiteOr(cell.contactDuration, contactTimer));
+    let huntCooldown = Math.max(0, finiteOr(cell.huntCooldown, 0) - dt);
+    const stopgo = noise2D2(nseed ^ 1399873280, t * STOPGO_FREQ, 0.13);
+    const cruiseEnv = 0.65 + 0.35 * (1 - Math.pow(1 - stopgo, 1.4));
+    const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L * cruiseEnv;
+    const wander = (noise2D2(nseed ^ 447978529, t * WANDER_FREQ, 0.61) * 2 - 1) * WANDER_RAD;
+    let wallPressure = 0;
+    let wallAwayX = 0;
+    let wallAwayY = 0;
+    const look = L * WALL_LOOK;
+    if (px0 < look) {
+      wallAwayX += 1 - px0 / look;
+      wallPressure += 1 - px0 / look;
+    }
+    if (safeWidth - px0 < look) {
+      wallAwayX -= 1 - (safeWidth - px0) / look;
+      wallPressure += 1 - (safeWidth - px0) / look;
+    }
+    if (py0 < look) {
+      wallAwayY += 1 - py0 / look;
+      wallPressure += 1 - py0 / look;
+    }
+    if (safeHeight - py0 < look) {
+      wallAwayY -= 1 - (safeHeight - py0) / look;
+      wallPressure += 1 - (safeHeight - py0) / look;
+    }
+    let avoidIndex = Math.max(0, Math.floor(finiteOr(cell.avoidIndex, 0)));
+    let avoidFrom = finiteOr(cell.avoidFrom, heading);
+    let avoidTo = finiteOr(cell.avoidTo, heading);
+    let avoidProgress = clamp01(finiteOr(cell.avoidProgress, 1));
+    const side = finiteOr(cell.turnSide, 1) < 0 ? -1 : 1;
+    const hitWall = wallPressure > 0.12 && avoidProgress >= 1;
+    if (hitWall) {
+      avoidIndex += 1;
+      const magU = noise2D2(nseed ^ 791783381, avoidIndex, 0.71);
+      const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
+      avoidFrom = heading;
+      const inward = Math.atan2(wallAwayY, wallAwayX);
+      avoidTo = inward + side * magnitude * 0.5;
+      avoidProgress = 0;
+    }
+    const avoidTotal = BACKUP_SECONDS + AVOID_SECONDS;
+    const backupFrac = BACKUP_SECONDS / avoidTotal;
+    let reversing = false;
+    if (avoidProgress < 1) {
+      const next = Math.min(1, avoidProgress + dt / avoidTotal);
+      if (avoidProgress < backupFrac) {
+        reversing = true;
+      } else {
+        const turnK = 6;
+        heading += wrapPi2(avoidTo - heading) * (1 - Math.exp(-turnK * dt));
+        if (next >= 1)
+          heading = avoidTo;
+      }
+      avoidProgress = next;
+    } else if (wallPressure > 0.000001) {
+      const desired = Math.atan2(Math.sin(heading) + wallAwayY, Math.cos(heading) + wallAwayX);
+      const turnK = 3 + 7 * Math.min(1, wallPressure);
+      heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
+    }
+    const field = frame.interaction;
+    const prey = (field?.obstacles ?? []).find((obs) => obs.shape === "ellipse" && obs.social);
+    let preyData = null;
+    let huntWeight = 0;
+    if (prey && prey.shape === "ellipse") {
+      const hh = finiteOr(prey.heading, 0);
+      const ch = Math.cos(hh), sh = Math.sin(hh);
+      const dx = px0 - prey.x;
+      const dy = py0 - prey.y;
+      const localX = dx * ch + dy * sh;
+      const localY = -dx * sh + dy * ch;
+      const A = Math.max(0.001, finiteOr(prey.halfLen, 1) + L * 0.38);
+      const B = Math.max(0.001, finiteOr(prey.halfWid, 1) + L * 0.38);
+      const q = Math.sqrt(localX * localX / (A * A) + localY * localY / (B * B)) || 0.000001;
+      const targetQ = 1.03;
+      const sx = localX * (targetQ / q);
+      const sy = localY * (targetQ / q);
+      const surfaceX = prey.x + sx * ch - sy * sh;
+      const surfaceY = prey.y + sx * sh + sy * ch;
+      const toTargetX = q < 1 ? prey.x - px0 : surfaceX - px0;
+      const toTargetY = q < 1 ? prey.y - py0 : surfaceY - py0;
+      const toTargetD = Math.hypot(toTargetX, toTargetY) || 1;
+      const probeHeading = heading + wander;
+      const approachDot = (Math.cos(probeHeading) * toTargetX + Math.sin(probeHeading) * toTargetY) / toTargetD;
+      preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y, approachDot };
+      if (q < 1.07 && approachDot > 0.55 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
+        contactDuration = 2.4 + seededUnit(nseed, 0, 714207245) * 0.9;
+        contactTimer = contactDuration;
+      }
+    }
+    let obstaclePressure = 0;
+    let obstacleAwayX = 0;
+    let obstacleAwayY = 0;
+    const circleObstacles = [];
+    for (const obs of field?.obstacles ?? []) {
+      if (obs.shape !== "circle")
+        continue;
+      circleObstacles.push({ x: obs.x, y: obs.y, radius: obs.radius });
+      const dx = px0 - obs.x;
+      const dy = py0 - obs.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const reach = obs.radius + L * 1.25;
+      if (d < reach) {
+        const p = 1 - d / reach;
+        obstaclePressure += p;
+        obstacleAwayX += dx / d * p;
+        obstacleAwayY += dy / d * p;
+      }
+    }
+    for (const motile of field?.motiles ?? []) {
+      if (motile.sourceId >> 20 !== KIND_ID.euglena)
+        continue;
+      const dx = px0 - motile.x;
+      const dy = py0 - motile.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const radius = Math.max(0, finiteOr(motile.radius, 0));
+      const reach = Math.max(8, 0.85 * (L + radius));
+      if (d < reach) {
+        const p = (1 - d / reach) * 0.45;
+        obstaclePressure += p;
+        obstacleAwayX += dx / d * p;
+        obstacleAwayY += dy / d * p;
+      }
+    }
+    if (obstaclePressure > 0.0001 && avoidProgress >= 1) {
+      const desired = Math.atan2(obstacleAwayY, obstacleAwayX);
+      const turnK = 2.5 + 5 * Math.min(1, obstaclePressure);
+      heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
+    } else if (avoidProgress >= 1 && wallPressure < 0.2 && contactTimer <= 0) {
+      if (preyData) {
+        const dx = preyData.surfaceX - px0;
+        const dy = preyData.surfaceY - py0;
+        const d = Math.hypot(dx, dy) || 1;
+        const sense = clamp(L * 2, 32, 52);
+        if (d < sense && preyData.approachDot > -0.15) {
+          const cone = clamp01((preyData.approachDot + 0.15) / 0.65);
+          const huntRaw = clamp01((sense - d) / (sense * 0.75)) * cone;
+          const hunt = preyData.q < 1.07 ? huntRaw : Math.min(0.35, huntRaw);
+          huntWeight = hunt;
+          const desired = Math.atan2(dy, dx);
+          const turnK = 1.4 + 2.4 * hunt;
+          heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt)) * hunt;
+        }
+      }
+    }
+    const curveEnv = clamp01(noise2D2(nseed ^ 2009178803, t * CURVE_FREQ, 0.29));
+    const curve = side * CURVE_BIAS * curveEnv;
+    const huntSuppression = 1 - 0.35 * huntWeight;
+    const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) * huntSuppression + curve * huntSuppression;
+    const spinFreq = Math.max(0, finite(cell.rollRate, 0));
+    const spinSeed = seededUnit(nseed, 0, 1821285621);
+    const spinAng = TAU2 * (spinSeed + spinFreq * t);
+    const lean = Math.sin(spinAng) * HELIX_LEAN;
+    const eh = travel + lean;
+    const ux = Math.cos(eh);
+    const uy = Math.sin(eh);
+    const vSigned = reversing ? -vPx * 0.28 : vPx;
+    const rawX = px0 + ux * vSigned * dt;
+    const rawY = py0 + uy * vSigned * dt;
+    let nextX = rawX;
+    let nextY = rawY;
+    if (contactTimer > 0 && preyData) {
+      const corrX = preyData.surfaceX - nextX;
+      const corrY = preyData.surfaceY - nextY;
+      const corrL = Math.hypot(corrX, corrY) || 1;
+      const maxStep = L * (preyData.q < 1 ? 0.65 : 0.04);
+      const kLatch = preyData.q < 1 ? 1 : 1 - Math.exp(-2 * dt);
+      const step = Math.min(maxStep, corrL * kLatch);
+      nextX += corrX / corrL * step;
+      nextY += corrY / corrL * step;
+      heading = Math.atan2(preyData.preyY - nextY, preyData.preyX - nextX);
+    }
+    const margin = Math.min(L * 0.55, safeWidth * 0.45, safeHeight * 0.45);
+    for (const obs of circleObstacles) {
+      const dx = nextX - obs.x;
+      const dy = nextY - obs.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const minD = obs.radius + L * 0.45;
+      if (d < minD) {
+        const need = minD - d;
+        const step = Math.min(L * 0.35, need * (1 - Math.exp(-8 * dt)));
+        nextX += dx / d * step;
+        nextY += dy / d * step;
+        if (d < obs.radius + L * 0.9 && avoidProgress >= 1 && contactTimer <= 0) {
+          avoidIndex += 1;
+          avoidFrom = heading;
+          avoidTo = Math.atan2(dy, dx) + side * Math.PI * 0.55;
+          avoidProgress = 0;
+        }
+      }
+    }
+    nextX = clamp(nextX, margin, safeWidth - margin);
+    nextY = clamp(nextY, margin, safeHeight - margin);
+    if ((nextX !== rawX || nextY !== rawY) && avoidProgress >= 1 && contactTimer <= 0) {
+      avoidIndex += 1;
+      const magU = noise2D2(nseed ^ 791783381, avoidIndex, 0.71);
+      const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
+      avoidFrom = heading;
+      const inward = Math.atan2(wallAwayY, wallAwayX);
+      avoidTo = inward + side * magnitude * 0.5;
+      avoidProgress = 0;
+    }
+    if (wasContacting && contactTimer <= 0) {
+      huntCooldown = 22 + seededUnit(nseed, 0, 1243315241) * 14;
+      avoidIndex += 1;
+      avoidFrom = heading;
+      avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 899314129)));
+      avoidProgress = 0;
+    }
+    const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
+    return {
+      ...cell,
+      x: nextX,
+      y: nextY,
+      phase: contactTimer > 0 ? heading : travel,
+      heading,
+      rollPhase: wrapUnit(finite(cell.rollPhase, 0) + spinFreq * dt),
+      beatPhase: wrapUnit(finiteOr(cell.beatPhase, 0) + beatEff * dt),
+      cvPhase: wrapUnit(finiteOr(cell.cvPhase, 0) + Math.max(0, finiteOr(cell.cvRate, 0)) * act * dt),
+      avoidIndex,
+      avoidFrom,
+      avoidTo,
+      avoidProgress,
+      contactTimer,
+      contactDuration: contactTimer > 0 ? contactDuration : 0,
+      huntCooldown
+    };
+  });
+}
+function transform(cx, cy, ux, uy, along, lateral) {
+  const nx = -uy;
+  const ny = ux;
+  return { x: cx + ux * along + nx * lateral, y: cy + uy * along + ny * lateral };
+}
+function drawPolyline(ctx, points, close) {
+  if (points.length === 0)
+    return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1;i < points.length; i++)
+    ctx.lineTo(points[i].x, points[i].y);
+  if (close)
+    ctx.closePath();
+}
+function drawDidinium(ctx, didinium, frame, view) {
+  if (!view.enabled || didinium.length === 0 || view.didinium.count <= 0)
+    return;
+  const alpha = Math.max(0, Math.min(1, view.alpha * 0.9 * didiniumModeView(frame.mode).alphaMul));
+  if (alpha <= 0)
+    return;
+  const scale = Math.max(0.1, finite(view.didinium.scale, 1));
+  const hue = 200 + finite(view.didinium.hueOffset, 0);
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  didinium.forEach((cell) => {
+    const L = didiniumDisplayLength(finite(cell.size, 1), scale);
+    const halfLength = L / 2;
+    const wMax = L / ASPECT / 2;
+    const heading = finiteOr(cell.phase, finite(cell.heading, 0));
+    const ux = Math.cos(heading);
+    const uy = Math.sin(heading);
+    const cx = finite(cell.x, 0);
+    const cy = finite(cell.y, 0);
+    const roll = wrapUnit(finite(cell.rollPhase, 0));
+    const rollAng = roll * TAU2;
+    const rollCos = Math.cos(rollAng);
+    const widthMul = 0.96 + 0.04 * Math.abs(rollCos);
+    const halfWidthAt = (u) => wMax * widthMul * normHalfWidth(u);
+    const SAMP = 64;
+    const upper = [];
+    const lower = [];
+    for (let i = 0;i <= SAMP; i++) {
+      const u = -Math.cos(Math.PI * i / SAMP);
+      const hw = halfWidthAt(u);
+      upper.push(transform(cx, cy, ux, uy, halfLength * u, hw));
+      lower.push(transform(cx, cy, ux, uy, halfLength * u, -hw));
+    }
+    const outline = [...upper, ...lower.reverse()];
+    ctx.save();
+    drawPolyline(ctx, outline, true);
+    ctx.clip();
+    const glowR = Math.max(1, halfLength * 1.05);
+    const grad = ctx.createRadialGradient(cx, cy, glowR * 0.1, cx, cy, glowR);
+    grad.addColorStop(0, `hsla(${hue}, 26%, 92%, ${alpha * 0.66})`);
+    grad.addColorStop(0.62, `hsla(${hue + 2}, 30%, 84%, ${alpha * 0.5})`);
+    grad.addColorStop(1, `hsla(${hue + 4}, 34%, 74%, ${alpha * 0.16})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
+    const gSeed = finiteOr(cell.noiseSeed, 0) | 0;
+    const gCount = Math.round(clamp(L * 6, 60, 220));
+    for (let g = 0;g < gCount; g++) {
+      const gu = (seededUnit(gSeed, g, 1371344503) * 2 - 1) * 0.9;
+      const gs = (seededUnit(gSeed, g, 2585733948) * 2 - 1) * 0.92;
+      const hw = halfWidthAt(gu);
+      const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
+      const r = 0.5 + seededUnit(gSeed, g, 752460107) * 0.9;
+      const nearGirdle = Math.min(Math.abs(gu - GIRDLE_A_U), Math.abs(gu - GIRDLE_P_U));
+      const lane = smoothstep2(clamp01(1 - nearGirdle / 0.075));
+      ctx.fillStyle = `hsla(${hue}, 22%, ${90 - 8 * lane}%, ${alpha * (0.34 - 0.12 * lane)})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, TAU2);
+      ctx.fill();
+    }
+    const gCount2 = Math.round(clamp(L * 4, 40, 150));
+    for (let g = 0;g < gCount2; g++) {
+      const gu = (seededUnit(gSeed, g, 1033993285) * 2 - 1) * 0.9;
+      const gs = (seededUnit(gSeed, g, 1508030371) * 2 - 1) * 0.92;
+      const hw = halfWidthAt(gu);
+      const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
+      const r = 0.3 + seededUnit(gSeed, g, 348696353) * 0.5;
+      const nearGirdle = Math.min(Math.abs(gu - GIRDLE_A_U), Math.abs(gu - GIRDLE_P_U));
+      const lane = smoothstep2(clamp01(1 - nearGirdle / 0.075));
+      ctx.fillStyle = `hsla(${hue + 4}, 18%, ${94 - 6 * lane}%, ${alpha * (0.16 - 0.07 * lane)})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, TAU2);
+      ctx.fill();
+    }
+    ctx.restore();
+    for (let i = 0;i < upper.length - 1; i++) {
+      const u = -Math.cos(Math.PI * i / SAMP);
+      const flank = 1 - Math.abs(u);
+      const a = alpha * (0.1 + 0.18 * flank * flank);
+      ctx.strokeStyle = `hsla(${hue + 2}, 32%, 92%, ${a})`;
+      ctx.lineWidth = Math.max(0.5, wMax * 0.07);
+      ctx.beginPath();
+      ctx.moveTo(upper[i].x, upper[i].y);
+      ctx.lineTo(upper[i + 1].x, upper[i + 1].y);
+      ctx.moveTo(lower[i].x, lower[i].y);
+      ctx.lineTo(lower[i + 1].x, lower[i + 1].y);
+      ctx.stroke();
+    }
+    {
+      const muStart = -0.58;
+      const muEnd = 0.4;
+      const bowDepth = 0.72 * (0.45 + 0.55 * Math.abs(rollCos));
+      const MN = 40;
+      const side2 = rollCos >= 0 ? 1 : -1;
+      const macro = [];
+      for (let k = 0;k <= MN; k++) {
+        const f = k / MN;
+        const u = muStart + (muEnd - muStart) * (0.5 - 0.5 * Math.cos(Math.PI * f));
+        const bow = Math.sin(f * Math.PI) * bowDepth;
+        const lat = bow * halfWidthAt(u) * side2;
+        macro.push(transform(cx, cy, ux, uy, halfLength * u, lat));
+      }
+      const halfTh = Math.max(1.2, wMax * 0.2);
+      const left = [];
+      const right = [];
+      for (let k = 0;k <= MN; k++) {
+        const f = k / MN;
+        const taper = Math.pow(Math.sin(Math.max(0, Math.min(1, f)) * Math.PI), 0.45);
+        const a = macro[Math.max(0, k - 1)];
+        const b = macro[Math.min(MN, k + 1)];
+        let tx = b.x - a.x, ty = b.y - a.y;
+        const tl = Math.hypot(tx, ty) || 1;
+        tx /= tl;
+        ty /= tl;
+        const nx2 = -ty, ny2 = tx;
+        const th = halfTh * (0.55 + 0.45 * taper);
+        const p = macro[k];
+        left.push({ x: p.x + nx2 * th, y: p.y + ny2 * th });
+        right.push({ x: p.x - nx2 * th, y: p.y - ny2 * th });
+      }
+      const ribbon = [...left, ...right.reverse()];
+      drawPolyline(ctx, ribbon, true);
+      ctx.fillStyle = `hsla(${hue - 8}, 6%, 76%, ${alpha * 0.9})`;
+      ctx.fill();
+      ctx.save();
+      drawPolyline(ctx, ribbon, true);
+      ctx.clip();
+      const mnSeed = finiteOr(cell.noiseSeed, 0) | 0;
+      for (let m = 0;m < MN; m += 2) {
+        const c0 = macro[m];
+        const u01 = seededUnit(mnSeed, m, 1545415487);
+        const dark = u01 < 0.5;
+        const jx = (seededUnit(mnSeed, m, 752460107) - 0.5) * halfTh * 1.2;
+        const jy = (seededUnit(mnSeed, m, 2585733948) - 0.5) * halfTh * 1.2;
+        const r = halfTh * (0.4 + 0.5 * seededUnit(mnSeed, m, 348696353));
+        ctx.fillStyle = dark ? `hsla(${hue - 8}, 7%, 50%, ${alpha * 0.6})` : `hsla(${hue}, 7%, 90%, ${alpha * 0.5})`;
+        ctx.beginPath();
+        ctx.arc(c0.x + jx, c0.y + jy, r, 0, TAU2);
+        ctx.fill();
+      }
+      ctx.restore();
+      drawPolyline(ctx, ribbon, true);
+      ctx.strokeStyle = `hsla(${hue - 2}, 18%, 90%, ${alpha * 0.36})`;
+      ctx.lineWidth = Math.max(0.4, wMax * 0.04);
+      ctx.stroke();
+    }
+    const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
+    const RING_TILT = 0.1;
+    const gSeedR = finiteOr(cell.noiseSeed, 0) | 0;
+    const drawGirdle = (gu, seatHue, gi) => {
+      const hw = halfWidthAt(gu);
+      const baseAlong = halfLength * gu;
+      const NT = 104;
+      ctx.lineWidth = Math.max(0.3, wMax * 0.026);
+      for (let s = 0;s < NT; s++) {
+        const phi = s / NT * TAU2;
+        const depth = Math.cos(phi + rollAng);
+        if (depth < -0.1)
+          continue;
+        const front = clamp01(0.5 + 0.5 * depth);
+        const jit = (seededUnit(gSeedR, s + gi * 97, 752460107) - 0.5) * 0.1;
+        const lat = Math.cos(phi) * hw;
+        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
+        const wave = 0.5 + 0.5 * Math.sin(TAU2 * beat - phi * 3);
+        const cilLen = hw * (0.042 + 0.022 * wave) * (1 + jit);
+        const outLat = Math.cos(phi);
+        const outAlong = Math.sin(phi) * RING_TILT;
+        const bandJ1 = (seededUnit(gSeedR, s + gi * 131, 2083166993) - 0.5) * hw * 0.34;
+        const bandJ2 = (seededUnit(gSeedR, s + gi * 131, 1309787047) - 0.5) * hw * 0.34;
+        const base = transform(cx, cy, ux, uy, along + bandJ1 * 0.55, lat + bandJ2);
+        ctx.fillStyle = `hsla(${seatHue}, 34%, 94%, ${alpha * (0.07 + 0.22 * front)})`;
+        ctx.beginPath();
+        ctx.arc(base.x, base.y, Math.max(0.42, wMax * 0.052), 0, TAU2);
+        ctx.fill();
+        if (s % 2 === 0) {
+          const bandJ3 = (seededUnit(gSeedR, s + gi * 149, 796744337) - 0.5) * hw * 0.32;
+          const bandJ4 = (seededUnit(gSeedR, s + gi * 149, 1639241769) - 0.5) * hw * 0.32;
+          const dust = transform(cx, cy, ux, uy, along + outAlong * cilLen * 0.35 + bandJ3 * 0.45, lat + outLat * cilLen * 0.35 + bandJ4);
+          ctx.fillStyle = `hsla(${seatHue}, 36%, 96%, ${alpha * (0.05 + 0.15 * front)})`;
+          ctx.beginPath();
+          ctx.arc(dust.x, dust.y, Math.max(0.28, wMax * 0.03), 0, TAU2);
+          ctx.fill();
+        }
+      }
+    };
+    drawGirdle(GIRDLE_A_U, hue + 6, 0);
+    drawGirdle(GIRDLE_P_U, hue + 6, 1);
+    const drawBrushes = (gu) => {
+      const phi = rollAng;
+      const depth = Math.cos(phi);
+      if (depth < 0)
+        return;
+      const front = clamp01(0.5 + 0.5 * depth);
+      for (let r = 0;r < BRUSH_ROWS; r++) {
+        const bu = gu - 0.06 - r * 0.035;
+        const hw = halfWidthAt(bu);
+        const lat = Math.cos(phi) * hw * 0.62;
+        const along = halfLength * bu + Math.sin(phi) * hw * 0.34 * 0.62;
+        const dot = transform(cx, cy, ux, uy, along + hw * 0.028, lat + Math.sign(lat || 1) * hw * 0.028);
+        ctx.fillStyle = `hsla(${hue + 8}, 34%, 92%, ${alpha * 0.48 * front})`;
+        ctx.beginPath();
+        ctx.arc(dot.x, dot.y, Math.max(0.28, wMax * 0.026), 0, TAU2);
+        ctx.fill();
+      }
+    };
+    drawBrushes(GIRDLE_A_U);
+    drawBrushes(GIRDLE_P_U);
+    {
+      const coneBaseU = SHOULDER_U;
+      const tip = transform(cx, cy, ux, uy, halfLength * 1.02, 0);
+      const NS = 4;
+      for (let k = 1;k < NS; k++) {
+        const f = k / NS;
+        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU) * 0.22;
+        const dot = transform(cx, cy, ux, uy, halfLength * (coneBaseU + (1.02 - coneBaseU) * 0.62), lat);
+        ctx.fillStyle = `hsla(${hue + 4}, 14%, 88%, ${alpha * 0.08})`;
+        ctx.beginPath();
+        ctx.arc(dot.x, dot.y, Math.max(0.2, wMax * 0.018), 0, TAU2);
+        ctx.fill();
+      }
+      const collarHw = halfWidthAt(coneBaseU);
+      ctx.lineWidth = Math.max(0.35, wMax * 0.03);
+      for (let s = 0;s <= 10; s++) {
+        const f = s / 10;
+        const lat = (f * 2 - 1) * collarHw;
+        const depth = Math.cos(rollAng);
+        if (depth < -0.2)
+          continue;
+        const front = clamp01(0.5 + 0.5 * depth);
+        const base = transform(cx, cy, ux, uy, halfLength * coneBaseU, lat);
+        const tipC = transform(cx, cy, ux, uy, halfLength * (coneBaseU + 0.045), lat + Math.sign(lat || 1) * collarHw * 0.05);
+        ctx.strokeStyle = `hsla(${hue + 6}, 30%, 91%, ${alpha * (0.1 + 0.28 * front)})`;
+        ctx.beginPath();
+        ctx.moveTo(base.x, base.y);
+        ctx.lineTo(tipC.x, tipC.y);
+        ctx.stroke();
+      }
+      ctx.fillStyle = `hsla(${hue + 4}, 18%, 88%, ${alpha * 0.17})`;
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, Math.max(0.36, wMax * 0.052), 0, TAU2);
+      ctx.fill();
+    }
+    {
+      const cvPulse = 0.5 - 0.5 * Math.cos(TAU2 * wrapUnit(finiteOr(cell.cvPhase, 0)));
+      const cvR = Math.max(0.5, wMax * (0.13 + 0.06 * cvPulse));
+      const p = transform(cx, cy, ux, uy, -halfLength * 0.86, 0);
+      ctx.fillStyle = `hsla(${hue + 2}, 22%, 90%, ${alpha * 0.22})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, cvR, 0, TAU2);
+      ctx.fill();
+      ctx.strokeStyle = `hsla(${hue + 4}, 32%, 96%, ${alpha * 0.78})`;
+      ctx.lineWidth = Math.max(0.4, wMax * 0.04);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, cvR, 0, TAU2);
+      ctx.stroke();
+    }
+  });
+  ctx.restore();
+}
+
 // src/theme-engine/renderers/cell/aquarium/hero.ts
 function heroSurfacePoint(hero, point) {
   if (!hero)
@@ -1808,41 +2478,105 @@ function heroConsumeObstacles(circles, cx, cy, heroReach) {
   return { dx: curX - cx, dy: curY - cy };
 }
 
-// src/theme-engine/renderers/cell/aquarium/seeds.ts
-function mix32(n) {
-  let x = n | 0;
-  x ^= x >>> 16;
-  x = Math.imul(x, 2146121005);
-  x ^= x >>> 15;
-  x = Math.imul(x, 2221713035);
-  x ^= x >>> 16;
-  return x >>> 0;
+// src/theme-engine/renderers/cell/aquarium/didinium-paramecium.ts
+var CONTACT_ATTACK_SECONDS = 0.25;
+var CONTACT_SIDE_ATTACHMENT_DELAY_SECONDS = 0.25;
+var CONTACT_SIDE_ATTACHMENT_SECONDS = 0.35;
+var CONTACT_FAN_DELAY_SECONDS = 1.2;
+var CONTACT_FAN_SECONDS = 0.45;
+function didiniumContactPhase(didinium) {
+  const contact = Math.max(0, didinium.contactTimer ?? 0);
+  const duration = Math.max(0.001, didinium.contactDuration ?? contact);
+  const elapsed = Math.max(0, duration - contact);
+  const env = Math.min(1, Math.min(elapsed / CONTACT_ATTACK_SECONDS, contact / CONTACT_ATTACK_SECONDS));
+  const sideEnv = Math.min(1, Math.max(0, (elapsed - CONTACT_SIDE_ATTACHMENT_DELAY_SECONDS) / CONTACT_SIDE_ATTACHMENT_SECONDS));
+  const fanEnv = Math.min(1, Math.max(0, (elapsed - CONTACT_FAN_DELAY_SECONDS) / CONTACT_FAN_SECONDS));
+  return { contact, duration, elapsed, env, sideEnv, fanEnv };
 }
-function seededUnit(seed, index, salt) {
-  return mix32(seed ^ Math.imul(index + 1, 2654435761) ^ salt) / 4294967296;
+function didiniumParameciumContactPoint(didinium, frame, length) {
+  const heading = didinium.phase;
+  const ux = Math.cos(heading), uy = Math.sin(heading);
+  const snoutX = didinium.x + ux * length * 0.52;
+  const snoutY = didinium.y + uy * length * 0.52;
+  let px = snoutX + ux * Math.min(18, Math.max(14, length * 0.42));
+  let py = snoutY + uy * Math.min(18, Math.max(14, length * 0.42));
+  if (frame.hero) {
+    const surface = heroSurfacePoint(frame.hero, { x: snoutX, y: snoutY });
+    px = surface.x;
+    py = surface.y;
+  }
+  return { heading, ux, uy, snoutX, snoutY, px, py };
 }
-function smoothstep01(t) {
-  const x = Math.max(0, Math.min(1, t));
-  return x * x * (3 - 2 * x);
-}
-function lerp2(a, b, t) {
-  return a + (b - a) * t;
-}
-function latticeUnit(seed, ix, iy) {
-  return mix32(seed ^ Math.imul(ix | 0, 2654435761) ^ Math.imul(iy | 0, 2246822507)) / 4294967296;
-}
-function noise2D2(seed, x, y) {
-  const fx = Number.isFinite(x) ? x : 0;
-  const fy = Number.isFinite(y) ? y : 0;
-  const x0 = Math.floor(fx);
-  const y0 = Math.floor(fy);
-  const tx = smoothstep01(fx - x0);
-  const ty = smoothstep01(fy - y0);
-  const v00 = latticeUnit(seed, x0, y0);
-  const v10 = latticeUnit(seed, x0 + 1, y0);
-  const v01 = latticeUnit(seed, x0, y0 + 1);
-  const v11 = latticeUnit(seed, x0 + 1, y0 + 1);
-  return lerp2(lerp2(v00, v10, tx), lerp2(v01, v11, tx), ty);
+function drawDidiniumParameciumContact(ctx, aquarium, frame, view) {
+  const alpha = Math.max(0, Math.min(1, view.alpha * 0.9));
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const d of aquarium.didinium) {
+    const phase = didiniumContactPhase(d);
+    if (phase.contact <= 0)
+      continue;
+    const L = didiniumDisplayLength(d.size, view.didinium.scale);
+    const contact = didiniumParameciumContactPoint(d, frame, L);
+    const { heading, ux, uy, snoutX, snoutY, px, py } = contact;
+    const { env, sideEnv, fanEnv } = phase;
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.rotate(heading);
+    ctx.strokeStyle = `hsla(226, 48%, 96%, ${alpha * 0.96 * env})`;
+    ctx.lineWidth = Math.max(0.9, L * 0.03);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, L * 0.5, L * 0.22, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(214, 54%, 98%, ${alpha * 0.92 * env})`;
+    ctx.lineWidth = Math.max(0.9, L * 0.028);
+    for (const gx of [L * 0.18, -L * 0.12]) {
+      ctx.beginPath();
+      ctx.moveTo(gx, -L * 0.2);
+      ctx.lineTo(gx, L * 0.2);
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.fillStyle = `hsla(205, 18%, 15%, ${alpha * 0.55 * env})`;
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(1.3, L * 0.065), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `hsla(210, 14%, 10%, ${alpha * 0.42 * env})`;
+    ctx.lineWidth = Math.max(1, L * 0.035);
+    ctx.beginPath();
+    ctx.arc(px - ux * 1.5, py - uy * 1.5, Math.max(3, L * 0.16), heading + Math.PI * 0.62, heading + Math.PI * 1.38);
+    ctx.stroke();
+    for (const [side, aMul, wMul] of [[-L * 0.055, 0.55 * sideEnv, 0.8], [0, 1, 1.25], [L * 0.055, 0.55 * sideEnv, 0.8]]) {
+      const sx = snoutX - uy * side;
+      const sy = snoutY + ux * side;
+      ctx.strokeStyle = `hsla(198, 52%, 98%, ${alpha * 0.95 * env * aMul})`;
+      ctx.lineWidth = Math.max(0.75, L * 0.026) * wMul;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(px, py);
+      ctx.stroke();
+    }
+    const fanAlpha = alpha * 0.22 * env * fanEnv;
+    ctx.lineWidth = 0.75;
+    for (let k = 0;k < 7; k++) {
+      if (k % 5 === 1)
+        continue;
+      const jitter = Math.sin((k + 1) * 12.9898) * 0.07;
+      const a = heading + Math.PI + (k - 3) * 0.16 + jitter;
+      const len = 4.8 + k * 5 % 4 * 0.7;
+      const aJ = 0.75 + 0.25 * Math.abs(Math.sin((k + 3) * 4.17));
+      ctx.strokeStyle = `hsla(42, 46%, 95%, ${fanAlpha * aJ})`;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(px + Math.cos(a) * len, py + Math.sin(a) * len);
+      ctx.stroke();
+    }
+    ctx.fillStyle = `hsla(44, 52%, 97%, ${alpha * 0.86 * env})`;
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(1, L * 0.04), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 // src/theme-engine/renderers/cell/aquarium/diatoms.ts
@@ -1852,7 +2586,7 @@ function wrap(value, max) {
   const wrapped = value % max;
   return wrapped < 0 ? wrapped + max : wrapped;
 }
-function transform(cx, cy, ux, uy, x, y) {
+function transform2(cx, cy, ux, uy, x, y) {
   const nx = -uy;
   const ny = ux;
   return { x: cx + ux * x + nx * y, y: cy + uy * x + ny * y };
@@ -1880,10 +2614,10 @@ function diatomGeometry(shape, options = {}) {
       const a = i / steps * Math.PI * 2;
       const x = halfLength * Math.cos(a);
       const y = halfWidth * Math.sin(a) * (0.72 + 0.28 * Math.abs(Math.cos(a)));
-      outline.push(transform(cx, cy, ux, uy, x, y));
+      outline.push(transform2(cx, cy, ux, uy, x, y));
     }
-    raphe.push(transform(cx, cy, ux, uy, -halfLength * 0.78, 0));
-    raphe.push(transform(cx, cy, ux, uy, halfLength * 0.78, 0));
+    raphe.push(transform2(cx, cy, ux, uy, -halfLength * 0.78, 0));
+    raphe.push(transform2(cx, cy, ux, uy, halfLength * 0.78, 0));
     const pairCount = Math.max(1, Math.min(8, Math.floor(length / minStriaSpacing)));
     for (let i = 1;i <= pairCount; i++) {
       const x = i / (pairCount + 1) * halfLength * 0.9;
@@ -1892,8 +2626,8 @@ function diatomGeometry(shape, options = {}) {
         const u = sx / halfLength;
         const hw = naviculaHalfWidth(u, halfWidth) * 0.72;
         striae.push({
-          from: transform(cx, cy, ux, uy, sx, -hw),
-          to: transform(cx, cy, ux, uy, sx, hw)
+          from: transform2(cx, cy, ux, uy, sx, -hw),
+          to: transform2(cx, cy, ux, uy, sx, hw)
         });
       }
     }
@@ -1901,16 +2635,16 @@ function diatomGeometry(shape, options = {}) {
     const steps = 20;
     for (let i = 0;i < steps; i++) {
       const a = i / steps * Math.PI * 2;
-      outline.push(transform(cx, cy, ux, uy, halfLength * Math.cos(a), halfWidth * Math.sin(a)));
+      outline.push(transform2(cx, cy, ux, uy, halfLength * Math.cos(a), halfWidth * Math.sin(a)));
     }
-    raphe.push(transform(cx, cy, ux, uy, -halfLength * 0.18, 0));
-    raphe.push(transform(cx, cy, ux, uy, halfLength * 0.18, 0));
+    raphe.push(transform2(cx, cy, ux, uy, -halfLength * 0.18, 0));
+    raphe.push(transform2(cx, cy, ux, uy, halfLength * 0.18, 0));
     const radialCount = Math.max(4, Math.min(16, Math.floor(Math.PI * width / minStriaSpacing)));
     for (let i = 0;i < radialCount; i++) {
       const a = i / radialCount * Math.PI * 2;
       striae.push({
-        from: transform(cx, cy, ux, uy, Math.cos(a) * halfLength * 0.18, Math.sin(a) * halfWidth * 0.18),
-        to: transform(cx, cy, ux, uy, Math.cos(a) * halfLength * 0.72, Math.sin(a) * halfWidth * 0.72)
+        from: transform2(cx, cy, ux, uy, Math.cos(a) * halfLength * 0.18, Math.sin(a) * halfWidth * 0.18),
+        to: transform2(cx, cy, ux, uy, Math.cos(a) * halfLength * 0.72, Math.sin(a) * halfWidth * 0.72)
       });
     }
   }
@@ -1956,7 +2690,7 @@ function updateDiatoms(diatoms, frame, view) {
     heading: wrap(finite(diatom.heading, 0) + finite(diatom.rotationRate, 0) * dt, TAU2)
   }));
 }
-function drawPolyline(ctx, points, close) {
+function drawPolyline2(ctx, points, close) {
   if (points.length === 0)
     return;
   ctx.beginPath();
@@ -1992,13 +2726,13 @@ function drawDiatoms(ctx, diatoms, frame, view) {
     const fillAlpha = alpha * 0.18 * shimmer;
     const strokeAlpha = alpha * 0.42 * shimmer;
     const detailAlpha = alpha * 0.24 * shimmer;
-    drawPolyline(ctx, geometry.outline, true);
+    drawPolyline2(ctx, geometry.outline, true);
     ctx.fillStyle = `hsla(${hue}, 35%, 63%, ${fillAlpha})`;
     ctx.strokeStyle = `hsla(${hue}, 42%, 70%, ${strokeAlpha})`;
     ctx.lineWidth = 0.55;
     ctx.fill();
     ctx.stroke();
-    drawPolyline(ctx, geometry.raphe, false);
+    drawPolyline2(ctx, geometry.raphe, false);
     ctx.strokeStyle = `hsla(${hue + 12}, 28%, 78%, ${detailAlpha})`;
     ctx.lineWidth = 0.35;
     ctx.stroke();
@@ -2035,7 +2769,7 @@ function euglenaModeView(mode) {
 function point(cx, cy, ux, uy, along) {
   return { x: cx + ux * along, y: cy + uy * along };
 }
-function transform2(cx, cy, ux, uy, along, lateral) {
+function transform3(cx, cy, ux, uy, along, lateral) {
   const nx = -uy;
   const ny = ux;
   return { x: cx + ux * along + nx * lateral, y: cy + uy * along + ny * lateral };
@@ -2044,7 +2778,7 @@ function euglenaDisplayLength(size, scale) {
   const s = Math.max(0.1, finite(scale, 1));
   return Math.max(5, Math.min(16 * s, (7.2 + finite(size, 1) * 1.6) * s));
 }
-function bodyShape(u) {
+function bodyShape2(u) {
   const us = u - 0.28 * (1 - u * u);
   const a = Math.max(0, 1 - us * us);
   const p = us >= 0 ? 0.4 : 0.9;
@@ -2053,16 +2787,16 @@ function bodyShape(u) {
   w *= 1 - 0.32 * Math.exp(-d * d);
   return w;
 }
-var BODY_SHAPE_MAX = (() => {
+var BODY_SHAPE_MAX2 = (() => {
   let m = 0;
   for (let i = 0;i <= 400; i++) {
     const u = -1 + i / 400 * 2;
-    m = Math.max(m, bodyShape(u));
+    m = Math.max(m, bodyShape2(u));
   }
   return m;
 })();
-function normHalfWidth(u) {
-  return bodyShape(u) / BODY_SHAPE_MAX;
+function normHalfWidth2(u) {
+  return bodyShape2(u) / BODY_SHAPE_MAX2;
 }
 function euglenaPose(rollPhase, metabolyPhase, options = {}) {
   const cx = finiteOr(options.centerX, 0);
@@ -2094,13 +2828,13 @@ function euglenaPose(rollPhase, metabolyPhase, options = {}) {
     let at = 0;
     for (let i = 0;i <= 40; i++) {
       const u = -1 + i / 40 * 2;
-      const base = normHalfWidth(u);
+      const base = normHalfWidth2(u);
       a0 += base;
       at += base * metabolyAt(u);
     }
     areaScale = at > 0.000001 ? a0 / at : 1;
   }
-  const halfWidthAt = (u) => wmax * widthMul * normHalfWidth(u) * metabolyAt(u) * areaScale;
+  const halfWidthAt = (u) => wmax * widthMul * normHalfWidth2(u) * metabolyAt(u) * areaScale;
   const anterior = point(cx, cy, ux, uy, halfLength);
   const posterior = point(cx, cy, ux, uy, -halfLength);
   const SAMPLES = Math.max(28, Math.min(56, Math.round(length / 2.2)));
@@ -2109,8 +2843,8 @@ function euglenaPose(rollPhase, metabolyPhase, options = {}) {
   for (let i = 0;i <= SAMPLES; i++) {
     const u = -Math.cos(Math.PI * i / SAMPLES);
     const hw = halfWidthAt(u);
-    upper.push(transform2(cx, cy, ux, uy, halfLength * u, hw));
-    lower.push(transform2(cx, cy, ux, uy, halfLength * u, -hw));
+    upper.push(transform3(cx, cy, ux, uy, halfLength * u, hw));
+    lower.push(transform3(cx, cy, ux, uy, halfLength * u, -hw));
   }
   const outline = [...upper, ...lower.reverse()];
   const bodySamples = [-1, -0.5, 0, 0.5, 1].map((u) => ({ u, halfWidth: halfWidthAt(u) }));
@@ -2126,11 +2860,11 @@ function euglenaPose(rollPhase, metabolyPhase, options = {}) {
     const lateral = clamp(ampTip * env * (Math.sin(ph) + 0.28 * Math.sin(2 * ph + Math.PI / 2)), -maxLat, maxLat);
     const curl = ampTip * env * 0.55 * Math.cos(ph);
     const along = halfLength + flagellumLength * q + curl;
-    flagellumPoints.push(transform2(cx, cy, ux, uy, along, lateral));
+    flagellumPoints.push(transform3(cx, cy, ux, uy, along, lateral));
   }
   const flagellumEnd = flagellumPoints[flagellumPoints.length - 1];
   const eyeSUnit = 0.7;
-  const eyespot = transform2(cx, cy, ux, uy, halfLength * 0.66, eyeSUnit * Math.cos(rollAng) * halfWidthAt(0.66));
+  const eyespot = transform3(cx, cy, ux, uy, halfLength * 0.66, eyeSUnit * Math.cos(rollAng) * halfWidthAt(0.66));
   const eyespotFront = 0.5 + 0.5 * Math.cos(rollAng - eyeSUnit * 1.2);
   const seed = options.organelleSeed;
   const chloroplasts = [];
@@ -2140,13 +2874,13 @@ function euglenaPose(rollPhase, metabolyPhase, options = {}) {
   let contractileVacuole2 = null;
   const pellicleStrips = [];
   if (seed !== undefined) {
-    const bodyPoint = (u, sFrac) => transform2(cx, cy, ux, uy, halfLength * u, sFrac * halfWidthAt(u));
+    const bodyPoint = (u, sFrac) => transform3(cx, cy, ux, uy, halfLength * u, sFrac * halfWidthAt(u));
     const safeEllipse = (u, sUnit, baseRx, baseRy, hueShift, lightShift) => {
       const hw = halfWidthAt(u);
       const ry = Math.max(0.2, Math.min(baseRy, hw * 0.85));
       const latMax = Math.max(0, hw - ry);
       const lat = sUnit * latMax * Math.cos(rollAng);
-      const p = transform2(cx, cy, ux, uy, halfLength * u, lat);
+      const p = transform3(cx, cy, ux, uy, halfLength * u, lat);
       return {
         x: p.x,
         y: p.y,
@@ -2182,7 +2916,7 @@ function euglenaPose(rollPhase, metabolyPhase, options = {}) {
       const cvR = Math.max(0.4, Math.min(length * (0.025 + 0.05 * cvPulse), halfWidthAt(0.6) * 0.75));
       const latMax = Math.max(0, halfWidthAt(0.6) - cvR);
       const lat = -0.5 * latMax * Math.cos(rollAng);
-      const p = transform2(cx, cy, ux, uy, halfLength * 0.6, lat);
+      const p = transform3(cx, cy, ux, uy, halfLength * 0.6, lat);
       contractileVacuole2 = { x: p.x, y: p.y, r: cvR };
     }
     const stCount = Math.max(0, Math.floor(finiteOr(options.striaeCount, 0)));
@@ -2591,7 +3325,7 @@ function updateEuglena(euglena, frame, view) {
     };
   });
 }
-function drawPolyline2(ctx, points, close) {
+function drawPolyline3(ctx, points, close) {
   if (points.length === 0)
     return;
   ctx.beginPath();
@@ -2675,7 +3409,7 @@ function drawEuglena(ctx, euglena, frame, view) {
       includeCV,
       cvPhase: cell.cvPhase
     });
-    drawPolyline2(ctx, pose.outline, true);
+    drawPolyline3(ctx, pose.outline, true);
     ctx.fillStyle = `hsla(${hue}, 50%, 46%, ${alpha * 0.5})`;
     ctx.strokeStyle = `hsla(${hue + 6}, 42%, 64%, ${alpha * 0.62})`;
     ctx.lineWidth = Math.max(0.5, Math.min(0.9, width * 0.08));
@@ -2693,7 +3427,7 @@ function drawEuglena(ctx, euglena, frame, view) {
       ctx.strokeStyle = `hsla(${hue - 6}, 22%, 76%, ${alpha * 0.4})`;
       ctx.lineWidth = Math.max(0.35, Math.min(0.55, width * 0.06));
       for (const strip of pose.pellicleStrips) {
-        drawPolyline2(ctx, strip, false);
+        drawPolyline3(ctx, strip, false);
         ctx.stroke();
       }
     }
@@ -2757,15 +3491,15 @@ function drawEuglena(ctx, euglena, frame, view) {
       }
       ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.3 * flagFade})`;
       ctx.lineWidth = Math.max(0.9, width * 0.18);
-      drawPolyline2(ctx, fp, false);
+      drawPolyline3(ctx, fp, false);
       ctx.stroke();
       ctx.strokeStyle = `hsla(${hue + 8}, 34%, 70%, ${alpha * 0.9 * flagFade})`;
       ctx.lineWidth = Math.max(0.5, width * 0.1);
-      drawPolyline2(ctx, fp, false);
+      drawPolyline3(ctx, fp, false);
       ctx.stroke();
       const nprox = Math.max(2, Math.round(fp.length * 0.6));
       ctx.lineWidth = Math.max(0.8, width * 0.16);
-      drawPolyline2(ctx, fp.slice(0, nprox), false);
+      drawPolyline3(ctx, fp.slice(0, nprox), false);
       ctx.stroke();
     }
   });
@@ -3065,7 +3799,7 @@ function updateVorticella(vorticella, frame, view) {
     };
   });
 }
-function drawPolyline3(ctx, points, close) {
+function drawPolyline4(ctx, points, close) {
   if (points.length === 0)
     return;
   ctx.beginPath();
@@ -3172,7 +3906,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
       const lipGate = 1 - (1 - (0.55 + 0.45 * open)) * smoothstep2((u - 0.82) / 0.18);
       return D * base * lipGate;
     };
-    drawPolyline3(ctx, geom.stalkPath, false);
+    drawPolyline4(ctx, geom.stalkPath, false);
     ctx.strokeStyle = `hsla(202, 26%, 80%, ${alpha * 0.34})`;
     ctx.lineWidth = Math.max(0.6, D * 0.07);
     ctx.stroke();
@@ -3181,7 +3915,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
       for (let i = 1;i < n; i++) {
         const t = i / (n - 1);
         const near = Math.cos(t * geom.coilTurns * TAU2);
-        drawPolyline3(ctx, [geom.stalkPath[i - 1], geom.stalkPath[i]], false);
+        drawPolyline4(ctx, [geom.stalkPath[i - 1], geom.stalkPath[i]], false);
         if (near > 0) {
           ctx.strokeStyle = `hsla(204, 32%, 90%, ${alpha * (0.18 + 0.34 * near) * s})`;
           ctx.lineWidth = Math.max(0.4, D * (0.05 + 0.05 * near));
@@ -3192,7 +3926,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
         ctx.stroke();
       }
     }
-    drawPolyline3(ctx, geom.stalkPath, false);
+    drawPolyline4(ctx, geom.stalkPath, false);
     ctx.strokeStyle = `hsla(204, 30%, 70%, ${alpha * 0.3})`;
     ctx.lineWidth = Math.max(0.75, D * 0.03);
     ctx.stroke();
@@ -3216,7 +3950,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
         const beat = Math.sin((a * 3 - beatBase) * TAU2);
         const len = D * (0.12 + 0.025 * beat);
         const tip = { x: baseP.x - ux * len + nx * beat * D * 0.02, y: baseP.y - uy * len + ny * beat * D * 0.02 };
-        drawPolyline3(ctx, [baseP, tip], false);
+        drawPolyline4(ctx, [baseP, tip], false);
         ctx.stroke();
       }
     }
@@ -3244,14 +3978,14 @@ function drawVorticella(ctx, vorticella, frame, view) {
       ctx.fillStyle = halo;
       ctx.fill();
     }
-    drawPolyline3(ctx, outline, true);
+    drawPolyline4(ctx, outline, true);
     const cyto = ctx.createLinearGradient(rimC.x, rimC.y, neck.x, neck.y);
     cyto.addColorStop(0, `hsla(200, 16%, 94%, ${alpha * 0.62 * glow})`);
     cyto.addColorStop(1, `hsla(200, 20%, 86%, ${alpha * 0.74 * glow})`);
     ctx.fillStyle = cyto;
     ctx.fill();
     ctx.save();
-    drawPolyline3(ctx, outline, true);
+    drawPolyline4(ctx, outline, true);
     ctx.clip();
     const gSeed = (Math.round(finite(cell.restLength, 10) * 8192) ^ 28218) >>> 0;
     const gCount = Math.round(clamp(D * 5, 44, 150));
@@ -3282,16 +4016,16 @@ function drawVorticella(ctx, vorticella, frame, view) {
       ctx.fill();
     }
     ctx.restore();
-    drawPolyline3(ctx, outline, true);
+    drawPolyline4(ctx, outline, true);
     ctx.strokeStyle = `hsla(205, 12%, 70%, ${alpha * 0.22})`;
     ctx.lineWidth = Math.max(0.5, D * 0.03);
     ctx.stroke();
-    drawPolyline3(ctx, outline, true);
+    drawPolyline4(ctx, outline, true);
     ctx.strokeStyle = `hsla(200, 16%, 88%, ${alpha * 0.3})`;
     ctx.lineWidth = Math.max(0.5, D * 0.018);
     ctx.stroke();
     ctx.save();
-    drawPolyline3(ctx, outline, true);
+    drawPolyline4(ctx, outline, true);
     ctx.clip();
     const macPts = [];
     const macAlong = drawBellH * 0.5;
@@ -3300,11 +4034,11 @@ function drawVorticella(ctx, vorticella, frame, view) {
       const th = Math.PI * (0.32 + i / 14 * 1.08);
       macPts.push(bodyPoint(macAlong - macR * 1.35 * Math.cos(th), macR * 0.95 * Math.sin(th)));
     }
-    drawPolyline3(ctx, macPts, false);
+    drawPolyline4(ctx, macPts, false);
     ctx.strokeStyle = `hsla(205, 9%, 54%, ${alpha * 0.28})`;
     ctx.lineWidth = Math.max(1.6, D * 0.24);
     ctx.stroke();
-    drawPolyline3(ctx, macPts, false);
+    drawPolyline4(ctx, macPts, false);
     ctx.strokeStyle = `hsla(200, 14%, 86%, ${alpha * 0.5})`;
     ctx.lineWidth = Math.max(1, D * 0.12);
     ctx.stroke();
@@ -3374,13 +4108,13 @@ function drawVorticella(ctx, vorticella, frame, view) {
       }
       return pts;
     };
-    drawPolyline3(ctx, ringPath(Rrim, lipRy, 0.05), true);
+    drawPolyline4(ctx, ringPath(Rrim, lipRy, 0.05), true);
     ctx.fillStyle = `hsla(186, 36%, 88%, ${alpha * 0.22 * open})`;
     ctx.fill();
     ctx.strokeStyle = `hsla(186, 50%, 90%, ${alpha * 0.55 * open})`;
     ctx.lineWidth = Math.max(0.75, D * 0.05);
     ctx.stroke();
-    drawPolyline3(ctx, ringPath(Rrim * 0.9, lipRy * 0.9, 0.07), true);
+    drawPolyline4(ctx, ringPath(Rrim * 0.9, lipRy * 0.9, 0.07), true);
     ctx.fillStyle = `hsla(200, 12%, 84%, ${alpha * 0.26 * open})`;
     ctx.fill();
     if (crownFade > 0.02 && D >= 9) {
@@ -3395,7 +4129,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
         const depth = Math.sin(a) * lipRy * rr + cytDep * t;
         spiral.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
-      drawPolyline3(ctx, spiral, false);
+      drawPolyline4(ctx, spiral, false);
       ctx.strokeStyle = `hsla(198, 18%, 94%, ${alpha * 0.48 * crownFade * glow})`;
       ctx.lineWidth = Math.max(0.75, D * 0.03);
       ctx.stroke();
@@ -3408,7 +4142,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
         const depth = Math.sin(a) * lipRy * rr + cytDep * t;
         spiral2.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
-      drawPolyline3(ctx, spiral2, false);
+      drawPolyline4(ctx, spiral2, false);
       ctx.strokeStyle = `hsla(198, 18%, 92%, ${alpha * 0.34 * crownFade * glow})`;
       ctx.lineWidth = Math.max(0.75, D * 0.022);
       ctx.stroke();
@@ -3427,7 +4161,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
         const depth = Math.sin(a * TAU2) * lipRy;
         bandPts.push({ x: rimC.x + nx * lateral + ux * depth, y: rimC.y + ny * lateral + uy * depth });
       }
-      drawPolyline3(ctx, bandPts, true);
+      drawPolyline4(ctx, bandPts, true);
       ctx.strokeStyle = `hsla(198, 16%, 93%, ${alpha * 0.26 * crownFade * glow})`;
       ctx.lineWidth = Math.max(1, D * 0.11);
       ctx.stroke();
@@ -3447,644 +4181,11 @@ function drawVorticella(ctx, vorticella, frame, view) {
         const outx = nx * (ca >= 0 ? 0.5 : -0.5) + ux;
         const outy = ny * (ca >= 0 ? 0.5 : -0.5) + uy;
         const tip = { x: base.x + outx * len + nx * beat * D * 0.02, y: base.y + outy * len + ny * beat * D * 0.02 };
-        drawPolyline3(ctx, [base, tip], false);
+        drawPolyline4(ctx, [base, tip], false);
         ctx.stroke();
       }
     }
   }
-  ctx.restore();
-}
-
-// src/theme-engine/renderers/cell/aquarium/didinium.ts
-var DIDINIUM_SALT = 220011530;
-var ASPECT = 1.42;
-var GIRDLE_A_U = 0.46;
-var GIRDLE_P_U = -0.16;
-var SHOULDER_U = 0.49;
-var BRUSH_ROWS = 5;
-var STOPGO_FREQ = 0.32;
-var WANDER_FREQ = 0.1;
-var WANDER_RAD = 0.42;
-var HELIX_LEAN = 0.07;
-var CURVE_FREQ = 0.09;
-var CURVE_BIAS = 0.18;
-var WALL_LOOK = 1.25;
-var BACKUP_SECONDS = 0.08;
-var AVOID_SECONDS = 0.18;
-var AVOID_TURN_MIN = 2 * Math.PI / 3;
-var AVOID_TURN_MAX = 5 * Math.PI / 6;
-function didiniumModeView(mode) {
-  switch (mode) {
-    case "recording":
-      return { motionMul: 1.2, alphaMul: 1.08 };
-    case "transcribing":
-      return { motionMul: 0.35, alphaMul: 0.8 };
-    case "error":
-      return { motionMul: 0.15, alphaMul: 0.55 };
-    case "idle":
-    default:
-      return { motionMul: 1, alphaMul: 1 };
-  }
-}
-function didiniumDisplayLength(size, scale) {
-  const s = Math.max(0.1, finite(scale, 1));
-  return Math.max(7, Math.min(34 * s, (16 + finite(size, 1) * 4) * s));
-}
-function bodyShape2(u) {
-  if (u >= SHOULDER_U) {
-    const q = (u - SHOULDER_U) / (1 - SHOULDER_U);
-    const wShoulder = 0.72;
-    return wShoulder * (0.07 + 0.93 * Math.pow(1 - q, 1.35));
-  }
-  const t = (u - SHOULDER_U) / (-1 - SHOULDER_U);
-  const tp = 0.45;
-  if (t <= tp) {
-    return 0.72 + 0.28 * Math.sin(t / tp * (Math.PI / 2));
-  }
-  const s = (t - tp) / (1 - tp);
-  return Math.sqrt(Math.max(0, 1 - s * s));
-}
-var BODY_SHAPE_MAX2 = (() => {
-  let m = 0;
-  for (let i = 0;i <= 400; i++) {
-    const u = -1 + i / 400 * 2;
-    m = Math.max(m, bodyShape2(u));
-  }
-  return m;
-})();
-function normHalfWidth2(u) {
-  return bodyShape2(u) / BODY_SHAPE_MAX2;
-}
-function seedDidinium(count, seed, frame, salt = DIDINIUM_SALT) {
-  if (count <= 0)
-    return [];
-  const out = [];
-  const safeWidth = Math.max(0, finite(frame.width, 0));
-  const safeHeight = Math.max(0, finite(frame.height, 0));
-  for (let i = 0;i < count; i++) {
-    const heading = seededUnit(seed, i, salt ^ 1757159915) * TAU2;
-    out.push({
-      x: (0.2 + 0.6 * seededUnit(seed, i, salt)) * safeWidth,
-      y: (0.25 + 0.5 * seededUnit(seed, i, salt ^ 1374496523)) * safeHeight,
-      phase: heading,
-      size: 0.5 + seededUnit(seed, i, salt ^ 48610963),
-      heading,
-      swimSpeed: 0.85 + seededUnit(seed, i, salt ^ 802853537) * 0.3,
-      rollPhase: seededUnit(seed, i, salt ^ 1107813911),
-      rollRate: 0.6 + seededUnit(seed, i, salt ^ 348696353) * 0.24,
-      beatPhase: seededUnit(seed, i, salt ^ 668265263),
-      beatRate: 4 + seededUnit(seed, i, salt ^ 1966046297) * 1.5,
-      cvPhase: seededUnit(seed, i, salt ^ 1033993285),
-      cvRate: 0.045 + seededUnit(seed, i, salt ^ 1508030371) * 0.02,
-      turnSide: seededUnit(seed, i, salt ^ 2050968865) < 0.5 ? -1 : 1,
-      avoidIndex: 0,
-      avoidFrom: heading,
-      avoidTo: heading,
-      avoidProgress: 1,
-      noiseSeed: mix32(seed ^ Math.imul(i + 1, 2654435761) ^ salt) >>> 0
-    });
-  }
-  return out;
-}
-var DIDINIUM_RELEVANT_FIELDS = new Set(["obstacle", "motile"]);
-function didiniumContribute(cell, idx, scale = 1) {
-  const length = didiniumDisplayLength(finite(cell.size, 1), scale);
-  return [{
-    kind: "motile",
-    x: finite(cell.x, 0),
-    y: finite(cell.y, 0),
-    heading: finiteOr(cell.heading, finiteOr(cell.phase, 0)),
-    radius: length * 0.35,
-    speed: Math.max(0, finiteOr(cell.swimSpeed, 0)),
-    role: "predator",
-    strength: 0.75,
-    sourceId: sourceId("didinium", idx)
-  }];
-}
-function updateDidinium(didinium, frame, view) {
-  if (didinium.length === 0)
-    return didinium;
-  const dt = Math.max(0, finite(frame.dt, 0));
-  const safeWidth = Math.max(0, finite(frame.width, 0));
-  const safeHeight = Math.max(0, finite(frame.height, 0));
-  const activityMix = clamp01(finite(frame.activity, 0) * finite(view.activityBoost, 0));
-  const modeView = didiniumModeView(frame.mode);
-  const vIdleBL = Math.max(0, finite(view.didinium.speed, 0));
-  const vActiveBL = Math.max(0, finite(view.didinium.speedActive, vIdleBL));
-  const vBL = (vIdleBL + (vActiveBL - vIdleBL) * activityMix) * modeView.motionMul;
-  const act = modeView.motionMul * (1 + 0.7 * activityMix);
-  const scale = view.didinium.scale;
-  const t = finite(frame.t, 0);
-  const wrapPi2 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
-  return didinium.map((cell, _idx) => {
-    const L = didiniumDisplayLength(finite(cell.size, 1), scale);
-    const nseed = finiteOr(cell.noiseSeed, 0) | 0;
-    let heading = finite(cell.heading, 0);
-    const px0 = finite(cell.x, 0);
-    const py0 = finite(cell.y, 0);
-    const wasContacting = finiteOr(cell.contactTimer, 0) > 0;
-    let contactTimer = Math.max(0, finiteOr(cell.contactTimer, 0) - dt);
-    let contactDuration = Math.max(0, finiteOr(cell.contactDuration, contactTimer));
-    let huntCooldown = Math.max(0, finiteOr(cell.huntCooldown, 0) - dt);
-    const stopgo = noise2D2(nseed ^ 1399873280, t * STOPGO_FREQ, 0.13);
-    const cruiseEnv = 0.65 + 0.35 * (1 - Math.pow(1 - stopgo, 1.4));
-    const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L * cruiseEnv;
-    const wander = (noise2D2(nseed ^ 447978529, t * WANDER_FREQ, 0.61) * 2 - 1) * WANDER_RAD;
-    let wallPressure = 0;
-    let wallAwayX = 0;
-    let wallAwayY = 0;
-    const look = L * WALL_LOOK;
-    if (px0 < look) {
-      wallAwayX += 1 - px0 / look;
-      wallPressure += 1 - px0 / look;
-    }
-    if (safeWidth - px0 < look) {
-      wallAwayX -= 1 - (safeWidth - px0) / look;
-      wallPressure += 1 - (safeWidth - px0) / look;
-    }
-    if (py0 < look) {
-      wallAwayY += 1 - py0 / look;
-      wallPressure += 1 - py0 / look;
-    }
-    if (safeHeight - py0 < look) {
-      wallAwayY -= 1 - (safeHeight - py0) / look;
-      wallPressure += 1 - (safeHeight - py0) / look;
-    }
-    let avoidIndex = Math.max(0, Math.floor(finiteOr(cell.avoidIndex, 0)));
-    let avoidFrom = finiteOr(cell.avoidFrom, heading);
-    let avoidTo = finiteOr(cell.avoidTo, heading);
-    let avoidProgress = clamp01(finiteOr(cell.avoidProgress, 1));
-    const side = finiteOr(cell.turnSide, 1) < 0 ? -1 : 1;
-    const hitWall = wallPressure > 0.12 && avoidProgress >= 1;
-    if (hitWall) {
-      avoidIndex += 1;
-      const magU = noise2D2(nseed ^ 791783381, avoidIndex, 0.71);
-      const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
-      avoidFrom = heading;
-      const inward = Math.atan2(wallAwayY, wallAwayX);
-      avoidTo = inward + side * magnitude * 0.5;
-      avoidProgress = 0;
-    }
-    const avoidTotal = BACKUP_SECONDS + AVOID_SECONDS;
-    const backupFrac = BACKUP_SECONDS / avoidTotal;
-    let reversing = false;
-    if (avoidProgress < 1) {
-      const next = Math.min(1, avoidProgress + dt / avoidTotal);
-      if (avoidProgress < backupFrac) {
-        reversing = true;
-      } else {
-        const turnK = 6;
-        heading += wrapPi2(avoidTo - heading) * (1 - Math.exp(-turnK * dt));
-        if (next >= 1)
-          heading = avoidTo;
-      }
-      avoidProgress = next;
-    } else if (wallPressure > 0.000001) {
-      const desired = Math.atan2(Math.sin(heading) + wallAwayY, Math.cos(heading) + wallAwayX);
-      const turnK = 3 + 7 * Math.min(1, wallPressure);
-      heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
-    }
-    const field = frame.interaction;
-    const prey = (field?.obstacles ?? []).find((obs) => obs.shape === "ellipse" && obs.social);
-    let preyData = null;
-    let huntWeight = 0;
-    if (prey && prey.shape === "ellipse") {
-      const hh = finiteOr(prey.heading, 0);
-      const ch = Math.cos(hh), sh = Math.sin(hh);
-      const dx = px0 - prey.x;
-      const dy = py0 - prey.y;
-      const localX = dx * ch + dy * sh;
-      const localY = -dx * sh + dy * ch;
-      const A = Math.max(0.001, finiteOr(prey.halfLen, 1) + L * 0.38);
-      const B = Math.max(0.001, finiteOr(prey.halfWid, 1) + L * 0.38);
-      const q = Math.sqrt(localX * localX / (A * A) + localY * localY / (B * B)) || 0.000001;
-      const targetQ = 1.03;
-      const sx = localX * (targetQ / q);
-      const sy = localY * (targetQ / q);
-      const surfaceX = prey.x + sx * ch - sy * sh;
-      const surfaceY = prey.y + sx * sh + sy * ch;
-      const toTargetX = q < 1 ? prey.x - px0 : surfaceX - px0;
-      const toTargetY = q < 1 ? prey.y - py0 : surfaceY - py0;
-      const toTargetD = Math.hypot(toTargetX, toTargetY) || 1;
-      const probeHeading = heading + wander;
-      const approachDot = (Math.cos(probeHeading) * toTargetX + Math.sin(probeHeading) * toTargetY) / toTargetD;
-      preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y, approachDot };
-      if (q < 1.07 && approachDot > 0.55 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
-        contactDuration = 2.4 + seededUnit(nseed, 0, 714207245) * 0.9;
-        contactTimer = contactDuration;
-      }
-    }
-    let obstaclePressure = 0;
-    let obstacleAwayX = 0;
-    let obstacleAwayY = 0;
-    const circleObstacles = [];
-    for (const obs of field?.obstacles ?? []) {
-      if (obs.shape !== "circle")
-        continue;
-      circleObstacles.push({ x: obs.x, y: obs.y, radius: obs.radius });
-      const dx = px0 - obs.x;
-      const dy = py0 - obs.y;
-      const d = Math.hypot(dx, dy) || 1;
-      const reach = obs.radius + L * 1.25;
-      if (d < reach) {
-        const p = 1 - d / reach;
-        obstaclePressure += p;
-        obstacleAwayX += dx / d * p;
-        obstacleAwayY += dy / d * p;
-      }
-    }
-    for (const motile of field?.motiles ?? []) {
-      if (motile.sourceId >> 20 !== KIND_ID.euglena)
-        continue;
-      const dx = px0 - motile.x;
-      const dy = py0 - motile.y;
-      const d = Math.hypot(dx, dy) || 1;
-      const radius = Math.max(0, finiteOr(motile.radius, 0));
-      const reach = Math.max(8, 0.85 * (L + radius));
-      if (d < reach) {
-        const p = (1 - d / reach) * 0.45;
-        obstaclePressure += p;
-        obstacleAwayX += dx / d * p;
-        obstacleAwayY += dy / d * p;
-      }
-    }
-    if (obstaclePressure > 0.0001 && avoidProgress >= 1) {
-      const desired = Math.atan2(obstacleAwayY, obstacleAwayX);
-      const turnK = 2.5 + 5 * Math.min(1, obstaclePressure);
-      heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
-    } else if (avoidProgress >= 1 && wallPressure < 0.2 && contactTimer <= 0) {
-      if (preyData) {
-        const dx = preyData.surfaceX - px0;
-        const dy = preyData.surfaceY - py0;
-        const d = Math.hypot(dx, dy) || 1;
-        const sense = clamp(L * 2, 32, 52);
-        if (d < sense && preyData.approachDot > -0.15) {
-          const cone = clamp01((preyData.approachDot + 0.15) / 0.65);
-          const huntRaw = clamp01((sense - d) / (sense * 0.75)) * cone;
-          const hunt = preyData.q < 1.07 ? huntRaw : Math.min(0.35, huntRaw);
-          huntWeight = hunt;
-          const desired = Math.atan2(dy, dx);
-          const turnK = 1.4 + 2.4 * hunt;
-          heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt)) * hunt;
-        }
-      }
-    }
-    const curveEnv = clamp01(noise2D2(nseed ^ 2009178803, t * CURVE_FREQ, 0.29));
-    const curve = side * CURVE_BIAS * curveEnv;
-    const huntSuppression = 1 - 0.35 * huntWeight;
-    const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) * huntSuppression + curve * huntSuppression;
-    const spinFreq = Math.max(0, finite(cell.rollRate, 0));
-    const spinSeed = seededUnit(nseed, 0, 1821285621);
-    const spinAng = TAU2 * (spinSeed + spinFreq * t);
-    const lean = Math.sin(spinAng) * HELIX_LEAN;
-    const eh = travel + lean;
-    const ux = Math.cos(eh);
-    const uy = Math.sin(eh);
-    const vSigned = reversing ? -vPx * 0.28 : vPx;
-    const rawX = px0 + ux * vSigned * dt;
-    const rawY = py0 + uy * vSigned * dt;
-    let nextX = rawX;
-    let nextY = rawY;
-    if (contactTimer > 0 && preyData) {
-      const corrX = preyData.surfaceX - nextX;
-      const corrY = preyData.surfaceY - nextY;
-      const corrL = Math.hypot(corrX, corrY) || 1;
-      const maxStep = L * (preyData.q < 1 ? 0.65 : 0.04);
-      const kLatch = preyData.q < 1 ? 1 : 1 - Math.exp(-2 * dt);
-      const step = Math.min(maxStep, corrL * kLatch);
-      nextX += corrX / corrL * step;
-      nextY += corrY / corrL * step;
-      heading = Math.atan2(preyData.preyY - nextY, preyData.preyX - nextX);
-    }
-    const margin = Math.min(L * 0.55, safeWidth * 0.45, safeHeight * 0.45);
-    for (const obs of circleObstacles) {
-      const dx = nextX - obs.x;
-      const dy = nextY - obs.y;
-      const d = Math.hypot(dx, dy) || 1;
-      const minD = obs.radius + L * 0.45;
-      if (d < minD) {
-        const need = minD - d;
-        const step = Math.min(L * 0.35, need * (1 - Math.exp(-8 * dt)));
-        nextX += dx / d * step;
-        nextY += dy / d * step;
-        if (d < obs.radius + L * 0.9 && avoidProgress >= 1 && contactTimer <= 0) {
-          avoidIndex += 1;
-          avoidFrom = heading;
-          avoidTo = Math.atan2(dy, dx) + side * Math.PI * 0.55;
-          avoidProgress = 0;
-        }
-      }
-    }
-    nextX = clamp(nextX, margin, safeWidth - margin);
-    nextY = clamp(nextY, margin, safeHeight - margin);
-    if ((nextX !== rawX || nextY !== rawY) && avoidProgress >= 1 && contactTimer <= 0) {
-      avoidIndex += 1;
-      const magU = noise2D2(nseed ^ 791783381, avoidIndex, 0.71);
-      const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
-      avoidFrom = heading;
-      const inward = Math.atan2(wallAwayY, wallAwayX);
-      avoidTo = inward + side * magnitude * 0.5;
-      avoidProgress = 0;
-    }
-    if (wasContacting && contactTimer <= 0) {
-      huntCooldown = 22 + seededUnit(nseed, 0, 1243315241) * 14;
-      avoidIndex += 1;
-      avoidFrom = heading;
-      avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 899314129)));
-      avoidProgress = 0;
-    }
-    const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
-    return {
-      ...cell,
-      x: nextX,
-      y: nextY,
-      phase: contactTimer > 0 ? heading : travel,
-      heading,
-      rollPhase: wrapUnit(finite(cell.rollPhase, 0) + spinFreq * dt),
-      beatPhase: wrapUnit(finiteOr(cell.beatPhase, 0) + beatEff * dt),
-      cvPhase: wrapUnit(finiteOr(cell.cvPhase, 0) + Math.max(0, finiteOr(cell.cvRate, 0)) * act * dt),
-      avoidIndex,
-      avoidFrom,
-      avoidTo,
-      avoidProgress,
-      contactTimer,
-      contactDuration: contactTimer > 0 ? contactDuration : 0,
-      huntCooldown
-    };
-  });
-}
-function transform3(cx, cy, ux, uy, along, lateral) {
-  const nx = -uy;
-  const ny = ux;
-  return { x: cx + ux * along + nx * lateral, y: cy + uy * along + ny * lateral };
-}
-function drawPolyline4(ctx, points, close) {
-  if (points.length === 0)
-    return;
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (let i = 1;i < points.length; i++)
-    ctx.lineTo(points[i].x, points[i].y);
-  if (close)
-    ctx.closePath();
-}
-function drawDidinium(ctx, didinium, frame, view) {
-  if (!view.enabled || didinium.length === 0 || view.didinium.count <= 0)
-    return;
-  const alpha = Math.max(0, Math.min(1, view.alpha * 0.9 * didiniumModeView(frame.mode).alphaMul));
-  if (alpha <= 0)
-    return;
-  const scale = Math.max(0.1, finite(view.didinium.scale, 1));
-  const hue = 200 + finite(view.didinium.hueOffset, 0);
-  ctx.save();
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  didinium.forEach((cell) => {
-    const L = didiniumDisplayLength(finite(cell.size, 1), scale);
-    const halfLength = L / 2;
-    const wMax = L / ASPECT / 2;
-    const heading = finiteOr(cell.phase, finite(cell.heading, 0));
-    const ux = Math.cos(heading);
-    const uy = Math.sin(heading);
-    const cx = finite(cell.x, 0);
-    const cy = finite(cell.y, 0);
-    const roll = wrapUnit(finite(cell.rollPhase, 0));
-    const rollAng = roll * TAU2;
-    const rollCos = Math.cos(rollAng);
-    const widthMul = 0.96 + 0.04 * Math.abs(rollCos);
-    const halfWidthAt = (u) => wMax * widthMul * normHalfWidth2(u);
-    const SAMP = 64;
-    const upper = [];
-    const lower = [];
-    for (let i = 0;i <= SAMP; i++) {
-      const u = -Math.cos(Math.PI * i / SAMP);
-      const hw = halfWidthAt(u);
-      upper.push(transform3(cx, cy, ux, uy, halfLength * u, hw));
-      lower.push(transform3(cx, cy, ux, uy, halfLength * u, -hw));
-    }
-    const outline = [...upper, ...lower.reverse()];
-    ctx.save();
-    drawPolyline4(ctx, outline, true);
-    ctx.clip();
-    const glowR = Math.max(1, halfLength * 1.05);
-    const grad = ctx.createRadialGradient(cx, cy, glowR * 0.1, cx, cy, glowR);
-    grad.addColorStop(0, `hsla(${hue}, 26%, 92%, ${alpha * 0.66})`);
-    grad.addColorStop(0.62, `hsla(${hue + 2}, 30%, 84%, ${alpha * 0.5})`);
-    grad.addColorStop(1, `hsla(${hue + 4}, 34%, 74%, ${alpha * 0.16})`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
-    const gSeed = finiteOr(cell.noiseSeed, 0) | 0;
-    const gCount = Math.round(clamp(L * 6, 60, 220));
-    for (let g = 0;g < gCount; g++) {
-      const gu = (seededUnit(gSeed, g, 1371344503) * 2 - 1) * 0.9;
-      const gs = (seededUnit(gSeed, g, 2585733948) * 2 - 1) * 0.92;
-      const hw = halfWidthAt(gu);
-      const p = transform3(cx, cy, ux, uy, halfLength * gu, gs * hw);
-      const r = 0.5 + seededUnit(gSeed, g, 752460107) * 0.9;
-      const nearGirdle = Math.min(Math.abs(gu - GIRDLE_A_U), Math.abs(gu - GIRDLE_P_U));
-      const lane = smoothstep2(clamp01(1 - nearGirdle / 0.075));
-      ctx.fillStyle = `hsla(${hue}, 22%, ${90 - 8 * lane}%, ${alpha * (0.34 - 0.12 * lane)})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, TAU2);
-      ctx.fill();
-    }
-    const gCount2 = Math.round(clamp(L * 4, 40, 150));
-    for (let g = 0;g < gCount2; g++) {
-      const gu = (seededUnit(gSeed, g, 1033993285) * 2 - 1) * 0.9;
-      const gs = (seededUnit(gSeed, g, 1508030371) * 2 - 1) * 0.92;
-      const hw = halfWidthAt(gu);
-      const p = transform3(cx, cy, ux, uy, halfLength * gu, gs * hw);
-      const r = 0.3 + seededUnit(gSeed, g, 348696353) * 0.5;
-      const nearGirdle = Math.min(Math.abs(gu - GIRDLE_A_U), Math.abs(gu - GIRDLE_P_U));
-      const lane = smoothstep2(clamp01(1 - nearGirdle / 0.075));
-      ctx.fillStyle = `hsla(${hue + 4}, 18%, ${94 - 6 * lane}%, ${alpha * (0.16 - 0.07 * lane)})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, TAU2);
-      ctx.fill();
-    }
-    ctx.restore();
-    for (let i = 0;i < upper.length - 1; i++) {
-      const u = -Math.cos(Math.PI * i / SAMP);
-      const flank = 1 - Math.abs(u);
-      const a = alpha * (0.1 + 0.18 * flank * flank);
-      ctx.strokeStyle = `hsla(${hue + 2}, 32%, 92%, ${a})`;
-      ctx.lineWidth = Math.max(0.5, wMax * 0.07);
-      ctx.beginPath();
-      ctx.moveTo(upper[i].x, upper[i].y);
-      ctx.lineTo(upper[i + 1].x, upper[i + 1].y);
-      ctx.moveTo(lower[i].x, lower[i].y);
-      ctx.lineTo(lower[i + 1].x, lower[i + 1].y);
-      ctx.stroke();
-    }
-    {
-      const muStart = -0.58;
-      const muEnd = 0.4;
-      const bowDepth = 0.72 * (0.45 + 0.55 * Math.abs(rollCos));
-      const MN = 40;
-      const side2 = rollCos >= 0 ? 1 : -1;
-      const macro = [];
-      for (let k = 0;k <= MN; k++) {
-        const f = k / MN;
-        const u = muStart + (muEnd - muStart) * (0.5 - 0.5 * Math.cos(Math.PI * f));
-        const bow = Math.sin(f * Math.PI) * bowDepth;
-        const lat = bow * halfWidthAt(u) * side2;
-        macro.push(transform3(cx, cy, ux, uy, halfLength * u, lat));
-      }
-      const halfTh = Math.max(1.2, wMax * 0.2);
-      const left = [];
-      const right = [];
-      for (let k = 0;k <= MN; k++) {
-        const f = k / MN;
-        const taper = Math.pow(Math.sin(Math.max(0, Math.min(1, f)) * Math.PI), 0.45);
-        const a = macro[Math.max(0, k - 1)];
-        const b = macro[Math.min(MN, k + 1)];
-        let tx = b.x - a.x, ty = b.y - a.y;
-        const tl = Math.hypot(tx, ty) || 1;
-        tx /= tl;
-        ty /= tl;
-        const nx2 = -ty, ny2 = tx;
-        const th = halfTh * (0.55 + 0.45 * taper);
-        const p = macro[k];
-        left.push({ x: p.x + nx2 * th, y: p.y + ny2 * th });
-        right.push({ x: p.x - nx2 * th, y: p.y - ny2 * th });
-      }
-      const ribbon = [...left, ...right.reverse()];
-      drawPolyline4(ctx, ribbon, true);
-      ctx.fillStyle = `hsla(${hue - 8}, 6%, 76%, ${alpha * 0.9})`;
-      ctx.fill();
-      ctx.save();
-      drawPolyline4(ctx, ribbon, true);
-      ctx.clip();
-      const mnSeed = finiteOr(cell.noiseSeed, 0) | 0;
-      for (let m = 0;m < MN; m += 2) {
-        const c0 = macro[m];
-        const u01 = seededUnit(mnSeed, m, 1545415487);
-        const dark = u01 < 0.5;
-        const jx = (seededUnit(mnSeed, m, 752460107) - 0.5) * halfTh * 1.2;
-        const jy = (seededUnit(mnSeed, m, 2585733948) - 0.5) * halfTh * 1.2;
-        const r = halfTh * (0.4 + 0.5 * seededUnit(mnSeed, m, 348696353));
-        ctx.fillStyle = dark ? `hsla(${hue - 8}, 7%, 50%, ${alpha * 0.6})` : `hsla(${hue}, 7%, 90%, ${alpha * 0.5})`;
-        ctx.beginPath();
-        ctx.arc(c0.x + jx, c0.y + jy, r, 0, TAU2);
-        ctx.fill();
-      }
-      ctx.restore();
-      drawPolyline4(ctx, ribbon, true);
-      ctx.strokeStyle = `hsla(${hue - 2}, 18%, 90%, ${alpha * 0.36})`;
-      ctx.lineWidth = Math.max(0.4, wMax * 0.04);
-      ctx.stroke();
-    }
-    const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
-    const RING_TILT = 0.1;
-    const gSeedR = finiteOr(cell.noiseSeed, 0) | 0;
-    const drawGirdle = (gu, seatHue, gi) => {
-      const hw = halfWidthAt(gu);
-      const baseAlong = halfLength * gu;
-      const NT = 104;
-      ctx.lineWidth = Math.max(0.3, wMax * 0.026);
-      for (let s = 0;s < NT; s++) {
-        const phi = s / NT * TAU2;
-        const depth = Math.cos(phi + rollAng);
-        if (depth < -0.1)
-          continue;
-        const front = clamp01(0.5 + 0.5 * depth);
-        const jit = (seededUnit(gSeedR, s + gi * 97, 752460107) - 0.5) * 0.1;
-        const lat = Math.cos(phi) * hw;
-        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
-        const wave = 0.5 + 0.5 * Math.sin(TAU2 * beat - phi * 3);
-        const cilLen = hw * (0.042 + 0.022 * wave) * (1 + jit);
-        const outLat = Math.cos(phi);
-        const outAlong = Math.sin(phi) * RING_TILT;
-        const bandJ1 = (seededUnit(gSeedR, s + gi * 131, 2083166993) - 0.5) * hw * 0.34;
-        const bandJ2 = (seededUnit(gSeedR, s + gi * 131, 1309787047) - 0.5) * hw * 0.34;
-        const base = transform3(cx, cy, ux, uy, along + bandJ1 * 0.55, lat + bandJ2);
-        ctx.fillStyle = `hsla(${seatHue}, 34%, 94%, ${alpha * (0.07 + 0.22 * front)})`;
-        ctx.beginPath();
-        ctx.arc(base.x, base.y, Math.max(0.42, wMax * 0.052), 0, TAU2);
-        ctx.fill();
-        if (s % 2 === 0) {
-          const bandJ3 = (seededUnit(gSeedR, s + gi * 149, 796744337) - 0.5) * hw * 0.32;
-          const bandJ4 = (seededUnit(gSeedR, s + gi * 149, 1639241769) - 0.5) * hw * 0.32;
-          const dust = transform3(cx, cy, ux, uy, along + outAlong * cilLen * 0.35 + bandJ3 * 0.45, lat + outLat * cilLen * 0.35 + bandJ4);
-          ctx.fillStyle = `hsla(${seatHue}, 36%, 96%, ${alpha * (0.05 + 0.15 * front)})`;
-          ctx.beginPath();
-          ctx.arc(dust.x, dust.y, Math.max(0.28, wMax * 0.03), 0, TAU2);
-          ctx.fill();
-        }
-      }
-    };
-    drawGirdle(GIRDLE_A_U, hue + 6, 0);
-    drawGirdle(GIRDLE_P_U, hue + 6, 1);
-    const drawBrushes = (gu) => {
-      const phi = rollAng;
-      const depth = Math.cos(phi);
-      if (depth < 0)
-        return;
-      const front = clamp01(0.5 + 0.5 * depth);
-      for (let r = 0;r < BRUSH_ROWS; r++) {
-        const bu = gu - 0.06 - r * 0.035;
-        const hw = halfWidthAt(bu);
-        const lat = Math.cos(phi) * hw * 0.62;
-        const along = halfLength * bu + Math.sin(phi) * hw * 0.34 * 0.62;
-        const dot = transform3(cx, cy, ux, uy, along + hw * 0.028, lat + Math.sign(lat || 1) * hw * 0.028);
-        ctx.fillStyle = `hsla(${hue + 8}, 34%, 92%, ${alpha * 0.48 * front})`;
-        ctx.beginPath();
-        ctx.arc(dot.x, dot.y, Math.max(0.28, wMax * 0.026), 0, TAU2);
-        ctx.fill();
-      }
-    };
-    drawBrushes(GIRDLE_A_U);
-    drawBrushes(GIRDLE_P_U);
-    {
-      const coneBaseU = SHOULDER_U;
-      const tip = transform3(cx, cy, ux, uy, halfLength * 1.02, 0);
-      const NS = 4;
-      for (let k = 1;k < NS; k++) {
-        const f = k / NS;
-        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU) * 0.22;
-        const dot = transform3(cx, cy, ux, uy, halfLength * (coneBaseU + (1.02 - coneBaseU) * 0.62), lat);
-        ctx.fillStyle = `hsla(${hue + 4}, 14%, 88%, ${alpha * 0.08})`;
-        ctx.beginPath();
-        ctx.arc(dot.x, dot.y, Math.max(0.2, wMax * 0.018), 0, TAU2);
-        ctx.fill();
-      }
-      const collarHw = halfWidthAt(coneBaseU);
-      ctx.lineWidth = Math.max(0.35, wMax * 0.03);
-      for (let s = 0;s <= 10; s++) {
-        const f = s / 10;
-        const lat = (f * 2 - 1) * collarHw;
-        const depth = Math.cos(rollAng);
-        if (depth < -0.2)
-          continue;
-        const front = clamp01(0.5 + 0.5 * depth);
-        const base = transform3(cx, cy, ux, uy, halfLength * coneBaseU, lat);
-        const tipC = transform3(cx, cy, ux, uy, halfLength * (coneBaseU + 0.045), lat + Math.sign(lat || 1) * collarHw * 0.05);
-        ctx.strokeStyle = `hsla(${hue + 6}, 30%, 91%, ${alpha * (0.1 + 0.28 * front)})`;
-        ctx.beginPath();
-        ctx.moveTo(base.x, base.y);
-        ctx.lineTo(tipC.x, tipC.y);
-        ctx.stroke();
-      }
-      ctx.fillStyle = `hsla(${hue + 4}, 18%, 88%, ${alpha * 0.17})`;
-      ctx.beginPath();
-      ctx.arc(tip.x, tip.y, Math.max(0.36, wMax * 0.052), 0, TAU2);
-      ctx.fill();
-    }
-    {
-      const cvPulse = 0.5 - 0.5 * Math.cos(TAU2 * wrapUnit(finiteOr(cell.cvPhase, 0)));
-      const cvR = Math.max(0.5, wMax * (0.13 + 0.06 * cvPulse));
-      const p = transform3(cx, cy, ux, uy, -halfLength * 0.86, 0);
-      ctx.fillStyle = `hsla(${hue + 2}, 22%, 90%, ${alpha * 0.22})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, cvR, 0, TAU2);
-      ctx.fill();
-      ctx.strokeStyle = `hsla(${hue + 4}, 32%, 96%, ${alpha * 0.78})`;
-      ctx.lineWidth = Math.max(0.4, wMax * 0.04);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, cvR, 0, TAU2);
-      ctx.stroke();
-    }
-  });
   ctx.restore();
 }
 
@@ -4280,88 +4381,7 @@ function drawAquariumForeground(ctx, aquarium, frame, params) {
   const view = aquariumParamsView(params);
   if (!view.enabled || view.didinium.count <= 0)
     return;
-  const alpha = Math.max(0, Math.min(1, view.alpha * 0.9));
-  ctx.save();
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  for (const d of aquarium.didinium) {
-    const contact = Math.max(0, d.contactTimer ?? 0);
-    if (contact <= 0)
-      continue;
-    const L = didiniumDisplayLength(d.size, view.didinium.scale);
-    const heading = d.phase;
-    const ux = Math.cos(heading), uy = Math.sin(heading);
-    const snoutX = d.x + ux * L * 0.52;
-    const snoutY = d.y + uy * L * 0.52;
-    const duration = Math.max(0.001, d.contactDuration ?? contact);
-    const elapsed = Math.max(0, duration - contact);
-    const env = Math.min(1, Math.min(elapsed / 0.25, contact / 0.25));
-    const sideEnv = Math.min(1, Math.max(0, (elapsed - 0.25) / 0.35));
-    const fanEnv = Math.min(1, Math.max(0, (elapsed - 1.2) / 0.45));
-    ctx.save();
-    ctx.translate(d.x, d.y);
-    ctx.rotate(heading);
-    ctx.strokeStyle = `hsla(226, 48%, 96%, ${alpha * 0.96 * env})`;
-    ctx.lineWidth = Math.max(0.9, L * 0.03);
-    ctx.beginPath();
-    ctx.ellipse(0, 0, L * 0.5, L * 0.22, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.strokeStyle = `hsla(214, 54%, 98%, ${alpha * 0.92 * env})`;
-    ctx.lineWidth = Math.max(0.9, L * 0.028);
-    for (const gx of [L * 0.18, -L * 0.12]) {
-      ctx.beginPath();
-      ctx.moveTo(gx, -L * 0.2);
-      ctx.lineTo(gx, L * 0.2);
-      ctx.stroke();
-    }
-    ctx.restore();
-    let px = snoutX + ux * Math.min(18, Math.max(14, L * 0.42));
-    let py = snoutY + uy * Math.min(18, Math.max(14, L * 0.42));
-    if (frame.hero) {
-      const surface = heroSurfacePoint(frame.hero, { x: snoutX, y: snoutY });
-      px = surface.x;
-      py = surface.y;
-    }
-    ctx.fillStyle = `hsla(205, 18%, 15%, ${alpha * 0.55 * env})`;
-    ctx.beginPath();
-    ctx.arc(px, py, Math.max(1.3, L * 0.065), 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = `hsla(210, 14%, 10%, ${alpha * 0.42 * env})`;
-    ctx.lineWidth = Math.max(1, L * 0.035);
-    ctx.beginPath();
-    ctx.arc(px - ux * 1.5, py - uy * 1.5, Math.max(3, L * 0.16), heading + Math.PI * 0.62, heading + Math.PI * 1.38);
-    ctx.stroke();
-    for (const [side, aMul, wMul] of [[-L * 0.055, 0.55 * sideEnv, 0.8], [0, 1, 1.25], [L * 0.055, 0.55 * sideEnv, 0.8]]) {
-      const sx = snoutX - uy * side;
-      const sy = snoutY + ux * side;
-      ctx.strokeStyle = `hsla(198, 52%, 98%, ${alpha * 0.95 * env * aMul})`;
-      ctx.lineWidth = Math.max(0.75, L * 0.026) * wMul;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(px, py);
-      ctx.stroke();
-    }
-    const fanAlpha = alpha * 0.22 * env * fanEnv;
-    ctx.lineWidth = 0.75;
-    for (let k = 0;k < 7; k++) {
-      if (k % 5 === 1)
-        continue;
-      const jitter = Math.sin((k + 1) * 12.9898) * 0.07;
-      const a = heading + Math.PI + (k - 3) * 0.16 + jitter;
-      const len = 4.8 + k * 5 % 4 * 0.7;
-      const aJ = 0.75 + 0.25 * Math.abs(Math.sin((k + 3) * 4.17));
-      ctx.strokeStyle = `hsla(42, 46%, 95%, ${fanAlpha * aJ})`;
-      ctx.beginPath();
-      ctx.moveTo(px, py);
-      ctx.lineTo(px + Math.cos(a) * len, py + Math.sin(a) * len);
-      ctx.stroke();
-    }
-    ctx.fillStyle = `hsla(44, 52%, 97%, ${alpha * 0.86 * env})`;
-    ctx.beginPath();
-    ctx.arc(px, py, Math.max(1, L * 0.04), 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
+  drawDidiniumParameciumContact(ctx, aquarium, frame, view);
 }
 
 // src/theme-engine/renderers/cell/draw.ts
