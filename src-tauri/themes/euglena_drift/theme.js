@@ -3521,16 +3521,7 @@ function drawEuglena(ctx, euglena, frame, view) {
   ctx.restore();
 }
 
-// src/theme-engine/renderers/cell/aquarium/vorticella.ts
-var VC_CONTRACT = 0.02;
-var VC_HOLD = 0.02;
-var VC_RELAX = 0.33;
-var T_C = 0.033;
-var T_HOLD = 0.05;
-var T_E = 2.6;
-function vorticellaCellSeed(anchorX) {
-  return (Math.round(anchorX * 7) ^ 117600714) >>> 0;
-}
+// src/theme-engine/renderers/cell/aquarium/vorticella-parts/geometry.ts
 function vorticellaBellMetrics(cell, scale, H) {
   const Hc = Math.max(1, finite(H, 80));
   const Sc = Math.max(0.1, finite(scale, 1));
@@ -3538,42 +3529,6 @@ function vorticellaBellMetrics(cell, scale, H) {
   const bellHeight = 1.45 * D;
   const restStalk = Math.max(0, Math.min(D * 3.7, Hc - bellHeight - Math.max(10, D * 0.34)));
   return { D, bellHeight, restStalk };
-}
-var MIG_DETACH = 0.6;
-var MIG_SWIM = 16;
-var MIG_ATTACH = 0.7;
-function drawMigrateInterval(cellSeed, migrateCount) {
-  const u = Math.max(0.0001, seededUnit(cellSeed, migrateCount, 1831565813));
-  return clamp(-Math.log(u) * 900, 540, 2400);
-}
-function vorticellaLegAmount(leg, timer) {
-  if (leg === 1) {
-    const fast = clamp01(timer / 0.016);
-    const tail = clamp01((timer - 0.016) / Math.max(0.000001, T_C - 0.016));
-    return 0.9 * (1 - Math.pow(1 - fast, 3)) + 0.1 * (1 - Math.pow(1 - tail, 3));
-  }
-  if (leg === 2)
-    return 1;
-  if (leg === 3) {
-    const u = clamp01(timer / T_E);
-    const e0 = Math.exp(-Math.pow(1.9, 1.4));
-    return (Math.exp(-Math.pow(u * 1.9, 1.4)) - e0) / (1 - e0);
-  }
-  return 0;
-}
-function vorticellaContractPhase(cyclePhase) {
-  const phase = wrapUnit(cyclePhase);
-  if (phase < VC_CONTRACT) {
-    const q = phase / VC_CONTRACT;
-    return 1 - Math.pow(1 - q, 3);
-  }
-  if (phase < VC_CONTRACT + VC_HOLD)
-    return 1;
-  if (phase < VC_CONTRACT + VC_HOLD + VC_RELAX) {
-    const q = (phase - VC_CONTRACT - VC_HOLD) / VC_RELAX;
-    return 1 - smoothstep2(q);
-  }
-  return 0;
 }
 function vorticellaGeometry(contractPhase, options = {}) {
   const phase = clamp01(contractPhase);
@@ -3620,6 +3575,53 @@ function vorticellaObstacle(cell, scale, frameHeight) {
   const ax = finite(cell.anchorX, 0);
   const ay = finite(cell.anchorY, 0);
   return { x: ax, y: ay - (restStalk + bellHeight * 0.5), radius: 1.1 * D };
+}
+
+// src/theme-engine/renderers/cell/aquarium/vorticella.ts
+var VC_CONTRACT = 0.02;
+var VC_HOLD = 0.02;
+var VC_RELAX = 0.33;
+var T_C = 0.033;
+var T_HOLD = 0.05;
+var T_E = 2.6;
+function vorticellaCellSeed(anchorX) {
+  return (Math.round(anchorX * 7) ^ 117600714) >>> 0;
+}
+var MIG_DETACH = 0.6;
+var MIG_SWIM = 16;
+var MIG_ATTACH = 0.7;
+function drawMigrateInterval(cellSeed, migrateCount) {
+  const u = Math.max(0.0001, seededUnit(cellSeed, migrateCount, 1831565813));
+  return clamp(-Math.log(u) * 900, 540, 2400);
+}
+function vorticellaLegAmount(leg, timer) {
+  if (leg === 1) {
+    const fast = clamp01(timer / 0.016);
+    const tail = clamp01((timer - 0.016) / Math.max(0.000001, T_C - 0.016));
+    return 0.9 * (1 - Math.pow(1 - fast, 3)) + 0.1 * (1 - Math.pow(1 - tail, 3));
+  }
+  if (leg === 2)
+    return 1;
+  if (leg === 3) {
+    const u = clamp01(timer / T_E);
+    const e0 = Math.exp(-Math.pow(1.9, 1.4));
+    return (Math.exp(-Math.pow(u * 1.9, 1.4)) - e0) / (1 - e0);
+  }
+  return 0;
+}
+function vorticellaContractPhase(cyclePhase) {
+  const phase = wrapUnit(cyclePhase);
+  if (phase < VC_CONTRACT) {
+    const q = phase / VC_CONTRACT;
+    return 1 - Math.pow(1 - q, 3);
+  }
+  if (phase < VC_CONTRACT + VC_HOLD)
+    return 1;
+  if (phase < VC_CONTRACT + VC_HOLD + VC_RELAX) {
+    const q = (phase - VC_CONTRACT - VC_HOLD) / VC_RELAX;
+    return 1 - smoothstep2(q);
+  }
+  return 0;
 }
 var VORTICELLA_RELEVANT_FIELDS = new Set(["motile"]);
 function motileKindId(motile) {
