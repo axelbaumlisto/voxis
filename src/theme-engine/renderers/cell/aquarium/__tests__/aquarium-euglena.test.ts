@@ -242,7 +242,7 @@ describe("aquarium layer Phase 3 euglena", () => {
       aquariumActivityBoost: 1,
     });
     const run = () => {
-      let cell = testEuglena({ x: 250, y: 150, heading: 0, swimSpeed: 1 }); // approaching the right wall, outside the clamp
+      let cell = testEuglena({ x: 230, y: 150, heading: 0, swimSpeed: 1 }); // approaching the right wall, outside the clamp
       for (let i = 0; i < 6; i++) {
         cell = updateEuglena([cell], frame({ dt: 0.05, width: 300, height: 300, activity: 0 }), view)[0];
       }
@@ -393,7 +393,7 @@ describe("aquarium layer Phase 3 euglena", () => {
       cell = updateEuglena([cell], frame({ dt: 0.05, width, height, activity: 0.2 }), view)[0];
     }
     const bounds = euglenaVisualBounds(cell, view.euglena.scale, height);
-    expect(bounds.minX).toBeGreaterThanOrEqual(0);
+    expect(bounds.minX).toBeGreaterThanOrEqual(6);
     expect(Math.cos(cell.heading)).toBeGreaterThan(0);
   });
 

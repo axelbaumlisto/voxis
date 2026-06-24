@@ -133,7 +133,7 @@ export function updateEuglena(
     // Keep the rendered swimmer in open water, not just its centroid. The body
     // extends ~0.5L forward and the flagellum another ~0.95L, so a centroid-safe
     // clamp still lets a wall-facing cell look pinned into the edge.
-    const wallInset = Math.min(L * 1.48, safeWidth * 0.32, safeHeight * 0.32);
+    const wallInset = Math.min(L * 1.48 + 8, safeWidth * 0.36, safeHeight * 0.36);
 
     const field = frame.interaction;
     const fieldObstacles = field ? field.obstacles.filter((obstacle) => obstacle.sourceId !== selfId) : undefined;

@@ -3088,7 +3088,7 @@ function updateEuglena(euglena, frame, view) {
     let ux = Math.cos(heading);
     let uy = Math.sin(heading);
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L;
-    const wallInset = Math.min(L * 1.48, safeWidth * 0.32, safeHeight * 0.32);
+    const wallInset = Math.min(L * 1.48 + 8, safeWidth * 0.36, safeHeight * 0.36);
     const field = frame.interaction;
     const fieldObstacles = field ? field.obstacles.filter((obstacle) => obstacle.sourceId !== selfId) : undefined;
     const fieldWakes = field ? field.wakes.filter((wake) => wake.sourceId !== selfId) : undefined;

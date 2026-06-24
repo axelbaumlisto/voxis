@@ -135,9 +135,9 @@ describe("all_aquarium update oracle", () => {
       burstPhase: 0.45452829520218074,
     });
     expectCloseState<EuglenaState>(nextEuglena, {
-      x: 211.25875918416583,
-      y: 38.297124011169366,
-      heading: 0.003025641291249437,
+      x: 211.2587465859309,
+      y: 38.298895514764396,
+      heading: 0.011197330193197963,
       startle: 0,
       tumbleProgress: 1,
       rollPhase: 0.7204900612203637,
