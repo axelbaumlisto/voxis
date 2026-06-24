@@ -76,7 +76,13 @@ function drawMigrateInterval(cellSeed: number, migrateCount: number): number {
 
 /** Contraction amount s in [0,1] from the absolute-time leg/timer state. */
 function vorticellaLegAmount(leg: number, timer: number): number {
-  if (leg === 1) { const u = clamp01(timer / T_C); return 1 - Math.pow(1 - u, 3); } // ballistic ease-out
+  if (leg === 1) {
+    // Real collapse is sub-frame; keep an 80ms readable window but put most of
+    // the shortening in the first ~35ms so a sampled sheet sees the snap.
+    const fast = clamp01(timer / 0.035);
+    const tail = clamp01((timer - 0.035) / Math.max(1e-6, T_C - 0.035));
+    return 0.82 * (1 - Math.pow(1 - fast, 3)) + 0.18 * (1 - Math.pow(1 - tail, 3));
+  } // ballistic ease-out
   if (leg === 2) return 1;                                                          // hold
   // stretched-exp, normalized so the tail reaches EXACTLY 0 at u=1 (was 0.086 -> a
   // per-cycle pop as it snapped to the leg-0 value 0). e0 = exp(-1.9^1.4).
@@ -181,11 +187,11 @@ function vorticellaTriggerRadius(obsRadius: number, motile: Motile): number {
       : kind === KIND_ID.euglena ? 0.35
         : 0.5;
   const strength = clamp(finiteOr(motile.strength, strengthFallback), 0.15, 1.5);
-  const baseMul = kind === KIND_ID.euglena ? 1.05 : 1.12;
-  const bodyMul = kind === KIND_ID.hero ? 0.9
-    : kind === KIND_ID.didinium ? 0.8
-      : kind === KIND_ID.euglena ? 0.35
-        : 0.6;
+  const baseMul = kind === KIND_ID.euglena ? 1.30 : 1.55;
+  const bodyMul = kind === KIND_ID.hero ? 0.95
+    : kind === KIND_ID.didinium ? 0.9
+      : kind === KIND_ID.euglena ? 0.5
+        : 0.65;
 
   return obsRadius * baseMul + radius * bodyMul * strength;
 }

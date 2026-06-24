@@ -191,7 +191,7 @@ export function drawAquariumForeground(
 
     // Directional attack point: push the luminous contact slightly INTO the prey
     // surface so the cue reads as piercing/attachment, not a centered kiss.
-    const pierceLen = Math.min(24, Math.max(18, L * 0.55));
+    const pierceLen = Math.min(18, Math.max(14, L * 0.42));
     const px = snoutX + ux * pierceLen;
     const py = snoutY + uy * pierceLen;
 
@@ -221,13 +221,13 @@ export function drawAquariumForeground(
 
     // Paramecium defensive trichocyst burst: asymmetric fan AWAY from predator,
     // not a regular radial UI sparkle.
-    const fanAlpha = alpha * 0.58 * env;
-    ctx.lineWidth = 0.85;
-    for (let k = 0; k < 13; k++) {
+    const fanAlpha = alpha * 0.38 * env;
+    ctx.lineWidth = 0.8;
+    for (let k = 0; k < 9; k++) {
       if (k % 5 === 1) continue; // irregular gaps: biological, not UI starburst
       const jitter = Math.sin((k + 1) * 12.9898) * 0.08;
-      const a = heading + Math.PI + (k - 6) * 0.13 + jitter;
-      const len = 8 + ((k * 5) % 6) * 0.95;
+      const a = heading + Math.PI + (k - 4) * 0.15 + jitter;
+      const len = 5.5 + ((k * 5) % 5) * 0.75;
       const aJ = 0.75 + 0.25 * Math.abs(Math.sin((k + 3) * 4.17));
       ctx.strokeStyle = `hsla(42, 46%, 95%, ${fanAlpha * aJ})`;
       ctx.beginPath();
