@@ -245,7 +245,7 @@ describe("cell renderer draw-call golden", () => {
       options: { width: SIZE, height: SIZE, baseHue: 50, params: DRIFTING_CONTOUR_V1_PARAMS },
       state: RECORDING_STATE,
       expected: {
-        hash: "ec644f00d481ea7e",
+        hash: "c4fd413133fc00f1",
         opCount: 4690,
         counts: { beginPath: 258, moveTo: 207, lineTo: 3899, stroke: 213, closePath: 4, fill: 53, save: 2, clip: 1, arc: 51, restore: 2 },
       },
@@ -255,7 +255,7 @@ describe("cell renderer draw-call golden", () => {
       options: { width: SIZE, height: SIZE, baseHue: 50, params: INTERIOR_HEAVY_PARAMS },
       state: RECORDING_STATE,
       expected: {
-        hash: "0f0991e443f4858b",
+        hash: "e92ce86284384614",
         opCount: 4746,
         counts: { beginPath: 276, moveTo: 207, lineTo: 3899, stroke: 215, closePath: 4, fill: 71, save: 2, clip: 1, arc: 69, restore: 2 },
       },
