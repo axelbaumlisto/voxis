@@ -166,7 +166,7 @@ export function drawAquariumForeground(
     const ux = Math.cos(heading), uy = Math.sin(heading);
     const snoutX = d.x + ux * L * 0.52;
     const snoutY = d.y + uy * L * 0.52;
-    const env = Math.min(1, contact / 0.45);
+    const env = Math.min(1, contact / 0.55);
 
     // Foreground Didinium silhouette cue: a faint barrel outline + two girdle marks
     // above the hero so the predator remains a distinct cell during latch, not a
@@ -174,13 +174,13 @@ export function drawAquariumForeground(
     ctx.save();
     ctx.translate(d.x, d.y);
     ctx.rotate(heading);
-    ctx.strokeStyle = `hsla(222, 42%, 94%, ${alpha * 0.72 * env})`;
-    ctx.lineWidth = Math.max(0.65, L * 0.022);
+    ctx.strokeStyle = `hsla(226, 48%, 96%, ${alpha * 0.96 * env})`;
+    ctx.lineWidth = Math.max(0.9, L * 0.030);
     ctx.beginPath();
     ctx.ellipse(0, 0, L * 0.50, L * 0.22, 0, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.strokeStyle = `hsla(214, 48%, 97%, ${alpha * 0.72 * env})`;
-    ctx.lineWidth = Math.max(0.7, L * 0.022);
+    ctx.strokeStyle = `hsla(214, 54%, 98%, ${alpha * 0.92 * env})`;
+    ctx.lineWidth = Math.max(0.9, L * 0.028);
     for (const gx of [L * 0.18, -L * 0.12]) {
       ctx.beginPath();
       ctx.moveTo(gx, -L * 0.20);
@@ -221,13 +221,13 @@ export function drawAquariumForeground(
 
     // Paramecium defensive trichocyst burst: asymmetric fan AWAY from predator,
     // not a regular radial UI sparkle.
-    const fanAlpha = alpha * 0.9 * env;
-    ctx.lineWidth = 0.9;
-    for (let k = 0; k < 19; k++) {
-      if (k % 4 === 1) continue; // irregular gaps: biological, not UI starburst
-      const jitter = Math.sin((k + 1) * 12.9898) * 0.09;
-      const a = heading + Math.PI + (k - 9) * 0.11 + jitter;
-      const len = 8.5 + ((k * 7) % 7) * 1.35;
+    const fanAlpha = alpha * 0.58 * env;
+    ctx.lineWidth = 0.85;
+    for (let k = 0; k < 13; k++) {
+      if (k % 5 === 1) continue; // irregular gaps: biological, not UI starburst
+      const jitter = Math.sin((k + 1) * 12.9898) * 0.08;
+      const a = heading + Math.PI + (k - 6) * 0.13 + jitter;
+      const len = 8 + ((k * 5) % 6) * 0.95;
       const aJ = 0.75 + 0.25 * Math.abs(Math.sin((k + 3) * 4.17));
       ctx.strokeStyle = `hsla(42, 46%, 95%, ${fanAlpha * aJ})`;
       ctx.beginPath();

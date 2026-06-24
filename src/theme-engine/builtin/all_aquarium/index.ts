@@ -22,30 +22,30 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // Shrink the paramecium hero so all four organisms are visible at once.
       radiusFraction: 0.19,
       enableAquarium: true,
-      aquariumSeed: 71,
+      aquariumSeed: 13,
       aquariumAlpha: 0.70,
       aquariumActivityBoost: 0.65,
       diatomCount: 0,
 
       // free swimmer: Euglena
       euglenaCount: 1,
-      euglenaSpeed: 0.08,
-      euglenaSpeedActive: 0.18,
+      euglenaSpeed: 0.11,
+      euglenaSpeedActive: 0.22,
       euglenaScale: 2.2,
       euglenaGravitaxis: 0,
-      euglenaPhototaxis: 0.12,
+      euglenaPhototaxis: 0.05,
       euglenaRotDiffusion: 0,
 
       // sessile stalked organism: Vorticella
       vorticellaCount: 1,
-      vorticellaAlongFrac: 0.12,
+      vorticellaAlongFrac: 0.22,
       vorticellaScale: 1.05,
       vorticellaContractRate: 1.0,
 
       // predator swimmer: Didinium
       didiniumCount: 1,
-      didiniumSpeed: 0.45,
-      didiniumSpeedActive: 0.65,
+      didiniumSpeed: 0.36,
+      didiniumSpeedActive: 0.52,
       didiniumScale: 1.60,
 
       ...userParams,

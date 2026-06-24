@@ -378,6 +378,15 @@ export function createCellRenderer(
         const kick = startleHeadingKick(startle, prevStartle, t, params);
         if (kick !== 0) wander = { ...wander, heading: wander.heading + kick };
       }
+      // Didinium contact from the previous frame becomes a real low-Re escape
+      // bias in the hero's wander state on this frame. The foreground fan remains
+      // a visual defense cue, but the prey now also swims away instead of only
+      // being render-offset after the aquarium update.
+      if (predatorEnv > 0.02) {
+        const desired = Math.atan2(predatorNy, predatorNx);
+        const turn = Math.atan2(Math.sin(desired - wander.heading), Math.cos(desired - wander.heading));
+        wander = { ...wander, heading: wander.heading + turn * (1 - Math.exp(-5 * dt)) };
+      }
       // G2: activity-driven swim speed (Stokes-linear, memoryless). When the
       // activity gate is off, pass undefined so wanderStep uses legacy driftSpeed.
       // H1: add the transient startle speed burst on top (fades with startle).
@@ -387,7 +396,10 @@ export function createCellRenderer(
         baseSwim = Math.max(params.idleSwimFrac * maxSwim, baseSwim);
       }
       const burst = useKick ? startleBurstSpeed(startle, baseR, params) : 0;
-      const swimPx = baseSwim !== undefined ? baseSwim + burst : burst > 0 ? burst : undefined;
+      const predatorEscapeSpeed = predatorEnv > 0.02 ? predatorEnv * baseR * 0.9 : 0;
+      const swimPx = baseSwim !== undefined
+        ? baseSwim + burst + predatorEscapeSpeed
+        : burst > 0 || predatorEscapeSpeed > 0 ? burst + predatorEscapeSpeed : undefined;
       wander = wanderStep(wander, dt, width, height, baseR, params, swimPx);
       // Blend between rest center (width/2, height/2) and full-wander position
       const driftedX = width / 2 + (wander.x - width / 2) * drift01;
@@ -562,7 +574,7 @@ export function createCellRenderer(
           predatorNx /= pl;
           predatorNy /= pl;
         }
-        const kick = Math.min(14, baseR * 0.48) * predatorEnv;
+        const kick = Math.min(8, baseR * 0.28) * predatorEnv;
         const rx = predatorNx * kick;
         const ry = predatorNy * kick;
         if (kick > 0.01) {
