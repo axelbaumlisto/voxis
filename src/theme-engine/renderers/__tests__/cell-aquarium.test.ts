@@ -2560,14 +2560,25 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
     expect(stepR[0].avoidTo).toBeGreaterThan(stepL[0].avoidTo!);
   });
 
-  it("hunts the hero ellipse when Paramecium prey is in range", () => {
+  it("does not target-lock the hero ellipse from outside the forward encounter cone", () => {
     const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0 });
     const initial = [testDidinium({ x: 120, y: 80, heading: Math.PI, phase: Math.PI })];
     const interaction = buildField([
       { kind: "obstacle", shape: "ellipse", x: 210, y: 80, halfLen: 38, halfWid: 14, heading: 0, social: true, sourceId: sourceId("hero", 0) },
     ]);
     const next = updateDidinium(initial, frame({ dt: 0.2, t: 2, width: 340, height: 170, interaction }), view);
-    expect(Math.abs(next[0].heading)).toBeLessThan(Math.abs(initial[0].heading));
+    expect(next[0].heading).toBe(initial[0].heading);
+  });
+
+  it("hunts the hero ellipse only during a forward local encounter", () => {
+    const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0 });
+    const initial = [testDidinium({ x: 155, y: 100, heading: 0, phase: 0 })];
+    const interaction = buildField([
+      { kind: "obstacle", shape: "ellipse", x: 210, y: 80, halfLen: 38, halfWid: 14, heading: 0, social: true, sourceId: sourceId("hero", 0) },
+    ]);
+    const next = updateDidinium(initial, frame({ dt: 0.2, t: 2, width: 340, height: 170, interaction }), view);
+    expect(next[0].heading).toBeLessThan(0);
+    expect(next[0].contactTimer ?? 0).toBe(0);
   });
 
   it("banks away from vorticella circle obstacles and resolves the shell boundedly", () => {

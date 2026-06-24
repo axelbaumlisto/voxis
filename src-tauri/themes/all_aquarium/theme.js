@@ -3345,12 +3345,12 @@ var GIRDLE_A_U = 0.46;
 var GIRDLE_P_U = -0.16;
 var SHOULDER_U = 0.49;
 var BRUSH_ROWS = 5;
-var STOPGO_FREQ = 0.5;
+var STOPGO_FREQ = 0.32;
 var WANDER_FREQ = 0.1;
-var WANDER_RAD = 0.78;
-var HELIX_LEAN = 0.2;
+var WANDER_RAD = 0.42;
+var HELIX_LEAN = 0.07;
 var CURVE_FREQ = 0.09;
-var CURVE_BIAS = 0.32;
+var CURVE_BIAS = 0.18;
 var WALL_LOOK = 1.25;
 var BACKUP_SECONDS = 0.22;
 var AVOID_SECONDS = 0.6;
@@ -3469,7 +3469,7 @@ function updateDidinium(didinium, frame, view) {
     let contactTimer = Math.max(0, finiteOr(cell.contactTimer, 0) - dt);
     let huntCooldown = Math.max(0, finiteOr(cell.huntCooldown, 0) - dt);
     const stopgo = noise2D2(nseed ^ 1399873280, t * STOPGO_FREQ, 0.13);
-    const cruiseEnv = 0.05 + 0.95 * (1 - Math.pow(1 - stopgo, 2.2));
+    const cruiseEnv = 0.65 + 0.35 * (1 - Math.pow(1 - stopgo, 1.4));
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L * cruiseEnv;
     const wander = (noise2D2(nseed ^ 447978529, t * WANDER_FREQ, 0.61) * 2 - 1) * WANDER_RAD;
     let wallPressure = 0;
@@ -3545,9 +3545,14 @@ function updateDidinium(didinium, frame, view) {
       const sy = localY * (targetQ / q);
       const surfaceX = prey.x + sx * ch - sy * sh;
       const surfaceY = prey.y + sx * sh + sy * ch;
-      preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y };
-      if (q < 1.24 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
-        contactTimer = 0.75 + seededUnit(nseed, 0, 714207245) * 0.2;
+      const toTargetX = q < 1 ? prey.x - px0 : surfaceX - px0;
+      const toTargetY = q < 1 ? prey.y - py0 : surfaceY - py0;
+      const toTargetD = Math.hypot(toTargetX, toTargetY) || 1;
+      const probeHeading = heading + wander;
+      const approachDot = (Math.cos(probeHeading) * toTargetX + Math.sin(probeHeading) * toTargetY) / toTargetD;
+      preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y, approachDot };
+      if (q < 1.12 && approachDot > 0.35 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
+        contactTimer = 0.52 + seededUnit(nseed, 0, 714207245) * 0.16;
       }
     }
     let obstaclePressure = 0;
@@ -3593,19 +3598,21 @@ function updateDidinium(didinium, frame, view) {
         const dx = preyData.surfaceX - px0;
         const dy = preyData.surfaceY - py0;
         const d = Math.hypot(dx, dy) || 1;
-        const sense = Math.max(140, L * 4);
-        if (d < sense) {
-          const hunt = clamp01((sense - d) / (sense * 0.75));
+        const sense = clamp(L * 3.2, 48, 78);
+        if (d < sense && preyData.approachDot > -0.15) {
+          const cone = clamp01((preyData.approachDot + 0.15) / 0.65);
+          const huntRaw = clamp01((sense - d) / (sense * 0.75)) * cone;
+          const hunt = preyData.q < 1.12 ? huntRaw : Math.min(0.55, huntRaw);
           huntWeight = hunt;
           const desired = Math.atan2(dy, dx);
-          const turnK = 3 + 6.5 * hunt;
+          const turnK = 1.4 + 2.4 * hunt;
           heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt)) * hunt;
         }
       }
     }
     const curveEnv = clamp01(noise2D2(nseed ^ 2009178803, t * CURVE_FREQ, 0.29));
     const curve = side * CURVE_BIAS * curveEnv;
-    const huntSuppression = 1 - 0.75 * huntWeight;
+    const huntSuppression = 1 - 0.35 * huntWeight;
     const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) * huntSuppression + curve * huntSuppression;
     const spinFreq = Math.max(0, finite(cell.rollRate, 0));
     const spinSeed = seededUnit(nseed, 0, 1821285621);
@@ -3614,7 +3621,7 @@ function updateDidinium(didinium, frame, view) {
     const eh = travel + lean;
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
-    const vSigned = reversing ? -vPx * 0.6 : vPx;
+    const vSigned = reversing ? -vPx * 0.28 : vPx;
     const rawX = px0 + ux * vSigned * dt;
     const rawY = py0 + uy * vSigned * dt;
     let nextX = rawX;
@@ -3623,8 +3630,8 @@ function updateDidinium(didinium, frame, view) {
       const corrX = preyData.surfaceX - nextX;
       const corrY = preyData.surfaceY - nextY;
       const corrL = Math.hypot(corrX, corrY) || 1;
-      const maxStep = L * (preyData.q < 1 ? 0.38 : 0.08);
-      const kLatch = 1 - Math.exp(-(preyData.q < 1 ? 12 : 4) * dt);
+      const maxStep = L * (preyData.q < 1 ? 0.38 : 0.04);
+      const kLatch = 1 - Math.exp(-(preyData.q < 1 ? 12 : 2) * dt);
       const step = Math.min(maxStep, corrL * kLatch);
       nextX += corrX / corrL * step;
       nextY += corrY / corrL * step;
@@ -5214,8 +5221,8 @@ function mount(container, api) {
       vorticellaScale: 1.12,
       vorticellaContractRate: 1,
       didiniumCount: 1,
-      didiniumSpeed: 0.78,
-      didiniumSpeedActive: 1.12,
+      didiniumSpeed: 0.48,
+      didiniumSpeedActive: 0.68,
       didiniumScale: 1.6,
       ...userParams
     }

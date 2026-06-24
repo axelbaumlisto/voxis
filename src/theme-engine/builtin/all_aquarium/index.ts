@@ -44,8 +44,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
 
       // predator swimmer: Didinium
       didiniumCount: 1,
-      didiniumSpeed: 0.78,
-      didiniumSpeedActive: 1.12,
+      didiniumSpeed: 0.48,
+      didiniumSpeedActive: 0.68,
       didiniumScale: 1.60,
 
       ...userParams,

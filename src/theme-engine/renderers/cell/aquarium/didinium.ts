@@ -25,14 +25,14 @@ const BRUSH_ROWS = 5; // dorsal brushes (brosse) per girdle
 // rotating and leaning to one side" = a smooth corkscrew coupled to the spin,
 // punctuated by stops + a fixed-side avoiding reaction that BACKS UP first.
 // (bioRxiv 2025.09.12.675801; Jennings 1902; Berdan; cavac/Rosetta)
-const STOPGO_FREQ = 0.5; // Hz-ish; erratic cruise stop/dart modulation (phase-fn of frame.t)
+const STOPGO_FREQ = 0.32; // Hz-ish; calm stop/dart modulation (phase-fn of frame.t)
 const WANDER_FREQ = 0.1; // slow purposeful heading drift (phase-fn of frame.t): low so
                        // straight runs last longer (real Didinium darts in long runs)
-const WANDER_RAD = 0.78; // open-water heading swing (rad): wide enough that the travel
+const WANDER_RAD = 0.42; // open-water heading swing (rad): calm wide-search travel
                       // direction MEANDERS in 2D mid-tank (not a dead-straight shot that
                       // only turns at walls), but not so wide that turns stack into a
                       // loop. Two-sided noise → cannot loop; pure fn of t → partition-exact.
-const HELIX_LEAN = 0.2; // corkscrew lean angle (rad); thin helix, coupled to the axial spin
+const HELIX_LEAN = 0.07; // corkscrew lean angle (rad); thin helix, coupled to the axial spin
 // One-sided turning BIAS as a BOUNDED slow phase-function of frame.t: a slow
 // noise envelope (0..1) scaled by a max lean angle and the fixed per-cell side.
 // When the envelope is low the cell runs near-straight (directed gait); when it
@@ -42,7 +42,7 @@ const HELIX_LEAN = 0.2; // corkscrew lean angle (rad); thin helix, coupled to th
 // t (unlike the old linear-in-t side*CURVE_RATE*t, which grew without bound and
 // made the partition error climb with t).
 const CURVE_FREQ = 0.09; // Hz-ish; how fast the one-sided turning bias varies
-const CURVE_BIAS = 0.32; // max one-sided lean (rad) — gentle, so it does not by itself loop
+const CURVE_BIAS = 0.18; // max one-sided lean (rad) — gentle, so it does not by itself loop
 const WALL_LOOK = 1.25; // body-lengths of anticipatory wall lookahead. MUST be small enough
                      // that the tank centre is genuine open water (zero wall pressure):
                      // the tank is only ~2.5 body-heights tall, so a large look made
@@ -217,7 +217,7 @@ export function updateDidinium(
     const stopgo = noise2D(nseed ^ 0x53705f00, t * STOPGO_FREQ, 0.13);
     // biased MOSTLY FAST with occasional near-stops (Didinium is a fast swimmer):
     // 1-(1-x)^p spends most of its range near 1, dipping to ~0 only briefly.
-    const cruiseEnv = 0.05 + 0.95 * (1 - Math.pow(1 - stopgo, 2.2));
+    const cruiseEnv = 0.65 + 0.35 * (1 - Math.pow(1 - stopgo, 1.4));
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L * cruiseEnv;
 
     // ── slow heading wander as a PHASE-FUNCTION of absolute frame.t (NOT an
@@ -300,7 +300,7 @@ export function updateDidinium(
     // reactions still dominate, and defaults/no-hero solo themes stay no-op.
     const field = frame.interaction;
     const prey = (field?.obstacles ?? []).find((obs) => obs.shape === "ellipse" && obs.social);
-    let preyData: { q: number; surfaceX: number; surfaceY: number; preyX: number; preyY: number } | null = null;
+    let preyData: { q: number; surfaceX: number; surfaceY: number; preyX: number; preyY: number; approachDot: number } | null = null;
     let huntWeight = 0;
     if (prey && prey.shape === "ellipse") {
       const hh = finiteOr(prey.heading, 0);
@@ -317,9 +317,14 @@ export function updateDidinium(
       const sy = localY * (targetQ / q);
       const surfaceX = prey.x + sx * ch - sy * sh;
       const surfaceY = prey.y + sx * sh + sy * ch;
-      preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y };
-      if (q < 1.24 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
-        contactTimer = 0.75 + seededUnit(nseed, 0, 0x2a91f00d) * 0.20;
+      const toTargetX = q < 1 ? prey.x - px0 : surfaceX - px0;
+      const toTargetY = q < 1 ? prey.y - py0 : surfaceY - py0;
+      const toTargetD = Math.hypot(toTargetX, toTargetY) || 1;
+      const probeHeading = heading + wander;
+      const approachDot = (Math.cos(probeHeading) * toTargetX + Math.sin(probeHeading) * toTargetY) / toTargetD;
+      preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y, approachDot };
+      if (q < 1.12 && approachDot > 0.35 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
+        contactTimer = 0.52 + seededUnit(nseed, 0, 0x2a91f00d) * 0.16;
       }
     }
     let obstaclePressure = 0;
@@ -363,12 +368,14 @@ export function updateDidinium(
         const dx = preyData.surfaceX - px0;
         const dy = preyData.surfaceY - py0;
         const d = Math.hypot(dx, dy) || 1;
-        const sense = Math.max(140, L * 4.0);
-        if (d < sense) {
-          const hunt = clamp01((sense - d) / (sense * 0.75));
+        const sense = clamp(L * 3.2, 48, 78);
+        if (d < sense && preyData.approachDot > -0.15) {
+          const cone = clamp01((preyData.approachDot + 0.15) / 0.65);
+          const huntRaw = clamp01((sense - d) / (sense * 0.75)) * cone;
+          const hunt = preyData.q < 1.12 ? huntRaw : Math.min(0.55, huntRaw);
           huntWeight = hunt;
           const desired = Math.atan2(dy, dx); // aim at prey SURFACE, not centroid
-          const turnK = 3.0 + 6.5 * hunt;
+          const turnK = 1.4 + 2.4 * hunt;
           heading += wrapPi(desired - heading) * (1 - Math.exp(-turnK * dt)) * hunt;
         }
       }
@@ -385,7 +392,7 @@ export function updateDidinium(
     // test stays on the constant-heading pure-forward open-water cruise.
     const curveEnv = clamp01(noise2D(nseed ^ 0x77c1a2b3, t * CURVE_FREQ, 0.29));
     const curve = side * CURVE_BIAS * curveEnv;
-    const huntSuppression = 1 - 0.75 * huntWeight;
+    const huntSuppression = 1 - 0.35 * huntWeight;
     const travel = heading + wander * (0.3 + 0.7 * cruiseEnv) * huntSuppression + curve * huntSuppression;
     // ── thin corkscrew LEAN at the axial SPIN frequency: a small constant-
     // amplitude offset so the velocity traces a tight cone (thin helix, pitch >>
@@ -399,7 +406,7 @@ export function updateDidinium(
     const eh = travel + lean; // velocity direction (travel + fast helix lean)
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
-    const vSigned = reversing ? -vPx * 0.6 : vPx; // brief reverse jerk
+    const vSigned = reversing ? -vPx * 0.28 : vPx; // brief reverse easing
     const rawX = px0 + ux * vSigned * dt;
     const rawY = py0 + uy * vSigned * dt;
     let nextX = rawX;
@@ -411,8 +418,8 @@ export function updateDidinium(
       const corrX = preyData.surfaceX - nextX;
       const corrY = preyData.surfaceY - nextY;
       const corrL = Math.hypot(corrX, corrY) || 1;
-      const maxStep = L * (preyData.q < 1 ? 0.38 : 0.08);
-      const kLatch = 1 - Math.exp(-(preyData.q < 1 ? 12 : 4) * dt);
+      const maxStep = L * (preyData.q < 1 ? 0.38 : 0.04);
+      const kLatch = 1 - Math.exp(-(preyData.q < 1 ? 12 : 2.0) * dt);
       const step = Math.min(maxStep, corrL * kLatch);
       nextX += (corrX / corrL) * step;
       nextY += (corrY / corrL) * step;
