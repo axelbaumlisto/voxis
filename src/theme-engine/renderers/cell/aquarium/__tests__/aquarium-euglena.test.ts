@@ -350,6 +350,26 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(cell.x).toBeLessThanOrEqual(300);
   });
 
+  it("de-pins a wall-clamped euglena so it visibly leaves the edge", () => {
+    const view = aquariumParamsView({
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaScale: 2.2,
+      aquariumActivityBoost: 1,
+    });
+    let cell = testEuglena({ x: 3, y: 150, heading: Math.PI, swimSpeed: 1 });
+    let minX = Infinity;
+    for (let i = 0; i < 20; i++) {
+      cell = updateEuglena([cell], frame({ dt: 0.05, width: 300, height: 300, activity: 0 }), view)[0];
+      minX = Math.min(minX, cell.x);
+    }
+    expect(minX).toBeGreaterThan(3);
+    expect(Math.cos(cell.heading)).toBeGreaterThan(0.15);
+  });
+
   it("a negative hero weight makes the euglena PURSUE the hero instead of avoiding", () => {
     const view = aquariumParamsView({
       ...CELL_DEFAULTS,

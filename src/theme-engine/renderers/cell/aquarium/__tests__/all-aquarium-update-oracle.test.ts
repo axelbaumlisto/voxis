@@ -17,8 +17,8 @@ function allAquariumParams(): CellParams {
     aquariumActivityBoost: 0.65,
     diatomCount: 0,
     euglenaCount: 1,
-    euglenaSpeed: 0.11,
-    euglenaSpeedActive: 0.22,
+    euglenaSpeed: 0.18,
+    euglenaSpeedActive: 0.34,
     euglenaScale: 2.2,
     euglenaGravitaxis: 0.03,
     euglenaPhototaxis: 0.08,
@@ -135,8 +135,8 @@ describe("all_aquarium update oracle", () => {
       burstPhase: 0.45452829520218074,
     });
     expectCloseState<EuglenaState>(nextEuglena, {
-      x: 211.177851081178,
-      y: 38.29422580111589,
+      x: 211.2587306660469,
+      y: 38.29289115906094,
       heading: -0.016500096220010918,
       startle: 0,
       tumbleProgress: 1,

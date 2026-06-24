@@ -10,6 +10,8 @@ const EXPECTED_ALL_AQUARIUM_CRITICAL_PARAMS = {
   radiusFraction: 0.19,
   enableAquarium: true,
   aquariumSeed: 13,
+  euglenaSpeed: 0.18,
+  euglenaSpeedActive: 0.34,
   euglenaLoiter: 0,
   euglenaWake: 0.3,
   euglenaPhototaxis: 0.08,
@@ -57,6 +59,8 @@ describe("all_aquarium source mount params", () => {
     const options = await mountAllAquarium({
       radiusFraction: 0.25,
       aquariumSeed: 99,
+      euglenaSpeed: 0.5,
+      euglenaSpeedActive: 0.9,
       euglenaLoiter: 0.75,
       euglenaWake: 0.8,
       euglenaPhototaxis: 0.9,
@@ -71,6 +75,8 @@ describe("all_aquarium source mount params", () => {
     expect(options.params).toMatchObject({
       radiusFraction: 0.25,
       aquariumSeed: 99,
+      euglenaSpeed: 0.5,
+      euglenaSpeedActive: 0.9,
       euglenaLoiter: 0.75,
       euglenaWake: 0.8,
       euglenaPhototaxis: 0.9,
