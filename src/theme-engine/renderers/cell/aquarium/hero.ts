@@ -1,4 +1,42 @@
-import type { ObstacleCircle } from "./interaction";
+import { sourceId } from "./interaction";
+import type { FieldContribution, ObstacleCircle } from "./interaction";
+import type { AquariumFrame } from "./types";
+
+export function heroContribute(hero: AquariumFrame["hero"]): FieldContribution[] {
+  if (!hero) return [];
+  const heroId = sourceId("hero", 0);
+  return [
+    {
+      kind: "obstacle",
+      shape: "ellipse",
+      x: hero.x,
+      y: hero.y,
+      halfLen: hero.halfLen ?? hero.radius,
+      halfWid: hero.halfWid ?? hero.radius,
+      heading: hero.heading ?? 0,
+      social: true,
+      sourceId: heroId,
+    },
+    {
+      kind: "wake",
+      x: hero.x,
+      y: hero.y,
+      heading: hero.heading ?? 0,
+      sourceId: heroId,
+    },
+    {
+      kind: "motile",
+      x: hero.x,
+      y: hero.y,
+      heading: hero.heading ?? 0,
+      radius: Math.max(hero.halfWid ?? hero.radius, (hero.halfLen ?? hero.radius) * 0.35),
+      speed: 0,
+      role: "prey",
+      strength: 1,
+      sourceId: heroId,
+    },
+  ];
+}
 
 export function heroConsumeObstacles(
   circles: readonly ObstacleCircle[],

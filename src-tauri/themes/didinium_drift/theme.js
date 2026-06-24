@@ -1733,6 +1733,60 @@ function sourceId(kind, instanceIndex) {
   return KIND_ID[kind] << 20 | instanceIndex;
 }
 
+// src/theme-engine/renderers/cell/aquarium/hero.ts
+function heroContribute(hero) {
+  if (!hero)
+    return [];
+  const heroId = sourceId("hero", 0);
+  return [
+    {
+      kind: "obstacle",
+      shape: "ellipse",
+      x: hero.x,
+      y: hero.y,
+      halfLen: hero.halfLen ?? hero.radius,
+      halfWid: hero.halfWid ?? hero.radius,
+      heading: hero.heading ?? 0,
+      social: true,
+      sourceId: heroId
+    },
+    {
+      kind: "wake",
+      x: hero.x,
+      y: hero.y,
+      heading: hero.heading ?? 0,
+      sourceId: heroId
+    },
+    {
+      kind: "motile",
+      x: hero.x,
+      y: hero.y,
+      heading: hero.heading ?? 0,
+      radius: Math.max(hero.halfWid ?? hero.radius, (hero.halfLen ?? hero.radius) * 0.35),
+      speed: 0,
+      role: "prey",
+      strength: 1,
+      sourceId: heroId
+    }
+  ];
+}
+function heroConsumeObstacles(circles, cx, cy, heroReach) {
+  let curX = cx;
+  let curY = cy;
+  for (const o of circles) {
+    const dx = curX - o.x;
+    const dy = curY - o.y;
+    const d = Math.hypot(dx, dy);
+    const minD = o.radius + heroReach;
+    if (d < minD && d > 0.000001) {
+      const push = minD - d;
+      curX += dx / d * push;
+      curY += dy / d * push;
+    }
+  }
+  return { dx: curX - cx, dy: curY - cy };
+}
+
 // src/theme-engine/renderers/cell/aquarium/seeds.ts
 function mix32(n) {
   let x = n | 0;
@@ -4144,42 +4198,6 @@ function sceneFromParams(params) {
 }
 
 // src/theme-engine/renderers/cell/aquarium/layer.ts
-function heroContribute(hero) {
-  if (!hero)
-    return [];
-  const heroId = sourceId("hero", 0);
-  return [
-    {
-      kind: "obstacle",
-      shape: "ellipse",
-      x: hero.x,
-      y: hero.y,
-      halfLen: hero.halfLen ?? hero.radius,
-      halfWid: hero.halfWid ?? hero.radius,
-      heading: hero.heading ?? 0,
-      social: true,
-      sourceId: heroId
-    },
-    {
-      kind: "wake",
-      x: hero.x,
-      y: hero.y,
-      heading: hero.heading ?? 0,
-      sourceId: heroId
-    },
-    {
-      kind: "motile",
-      x: hero.x,
-      y: hero.y,
-      heading: hero.heading ?? 0,
-      radius: Math.max(hero.halfWid ?? hero.radius, (hero.halfLen ?? hero.radius) * 0.35),
-      speed: 0,
-      role: "prey",
-      strength: 1,
-      sourceId: heroId
-    }
-  ];
-}
 function buildAquariumInteractionField(euglena, vorticella, hero, vorticellaScale, frameHeight, didinium, euglenaScale = 1, didiniumScale = 1) {
   const contribs = [];
   if (vorticella) {
@@ -4336,24 +4354,6 @@ function drawAquariumForeground(ctx, aquarium, frame, params) {
     ctx.fill();
   }
   ctx.restore();
-}
-
-// src/theme-engine/renderers/cell/aquarium/hero.ts
-function heroConsumeObstacles(circles, cx, cy, heroReach) {
-  let curX = cx;
-  let curY = cy;
-  for (const o of circles) {
-    const dx = curX - o.x;
-    const dy = curY - o.y;
-    const d = Math.hypot(dx, dy);
-    const minD = o.radius + heroReach;
-    if (d < minD && d > 0.000001) {
-      const push = minD - d;
-      curX += dx / d * push;
-      curY += dy / d * push;
-    }
-  }
-  return { dx: curX - cx, dy: curY - cy };
 }
 
 // src/theme-engine/renderers/cell/draw.ts

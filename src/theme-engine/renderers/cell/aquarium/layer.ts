@@ -1,7 +1,8 @@
 import type { CellParams } from "../types";
 import { aquariumParamsView } from "./params";
-import { buildField, sourceId } from "./interaction";
+import { buildField } from "./interaction";
 import type { FieldContribution, InteractionField } from "./interaction";
+import { heroContribute } from "./hero";
 import { REGISTRY, sceneFromParams } from "./registry";
 import type { AquariumFrame, AquariumLayerState } from "./types";
 import { euglenaContribute } from "./euglena";
@@ -9,42 +10,6 @@ import { vorticellaContribute } from "./vorticella";
 import { didiniumContribute, didiniumDisplayLength } from "./didinium";
 
 type MutableAquariumLayerState = { -readonly [K in keyof AquariumLayerState]: AquariumLayerState[K] };
-
-export function heroContribute(hero: AquariumFrame["hero"]): FieldContribution[] {
-  if (!hero) return [];
-  const heroId = sourceId("hero", 0);
-  return [
-    {
-      kind: "obstacle",
-      shape: "ellipse",
-      x: hero.x,
-      y: hero.y,
-      halfLen: hero.halfLen ?? hero.radius,
-      halfWid: hero.halfWid ?? hero.radius,
-      heading: hero.heading ?? 0,
-      social: true,
-      sourceId: heroId,
-    },
-    {
-      kind: "wake",
-      x: hero.x,
-      y: hero.y,
-      heading: hero.heading ?? 0,
-      sourceId: heroId,
-    },
-    {
-      kind: "motile",
-      x: hero.x,
-      y: hero.y,
-      heading: hero.heading ?? 0,
-      radius: Math.max(hero.halfWid ?? hero.radius, (hero.halfLen ?? hero.radius) * 0.35),
-      speed: 0,
-      role: "prey",
-      strength: 1,
-      sourceId: heroId,
-    },
-  ];
-}
 
 export function buildAquariumInteractionField(
   euglena: readonly AquariumLayerState["euglena"][number][] | undefined,
