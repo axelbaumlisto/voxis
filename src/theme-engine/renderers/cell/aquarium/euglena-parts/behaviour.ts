@@ -130,10 +130,10 @@ export function updateEuglena(
     let ux = Math.cos(heading);
     let uy = Math.sin(heading);
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L;
-    // Keep the swimmer as a whole organism in open water, not half-on a wall.
-    // This is body-scale (not a point clamp): at overlay scale, a centroid at x=0
-    // makes the flagellum/body read as trapped on the edge.
-    const wallInset = Math.min(L * 0.8, safeWidth * 0.22, safeHeight * 0.22);
+    // Keep the rendered swimmer in open water, not just its centroid. The body
+    // extends ~0.5L forward and the flagellum another ~0.95L, so a centroid-safe
+    // clamp still lets a wall-facing cell look pinned into the edge.
+    const wallInset = Math.min(L * 1.48, safeWidth * 0.32, safeHeight * 0.32);
 
     const field = frame.interaction;
     const fieldObstacles = field ? field.obstacles.filter((obstacle) => obstacle.sourceId !== selfId) : undefined;
@@ -434,12 +434,23 @@ export function updateEuglena(
     // cap effective beat freq so the 2nd lasso harmonic stays near 60fps Nyquist;
     // this reads as high-frequency shimmer instead of a slow tadpole-tail whip.
     const fEff = Math.min(18, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
+    const minX = wallInset;
+    const maxX = Math.max(wallInset, safeWidth - wallInset);
+    const minY = wallInset;
+    const maxY = Math.max(wallInset, safeHeight - wallInset);
+    const clampedX = clamp(nextX, minX, maxX); // clamp, never wrap (wrapping teleported it across the tank)
+    const clampedY = clamp(nextY, minY, maxY);
+    let finalHeading = heading;
+    if (clampedX <= minX + 1e-6 && Math.cos(finalHeading) < 0) finalHeading = Math.atan2(Math.sin(finalHeading), 0.35);
+    if (clampedX >= maxX - 1e-6 && Math.cos(finalHeading) > 0) finalHeading = Math.atan2(Math.sin(finalHeading), -0.35);
+    if (clampedY <= minY + 1e-6 && Math.sin(finalHeading) < 0) finalHeading = Math.atan2(0.35, Math.cos(finalHeading));
+    if (clampedY >= maxY - 1e-6 && Math.sin(finalHeading) > 0) finalHeading = Math.atan2(-0.35, Math.cos(finalHeading));
     return {
       ...cell,
-      x: clamp(nextX, wallInset, Math.max(wallInset, safeWidth - wallInset)), // clamp, never wrap (wrapping teleported it across the tank)
-      y: clamp(nextY, wallInset, Math.max(wallInset, safeHeight - wallInset)),
-      phase: heading,
-      heading,
+      x: clampedX,
+      y: clampedY,
+      phase: finalHeading,
+      heading: finalHeading,
       turnProgress: finiteOr(cell.turnProgress, 2),
       turnFrom: finiteOr(cell.turnFrom, heading),
       turnTo: finiteOr(cell.turnTo, heading),
