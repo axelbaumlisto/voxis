@@ -17,13 +17,13 @@ function allAquariumParams(): CellParams {
     aquariumActivityBoost: 0.65,
     diatomCount: 0,
     euglenaCount: 1,
-    euglenaSpeed: 0.18,
-    euglenaSpeedActive: 0.34,
+    euglenaSpeed: 0.28,
+    euglenaSpeedActive: 0.55,
     euglenaScale: 2.2,
     euglenaGravitaxis: 0.03,
-    euglenaPhototaxis: 0.08,
+    euglenaPhototaxis: 0.03,
     euglenaLoiter: 0,
-    euglenaWake: 0.3,
+    euglenaWake: 0.12,
     euglenaRotDiffusion: 0,
     vorticellaCount: 1,
     vorticellaAlongFrac: 0.30,
@@ -135,9 +135,9 @@ describe("all_aquarium update oracle", () => {
       burstPhase: 0.45452829520218074,
     });
     expectCloseState<EuglenaState>(nextEuglena, {
-      x: 211.2587465859309,
-      y: 38.298895514764396,
-      heading: 0.011197330193197963,
+      x: 211.38508038697682,
+      y: 38.30035878872642,
+      heading: 0.011338996503301654,
       startle: 0,
       tumbleProgress: 1,
       rollPhase: 0.7204900612203637,
@@ -187,5 +187,23 @@ describe("all_aquarium update oracle", () => {
       rollPhase: 0.08467072853539137,
       beatPhase: 0.20083689871244137,
     });
+  });
+
+  it("keeps the all_aquarium Euglena visibly traversing instead of station-keeping", () => {
+    const params = allAquariumParams();
+    let state = seedAquarium(frame({ t: 0, mode: "recording", activity: 0.4, audioLevel: 0.4 }), params);
+    const xs: number[] = [];
+    const ys: number[] = [];
+
+    for (let i = 0; i < 60 * 36; i++) {
+      state = updateAquarium(state, frame({ t: i / 60, dt: 1 / 60, mode: "recording", activity: 0.4, audioLevel: 0.4 }), params);
+      if (i % 120 === 0) {
+        xs.push(state.euglena[0].x);
+        ys.push(state.euglena[0].y);
+      }
+    }
+
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(35);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(45);
   });
 });
