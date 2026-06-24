@@ -2958,6 +2958,33 @@ function euglenaPose(rollPhase, metabolyPhase, options = {}) {
     pellicleStrips
   };
 }
+
+// src/theme-engine/renderers/cell/aquarium/euglena-parts/steering.ts
+var EUGLENA_STEER = {
+  forward: 1,
+  wall: 2,
+  hero: 0,
+  loiter: 1.1,
+  wake: 10,
+  separation: 0,
+  startleAway: 3,
+  startleDart: 1,
+  gravitaxis: 0,
+  phototaxis: 0,
+  obstacle: 1.8
+};
+var MEDIUM = {
+  viscosity: 1.6,
+  rotDiffusion: 0,
+  translationDrag: 1
+};
+var HERO_LOITER_Q = 1.3;
+var HERO_INTEREST_RANGE = 2.2;
+var HERO_WAKE_RANGE = 1.5;
+var STARTLE_TRIGGER_Q = 1.12;
+var STARTLE_TAU = 0.6;
+var SEPARATION_RANGE_BODY_LENGTHS = 1.6;
+var DIDINIUM_HAZARD_WEIGHT = 0.55;
 // src/theme-engine/renderers/cell/aquarium/euglena-parts/draw.ts
 function euglenaDrawModeView(mode) {
   switch (mode) {
@@ -3208,37 +3235,12 @@ function seedEuglena(count, seed, frame, salt = 235478698) {
   }
   return euglena;
 }
-var EUGLENA_STEER = {
-  forward: 1,
-  wall: 2,
-  hero: 0,
-  loiter: 1.1,
-  wake: 10,
-  separation: 0,
-  startleAway: 3,
-  startleDart: 1,
-  gravitaxis: 0,
-  phototaxis: 0,
-  obstacle: 1.8
-};
-var MEDIUM = {
-  viscosity: 1.6,
-  rotDiffusion: 0,
-  translationDrag: 1
-};
-var HERO_LOITER_Q = 1.3;
-var HERO_INTEREST_RANGE = 2.2;
-var HERO_WAKE_RANGE = 1.5;
-var STARTLE_TRIGGER_Q = 1.12;
-var STARTLE_TAU = 0.6;
 var TUMBLE_WINDOW = 0.08;
 var TUMBLE_SECONDS = 1;
 var TUMBLE_MIN_RAD = Math.PI / 6;
 var TUMBLE_MAX_RAD = 5 * Math.PI / 6;
 var TUMBLE_RATE_MIN = 0.045;
 var TUMBLE_RATE_MAX = 0.16;
-var SEPARATION_RANGE_BODY_LENGTHS = 1.6;
-var DIDINIUM_HAZARD_WEIGHT = 0.55;
 var EUGLENA_RELEVANT_FIELDS = new Set(["obstacle", "wake", "motile"]);
 function euglenaContribute(cell, idx, scale = 1) {
   const length = euglenaDisplayLength(finite(cell.size, 1), scale);
