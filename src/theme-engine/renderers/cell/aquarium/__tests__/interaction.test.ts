@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { CELL_DEFAULTS } from "../../defaults";
 import { euglenaContribute, euglenaDisplayLength, EUGLENA_RELEVANT_FIELDS } from "../euglena";
 import { didiniumContribute, didiniumDisplayLength, DIDINIUM_RELEVANT_FIELDS } from "../didinium";
-import { heroConsumeObstacles } from "../hero";
+import { heroConsumeObstacles, heroContribute } from "../hero";
 import { buildField, KIND_ID, sourceId } from "../interaction";
 import type { FieldContribution, ObstacleCircle } from "../interaction";
-import { buildAquariumInteractionField, heroContribute, seedAquarium, updateAquarium } from "../layer";
+import { buildAquariumInteractionField, seedAquarium, updateAquarium } from "../layer";
 import type { AquariumFrame } from "../types";
 import { vorticellaContribute, vorticellaObstacle, VORTICELLA_RELEVANT_FIELDS } from "../vorticella";
 import type { CellParams } from "../../types";
@@ -212,6 +212,37 @@ describe("aquarium interaction field vocabulary", () => {
     expect([...EUGLENA_RELEVANT_FIELDS]).toEqual(["obstacle", "wake", "motile"]);
     expect([...VORTICELLA_RELEVANT_FIELDS]).toEqual(["motile"]);
     expect([...DIDINIUM_RELEVANT_FIELDS]).toEqual(["obstacle", "motile"]);
+  });
+
+  it("hero contribution falls back to radius and zero heading when optional ellipse fields are absent", () => {
+    const hero = { x: 12, y: 8, radius: 10 };
+
+    expect(heroContribute(hero)).toEqual([
+      {
+        kind: "obstacle",
+        shape: "ellipse",
+        x: 12,
+        y: 8,
+        halfLen: 10,
+        halfWid: 10,
+        heading: 0,
+        social: true,
+        sourceId: sourceId("hero", 0),
+      },
+      { kind: "wake", x: 12, y: 8, heading: 0, sourceId: sourceId("hero", 0) },
+      {
+        kind: "motile",
+        x: 12,
+        y: 8,
+        heading: 0,
+        radius: 10,
+        speed: 0,
+        role: "prey",
+        strength: 1,
+        sourceId: sourceId("hero", 0),
+      },
+    ]);
+    expect(heroContribute(undefined)).toEqual([]);
   });
 
   it("hero hard-clamp consume matches legacy vorticella obstacle loop to 1e-10", () => {
