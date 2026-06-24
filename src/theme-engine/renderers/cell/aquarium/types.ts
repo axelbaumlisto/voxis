@@ -102,6 +102,10 @@ export interface EuglenaState extends AquariumSeedPoint {
   readonly tumbleProgress?: number;
   /** Decaying escape state [0,1] for the startle-dart interaction. */
   readonly startle?: number;
+  /** Current deterministic photo-intent waypoint index (opt-in stimulus-response path). */
+  readonly photoTargetIndex?: number;
+  /** Seconds spent on the current photo-intent waypoint before deterministic retarget. */
+  readonly photoTargetAge?: number;
   /** Stable per-cell deterministic noise key for future stochastic behaviours. */
   readonly noiseSeed?: number;
 }

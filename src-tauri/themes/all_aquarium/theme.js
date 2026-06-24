@@ -3049,7 +3049,8 @@ var TUMBLE_MIN_RAD = Math.PI / 6;
 var TUMBLE_MAX_RAD = 5 * Math.PI / 6;
 var TUMBLE_RATE_MIN = 0.045;
 var TUMBLE_RATE_MAX = 0.16;
-var PHOTO_INTENT_SECONDS = 54;
+var PHOTO_TARGET_REACHED_PX = 30;
+var PHOTO_TARGET_MAX_SECONDS = 11;
 var EUGLENA_RELEVANT_FIELDS = new Set(["obstacle", "wake", "motile"]);
 function euglenaContribute(cell, idx, scale = 1) {
   const length = euglenaDisplayLength(finite(cell.size, 1), scale);
@@ -3144,6 +3145,11 @@ function updateEuglena(euglena, frame, view) {
     if (finite(frame.startle, 0) > 0.5)
       startle = 1;
     let priorityPressure = 0;
+    const photoIntent = Math.max(0, finite(view.euglena.photoIntent, 0));
+    let photoTargetIndex = Math.max(0, Math.floor(finiteOr(cell.photoTargetIndex, 0)));
+    let photoTargetAge = Math.max(0, finiteOr(cell.photoTargetAge, 0)) + dt;
+    let photoTargetX = Number.NaN;
+    let photoTargetY = Number.NaN;
     {
       let sx = ux * steer.forward;
       let sy = uy * steer.forward;
@@ -3175,24 +3181,28 @@ function updateEuglena(euglena, frame, view) {
         sx += ldx / ldist * photoW;
         sy += ldy / ldist * photoW;
       }
-      const photoIntent = Math.max(0, finite(view.euglena.photoIntent, 0));
       if (photoIntent > 0 && safeWidth > 0 && safeHeight > 0) {
-        const t = Math.max(0, finite(frame.t, 0));
-        const cycleFloat = t / PHOTO_INTENT_SECONDS;
-        const cycle = Math.floor(cycleFloat);
-        const u = wrapUnit(cycleFloat);
-        const dir = (cycle & 1) === 0 ? -1 : 1;
-        const laneY = dir < 0 ? Math.min(safeHeight - wallInset, wallInset + 2) : Math.max(wallInset, safeHeight - wallInset - 2);
-        const laneErr = clamp((laneY - py0) / Math.max(1, safeHeight - 2 * wallInset), -0.8, 0.8);
-        const tx = dir;
-        const ty = 0.22 * dir + 0.55 * laneErr;
-        const td = Math.hypot(tx, ty) || 0.000001;
+        const route = [
+          [0.2, 0.25],
+          [0.84, 0.3],
+          [0.78, 0.66],
+          [0.28, 0.72],
+          [0.36, 0.38],
+          [0.7, 0.22]
+        ][photoTargetIndex % 6];
+        photoTargetX = wallInset + (safeWidth - 2 * wallInset) * route[0];
+        photoTargetY = wallInset + (safeHeight - 2 * wallInset) * route[1];
+        const dx = photoTargetX - px0;
+        const dy = photoTargetY - py0;
+        const dist = Math.hypot(dx, dy) || 0.000001;
+        const tx = dx / dist;
+        const ty = dy / dist;
         const bearing = Math.atan2(ty, tx);
-        const eyeGate = 0.7 + 0.3 * Math.max(0, Math.cos(bearing - heading - TAU2 * finite(cell.rollPhase, 0)));
-        const legEase = 0.85 + 0.15 * Math.sin(Math.PI * Math.min(1, u));
-        const seekW = photoIntent * legEase * eyeGate;
-        sx += tx / td * seekW;
-        sy += ty / td * seekW;
+        const eyeGate = 0.76 + 0.24 * Math.max(0, Math.cos(bearing - heading - TAU2 * finite(cell.rollPhase, 0)));
+        const approachFade = 0.62 + 0.38 * clamp01(dist / 90);
+        const seekW = photoIntent * approachFade * eyeGate;
+        sx += tx * seekW;
+        sy += ty * seekW;
       }
       if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 0.0001) {
         const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
@@ -3359,6 +3369,14 @@ function updateEuglena(euglena, frame, view) {
       finalHeading = Math.atan2(0.35, Math.cos(finalHeading));
     if (clampedY >= maxY - 0.000001 && Math.sin(finalHeading) > 0)
       finalHeading = Math.atan2(-0.35, Math.cos(finalHeading));
+    if (photoIntent > 0) {
+      const reached = Number.isFinite(photoTargetX) && Number.isFinite(photoTargetY) && Math.hypot(clampedX - photoTargetX, clampedY - photoTargetY) < PHOTO_TARGET_REACHED_PX;
+      const edgeBlocked = clampedX <= minX + 2 || clampedX >= maxX - 2;
+      if (reached || edgeBlocked || photoTargetAge > PHOTO_TARGET_MAX_SECONDS) {
+        photoTargetIndex += 1;
+        photoTargetAge = 0;
+      }
+    }
     return {
       ...cell,
       x: clampedX,
@@ -3373,6 +3391,7 @@ function updateEuglena(euglena, frame, view) {
       tumbleTo,
       tumbleProgress,
       startle: startle * Math.exp(-dt / STARTLE_TAU),
+      ...photoIntent > 0 ? { photoTargetIndex, photoTargetAge } : {},
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + rollDelta),
       metabolyPhase: wrapUnit(finite(cell.metabolyPhase, 0) + Math.max(0, finite(cell.metabolyRate, 0)) * act * dt),
       flagellumPhase: wrapUnit(finite(cell.flagellumPhase, 0) + fEff * dt),
@@ -5381,8 +5400,8 @@ function mount(container, api) {
       aquariumActivityBoost: 0.65,
       diatomCount: 0,
       euglenaCount: 1,
-      euglenaSpeed: 0.28,
-      euglenaSpeedActive: 0.55,
+      euglenaSpeed: 0.34,
+      euglenaSpeedActive: 0.65,
       euglenaScale: 2.2,
       euglenaGravitaxis: 0.03,
       euglenaPhototaxis: 0,
