@@ -17,8 +17,8 @@ function allAquariumParams(): CellParams {
     aquariumActivityBoost: 0.65,
     diatomCount: 0,
     euglenaCount: 1,
-    euglenaSpeed: 0.28,
-    euglenaSpeedActive: 0.55,
+    euglenaSpeed: 0.34,
+    euglenaSpeedActive: 0.65,
     euglenaScale: 2.2,
     euglenaGravitaxis: 0.03,
     euglenaPhototaxis: 0,
@@ -136,9 +136,9 @@ describe("all_aquarium update oracle", () => {
       burstPhase: 0.45452829520218074,
     });
     expectCloseState<EuglenaState>(nextEuglena, {
-      x: 211.3827081900239,
-      y: 38.3369324799962,
-      heading: 0.11820104702745463,
+      x: 211.45126181078513,
+      y: 38.340639308785356,
+      heading: 0.10750467313452511,
       startle: 0,
       tumbleProgress: 1,
       rollPhase: 0.7204900612203637,
@@ -205,7 +205,44 @@ describe("all_aquarium update oracle", () => {
     }
 
     expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(120);
-    expect(Math.min(...xs)).toBeLessThan(70);
-    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(40);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(60);
+  });
+
+  it("does not wait at an edge during long all_aquarium photo-intent transit", () => {
+    const params = allAquariumParams();
+    let state = seedAquarium(frame({ t: 0, mode: "recording", activity: 0.4, audioLevel: 0.4 }), params);
+    let leftEdgeFrames = 0;
+    let rightEdgeFrames = 0;
+    let stillRunFrames = 0;
+    let maxStillRunFrames = 0;
+    let previous = state.euglena[0];
+    const sampledX: number[] = [];
+    const sampledY: number[] = [];
+
+    for (let i = 0; i < 60 * 90; i++) {
+      state = updateAquarium(state, frame({ t: i / 60, dt: 1 / 60, mode: "recording", activity: 0.4, audioLevel: 0.4 }), params);
+      const euglena = state.euglena[0];
+      if (euglena.x < 55) leftEdgeFrames++;
+      if (euglena.x > 285) rightEdgeFrames++;
+      const step = Math.hypot(euglena.x - previous.x, euglena.y - previous.y);
+      if (step < 0.02) {
+        stillRunFrames++;
+      } else {
+        maxStillRunFrames = Math.max(maxStillRunFrames, stillRunFrames);
+        stillRunFrames = 0;
+      }
+      previous = euglena;
+      if (i % 60 === 0) {
+        sampledX.push(euglena.x);
+        sampledY.push(euglena.y);
+      }
+    }
+    maxStillRunFrames = Math.max(maxStillRunFrames, stillRunFrames);
+
+    expect(leftEdgeFrames / 60).toBeLessThan(2);
+    expect(rightEdgeFrames / 60).toBeLessThan(2);
+    expect(maxStillRunFrames / 60).toBeLessThan(0.5);
+    expect(Math.max(...sampledX) - Math.min(...sampledX)).toBeGreaterThan(130);
+    expect(Math.max(...sampledY) - Math.min(...sampledY)).toBeGreaterThan(60);
   });
 });
