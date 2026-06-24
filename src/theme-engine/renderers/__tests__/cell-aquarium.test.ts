@@ -2376,6 +2376,81 @@ describe("createCellRenderer aquarium gate", () => {
     expect(secondHero.x).toBeGreaterThan(firstHero.x); // same-frame published hero includes previous contact response
   });
 
+  it("passes the same recoiled hero pose to aquarium update, background, and foreground in one frame", async () => {
+    installNoopCanvasContext();
+    const width = 172;
+    const height = 36;
+    const didinium: DidiniumState = {
+      x: 70, y: height * 0.5, phase: 0, size: 1, heading: 0, swimSpeed: 1,
+      rollPhase: 0, rollRate: 0.5, beatPhase: 0, beatRate: 4,
+      turnSide: 1, avoidProgress: 1, contactTimer: 0.5, contactDuration: 2.0, noiseSeed: 123,
+    };
+    const state: AquariumLayerState = { seed: 1, diatoms: [], euglena: [], vorticella: [], didinium: [didinium] };
+    const seed = vi.fn(() => state);
+    const update = vi.fn((aquarium: AquariumLayerState) => aquarium);
+    const draw = vi.fn();
+    const foreground = vi.fn();
+    vi.doMock("../cell/aquarium/layer", () => ({
+      seedAquarium: seed,
+      updateAquarium: update,
+      drawAquariumBackground: draw,
+      drawAquariumForeground: foreground,
+    }));
+    const rafCalls: Array<() => void> = [];
+    let now = 1000;
+    vi.stubGlobal("performance", { ["now"]: () => now });
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return rafCalls.length; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const { createCellRenderer } = await import("../cell/renderer");
+    const renderer = createCellRenderer(document.createElement("div"), {
+      width, height, baseHue: 50,
+      params: {
+        ...CELL_DEFAULTS,
+        enableAquarium: true,
+        enableHelicalSwim: false,
+        didiniumCount: 1,
+        swimSpeedMaxFrac: 0,
+        idleSwimFrac: 0,
+        idleDriftMin: 0,
+      },
+    });
+
+    now += 1000 / 60;
+    rafCalls.shift()?.(); // Prime aquarium state so the next tick sees prior Didinium contact.
+    update.mockClear();
+    draw.mockClear();
+    foreground.mockClear();
+
+    now += 1000 / 60;
+    rafCalls.shift()?.();
+    renderer.destroy();
+
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(draw).toHaveBeenCalledTimes(1);
+    expect(foreground).toHaveBeenCalledTimes(1);
+    const updateFrame = update.mock.calls[0]?.[1] as AquariumFrame;
+    const backgroundFrame = draw.mock.calls[0]?.[2] as AquariumFrame;
+    const foregroundFrame = foreground.mock.calls[0]?.[2] as AquariumFrame;
+    expect(backgroundFrame).toBe(updateFrame);
+    expect(foregroundFrame).toMatchObject({
+      t: updateFrame.t,
+      dt: updateFrame.dt,
+      width: updateFrame.width,
+      height: updateFrame.height,
+      mode: updateFrame.mode,
+      activity: updateFrame.activity,
+      audioLevel: updateFrame.audioLevel,
+      startle: updateFrame.startle,
+      baseHue: updateFrame.baseHue,
+    });
+    expect(updateFrame.hero).toBeDefined();
+    expect(backgroundFrame.hero).toEqual(updateFrame.hero);
+    expect(foregroundFrame.hero).toEqual(updateFrame.hero);
+    expect(updateFrame.hero!.x).toBeGreaterThan(width * 0.5);
+    expect(updateFrame.hero!.y).toBeCloseTo(height * 0.5, 6);
+  });
+
   it("Euglena near-touch does not trigger predator-level hero recoil", async () => {
     installNoopCanvasContext();
     const euglena: EuglenaState = {
