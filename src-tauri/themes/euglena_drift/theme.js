@@ -3576,246 +3576,8 @@ function vorticellaObstacle(cell, scale, frameHeight) {
   const ay = finite(cell.anchorY, 0);
   return { x: ax, y: ay - (restStalk + bellHeight * 0.5), radius: 1.1 * D };
 }
-
-// src/theme-engine/renderers/cell/aquarium/vorticella.ts
-var VC_CONTRACT = 0.02;
-var VC_HOLD = 0.02;
-var VC_RELAX = 0.33;
-var T_C = 0.033;
+// src/theme-engine/renderers/cell/aquarium/vorticella-parts/draw.ts
 var T_HOLD = 0.05;
-var T_E = 2.6;
-function vorticellaCellSeed(anchorX) {
-  return (Math.round(anchorX * 7) ^ 117600714) >>> 0;
-}
-var MIG_DETACH = 0.6;
-var MIG_SWIM = 16;
-var MIG_ATTACH = 0.7;
-function drawMigrateInterval(cellSeed, migrateCount) {
-  const u = Math.max(0.0001, seededUnit(cellSeed, migrateCount, 1831565813));
-  return clamp(-Math.log(u) * 900, 540, 2400);
-}
-function vorticellaLegAmount(leg, timer) {
-  if (leg === 1) {
-    const fast = clamp01(timer / 0.016);
-    const tail = clamp01((timer - 0.016) / Math.max(0.000001, T_C - 0.016));
-    return 0.9 * (1 - Math.pow(1 - fast, 3)) + 0.1 * (1 - Math.pow(1 - tail, 3));
-  }
-  if (leg === 2)
-    return 1;
-  if (leg === 3) {
-    const u = clamp01(timer / T_E);
-    const e0 = Math.exp(-Math.pow(1.9, 1.4));
-    return (Math.exp(-Math.pow(u * 1.9, 1.4)) - e0) / (1 - e0);
-  }
-  return 0;
-}
-function vorticellaContractPhase(cyclePhase) {
-  const phase = wrapUnit(cyclePhase);
-  if (phase < VC_CONTRACT) {
-    const q = phase / VC_CONTRACT;
-    return 1 - Math.pow(1 - q, 3);
-  }
-  if (phase < VC_CONTRACT + VC_HOLD)
-    return 1;
-  if (phase < VC_CONTRACT + VC_HOLD + VC_RELAX) {
-    const q = (phase - VC_CONTRACT - VC_HOLD) / VC_RELAX;
-    return 1 - smoothstep2(q);
-  }
-  return 0;
-}
-var VORTICELLA_RELEVANT_FIELDS = new Set(["motile"]);
-function motileKindId(motile) {
-  return Math.floor(Math.max(0, finiteOr(motile.sourceId, 0)) / (1 << 20));
-}
-function vorticellaTriggerRadius(obsRadius, motile) {
-  const radius = Math.max(0, finiteOr(motile.radius, 0));
-  const hasMetadata = radius > 0 || motile.strength !== undefined || motile.role !== undefined;
-  if (!hasMetadata)
-    return obsRadius * 1.25;
-  const kind = motileKindId(motile);
-  const strengthFallback = kind === KIND_ID.hero ? 1 : kind === KIND_ID.didinium ? 0.75 : kind === KIND_ID.euglena ? 0.35 : 0.5;
-  const strength = clamp(finiteOr(motile.strength, strengthFallback), 0.15, 1.5);
-  const baseMul = kind === KIND_ID.euglena ? 1.3 : 1.55;
-  const bodyMul = kind === KIND_ID.hero ? 0.95 : kind === KIND_ID.didinium ? 0.9 : kind === KIND_ID.euglena ? 0.5 : 0.65;
-  return obsRadius * baseMul + radius * bodyMul * strength;
-}
-function vorticellaContribute(cell, scale, frameHeight, idx) {
-  const obstacle = vorticellaObstacle(cell, scale, frameHeight);
-  return [{
-    kind: "obstacle",
-    shape: "circle",
-    x: obstacle.x,
-    y: obstacle.y,
-    radius: obstacle.radius,
-    sourceId: sourceId("vorticella", idx)
-  }, {
-    kind: "wake",
-    x: obstacle.x,
-    y: obstacle.y,
-    heading: finite(cell.directionAngle, -Math.PI / 2),
-    sourceId: sourceId("vorticella", idx)
-  }];
-}
-function seedVorticella(count, seed, frame, alongFrac = 0.5, salt = 117600714) {
-  if (count <= 0)
-    return [];
-  const vorticella = [];
-  const safeWidth = Math.max(0, finite(frame.width, 0));
-  const safeHeight = Math.max(0, finite(frame.height, 0));
-  const inset = 0.5;
-  for (let i = 0;i < count; i++) {
-    const along = count === 1 ? clamp01(alongFrac) : seededUnit(seed, i, salt ^ 1164169887);
-    const anchorX = along * safeWidth;
-    const anchorY = safeHeight - inset;
-    const lean = clamp((0.5 - along) * 1.2, -0.35, 0.35);
-    const directionAngle = -Math.PI / 2 + lean;
-    const restLength = 7.5 + seededUnit(seed, i, salt ^ 48610963) * 3.5;
-    const cycle = seededUnit(seed, i, salt ^ 1628012333);
-    vorticella.push({
-      x: anchorX,
-      y: anchorY,
-      phase: cycle,
-      size: 0.5 + seededUnit(seed, i, salt ^ 1921111239),
-      anchorX,
-      anchorY,
-      directionAngle,
-      restLength,
-      contractPhase: vorticellaContractPhase(cycle),
-      contractCyclePhase: cycle,
-      oralWreathPhase: seededUnit(seed, i, salt ^ 1757159915),
-      contractRate: 0.06 + seededUnit(seed, i, salt ^ 802853537) * 0.05,
-      oralRate: 0.42 + seededUnit(seed, i, salt ^ 348696353) * 0.18,
-      swayPhase: seededUnit(seed, i, salt ^ 999411207),
-      swayRate: 0.1 + seededUnit(seed, i, salt ^ 1513062835) * 0.07,
-      contractLeg: 0,
-      contractTimer: seededUnit(seed, i, salt ^ 699105045) * 1.5,
-      voiceEnv: 0,
-      migrateState: 0,
-      attach: 1,
-      migrateTimer: seededUnit(seed, i, salt ^ 1912249405) * 6,
-      migrateInterval: drawMigrateInterval(vorticellaCellSeed(anchorX), 0),
-      migrateTargetX: anchorX,
-      migrateCount: 0
-    });
-  }
-  return vorticella;
-}
-function updateVorticella(vorticella, frame, view) {
-  if (vorticella.length === 0)
-    return vorticella;
-  const dt = Math.max(0, finite(frame.dt, 0));
-  const oralHz = 5;
-  const swayMul = 1;
-  return vorticella.map((cell, idx) => {
-    const cvClock = wrapUnit(finite(cell.contractCyclePhase, 0) + Math.max(0, finite(cell.contractRate, 0)) * dt);
-    const cellSeed = vorticellaCellSeed(finite(cell.anchorX, 0));
-    let leg = Math.max(0, Math.min(3, Math.floor(finiteOr(cell.contractLeg, 0))));
-    let timer = Math.max(0, finiteOr(cell.contractTimer, 0)) + dt;
-    let voiceEnv = clamp01(finiteOr(cell.voiceEnv, 0));
-    const loud = clamp01(Math.max(finite(frame.audioLevel, 0), finite(frame.activity, 0)));
-    const voiceTarget = frame.mode === "recording" ? Math.max(0.4, loud) : 0;
-    const voiceTau = voiceTarget > voiceEnv ? 0.3 : 1.4;
-    voiceEnv = clamp01(voiceEnv + (voiceTarget - voiceEnv) * (1 - Math.exp(-dt / voiceTau)));
-    const motiles = frame.interaction?.motiles.filter((motile) => motile.sourceId !== sourceId("vorticella", idx));
-    if (motiles && motiles.length > 0 && leg === 0 && timer > 1) {
-      const obs = vorticellaObstacle(cell, view.vorticella.scale, frame.height);
-      for (let mi = 0;mi < motiles.length; mi++) {
-        const motile = motiles[mi];
-        const trigR = vorticellaTriggerRadius(obs.radius, motile);
-        const mdx = finite(motile.x, 0) - obs.x;
-        const mdy = finite(motile.y, 0) - obs.y;
-        if (mdx * mdx + mdy * mdy < trigR * trigR) {
-          leg = 1;
-          timer = 0;
-          break;
-        }
-      }
-    }
-    for (let guard = 0;guard < 128; guard++) {
-      if (leg === 1) {
-        if (timer >= T_C) {
-          timer -= T_C;
-          leg = 2;
-        } else
-          break;
-      } else if (leg === 2) {
-        if (timer >= T_HOLD) {
-          timer -= T_HOLD;
-          leg = 3;
-        } else
-          break;
-      } else if (leg === 3) {
-        if (timer >= T_E) {
-          timer -= T_E;
-          leg = 0;
-        } else
-          break;
-      } else
-        break;
-    }
-    let migrateState = Math.max(0, Math.min(3, Math.floor(finiteOr(cell.migrateState, 0))));
-    let attach = clamp01(finiteOr(cell.attach, 1));
-    let migrateTimer = Math.max(0, finiteOr(cell.migrateTimer, 0));
-    let migrateInterval = Math.max(8, finiteOr(cell.migrateInterval, 900));
-    let migrateTargetX = finiteOr(cell.migrateTargetX, finite(cell.anchorX, 0));
-    let migrateCount = Math.max(0, Math.floor(finiteOr(cell.migrateCount, 0)));
-    let anchorX = finite(cell.anchorX, 0);
-    const safeWidth = Math.max(1, finite(frame.width, 0));
-    const inset2 = Math.max(8, safeWidth * 0.08);
-    if (migrateState === 0) {
-      migrateTimer += dt;
-      if (migrateTimer >= migrateInterval && leg === 0) {
-        migrateState = 1;
-        migrateCount += 1;
-        const u = seededUnit(cellSeed, migrateCount, 2654435761);
-        const nx = inset2 + u * (safeWidth - 2 * inset2);
-        migrateTargetX = Math.abs(nx - anchorX) >= safeWidth * 0.2 ? nx : anchorX < safeWidth / 2 ? Math.min(safeWidth - inset2, anchorX + safeWidth * 0.3) : Math.max(inset2, anchorX - safeWidth * 0.3);
-      }
-    } else if (migrateState === 1) {
-      attach = Math.max(0, attach - dt / MIG_DETACH);
-      if (attach <= 0) {
-        attach = 0;
-        migrateState = 2;
-      }
-    } else if (migrateState === 2) {
-      const dx = migrateTargetX - anchorX;
-      const step = MIG_SWIM * dt;
-      if (Math.abs(dx) <= step) {
-        anchorX = migrateTargetX;
-        migrateState = 3;
-      } else
-        anchorX += Math.sign(dx) * step;
-    } else {
-      attach = Math.min(1, attach + dt / MIG_ATTACH);
-      if (attach >= 1) {
-        attach = 1;
-        migrateState = 0;
-        migrateTimer = 0;
-        migrateInterval = drawMigrateInterval(cellSeed, migrateCount);
-      }
-    }
-    return {
-      ...cell,
-      x: anchorX,
-      y: cell.anchorY,
-      anchorX,
-      phase: cvClock,
-      contractCyclePhase: cvClock,
-      contractPhase: clamp01(vorticellaLegAmount(leg, timer)),
-      contractLeg: leg,
-      contractTimer: timer,
-      voiceEnv,
-      oralWreathPhase: wrapUnit(cell.oralWreathPhase + oralHz * dt),
-      swayPhase: wrapUnit(finiteOr(cell.swayPhase, 0) + Math.max(0, finiteOr(cell.swayRate, 0.12)) * swayMul * dt),
-      migrateState,
-      attach,
-      migrateTimer,
-      migrateInterval,
-      migrateTargetX,
-      migrateCount
-    };
-  });
-}
 function drawPolyline4(ctx, points, close) {
   if (points.length === 0)
     return;
@@ -4204,6 +3966,246 @@ function drawVorticella(ctx, vorticella, frame, view) {
     }
   }
   ctx.restore();
+}
+
+// src/theme-engine/renderers/cell/aquarium/vorticella.ts
+var VC_CONTRACT = 0.02;
+var VC_HOLD = 0.02;
+var VC_RELAX = 0.33;
+var T_C = 0.033;
+var T_HOLD2 = 0.05;
+var T_E = 2.6;
+function vorticellaCellSeed(anchorX) {
+  return (Math.round(anchorX * 7) ^ 117600714) >>> 0;
+}
+var MIG_DETACH = 0.6;
+var MIG_SWIM = 16;
+var MIG_ATTACH = 0.7;
+function drawMigrateInterval(cellSeed, migrateCount) {
+  const u = Math.max(0.0001, seededUnit(cellSeed, migrateCount, 1831565813));
+  return clamp(-Math.log(u) * 900, 540, 2400);
+}
+function vorticellaLegAmount(leg, timer) {
+  if (leg === 1) {
+    const fast = clamp01(timer / 0.016);
+    const tail = clamp01((timer - 0.016) / Math.max(0.000001, T_C - 0.016));
+    return 0.9 * (1 - Math.pow(1 - fast, 3)) + 0.1 * (1 - Math.pow(1 - tail, 3));
+  }
+  if (leg === 2)
+    return 1;
+  if (leg === 3) {
+    const u = clamp01(timer / T_E);
+    const e0 = Math.exp(-Math.pow(1.9, 1.4));
+    return (Math.exp(-Math.pow(u * 1.9, 1.4)) - e0) / (1 - e0);
+  }
+  return 0;
+}
+function vorticellaContractPhase(cyclePhase) {
+  const phase = wrapUnit(cyclePhase);
+  if (phase < VC_CONTRACT) {
+    const q = phase / VC_CONTRACT;
+    return 1 - Math.pow(1 - q, 3);
+  }
+  if (phase < VC_CONTRACT + VC_HOLD)
+    return 1;
+  if (phase < VC_CONTRACT + VC_HOLD + VC_RELAX) {
+    const q = (phase - VC_CONTRACT - VC_HOLD) / VC_RELAX;
+    return 1 - smoothstep2(q);
+  }
+  return 0;
+}
+var VORTICELLA_RELEVANT_FIELDS = new Set(["motile"]);
+function motileKindId(motile) {
+  return Math.floor(Math.max(0, finiteOr(motile.sourceId, 0)) / (1 << 20));
+}
+function vorticellaTriggerRadius(obsRadius, motile) {
+  const radius = Math.max(0, finiteOr(motile.radius, 0));
+  const hasMetadata = radius > 0 || motile.strength !== undefined || motile.role !== undefined;
+  if (!hasMetadata)
+    return obsRadius * 1.25;
+  const kind = motileKindId(motile);
+  const strengthFallback = kind === KIND_ID.hero ? 1 : kind === KIND_ID.didinium ? 0.75 : kind === KIND_ID.euglena ? 0.35 : 0.5;
+  const strength = clamp(finiteOr(motile.strength, strengthFallback), 0.15, 1.5);
+  const baseMul = kind === KIND_ID.euglena ? 1.3 : 1.55;
+  const bodyMul = kind === KIND_ID.hero ? 0.95 : kind === KIND_ID.didinium ? 0.9 : kind === KIND_ID.euglena ? 0.5 : 0.65;
+  return obsRadius * baseMul + radius * bodyMul * strength;
+}
+function vorticellaContribute(cell, scale, frameHeight, idx) {
+  const obstacle = vorticellaObstacle(cell, scale, frameHeight);
+  return [{
+    kind: "obstacle",
+    shape: "circle",
+    x: obstacle.x,
+    y: obstacle.y,
+    radius: obstacle.radius,
+    sourceId: sourceId("vorticella", idx)
+  }, {
+    kind: "wake",
+    x: obstacle.x,
+    y: obstacle.y,
+    heading: finite(cell.directionAngle, -Math.PI / 2),
+    sourceId: sourceId("vorticella", idx)
+  }];
+}
+function seedVorticella(count, seed, frame, alongFrac = 0.5, salt = 117600714) {
+  if (count <= 0)
+    return [];
+  const vorticella = [];
+  const safeWidth = Math.max(0, finite(frame.width, 0));
+  const safeHeight = Math.max(0, finite(frame.height, 0));
+  const inset = 0.5;
+  for (let i = 0;i < count; i++) {
+    const along = count === 1 ? clamp01(alongFrac) : seededUnit(seed, i, salt ^ 1164169887);
+    const anchorX = along * safeWidth;
+    const anchorY = safeHeight - inset;
+    const lean = clamp((0.5 - along) * 1.2, -0.35, 0.35);
+    const directionAngle = -Math.PI / 2 + lean;
+    const restLength = 7.5 + seededUnit(seed, i, salt ^ 48610963) * 3.5;
+    const cycle = seededUnit(seed, i, salt ^ 1628012333);
+    vorticella.push({
+      x: anchorX,
+      y: anchorY,
+      phase: cycle,
+      size: 0.5 + seededUnit(seed, i, salt ^ 1921111239),
+      anchorX,
+      anchorY,
+      directionAngle,
+      restLength,
+      contractPhase: vorticellaContractPhase(cycle),
+      contractCyclePhase: cycle,
+      oralWreathPhase: seededUnit(seed, i, salt ^ 1757159915),
+      contractRate: 0.06 + seededUnit(seed, i, salt ^ 802853537) * 0.05,
+      oralRate: 0.42 + seededUnit(seed, i, salt ^ 348696353) * 0.18,
+      swayPhase: seededUnit(seed, i, salt ^ 999411207),
+      swayRate: 0.1 + seededUnit(seed, i, salt ^ 1513062835) * 0.07,
+      contractLeg: 0,
+      contractTimer: seededUnit(seed, i, salt ^ 699105045) * 1.5,
+      voiceEnv: 0,
+      migrateState: 0,
+      attach: 1,
+      migrateTimer: seededUnit(seed, i, salt ^ 1912249405) * 6,
+      migrateInterval: drawMigrateInterval(vorticellaCellSeed(anchorX), 0),
+      migrateTargetX: anchorX,
+      migrateCount: 0
+    });
+  }
+  return vorticella;
+}
+function updateVorticella(vorticella, frame, view) {
+  if (vorticella.length === 0)
+    return vorticella;
+  const dt = Math.max(0, finite(frame.dt, 0));
+  const oralHz = 5;
+  const swayMul = 1;
+  return vorticella.map((cell, idx) => {
+    const cvClock = wrapUnit(finite(cell.contractCyclePhase, 0) + Math.max(0, finite(cell.contractRate, 0)) * dt);
+    const cellSeed = vorticellaCellSeed(finite(cell.anchorX, 0));
+    let leg = Math.max(0, Math.min(3, Math.floor(finiteOr(cell.contractLeg, 0))));
+    let timer = Math.max(0, finiteOr(cell.contractTimer, 0)) + dt;
+    let voiceEnv = clamp01(finiteOr(cell.voiceEnv, 0));
+    const loud = clamp01(Math.max(finite(frame.audioLevel, 0), finite(frame.activity, 0)));
+    const voiceTarget = frame.mode === "recording" ? Math.max(0.4, loud) : 0;
+    const voiceTau = voiceTarget > voiceEnv ? 0.3 : 1.4;
+    voiceEnv = clamp01(voiceEnv + (voiceTarget - voiceEnv) * (1 - Math.exp(-dt / voiceTau)));
+    const motiles = frame.interaction?.motiles.filter((motile) => motile.sourceId !== sourceId("vorticella", idx));
+    if (motiles && motiles.length > 0 && leg === 0 && timer > 1) {
+      const obs = vorticellaObstacle(cell, view.vorticella.scale, frame.height);
+      for (let mi = 0;mi < motiles.length; mi++) {
+        const motile = motiles[mi];
+        const trigR = vorticellaTriggerRadius(obs.radius, motile);
+        const mdx = finite(motile.x, 0) - obs.x;
+        const mdy = finite(motile.y, 0) - obs.y;
+        if (mdx * mdx + mdy * mdy < trigR * trigR) {
+          leg = 1;
+          timer = 0;
+          break;
+        }
+      }
+    }
+    for (let guard = 0;guard < 128; guard++) {
+      if (leg === 1) {
+        if (timer >= T_C) {
+          timer -= T_C;
+          leg = 2;
+        } else
+          break;
+      } else if (leg === 2) {
+        if (timer >= T_HOLD2) {
+          timer -= T_HOLD2;
+          leg = 3;
+        } else
+          break;
+      } else if (leg === 3) {
+        if (timer >= T_E) {
+          timer -= T_E;
+          leg = 0;
+        } else
+          break;
+      } else
+        break;
+    }
+    let migrateState = Math.max(0, Math.min(3, Math.floor(finiteOr(cell.migrateState, 0))));
+    let attach = clamp01(finiteOr(cell.attach, 1));
+    let migrateTimer = Math.max(0, finiteOr(cell.migrateTimer, 0));
+    let migrateInterval = Math.max(8, finiteOr(cell.migrateInterval, 900));
+    let migrateTargetX = finiteOr(cell.migrateTargetX, finite(cell.anchorX, 0));
+    let migrateCount = Math.max(0, Math.floor(finiteOr(cell.migrateCount, 0)));
+    let anchorX = finite(cell.anchorX, 0);
+    const safeWidth = Math.max(1, finite(frame.width, 0));
+    const inset2 = Math.max(8, safeWidth * 0.08);
+    if (migrateState === 0) {
+      migrateTimer += dt;
+      if (migrateTimer >= migrateInterval && leg === 0) {
+        migrateState = 1;
+        migrateCount += 1;
+        const u = seededUnit(cellSeed, migrateCount, 2654435761);
+        const nx = inset2 + u * (safeWidth - 2 * inset2);
+        migrateTargetX = Math.abs(nx - anchorX) >= safeWidth * 0.2 ? nx : anchorX < safeWidth / 2 ? Math.min(safeWidth - inset2, anchorX + safeWidth * 0.3) : Math.max(inset2, anchorX - safeWidth * 0.3);
+      }
+    } else if (migrateState === 1) {
+      attach = Math.max(0, attach - dt / MIG_DETACH);
+      if (attach <= 0) {
+        attach = 0;
+        migrateState = 2;
+      }
+    } else if (migrateState === 2) {
+      const dx = migrateTargetX - anchorX;
+      const step = MIG_SWIM * dt;
+      if (Math.abs(dx) <= step) {
+        anchorX = migrateTargetX;
+        migrateState = 3;
+      } else
+        anchorX += Math.sign(dx) * step;
+    } else {
+      attach = Math.min(1, attach + dt / MIG_ATTACH);
+      if (attach >= 1) {
+        attach = 1;
+        migrateState = 0;
+        migrateTimer = 0;
+        migrateInterval = drawMigrateInterval(cellSeed, migrateCount);
+      }
+    }
+    return {
+      ...cell,
+      x: anchorX,
+      y: cell.anchorY,
+      anchorX,
+      phase: cvClock,
+      contractCyclePhase: cvClock,
+      contractPhase: clamp01(vorticellaLegAmount(leg, timer)),
+      contractLeg: leg,
+      contractTimer: timer,
+      voiceEnv,
+      oralWreathPhase: wrapUnit(cell.oralWreathPhase + oralHz * dt),
+      swayPhase: wrapUnit(finiteOr(cell.swayPhase, 0) + Math.max(0, finiteOr(cell.swayRate, 0.12)) * swayMul * dt),
+      migrateState,
+      attach,
+      migrateTimer,
+      migrateInterval,
+      migrateTargetX,
+      migrateCount
+    };
+  });
 }
 
 // src/theme-engine/renderers/cell/aquarium/registry.ts
