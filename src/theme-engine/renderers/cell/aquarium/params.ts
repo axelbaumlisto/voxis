@@ -52,6 +52,7 @@ export function aquariumParamsView(params: CellParams): AquariumParamsView {
       speedActive: nonNegative(params.euglenaSpeedActive, 2.0),
       scale: nonNegative(params.euglenaScale, 1.0),
       hueOffset: finiteOr(params.euglenaHueOffset, 42),
+      photoIntent: nonNegative(params.euglenaPhotoIntent, 0),
       steer: euglenaSteerOverride(params),
     },
     medium: mediumOverride(params),

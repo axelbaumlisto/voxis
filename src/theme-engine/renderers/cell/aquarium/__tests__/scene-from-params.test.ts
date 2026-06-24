@@ -187,6 +187,7 @@ describe("sceneFromParams", () => {
             speedActive: 1.5,
             scale: 2.8,
             hueOffset: 42,
+            photoIntent: 0,
             steer: {
               gravitaxis: 0.2,
               phototaxis: 0.6,
@@ -223,6 +224,7 @@ describe("sceneFromParams", () => {
             speedActive: 0.34,
             scale: 7.5,
             hueOffset: 42,
+            photoIntent: 0,
             steer: undefined,
             medium: undefined,
             seed: 17,

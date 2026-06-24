@@ -446,6 +446,8 @@ export interface CellParams {
   euglenaGravitaxis?: number;
   /** Euglena phototaxis weight toward the virtual light (0 = off). */
   euglenaPhototaxis?: number;
+  /** Euglena deterministic seek/adapt/retarget light-response weight (0 = off). */
+  euglenaPhotoIntent?: number;
   /** Euglena same-species soft separation weight (0 = off). */
   euglenaSeparation?: number;
   /** Euglena Paramecium standoff/loiter spring override. Undefined = species default. */

@@ -21,7 +21,8 @@ function allAquariumParams(): CellParams {
     euglenaSpeedActive: 0.55,
     euglenaScale: 2.2,
     euglenaGravitaxis: 0.03,
-    euglenaPhototaxis: 0.03,
+    euglenaPhototaxis: 0,
+    euglenaPhotoIntent: 2.4,
     euglenaLoiter: 0,
     euglenaWake: 0.12,
     euglenaRotDiffusion: 0,
@@ -135,9 +136,9 @@ describe("all_aquarium update oracle", () => {
       burstPhase: 0.45452829520218074,
     });
     expectCloseState<EuglenaState>(nextEuglena, {
-      x: 211.38508038697682,
-      y: 38.30035878872642,
-      heading: 0.011338996503301654,
+      x: 211.3827081900239,
+      y: 38.3369324799962,
+      heading: 0.11820104702745463,
       startle: 0,
       tumbleProgress: 1,
       rollPhase: 0.7204900612203637,
@@ -203,7 +204,8 @@ describe("all_aquarium update oracle", () => {
       }
     }
 
-    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(35);
-    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(45);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(120);
+    expect(Math.min(...xs)).toBeLessThan(70);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(40);
   });
 });

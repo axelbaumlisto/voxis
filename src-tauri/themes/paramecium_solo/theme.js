@@ -1548,6 +1548,7 @@ var CELL_DEFAULTS = {
   euglenaHueOffset: 42,
   euglenaGravitaxis: 0,
   euglenaPhototaxis: 0,
+  euglenaPhotoIntent: 0,
   euglenaSeparation: 0,
   euglenaRotDiffusion: 0,
   vorticellaCount: 0,
@@ -1693,6 +1694,7 @@ function aquariumParamsView(params) {
       speedActive: nonNegative(params.euglenaSpeedActive, 2),
       scale: nonNegative(params.euglenaScale, 1),
       hueOffset: finiteOr(params.euglenaHueOffset, 42),
+      photoIntent: nonNegative(params.euglenaPhotoIntent, 0),
       steer: euglenaSteerOverride(params)
     },
     medium: mediumOverride(params),
@@ -3047,6 +3049,7 @@ var TUMBLE_MIN_RAD = Math.PI / 6;
 var TUMBLE_MAX_RAD = 5 * Math.PI / 6;
 var TUMBLE_RATE_MIN = 0.045;
 var TUMBLE_RATE_MAX = 0.16;
+var PHOTO_INTENT_SECONDS = 54;
 var EUGLENA_RELEVANT_FIELDS = new Set(["obstacle", "wake", "motile"]);
 function euglenaContribute(cell, idx, scale = 1) {
   const length = euglenaDisplayLength(finite(cell.size, 1), scale);
@@ -3083,6 +3086,7 @@ function updateEuglena(euglena, frame, view) {
     const L = euglenaDisplayLength(finite(cell.size, 1), scale);
     let heading = finite(cell.heading, 0);
     const wrapPi2 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    const noiseSeed = finiteOr(cell.noiseSeed, 0) | 0;
     const px0 = finite(cell.x, 0);
     const py0 = finite(cell.y, 0);
     let ux = Math.cos(heading);
@@ -3170,6 +3174,25 @@ function updateEuglena(euglena, frame, view) {
         const photoW = steer.phototaxis * response;
         sx += ldx / ldist * photoW;
         sy += ldy / ldist * photoW;
+      }
+      const photoIntent = Math.max(0, finite(view.euglena.photoIntent, 0));
+      if (photoIntent > 0 && safeWidth > 0 && safeHeight > 0) {
+        const t = Math.max(0, finite(frame.t, 0));
+        const cycleFloat = t / PHOTO_INTENT_SECONDS;
+        const cycle = Math.floor(cycleFloat);
+        const u = wrapUnit(cycleFloat);
+        const dir = (cycle & 1) === 0 ? -1 : 1;
+        const laneY = dir < 0 ? Math.min(safeHeight - wallInset, wallInset + 2) : Math.max(wallInset, safeHeight - wallInset - 2);
+        const laneErr = clamp((laneY - py0) / Math.max(1, safeHeight - 2 * wallInset), -0.8, 0.8);
+        const tx = dir;
+        const ty = 0.22 * dir + 0.55 * laneErr;
+        const td = Math.hypot(tx, ty) || 0.000001;
+        const bearing = Math.atan2(ty, tx);
+        const eyeGate = 0.7 + 0.3 * Math.max(0, Math.cos(bearing - heading - TAU2 * finite(cell.rollPhase, 0)));
+        const legEase = 0.85 + 0.15 * Math.sin(Math.PI * Math.min(1, u));
+        const seekW = photoIntent * legEase * eyeGate;
+        sx += tx / td * seekW;
+        sy += ty / td * seekW;
       }
       if (heroParams && heroQ < HERO_INTEREST_RANGE && heroQ > 0.0001) {
         const falloff = Math.min(1, (HERO_INTEREST_RANGE - heroQ) / (HERO_INTEREST_RANGE - 1));
@@ -3283,7 +3306,6 @@ function updateEuglena(euglena, frame, view) {
       }
     }
     const rollDelta = Math.max(0, finite(cell.rollRate, 0)) * act * dt;
-    const noiseSeed = finiteOr(cell.noiseSeed, 0) | 0;
     const bphase = wrapUnit(finiteOr(cell.burstPhase, 0));
     const burstBase = Math.max(0, finiteOr(cell.burstRate, 0));
     let tumbleIndex = Math.max(0, Math.floor(finiteOr(cell.tumbleIndex, 0)));
@@ -4241,7 +4263,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
 }
 // src/theme-engine/renderers/cell/aquarium/registry.ts
 var ZERO_DIATOMS = { count: 0, alpha: 0, driftSpeed: 0 };
-var ZERO_EUGLENA = { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42 };
+var ZERO_EUGLENA = { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42, photoIntent: 0 };
 var ZERO_VORTICELLA = { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 };
 var ZERO_DIDINIUM = { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 0 };
 function viewForDiatom(cfg) {
