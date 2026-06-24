@@ -2326,13 +2326,82 @@ describe("createCellRenderer aquarium gate", () => {
 
     const publishedHero = update.mock.calls[1]?.[1]?.hero;
     expect(publishedHero).toMatchObject({
-      x: rawX + expectedDelta.dx,
-      y: rawY + expectedDelta.dy,
       halfLen: heroReach / 1.2,
       halfWid: baseR / Math.sqrt(Math.max(1, params.bodyAspect ?? 1)),
     });
+    expect(publishedHero!.x).toBeCloseTo(rawX, 6);
+    // Stage 5: Vorticella response is bounded/first-order, not an instant full
+    // depenetration snap. It must move in the correct direction, but remain between
+    // raw position and the full geometric target on this early frame.
+    expect(publishedHero!.y).toBeLessThan(rawY);
+    expect(publishedHero!.y).toBeGreaterThan(rawY + expectedDelta.dy);
     expect(seed.mock.calls[0]?.[0]?.hero).toMatchObject({ x: rawX, y: rawY });
     expect(draw.mock.calls[1]?.[2]?.hero).toBe(publishedHero);
+  });
+
+  it("keeps predator prey response briefly after Didinium contact ends", async () => {
+    installNoopCanvasContext();
+    const didiniumBase: DidiniumState = {
+      x: 80, y: 18, phase: 0, size: 1, heading: 0, swimSpeed: 1,
+      rollPhase: 0, rollRate: 0.5, beatPhase: 0, beatRate: 4,
+      turnSide: 1, avoidProgress: 1, contactTimer: 0.5, noiseSeed: 123,
+    };
+    const states: AquariumLayerState[] = [
+      { seed: 1, diatoms: [], euglena: [], vorticella: [], didinium: [didiniumBase] },
+      { seed: 1, diatoms: [], euglena: [], vorticella: [], didinium: [{ ...didiniumBase, contactTimer: 0 }] },
+      { seed: 1, diatoms: [], euglena: [], vorticella: [], didinium: [{ ...didiniumBase, contactTimer: 0 }] },
+    ];
+    const seed = vi.fn(() => states[0]);
+    let updateIndex = 0;
+    const update = vi.fn((_aquarium: AquariumLayerState) => states[Math.min(updateIndex++, states.length - 1)]);
+    const draw = vi.fn();
+    const foreground = vi.fn();
+    vi.doMock("../cell/aquarium/layer", () => ({ seedAquarium: seed, updateAquarium: update, drawAquariumBackground: draw, drawAquariumForeground: foreground }));
+    const rafCalls: Array<() => void> = [];
+    let now = 1000;
+    vi.stubGlobal("performance", { ["now"]: () => now });
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return rafCalls.length; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const { createCellRenderer } = await import("../cell/renderer");
+    const renderer = createCellRenderer(document.createElement("div"), {
+      width: 172, height: 36, baseHue: 50,
+      params: { ...CELL_DEFAULTS, enableAquarium: true, enableHelicalSwim: false, didiniumCount: 1, swimSpeedMaxFrac: 0, idleSwimFrac: 0, idleDriftMin: 0 },
+    });
+    now += 1000 / 60; rafCalls.shift()?.();
+    const firstHero = foreground.mock.calls[0]?.[2]?.hero;
+    now += 1000 / 60; rafCalls.shift()?.();
+    const secondHero = foreground.mock.calls[1]?.[2]?.hero;
+    renderer.destroy();
+    expect(firstHero.x).toBeGreaterThan(secondHero.x);
+    expect(secondHero.x).toBeGreaterThan(172 * 0.5); // response persists after contactTimer reaches 0
+  });
+
+  it("Euglena near-touch does not trigger predator-level hero recoil", async () => {
+    installNoopCanvasContext();
+    const euglena: EuglenaState = {
+      x: 100, y: 18, phase: 0, size: 1, heading: 0, swimSpeed: 1,
+      rollPhase: 0, rollRate: 0.3, metabolyPhase: 0, metabolyRate: 0.1,
+      flagellumPhase: 0, flagellumRate: 3, spiralAmplitude: 0.1,
+    };
+    const state: AquariumLayerState = { seed: 1, diatoms: [], euglena: [euglena], vorticella: [], didinium: [] };
+    const seed = vi.fn(() => state);
+    const update = vi.fn((aquarium: AquariumLayerState) => aquarium);
+    const draw = vi.fn();
+    const foreground = vi.fn();
+    vi.doMock("../cell/aquarium/layer", () => ({ seedAquarium: seed, updateAquarium: update, drawAquariumBackground: draw, drawAquariumForeground: foreground }));
+    const rafCalls: Array<() => void> = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => { rafCalls.push(cb); return rafCalls.length; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const { createCellRenderer } = await import("../cell/renderer");
+    const renderer = createCellRenderer(document.createElement("div"), {
+      width: 172, height: 36, baseHue: 50,
+      params: { ...CELL_DEFAULTS, enableAquarium: true, enableHelicalSwim: false, euglenaCount: 1, swimSpeedMaxFrac: 0, idleSwimFrac: 0, idleDriftMin: 0 },
+    });
+    rafCalls.shift()?.();
+    renderer.destroy();
+    const hero = foreground.mock.calls[0]?.[2]?.hero;
+    expect(hero.x).toBeCloseTo(172 * 0.5, 6);
+    expect(hero.y).toBeCloseTo(36 * 0.5, 6);
   });
 
   it("keeps combined diatom/euglena/vorticella gate-on draw overhead under 1400 ops at 172x36", async () => {

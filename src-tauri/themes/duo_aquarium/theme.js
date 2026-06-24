@@ -4369,9 +4369,14 @@ function createCellRenderer(container, opts) {
   let baseline = 0;
   let drift01 = 0;
   let aquarium = null;
+  let heroVortDx = 0;
+  let heroVortDy = 0;
   let predatorEnv = 0;
   let predatorNx = 1;
   let predatorNy = 0;
+  let euglenaTouchEnv = 0;
+  let euglenaTouchX = width / 2;
+  let euglenaTouchY = height / 2;
   let wander = null;
   let bodyHeading = 0;
   let interiorHeading = 0;
@@ -4537,14 +4542,26 @@ function createCellRenderer(container, opts) {
         const vview = aquariumParamsView(params);
         const heroReach = baseR * Math.sqrt(Math.max(1, params.bodyAspect ?? 1)) * 1.2;
         const circles = buildField(aquarium.vorticella.flatMap((v, idx) => vorticellaContribute(v, vview.vorticella.scale, height, idx))).obstacles.filter((obstacle) => obstacle.shape === "circle");
-        const { dx, dy } = heroConsumeObstacles(circles, cx, cy, heroReach);
-        if (dx !== 0 || dy !== 0) {
-          cx += dx;
-          cy += dy;
+        const target = heroConsumeObstacles(circles, cx, cy, heroReach);
+        const a = 1 - Math.exp(-10 * dt);
+        const ndx = (target.dx - heroVortDx) * a;
+        const ndy = (target.dy - heroVortDy) * a;
+        const nLen = Math.hypot(ndx, ndy);
+        const maxStep = Math.max(0.5, baseR * 0.2);
+        const stepScale = nLen > maxStep && nLen > 0 ? maxStep / nLen : 1;
+        heroVortDx += ndx * stepScale;
+        heroVortDy += ndy * stepScale;
+        if (Math.abs(heroVortDx) > 0.001 || Math.abs(heroVortDy) > 0.001) {
+          cx += heroVortDx;
+          cy += heroVortDy;
           for (let i = 0;i < smoothedPoints.length; i++) {
-            smoothedPoints[i] = [smoothedPoints[i][0] + dx, smoothedPoints[i][1] + dy];
+            smoothedPoints[i] = [smoothedPoints[i][0] + heroVortDx, smoothedPoints[i][1] + heroVortDy];
           }
         }
+      } else if (heroVortDx !== 0 || heroVortDy !== 0) {
+        const a = 1 - Math.exp(-8 * dt);
+        heroVortDx += (0 - heroVortDx) * a;
+        heroVortDy += (0 - heroVortDy) * a;
       }
       if (params.enableAquarium) {
         const aquariumFrame = {
@@ -4602,6 +4619,37 @@ function createCellRenderer(container, opts) {
             smoothedPoints[i] = [smoothedPoints[i][0] + rx, smoothedPoints[i][1] + ry];
           }
         }
+      }
+      if (params.enableHero !== false && aquarium?.euglena?.length) {
+        const aspect = Math.sqrt(Math.max(1, params.bodyAspect ?? 1));
+        const A = Math.max(1, baseR * aspect);
+        const B = Math.max(1, baseR / aspect);
+        let targetEnv = 0;
+        let tx = euglenaTouchX, ty = euglenaTouchY;
+        const ch = Math.cos(bodyHeading), sh = Math.sin(bodyHeading);
+        for (const e of aquarium.euglena) {
+          const dx = e.x - cx;
+          const dy = e.y - cy;
+          const px = dx * ch + dy * sh;
+          const py = -dx * sh + dy * ch;
+          const q = Math.sqrt(px * px / (A * A) + py * py / (B * B));
+          if (q > 1 && q < 1.35) {
+            const env = 1 - (q - 1) / 0.35;
+            if (env > targetEnv) {
+              targetEnv = env;
+              const sx = px / q, sy = py / q;
+              tx = cx + sx * ch - sy * sh;
+              ty = cy + sx * sh + sy * ch;
+            }
+          }
+        }
+        const tau = targetEnv > euglenaTouchEnv ? 0.12 : 0.5;
+        const a = 1 - Math.exp(-dt / tau);
+        euglenaTouchEnv += (targetEnv - euglenaTouchEnv) * a;
+        euglenaTouchX += (tx - euglenaTouchX) * a;
+        euglenaTouchY += (ty - euglenaTouchY) * a;
+      } else {
+        euglenaTouchEnv += (0 - euglenaTouchEnv) * (1 - Math.exp(-dt / 0.5));
       }
       const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
       const splinePoints = catmullRom(contourPoints, 4);
@@ -4951,6 +4999,20 @@ function createCellRenderer(container, opts) {
           }
           ctx.stroke();
         }
+      }
+      if (params.enableHero !== false && euglenaTouchEnv > 0.02) {
+        ctx.save();
+        ctx.strokeStyle = `hsla(${baseHue + 55}, 35%, 88%, ${0.28 * euglenaTouchEnv})`;
+        ctx.lineWidth = 0.7;
+        for (let k = 0;k < 5; k++) {
+          const a = bodyHeading + Math.PI / 2 + (k - 2) * 0.22;
+          const len = 2 + k % 2 * 1;
+          ctx.beginPath();
+          ctx.moveTo(euglenaTouchX, euglenaTouchY);
+          ctx.lineTo(euglenaTouchX + Math.cos(a) * len, euglenaTouchY + Math.sin(a) * len);
+          ctx.stroke();
+        }
+        ctx.restore();
       }
       if (params.enableAquarium && aquarium) {
         const fgFrame = {

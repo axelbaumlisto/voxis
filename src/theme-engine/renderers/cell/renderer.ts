@@ -132,12 +132,20 @@ export function createCellRenderer(
   let baseline = 0; // slow-tracking audio baseline for startle edge detection
   let drift01 = 0; // smoothed drift activation (0=centered, 1=full drift)
   let aquarium: AquariumLayerState | null = null;
+  // Bounded low-Re render response of the hero to sessile obstacles. This replaces
+  // instant full depenetration with an exponential approach to the no-overlap offset.
+  let heroVortDx = 0;
+  let heroVortDy = 0;
   // Predator contact response envelope for the Paramecium hero. Unlike the raw
   // Didinium contactTimer, this persists and releases smoothly after the predator
   // detaches, so the prey visibly keeps defending/recovering for ~1s.
   let predatorEnv = 0;
   let predatorNx = 1;
   let predatorNy = 0;
+  // Tiny non-panic neighbour shimmer when Euglena brushes near the hero surface.
+  let euglenaTouchEnv = 0;
+  let euglenaTouchX = width / 2;
+  let euglenaTouchY = height / 2;
 
   // Reynolds-style integrated wander state (replaces position=noise(t), which
   // oscillated about the centre and kept "returning"). Lazily initialised at
@@ -471,8 +479,9 @@ export function createCellRenderer(
         }
       }
 
-      // The hero must not drift on top of a sessile (or migrating) vorticella:
-      // push its RENDER position (cx,cy + contour) out of each vorticella obstacle.
+      // The hero must not drift on top of a sessile (or migrating) vorticella.
+      // Move toward the no-overlap offset with first-order relaxation so this reads
+      // as viscous avoidance, not an instant geometric snap.
       if ((params.vorticellaCount ?? 0) > 0 && aquarium && aquarium.vorticella.length > 0) {
         const vview = aquariumParamsView(params);
         // full hero half-length (+margin): the elongated body must clear the bell
@@ -480,14 +489,27 @@ export function createCellRenderer(
         const circles = buildField(
           aquarium.vorticella.flatMap((v, idx) => vorticellaContribute(v, vview.vorticella.scale, height, idx)),
         ).obstacles.filter((obstacle): obstacle is ObstacleCircle => obstacle.shape === "circle");
-        const { dx, dy } = heroConsumeObstacles(circles, cx, cy, heroReach);
-        if (dx !== 0 || dy !== 0) {
-          cx += dx;
-          cy += dy;
+        const target = heroConsumeObstacles(circles, cx, cy, heroReach);
+        const a = 1 - Math.exp(-10 * dt);
+        const ndx = (target.dx - heroVortDx) * a;
+        const ndy = (target.dy - heroVortDy) * a;
+        const nLen = Math.hypot(ndx, ndy);
+        const maxStep = Math.max(0.5, baseR * 0.2);
+        const stepScale = nLen > maxStep && nLen > 0 ? maxStep / nLen : 1;
+        heroVortDx += ndx * stepScale;
+        heroVortDy += ndy * stepScale;
+        if (Math.abs(heroVortDx) > 1e-3 || Math.abs(heroVortDy) > 1e-3) {
+          cx += heroVortDx;
+          cy += heroVortDy;
           for (let i = 0; i < smoothedPoints.length; i++) {
-            smoothedPoints[i] = [smoothedPoints[i][0] + dx, smoothedPoints[i][1] + dy];
+            smoothedPoints[i] = [smoothedPoints[i][0] + heroVortDx, smoothedPoints[i][1] + heroVortDy];
           }
         }
+      } else if (heroVortDx !== 0 || heroVortDy !== 0) {
+        // Decay any old obstacle offset when Vorticella disappears/is disabled.
+        const a = 1 - Math.exp(-8 * dt);
+        heroVortDx += (0 - heroVortDx) * a;
+        heroVortDy += (0 - heroVortDy) * a;
       }
 
       if (params.enableAquarium) {
@@ -550,6 +572,38 @@ export function createCellRenderer(
             smoothedPoints[i] = [smoothedPoints[i][0] + rx, smoothedPoints[i][1] + ry];
           }
         }
+      }
+
+      if (params.enableHero !== false && aquarium?.euglena?.length) {
+        const aspect = Math.sqrt(Math.max(1, params.bodyAspect ?? 1));
+        const A = Math.max(1, baseR * aspect);
+        const B = Math.max(1, baseR / aspect);
+        let targetEnv = 0;
+        let tx = euglenaTouchX, ty = euglenaTouchY;
+        const ch = Math.cos(bodyHeading), sh = Math.sin(bodyHeading);
+        for (const e of aquarium.euglena) {
+          const dx = e.x - cx;
+          const dy = e.y - cy;
+          const px = dx * ch + dy * sh;
+          const py = -dx * sh + dy * ch;
+          const q = Math.sqrt((px * px) / (A * A) + (py * py) / (B * B));
+          if (q > 1.0 && q < 1.35) {
+            const env = 1 - (q - 1.0) / 0.35;
+            if (env > targetEnv) {
+              targetEnv = env;
+              const sx = px / q, sy = py / q;
+              tx = cx + sx * ch - sy * sh;
+              ty = cy + sx * sh + sy * ch;
+            }
+          }
+        }
+        const tau = targetEnv > euglenaTouchEnv ? 0.12 : 0.5;
+        const a = 1 - Math.exp(-dt / tau);
+        euglenaTouchEnv += (targetEnv - euglenaTouchEnv) * a;
+        euglenaTouchX += (tx - euglenaTouchX) * a;
+        euglenaTouchY += (ty - euglenaTouchY) * a;
+      } else {
+        euglenaTouchEnv += (0 - euglenaTouchEnv) * (1 - Math.exp(-dt / 0.5));
       }
 
       const contourPoints = affineSqueezePoints(smoothedPoints, squeezeK, squeezePhi, cx, cy, params);
@@ -1097,6 +1151,23 @@ export function createCellRenderer(
           }
           ctx.stroke();
         }
+      }
+
+      if (params.enableHero !== false && euglenaTouchEnv > 0.02) {
+        // Soft neighbour shimmer only: Euglena is a harmless small swimmer, so the
+        // Paramecium shows local cilia sparkle, not predator recoil/panic.
+        ctx.save();
+        ctx.strokeStyle = `hsla(${baseHue + 55}, 35%, 88%, ${0.28 * euglenaTouchEnv})`;
+        ctx.lineWidth = 0.7;
+        for (let k = 0; k < 5; k++) {
+          const a = bodyHeading + Math.PI / 2 + (k - 2) * 0.22;
+          const len = 2.0 + (k % 2) * 1.0;
+          ctx.beginPath();
+          ctx.moveTo(euglenaTouchX, euglenaTouchY);
+          ctx.lineTo(euglenaTouchX + Math.cos(a) * len, euglenaTouchY + Math.sin(a) * len);
+          ctx.stroke();
+        }
+        ctx.restore();
       }
 
       if (params.enableAquarium && aquarium) {
