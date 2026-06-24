@@ -4,20 +4,19 @@ import type { FieldContribution, FieldKind } from "./interaction";
 import type { AquariumFrame, AquariumParamsView, DidiniumState } from "./types";
 import { mix32, noise2D, seededUnit } from "./seeds";
 import { TAU, clamp, clamp01, finite, finiteOr, smoothstep, wrapUnit } from "./util";
+import {
+  DIDINIUM_ASPECT,
+  DIDINIUM_BRUSH_ROWS,
+  DIDINIUM_GIRDLE_A_U,
+  DIDINIUM_GIRDLE_P_U,
+  DIDINIUM_SHOULDER_U,
+  didiniumDisplayLength,
+  didiniumNormHalfWidth,
+} from "./didinium-parts/geometry";
+export { didiniumDisplayLength } from "./didinium-parts/geometry";
 
 /** Frozen per-species deterministic salt for Didinium seeding. */
 export const DIDINIUM_SALT = 0x0d1d1c0a;
-
-// ── biology constants (Didinium nasutum) ───────────────────────────────────
-// Stout barrel, aspect ~1.35:1 (length:width). Two transverse ciliary girdles
-// (pectinelles): anterior at the shoulder, posterior just below mid-body. A
-// conical apical snout (cytostome cone, closed at rest). Horseshoe macronucleus.
-// Terminal contractile vacuole at the aboral (posterior) pole.
-const ASPECT = 1.42; // length : width (real D. nasutum is an ELONGATE barrel ~1.4:1, not globular)
-const GIRDLE_A_U = 0.46; // anterior girdle position (shoulder), u ∈ [-1(post), +1(snout)]
-const GIRDLE_P_U = -0.16; // posterior girdle position (just below mid-body)
-const SHOULDER_U = 0.49; // where the barrel meets the cone snout (slightly longer visible cone)
-const BRUSH_ROWS = 5; // dorsal brushes (brosse) per girdle
 
 // ── swim constants (grounded in real D. nasutum kinematics) ───────────────────
 // Real cell: U≈11 BL/s (1.3 mm/s), axial spin Ω≈4.5 rad/s (~0.7 rev/s), thin
@@ -70,58 +69,6 @@ function didiniumModeView(mode: ThemeState["mode"]): DidiniumModeView {
     default:
       return { motionMul: 1.0, alphaMul: 1.0 };
   }
-}
-
-/**
- * Display body length (px). SINGLE SOURCE OF TRUTH shared by updateDidinium
- * (speed in body-lengths) and drawDidinium (geometry).
- */
-export function didiniumDisplayLength(size: number, scale: number): number {
-  const s = Math.max(0.1, finite(scale, 1));
-  return Math.max(7, Math.min(34 * s, (16 + finite(size, 1) * 4) * s));
-}
-
-/**
- * Normalized barrel half-width profile, peak ≈ 1. u=+1 is the apical snout tip
- * (cone, closed), u=-1 the rounded aboral pole. A flattened anterior shoulder
- * sits just below the cone; the mid-body is the widest; the posterior rounds off.
- */
-function bodyShape(u: number): number {
-  if (u >= SHOULDER_U) {
-    // cone snout: half-width eases from the shoulder width down to ~0 at the tip,
-    // slightly concave flanks (a cone, not a dome).
-    const q = (u - SHOULDER_U) / (1 - SHOULDER_U); // 0 at shoulder, 1 at tip
-    // cone base width MUST equal the body shoulder width (0.72) for a C0/C1-smooth
-    // join — a mismatch here read as a kink/notch in the silhouette.
-    const wShoulder = 0.72;
-    return wShoulder * (0.07 + 0.93 * Math.pow(1 - q, 1.35)); // blunt rounded cone tip, not a needle point
-  }
-  // ovoid body: moderately narrow anterior shoulder, full belly widest ~40% down,
-  // BROADLY ROUNDED posterior (real D. nasutum is plump/egg-shaped, not a flat
-  // lemon). Two smooth cosine lobes meet C1-continuously at the belly peak.
-  const t = (u - SHOULDER_U) / (-1 - SHOULDER_U); // 0 at shoulder, 1 at aboral pole
-  const tp = 0.45; // widest point, just below mid
-  if (t <= tp) {
-    return 0.72 + 0.28 * Math.sin((t / tp) * (Math.PI / 2)); // shoulder 0.72 -> belly 1.0
-  }
-  // belly 1.0 -> ROUNDED aboral DOME: a quarter-circle profile (sqrt) that reaches
-  // 0 at the pole with a VERTICAL tangent, i.e. the outline closes as a smooth
-  // hemispherical cap (NOT a flat truncated floor, NOT a pointed lemon tip).
-  const s = (t - tp) / (1 - tp); // 0 at belly, 1 at aboral pole
-  return Math.sqrt(Math.max(0, 1 - s * s));
-}
-
-const BODY_SHAPE_MAX = (() => {
-  let m = 0;
-  for (let i = 0; i <= 400; i++) {
-    const u = -1 + (i / 400) * 2;
-    m = Math.max(m, bodyShape(u));
-  }
-  return m;
-})();
-
-function normHalfWidth(u: number): number {
-  return bodyShape(u) / BODY_SHAPE_MAX;
 }
 
 export function seedDidinium(count: number, seed: number, frame: AquariumFrame, salt = DIDINIUM_SALT): DidiniumState[] {
@@ -554,7 +501,7 @@ export function drawDidinium(
   didinium.forEach((cell) => {
     const L = didiniumDisplayLength(finite(cell.size, 1), scale);
     const halfLength = L / 2;
-    const wMax = (L / ASPECT) / 2; // half of body width
+    const wMax = (L / DIDINIUM_ASPECT) / 2; // half of body width
     // orient the body along the TRAVEL heading (phase) so the snout always leads
     // the actual motion (no sideways crab); falls back to heading at seed.
     const heading = finiteOr(cell.phase, finite(cell.heading, 0));
@@ -571,7 +518,7 @@ export function drawDidinium(
     // read as a non-physical fat wobble). (math critic S4)
     const widthMul = 0.96 + 0.04 * Math.abs(rollCos);
 
-    const halfWidthAt = (u: number): number => wMax * widthMul * normHalfWidth(u);
+    const halfWidthAt = (u: number): number => wMax * widthMul * didiniumNormHalfWidth(u);
 
     // ── body outline (closed barrel + cone snout), cosine-clustered samples ──
     const SAMP = 64; // higher → smooth rounded silhouette (no faceting)
@@ -611,7 +558,7 @@ export function drawDidinium(
       const r = 0.5 + seededUnit(gSeed, g, 0x2cd9a14b) * 0.9;
       // Leave a very subtle lower-contrast lane at the two pectinelle latitudes so
       // the ciliary bands separate from endoplasm stipple without drawing chords.
-      const nearGirdle = Math.min(Math.abs(gu - GIRDLE_A_U), Math.abs(gu - GIRDLE_P_U));
+      const nearGirdle = Math.min(Math.abs(gu - DIDINIUM_GIRDLE_A_U), Math.abs(gu - DIDINIUM_GIRDLE_P_U));
       const lane = smoothstep(clamp01(1 - nearGirdle / 0.075));
       ctx.fillStyle = `hsla(${hue}, 22%, ${90 - 8 * lane}%, ${alpha * (0.34 - 0.12 * lane)})`;
       ctx.beginPath();
@@ -625,7 +572,7 @@ export function drawDidinium(
       const hw = halfWidthAt(gu);
       const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
       const r = 0.3 + seededUnit(gSeed, g, 0x14c8af21) * 0.5;
-      const nearGirdle = Math.min(Math.abs(gu - GIRDLE_A_U), Math.abs(gu - GIRDLE_P_U));
+      const nearGirdle = Math.min(Math.abs(gu - DIDINIUM_GIRDLE_A_U), Math.abs(gu - DIDINIUM_GIRDLE_P_U));
       const lane = smoothstep(clamp01(1 - nearGirdle / 0.075));
       ctx.fillStyle = `hsla(${hue + 4}, 18%, ${94 - 6 * lane}%, ${alpha * (0.16 - 0.07 * lane)})`;
       ctx.beginPath();
@@ -785,8 +732,8 @@ export function drawDidinium(
         }
       }
     };
-    drawGirdle(GIRDLE_A_U, hue + 6, 0);
-    drawGirdle(GIRDLE_P_U, hue + 6, 1);
+    drawGirdle(DIDINIUM_GIRDLE_A_U, hue + 6, 0);
+    drawGirdle(DIDINIUM_GIRDLE_P_U, hue + 6, 1);
 
     // ── dorsal brushes (brosse): short clavate tick rows behind each girdle, on
     // the NEAR hemisphere only (depth-gated) — a named D. nasutum diagnostic. ──
@@ -795,7 +742,7 @@ export function drawDidinium(
       const depth = Math.cos(phi); // near when > 0
       if (depth < 0) return; // hidden on the far hemisphere
       const front = clamp01(0.5 + 0.5 * depth);
-      for (let r = 0; r < BRUSH_ROWS; r++) {
+      for (let r = 0; r < DIDINIUM_BRUSH_ROWS; r++) {
         const bu = gu - 0.06 - r * 0.035; // a few rows just behind the girdle
         const hw = halfWidthAt(bu);
         const lat = Math.cos(phi) * hw * 0.62;
@@ -809,8 +756,8 @@ export function drawDidinium(
         ctx.fill();
       }
     };
-    drawBrushes(GIRDLE_A_U);
-    drawBrushes(GIRDLE_P_U);
+    drawBrushes(DIDINIUM_GIRDLE_A_U);
+    drawBrushes(DIDINIUM_GIRDLE_P_U);
 
     // ── apical cone snout (cytostome cone) detailing. The cone SILHOUETTE is
     // already drawn by the body outline (bodyShape covers u up to +1), so we do
@@ -818,7 +765,7 @@ export function drawDidinium(
     // different (straight) profile and read as a detached angular flap. We only
     // add interior detail: nematodesmal striae, a subtle base collar, the pip.
     {
-      const coneBaseU = SHOULDER_U;
+      const coneBaseU = DIDINIUM_SHOULDER_U;
       const tip = transform(cx, cy, ux, uy, halfLength * 1.02, 0); // on-axis apex
       // nematodesmal striae: only a few dim mottled dots near the cone axis.
       // No converging line segments — those read as a triangular construction fan.

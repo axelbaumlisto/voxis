@@ -1770,13 +1770,44 @@ function noise2D2(seed, x, y) {
   return lerp2(lerp2(v00, v10, tx), lerp2(v01, v11, tx), ty);
 }
 
+// src/theme-engine/renderers/cell/aquarium/didinium-parts/geometry.ts
+var DIDINIUM_ASPECT = 1.42;
+var DIDINIUM_GIRDLE_A_U = 0.46;
+var DIDINIUM_GIRDLE_P_U = -0.16;
+var DIDINIUM_SHOULDER_U = 0.49;
+var DIDINIUM_BRUSH_ROWS = 5;
+function didiniumDisplayLength(size, scale) {
+  const s = Math.max(0.1, finite(scale, 1));
+  return Math.max(7, Math.min(34 * s, (16 + finite(size, 1) * 4) * s));
+}
+function bodyShape(u) {
+  if (u >= DIDINIUM_SHOULDER_U) {
+    const q = (u - DIDINIUM_SHOULDER_U) / (1 - DIDINIUM_SHOULDER_U);
+    const wShoulder = 0.72;
+    return wShoulder * (0.07 + 0.93 * Math.pow(1 - q, 1.35));
+  }
+  const t = (u - DIDINIUM_SHOULDER_U) / (-1 - DIDINIUM_SHOULDER_U);
+  const tp = 0.45;
+  if (t <= tp) {
+    return 0.72 + 0.28 * Math.sin(t / tp * (Math.PI / 2));
+  }
+  const s = (t - tp) / (1 - tp);
+  return Math.sqrt(Math.max(0, 1 - s * s));
+}
+var DIDINIUM_BODY_SHAPE_MAX = (() => {
+  let m = 0;
+  for (let i = 0;i <= 400; i++) {
+    const u = -1 + i / 400 * 2;
+    m = Math.max(m, bodyShape(u));
+  }
+  return m;
+})();
+function didiniumNormHalfWidth(u) {
+  return bodyShape(u) / DIDINIUM_BODY_SHAPE_MAX;
+}
+
 // src/theme-engine/renderers/cell/aquarium/didinium.ts
 var DIDINIUM_SALT = 220011530;
-var ASPECT = 1.42;
-var GIRDLE_A_U = 0.46;
-var GIRDLE_P_U = -0.16;
-var SHOULDER_U = 0.49;
-var BRUSH_ROWS = 5;
 var STOPGO_FREQ = 0.32;
 var WANDER_FREQ = 0.1;
 var WANDER_RAD = 0.42;
@@ -1800,35 +1831,6 @@ function didiniumModeView(mode) {
     default:
       return { motionMul: 1, alphaMul: 1 };
   }
-}
-function didiniumDisplayLength(size, scale) {
-  const s = Math.max(0.1, finite(scale, 1));
-  return Math.max(7, Math.min(34 * s, (16 + finite(size, 1) * 4) * s));
-}
-function bodyShape(u) {
-  if (u >= SHOULDER_U) {
-    const q = (u - SHOULDER_U) / (1 - SHOULDER_U);
-    const wShoulder = 0.72;
-    return wShoulder * (0.07 + 0.93 * Math.pow(1 - q, 1.35));
-  }
-  const t = (u - SHOULDER_U) / (-1 - SHOULDER_U);
-  const tp = 0.45;
-  if (t <= tp) {
-    return 0.72 + 0.28 * Math.sin(t / tp * (Math.PI / 2));
-  }
-  const s = (t - tp) / (1 - tp);
-  return Math.sqrt(Math.max(0, 1 - s * s));
-}
-var BODY_SHAPE_MAX = (() => {
-  let m = 0;
-  for (let i = 0;i <= 400; i++) {
-    const u = -1 + i / 400 * 2;
-    m = Math.max(m, bodyShape(u));
-  }
-  return m;
-})();
-function normHalfWidth(u) {
-  return bodyShape(u) / BODY_SHAPE_MAX;
 }
 function seedDidinium(count, seed, frame, salt = DIDINIUM_SALT) {
   if (count <= 0)
@@ -2157,7 +2159,7 @@ function drawDidinium(ctx, didinium, frame, view) {
   didinium.forEach((cell) => {
     const L = didiniumDisplayLength(finite(cell.size, 1), scale);
     const halfLength = L / 2;
-    const wMax = L / ASPECT / 2;
+    const wMax = L / DIDINIUM_ASPECT / 2;
     const heading = finiteOr(cell.phase, finite(cell.heading, 0));
     const ux = Math.cos(heading);
     const uy = Math.sin(heading);
@@ -2167,7 +2169,7 @@ function drawDidinium(ctx, didinium, frame, view) {
     const rollAng = roll * TAU2;
     const rollCos = Math.cos(rollAng);
     const widthMul = 0.96 + 0.04 * Math.abs(rollCos);
-    const halfWidthAt = (u) => wMax * widthMul * normHalfWidth(u);
+    const halfWidthAt = (u) => wMax * widthMul * didiniumNormHalfWidth(u);
     const SAMP = 64;
     const upper = [];
     const lower = [];
@@ -2196,7 +2198,7 @@ function drawDidinium(ctx, didinium, frame, view) {
       const hw = halfWidthAt(gu);
       const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
       const r = 0.5 + seededUnit(gSeed, g, 752460107) * 0.9;
-      const nearGirdle = Math.min(Math.abs(gu - GIRDLE_A_U), Math.abs(gu - GIRDLE_P_U));
+      const nearGirdle = Math.min(Math.abs(gu - DIDINIUM_GIRDLE_A_U), Math.abs(gu - DIDINIUM_GIRDLE_P_U));
       const lane = smoothstep2(clamp01(1 - nearGirdle / 0.075));
       ctx.fillStyle = `hsla(${hue}, 22%, ${90 - 8 * lane}%, ${alpha * (0.34 - 0.12 * lane)})`;
       ctx.beginPath();
@@ -2210,7 +2212,7 @@ function drawDidinium(ctx, didinium, frame, view) {
       const hw = halfWidthAt(gu);
       const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
       const r = 0.3 + seededUnit(gSeed, g, 348696353) * 0.5;
-      const nearGirdle = Math.min(Math.abs(gu - GIRDLE_A_U), Math.abs(gu - GIRDLE_P_U));
+      const nearGirdle = Math.min(Math.abs(gu - DIDINIUM_GIRDLE_A_U), Math.abs(gu - DIDINIUM_GIRDLE_P_U));
       const lane = smoothstep2(clamp01(1 - nearGirdle / 0.075));
       ctx.fillStyle = `hsla(${hue + 4}, 18%, ${94 - 6 * lane}%, ${alpha * (0.16 - 0.07 * lane)})`;
       ctx.beginPath();
@@ -2328,15 +2330,15 @@ function drawDidinium(ctx, didinium, frame, view) {
         }
       }
     };
-    drawGirdle(GIRDLE_A_U, hue + 6, 0);
-    drawGirdle(GIRDLE_P_U, hue + 6, 1);
+    drawGirdle(DIDINIUM_GIRDLE_A_U, hue + 6, 0);
+    drawGirdle(DIDINIUM_GIRDLE_P_U, hue + 6, 1);
     const drawBrushes = (gu) => {
       const phi = rollAng;
       const depth = Math.cos(phi);
       if (depth < 0)
         return;
       const front = clamp01(0.5 + 0.5 * depth);
-      for (let r = 0;r < BRUSH_ROWS; r++) {
+      for (let r = 0;r < DIDINIUM_BRUSH_ROWS; r++) {
         const bu = gu - 0.06 - r * 0.035;
         const hw = halfWidthAt(bu);
         const lat = Math.cos(phi) * hw * 0.62;
@@ -2348,10 +2350,10 @@ function drawDidinium(ctx, didinium, frame, view) {
         ctx.fill();
       }
     };
-    drawBrushes(GIRDLE_A_U);
-    drawBrushes(GIRDLE_P_U);
+    drawBrushes(DIDINIUM_GIRDLE_A_U);
+    drawBrushes(DIDINIUM_GIRDLE_P_U);
     {
-      const coneBaseU = SHOULDER_U;
+      const coneBaseU = DIDINIUM_SHOULDER_U;
       const tip = transform(cx, cy, ux, uy, halfLength * 1.02, 0);
       const NS = 4;
       for (let k = 1;k < NS; k++) {
@@ -2787,7 +2789,7 @@ function bodyShape2(u) {
   w *= 1 - 0.32 * Math.exp(-d * d);
   return w;
 }
-var BODY_SHAPE_MAX2 = (() => {
+var BODY_SHAPE_MAX = (() => {
   let m = 0;
   for (let i = 0;i <= 400; i++) {
     const u = -1 + i / 400 * 2;
@@ -2795,8 +2797,8 @@ var BODY_SHAPE_MAX2 = (() => {
   }
   return m;
 })();
-function normHalfWidth2(u) {
-  return bodyShape2(u) / BODY_SHAPE_MAX2;
+function normHalfWidth(u) {
+  return bodyShape2(u) / BODY_SHAPE_MAX;
 }
 function euglenaPose(rollPhase, metabolyPhase, options = {}) {
   const cx = finiteOr(options.centerX, 0);
@@ -2828,13 +2830,13 @@ function euglenaPose(rollPhase, metabolyPhase, options = {}) {
     let at = 0;
     for (let i = 0;i <= 40; i++) {
       const u = -1 + i / 40 * 2;
-      const base = normHalfWidth2(u);
+      const base = normHalfWidth(u);
       a0 += base;
       at += base * metabolyAt(u);
     }
     areaScale = at > 0.000001 ? a0 / at : 1;
   }
-  const halfWidthAt = (u) => wmax * widthMul * normHalfWidth2(u) * metabolyAt(u) * areaScale;
+  const halfWidthAt = (u) => wmax * widthMul * normHalfWidth(u) * metabolyAt(u) * areaScale;
   const anterior = point(cx, cy, ux, uy, halfLength);
   const posterior = point(cx, cy, ux, uy, -halfLength);
   const SAMPLES = Math.max(28, Math.min(56, Math.round(length / 2.2)));
