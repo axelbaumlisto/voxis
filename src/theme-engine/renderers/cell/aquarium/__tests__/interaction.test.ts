@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CELL_DEFAULTS } from "../../defaults";
 import { euglenaContribute, euglenaDisplayLength, EUGLENA_RELEVANT_FIELDS } from "../euglena";
 import { didiniumContribute, didiniumDisplayLength, DIDINIUM_RELEVANT_FIELDS } from "../didinium";
-import { heroConsumeObstacles, heroContribute } from "../hero";
+import { heroConsumeObstacles, heroContribute, heroSurfacePoint } from "../hero";
 import { buildField, KIND_ID, sourceId } from "../interaction";
 import type { FieldContribution, ObstacleCircle } from "../interaction";
 import { buildAquariumInteractionField, seedAquarium, updateAquarium } from "../layer";
@@ -243,6 +243,31 @@ describe("aquarium interaction field vocabulary", () => {
       },
     ]);
     expect(heroContribute(undefined)).toEqual([]);
+  });
+
+  it("projects points onto the current hero ellipse membrane", () => {
+    const hero = { x: 10, y: 20, radius: 6, heading: 0, halfLen: 12, halfWid: 4 };
+
+    expect(heroSurfacePoint(hero, { x: 40, y: 20 })).toEqual({ x: 22, y: 20 });
+    expect(heroSurfacePoint(hero, { x: 10, y: -30 })).toEqual({ x: 10, y: 16 });
+
+    const diagonal = heroSurfacePoint(hero, { x: 22, y: 24 });
+    expect(diagonal.x).toBeCloseTo(18.485281374238568, 12);
+    expect(diagonal.y).toBeCloseTo(22.82842712474619, 12);
+  });
+
+  it("projects hero surface with heading and legacy finite-axis fallback", () => {
+    const rotated = heroSurfacePoint({ x: 10, y: 20, radius: 6, heading: Math.PI / 2, halfLen: 12, halfWid: 4 }, { x: 10, y: 50 });
+    expect(rotated.x).toBeCloseTo(10, 12);
+    expect(rotated.y).toBeCloseTo(32, 12);
+
+    const tiny = heroSurfacePoint({ x: 3, y: 4, radius: 0, heading: Number.NaN, halfLen: 0, halfWid: 0 }, { x: 3, y: 4 });
+    expect(tiny.x).toBe(3);
+    expect(tiny.y).toBe(4);
+
+    const invalidCenter = heroSurfacePoint({ x: Number.NaN, y: Number.POSITIVE_INFINITY, radius: 5 }, { x: 10, y: 0 });
+    expect(invalidCenter.x).toBe(5);
+    expect(invalidCenter.y).toBe(0);
   });
 
   it("hero hard-clamp consume matches legacy vorticella obstacle loop to 1e-10", () => {

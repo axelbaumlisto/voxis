@@ -1734,6 +1734,27 @@ function sourceId(kind, instanceIndex) {
 }
 
 // src/theme-engine/renderers/cell/aquarium/hero.ts
+function heroSurfacePoint(hero, point) {
+  if (!hero)
+    return point;
+  const hx = Number.isFinite(hero.x) ? hero.x : 0;
+  const hy = Number.isFinite(hero.y) ? hero.y : 0;
+  const hh = Number.isFinite(hero.heading ?? 0) ? hero.heading ?? 0 : 0;
+  const ch = Math.cos(hh), sh = Math.sin(hh);
+  const dx = point.x - hx;
+  const dy = point.y - hy;
+  const localX = dx * ch + dy * sh;
+  const localY = -dx * sh + dy * ch;
+  const A = Math.max(0.001, Number.isFinite(hero.halfLen ?? hero.radius) ? hero.halfLen ?? hero.radius : hero.radius);
+  const B = Math.max(0.001, Number.isFinite(hero.halfWid ?? hero.radius) ? hero.halfWid ?? hero.radius : hero.radius);
+  const q = Math.sqrt(localX * localX / (A * A) + localY * localY / (B * B)) || 0.000001;
+  const sx = localX / q;
+  const sy = localY / q;
+  return {
+    x: hx + sx * ch - sy * sh,
+    y: hy + sx * sh + sy * ch
+  };
+}
 function heroContribute(hero) {
   if (!hero)
     return [];
@@ -4296,23 +4317,10 @@ function drawAquariumForeground(ctx, aquarium, frame, params) {
     ctx.restore();
     let px = snoutX + ux * Math.min(18, Math.max(14, L * 0.42));
     let py = snoutY + uy * Math.min(18, Math.max(14, L * 0.42));
-    const hero = frame.hero;
-    if (hero) {
-      const hx = Number.isFinite(hero.x) ? hero.x : 0;
-      const hy = Number.isFinite(hero.y) ? hero.y : 0;
-      const hh = Number.isFinite(hero.heading ?? 0) ? hero.heading ?? 0 : 0;
-      const ch = Math.cos(hh), sh = Math.sin(hh);
-      const dx = snoutX - hx;
-      const dy = snoutY - hy;
-      const localX = dx * ch + dy * sh;
-      const localY = -dx * sh + dy * ch;
-      const A = Math.max(0.001, Number.isFinite(hero.halfLen ?? hero.radius) ? hero.halfLen ?? hero.radius : hero.radius);
-      const B = Math.max(0.001, Number.isFinite(hero.halfWid ?? hero.radius) ? hero.halfWid ?? hero.radius : hero.radius);
-      const q = Math.sqrt(localX * localX / (A * A) + localY * localY / (B * B)) || 0.000001;
-      const sx = localX / q;
-      const sy = localY / q;
-      px = hx + sx * ch - sy * sh;
-      py = hy + sx * sh + sy * ch;
+    if (frame.hero) {
+      const surface = heroSurfacePoint(frame.hero, { x: snoutX, y: snoutY });
+      px = surface.x;
+      py = surface.y;
     }
     ctx.fillStyle = `hsla(205, 18%, 15%, ${alpha * 0.55 * env})`;
     ctx.beginPath();

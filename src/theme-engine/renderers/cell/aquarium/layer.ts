@@ -2,7 +2,7 @@ import type { CellParams } from "../types";
 import { aquariumParamsView } from "./params";
 import { buildField } from "./interaction";
 import type { FieldContribution, InteractionField } from "./interaction";
-import { heroContribute } from "./hero";
+import { heroContribute, heroSurfacePoint } from "./hero";
 import { REGISTRY, sceneFromParams } from "./registry";
 import type { AquariumFrame, AquariumLayerState } from "./types";
 import { euglenaContribute } from "./euglena";
@@ -163,23 +163,10 @@ export function drawAquariumForeground(
     // filaments attach to the visible prey surface instead of a pre-recoil ghost.
     let px = snoutX + ux * Math.min(18, Math.max(14, L * 0.42));
     let py = snoutY + uy * Math.min(18, Math.max(14, L * 0.42));
-    const hero = frame.hero;
-    if (hero) {
-      const hx = Number.isFinite(hero.x) ? hero.x : 0;
-      const hy = Number.isFinite(hero.y) ? hero.y : 0;
-      const hh = Number.isFinite(hero.heading ?? 0) ? (hero.heading ?? 0) : 0;
-      const ch = Math.cos(hh), sh = Math.sin(hh);
-      const dx = snoutX - hx;
-      const dy = snoutY - hy;
-      const localX = dx * ch + dy * sh;
-      const localY = -dx * sh + dy * ch;
-      const A = Math.max(1e-3, Number.isFinite(hero.halfLen ?? hero.radius) ? (hero.halfLen ?? hero.radius) : hero.radius);
-      const B = Math.max(1e-3, Number.isFinite(hero.halfWid ?? hero.radius) ? (hero.halfWid ?? hero.radius) : hero.radius);
-      const q = Math.sqrt((localX * localX) / (A * A) + (localY * localY) / (B * B)) || 1e-6;
-      const sx = localX / q;
-      const sy = localY / q;
-      px = hx + sx * ch - sy * sh;
-      py = hy + sx * sh + sy * ch;
+    if (frame.hero) {
+      const surface = heroSurfacePoint(frame.hero, { x: snoutX, y: snoutY });
+      px = surface.x;
+      py = surface.y;
     }
 
     // Dark puncture/dent first: a tiny shadow + crescent under the contact glow.
