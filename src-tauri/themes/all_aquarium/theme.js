@@ -3088,7 +3088,7 @@ function updateEuglena(euglena, frame, view) {
     let ux = Math.cos(heading);
     let uy = Math.sin(heading);
     const vPx = Math.max(0, finite(cell.swimSpeed, 0)) * vBL * L;
-    const wallInset = Math.min(L * 0.8, safeWidth * 0.22, safeHeight * 0.22);
+    const wallInset = Math.min(L * 1.48, safeWidth * 0.32, safeHeight * 0.32);
     const field = frame.interaction;
     const fieldObstacles = field ? field.obstacles.filter((obstacle) => obstacle.sourceId !== selfId) : undefined;
     const fieldWakes = field ? field.wakes.filter((wake) => wake.sourceId !== selfId) : undefined;
@@ -3322,12 +3322,27 @@ function updateEuglena(euglena, frame, view) {
       heading += jitter;
     }
     const fEff = Math.min(18, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
+    const minX = wallInset;
+    const maxX = Math.max(wallInset, safeWidth - wallInset);
+    const minY = wallInset;
+    const maxY = Math.max(wallInset, safeHeight - wallInset);
+    const clampedX = clamp(nextX, minX, maxX);
+    const clampedY = clamp(nextY, minY, maxY);
+    let finalHeading = heading;
+    if (clampedX <= minX + 0.000001 && Math.cos(finalHeading) < 0)
+      finalHeading = Math.atan2(Math.sin(finalHeading), 0.35);
+    if (clampedX >= maxX - 0.000001 && Math.cos(finalHeading) > 0)
+      finalHeading = Math.atan2(Math.sin(finalHeading), -0.35);
+    if (clampedY <= minY + 0.000001 && Math.sin(finalHeading) < 0)
+      finalHeading = Math.atan2(0.35, Math.cos(finalHeading));
+    if (clampedY >= maxY - 0.000001 && Math.sin(finalHeading) > 0)
+      finalHeading = Math.atan2(-0.35, Math.cos(finalHeading));
     return {
       ...cell,
-      x: clamp(nextX, wallInset, Math.max(wallInset, safeWidth - wallInset)),
-      y: clamp(nextY, wallInset, Math.max(wallInset, safeHeight - wallInset)),
-      phase: heading,
-      heading,
+      x: clampedX,
+      y: clampedY,
+      phase: finalHeading,
+      heading: finalHeading,
       turnProgress: finiteOr(cell.turnProgress, 2),
       turnFrom: finiteOr(cell.turnFrom, heading),
       turnTo: finiteOr(cell.turnTo, heading),

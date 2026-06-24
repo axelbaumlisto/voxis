@@ -5,7 +5,7 @@ import { buildField, sourceId } from "../interaction";
 import { drawAquariumBackground, seedAquarium, updateAquarium } from "../layer";
 import { aquariumParamsView } from "../params";
 import type { AquariumFrame, AquariumLayerState, EuglenaState } from "../types";
-import { EUGLENA_STEER, MEDIUM, euglenaPose, updateEuglena } from "../euglena";
+import { EUGLENA_STEER, MEDIUM, euglenaDisplayLength, euglenaPose, updateEuglena } from "../euglena";
 
 function frame(overrides: Partial<AquariumFrame> = {}): AquariumFrame {
   return {
@@ -65,6 +65,32 @@ describe("aquarium layer Phase 3 euglena", () => {
       if (s.halfWidth > bestW) { bestW = s.halfWidth; bestU = s.u; }
     }
     return bestU;
+  }
+
+  function euglenaVisualBounds(cell: EuglenaState, scale: number, height: number): { minX: number; maxX: number; minY: number; maxY: number } {
+    const length = euglenaDisplayLength(cell.size, scale);
+    const ampTip = Math.min(Math.max(length * 0.22, 2), 0.40 * height);
+    const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {
+      centerX: cell.x,
+      centerY: cell.y,
+      length,
+      baseWidth: length * 0.22,
+      heading: cell.heading,
+      flagellumLength: length * 0.95,
+      flagellumPhase: cell.flagellumPhase,
+      flagellumAmp: ampTip,
+      maxFlagellumLateral: 0.40 * height,
+      flagellumSegments: Math.min(Math.max(Math.round(length / 3), 10), 24),
+      flagellumWaves: 1.5,
+      metabolyEnvelope: 1,
+    });
+    const pts = [...pose.outline, ...pose.flagellumPoints];
+    return {
+      minX: Math.min(...pts.map((p) => p.x)),
+      maxX: Math.max(...pts.map((p) => p.x)),
+      minY: Math.min(...pts.map((p) => p.y)),
+      maxY: Math.max(...pts.map((p) => p.y)),
+    };
   }
 
   function inspectEuglenaDraw(scale: number): { readonly calls: readonly string[]; readonly state: AquariumLayerState } {
@@ -216,7 +242,7 @@ describe("aquarium layer Phase 3 euglena", () => {
       aquariumActivityBoost: 1,
     });
     const run = () => {
-      let cell = testEuglena({ x: 295, y: 150, heading: 0, swimSpeed: 1 }); // driving at the right wall
+      let cell = testEuglena({ x: 250, y: 150, heading: 0, swimSpeed: 1 }); // approaching the right wall, outside the clamp
       for (let i = 0; i < 6; i++) {
         cell = updateEuglena([cell], frame({ dt: 0.05, width: 300, height: 300, activity: 0 }), view)[0];
       }
@@ -350,24 +376,25 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(cell.x).toBeLessThanOrEqual(300);
   });
 
-  it("de-pins a wall-clamped euglena so it visibly leaves the edge", () => {
+  it("de-pins a wall-clamped euglena so its rendered body and flagellum leave the edge", () => {
     const view = aquariumParamsView({
       ...CELL_DEFAULTS,
       enableAquarium: true,
       euglenaCount: 1,
-      euglenaSpeed: 1,
-      euglenaSpeedActive: 1,
+      euglenaSpeed: 0.18,
+      euglenaSpeedActive: 0.34,
       euglenaScale: 2.2,
-      aquariumActivityBoost: 1,
+      aquariumActivityBoost: 0.65,
     });
-    let cell = testEuglena({ x: 3, y: 150, heading: Math.PI, swimSpeed: 1 });
-    let minX = Infinity;
-    for (let i = 0; i < 20; i++) {
-      cell = updateEuglena([cell], frame({ dt: 0.05, width: 300, height: 300, activity: 0 }), view)[0];
-      minX = Math.min(minX, cell.x);
+    const width = 340;
+    const height = 170;
+    let cell = testEuglena({ x: 16, y: 85, heading: Math.PI, swimSpeed: 0.8563175361836329 });
+    for (let i = 0; i < 4; i++) {
+      cell = updateEuglena([cell], frame({ dt: 0.05, width, height, activity: 0.2 }), view)[0];
     }
-    expect(minX).toBeGreaterThan(3);
-    expect(Math.cos(cell.heading)).toBeGreaterThan(0.15);
+    const bounds = euglenaVisualBounds(cell, view.euglena.scale, height);
+    expect(bounds.minX).toBeGreaterThanOrEqual(0);
+    expect(Math.cos(cell.heading)).toBeGreaterThan(0);
   });
 
   it("a negative hero weight makes the euglena PURSUE the hero instead of avoiding", () => {
