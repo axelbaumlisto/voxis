@@ -4,7 +4,7 @@ import { aquariumParamsView } from "../cell/aquarium/params";
 import { heroConsumeObstacles } from "../cell/aquarium/hero";
 import { buildField, sourceId } from "../cell/aquarium/interaction";
 import type { ObstacleCircle } from "../cell/aquarium/interaction";
-import { buildAquariumInteractionField, seedAquarium, updateAquarium, drawAquariumBackground } from "../cell/aquarium/layer";
+import { buildAquariumInteractionField, seedAquarium, updateAquarium, drawAquariumBackground, drawAquariumForeground } from "../cell/aquarium/layer";
 import { diatomGeometry } from "../cell/aquarium/diatoms";
 import { euglenaPose, updateEuglena, drawEuglena, EUGLENA_STEER, MEDIUM } from "../cell/aquarium/euglena";
 import { updateVorticella, vorticellaContribute, vorticellaContractPhase, vorticellaGeometry, vorticellaObstacle } from "../cell/aquarium/vorticella";
@@ -12,7 +12,7 @@ import { noise2D } from "../cell/aquarium/seeds";
 import { seedDidinium, updateDidinium, didiniumContribute, didiniumDisplayLength } from "../cell/aquarium/didinium";
 import type { AquariumFrame, AquariumLayerState, DidiniumState, EuglenaState } from "../cell/aquarium/types";
 import type { CellParams } from "../cell/types";
-import { RecordingCanvasContext2D, summarize, type GoldenSummary } from "./helpers/recordingCanvas";
+import { RecordingCanvasContext2D, round, summarize, type GoldenSummary } from "./helpers/recordingCanvas";
 
 function installNoopCanvasContext(): void {
   const gradient = { addColorStop: vi.fn() };
@@ -2714,6 +2714,61 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
   it("didiniumDisplayLength agrees between update and draw (single source of truth)", () => {
     expect(didiniumDisplayLength(1, 1)).toBeGreaterThan(0);
     expect(didiniumDisplayLength(1, 2)).toBeGreaterThan(didiniumDisplayLength(1, 1));
+  });
+
+  it("characterizes Didinium contact foreground on the current hero membrane", () => {
+    const ops: string[] = [];
+    const ctx = new RecordingCanvasContext2D(ops) as unknown as CanvasRenderingContext2D;
+    const hero = {
+      x: 120,
+      y: 48,
+      radius: 20,
+      heading: 0,
+      halfLen: 20 * Math.sqrt(3),
+      halfWid: 20 / Math.sqrt(3),
+    };
+    const didinium = testDidinium({
+      x: hero.x - hero.halfLen - didiniumDisplayLength(1, 1) * 0.52,
+      y: hero.y,
+      phase: 0,
+      heading: 0,
+      contactTimer: 1.5,
+      contactDuration: 2,
+    });
+    const params: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      aquariumAlpha: 0.55,
+      didiniumCount: 1,
+      didiniumScale: 1,
+    };
+
+    drawAquariumForeground(ctx, { seed: 1, diatoms: [], euglena: [], vorticella: [], didinium: [didinium] }, frame({ hero }), params);
+
+    const membraneX = round(hero.x - hero.halfLen);
+    const membraneY = round(hero.y);
+    expect(summarize(ops)).toEqual({
+      hash: "fdfc46ba8565dd8d",
+      opCount: 58,
+      counts: {
+        save: 2,
+        translate: 1,
+        rotate: 1,
+        beginPath: 14,
+        ellipse: 1,
+        stroke: 12,
+        moveTo: 10,
+        lineTo: 10,
+        restore: 2,
+        arc: 3,
+        fill: 2,
+      },
+    });
+    expect(ops).toContain(`arc(${membraneX},${membraneY},1.3,0,6.283)`);
+    expect(ops).toContain(`arc(${membraneX},${membraneY},1,0,6.283)`);
+    expect(ops.filter((op) => op === `lineTo(${membraneX},${membraneY})`)).toHaveLength(3);
+    expect(ops.some((op) => op.includes("hsla(198, 52%, 98%"))).toBe(true);
+    expect(ops.some((op) => op.includes("hsla(42, 46%, 95%"))).toBe(true);
   });
 
   it("draws exactly two ciliary girdles and stays within an op budget", () => {

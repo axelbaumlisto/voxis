@@ -45,6 +45,8 @@ export class RecordingCanvasContext2D {
   clip(): void { this.push("clip"); }
   save(): void { this.push("save"); }
   restore(): void { this.push("restore"); }
+  translate(x: number, y: number): void { this.push("translate", x, y); }
+  rotate(angle: number): void { this.push("rotate", angle); }
 
   fill(): void {
     this.pushWithStyle("fill", this.fillStyle);
