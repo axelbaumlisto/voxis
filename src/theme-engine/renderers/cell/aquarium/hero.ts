@@ -2,6 +2,32 @@ import { sourceId } from "./interaction";
 import type { FieldContribution, ObstacleCircle } from "./interaction";
 import type { AquariumFrame } from "./types";
 
+export interface HeroSurfacePoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+export function heroSurfacePoint(hero: AquariumFrame["hero"], point: HeroSurfacePoint): HeroSurfacePoint {
+  if (!hero) return point;
+  const hx = Number.isFinite(hero.x) ? hero.x : 0;
+  const hy = Number.isFinite(hero.y) ? hero.y : 0;
+  const hh = Number.isFinite(hero.heading ?? 0) ? (hero.heading ?? 0) : 0;
+  const ch = Math.cos(hh), sh = Math.sin(hh);
+  const dx = point.x - hx;
+  const dy = point.y - hy;
+  const localX = dx * ch + dy * sh;
+  const localY = -dx * sh + dy * ch;
+  const A = Math.max(1e-3, Number.isFinite(hero.halfLen ?? hero.radius) ? (hero.halfLen ?? hero.radius) : hero.radius);
+  const B = Math.max(1e-3, Number.isFinite(hero.halfWid ?? hero.radius) ? (hero.halfWid ?? hero.radius) : hero.radius);
+  const q = Math.sqrt((localX * localX) / (A * A) + (localY * localY) / (B * B)) || 1e-6;
+  const sx = localX / q;
+  const sy = localY / q;
+  return {
+    x: hx + sx * ch - sy * sh,
+    y: hy + sx * sh + sy * ch,
+  };
+}
+
 export function heroContribute(hero: AquariumFrame["hero"]): FieldContribution[] {
   if (!hero) return [];
   const heroId = sourceId("hero", 0);
