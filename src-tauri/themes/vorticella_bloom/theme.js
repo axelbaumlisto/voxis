@@ -2763,24 +2763,11 @@ function drawDiatoms(ctx, diatoms, frame, view) {
   ctx.restore();
 }
 
-// src/theme-engine/renderers/cell/aquarium/euglena.ts
+// src/theme-engine/renderers/cell/aquarium/euglena-parts/pose.ts
 var METABOLY_AMP = 0.16;
 var METABOLY_K = 1.3;
 var STRIAE_TURNS = 1.25;
 var STRIAE_AMP = 0.62;
-function euglenaModeView(mode) {
-  switch (mode) {
-    case "recording":
-      return { motionMul: 1.15, alphaMul: 1.08 };
-    case "transcribing":
-      return { motionMul: 0.35, alphaMul: 0.8 };
-    case "error":
-      return { motionMul: 0.15, alphaMul: 0.55 };
-    case "idle":
-    default:
-      return { motionMul: 1, alphaMul: 1 };
-  }
-}
 function point(cx, cy, ux, uy, along) {
   return { x: cx + ux * along, y: cy + uy * along };
 }
@@ -2970,6 +2957,21 @@ function euglenaPose(rollPhase, metabolyPhase, options = {}) {
     contractileVacuole: contractileVacuole2,
     pellicleStrips
   };
+}
+
+// src/theme-engine/renderers/cell/aquarium/euglena.ts
+function euglenaModeView(mode) {
+  switch (mode) {
+    case "recording":
+      return { motionMul: 1.15, alphaMul: 1.08 };
+    case "transcribing":
+      return { motionMul: 0.35, alphaMul: 0.8 };
+    case "error":
+      return { motionMul: 0.15, alphaMul: 0.55 };
+    case "idle":
+    default:
+      return { motionMul: 1, alphaMul: 1 };
+  }
 }
 function seedEuglena(count, seed, frame, salt = 235478698) {
   if (count <= 0)
