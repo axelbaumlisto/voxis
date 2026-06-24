@@ -2985,202 +2985,8 @@ var STARTLE_TRIGGER_Q = 1.12;
 var STARTLE_TAU = 0.6;
 var SEPARATION_RANGE_BODY_LENGTHS = 1.6;
 var DIDINIUM_HAZARD_WEIGHT = 0.55;
-// src/theme-engine/renderers/cell/aquarium/euglena-parts/draw.ts
-function euglenaDrawModeView(mode) {
-  switch (mode) {
-    case "recording":
-      return { alphaMul: 1.08 };
-    case "transcribing":
-      return { alphaMul: 0.8 };
-    case "error":
-      return { alphaMul: 0.55 };
-    case "idle":
-    default:
-      return { alphaMul: 1 };
-  }
-}
-function drawPolyline3(ctx, points, close) {
-  if (points.length === 0)
-    return;
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (let i = 1;i < points.length; i++)
-    ctx.lineTo(points[i].x, points[i].y);
-  if (close)
-    ctx.closePath();
-}
-function metabolyEnvelope(burstPhase) {
-  const p = wrapUnit(burstPhase);
-  if (p < 0.6)
-    return 0;
-  return Math.sin((p - 0.6) / 0.4 * Math.PI);
-}
-function drawEuglena(ctx, euglena, frame, view) {
-  if (!view.enabled || euglena.length === 0 || view.euglena.count <= 0)
-    return;
-  const alpha = Math.max(0, Math.min(1, view.alpha * 0.72 * euglenaDrawModeView(frame.mode).alphaMul));
-  if (alpha <= 0)
-    return;
-  const scale = Math.max(0.1, finite(view.euglena.scale, 1));
-  const hue = finite(frame.baseHue, 50) + finite(view.euglena.hueOffset, 42);
-  const H = Math.max(1, finite(frame.height, 36));
-  ctx.save();
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  euglena.forEach((cell, idx) => {
-    const tp = finiteOr(cell.turnProgress, 2);
-    const turnShrink = tp < 1 ? 0.5 + 0.5 * Math.abs(Math.cos(tp * Math.PI)) : 1;
-    const fullLength = euglenaDisplayLength(finite(cell.size, 1), scale);
-    const length = fullLength * turnShrink;
-    const turnWiden = 1 + 0.9 * (1 - turnShrink);
-    const width = fullLength * 0.22 * turnWiden;
-    const flagellumLength = length * 0.95;
-    const heading = finite(cell.heading, 0);
-    const chCount = length < 7 ? 0 : length < 14 ? 5 : length < 40 ? clamp(Math.round(length / 4), 8, 12) : clamp(Math.round(length / 4.5), 12, 20);
-    const stCount = length < 7 ? 0 : length < 14 ? 2 : length < 40 ? 4 : Math.min(7, Math.round(length / 9));
-    const pmCount = length < 14 ? 0 : length < 40 ? 1 : 2;
-    const includeNucleus = length >= 14;
-    const includeReservoir = length >= 7;
-    const includeCV = length >= 14;
-    const flagSegs = clamp(Math.round(length / 3), 10, 24);
-    const roll = wrapUnit(finite(cell.rollPhase, 0));
-    const aHelix = finiteOr(cell.spiralAmplitude, 0.15) * length;
-    const apparentW = width * (0.85 + 0.15 * Math.abs(Math.cos(roll * TAU2)));
-    const lmax = Math.max(0, 0.4 * H - apparentW / 2);
-    const aFit = Math.min(aHelix, 0.9 * lmax);
-    const lateral = lmax > 0 ? lmax * Math.tanh(aFit * Math.sin(roll * TAU2 + heading) / lmax) : 0;
-    const ux = Math.cos(heading);
-    const uy = Math.sin(heading);
-    const nx = -uy;
-    const ny = ux;
-    const cxr = finite(cell.x, 0) + nx * lateral;
-    const cyr = finite(cell.y, 0) + ny * lateral;
-    const bp = wrapUnit(finiteOr(cell.burstPhase, 0));
-    const hh = finite(cell.heading, 0);
-    const flick = bp < 0.08 ? Math.sin(bp / 0.08 * Math.PI) : 0;
-    const vigour = 0.8 + 0.12 * Math.sin(TAU2 * bp + hh) + 0.08 * Math.sin(TAU2 * bp * 2.7 + hh * 1.7) + 0.3 * flick;
-    const ampTip = clamp(length * 0.22, 2, 0.4 * H) * vigour;
-    const env = metabolyEnvelope(finiteOr(cell.burstPhase, 0));
-    const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {
-      centerX: cxr,
-      centerY: cyr,
-      length,
-      baseWidth: width,
-      heading,
-      flagellumLength,
-      flagellumPhase: cell.flagellumPhase,
-      flagellumAmp: ampTip,
-      maxFlagellumLateral: 0.4 * H,
-      flagellumSegments: flagSegs,
-      flagellumWaves: 1.5,
-      metabolyEnvelope: env,
-      organelleSeed: (view.seed ^ (idx + 1) * 2654435761) >>> 0,
-      chloroplastCount: chCount,
-      striaeCount: stCount,
-      paramylonCount: pmCount,
-      includeNucleus,
-      includeReservoir,
-      includeCV,
-      cvPhase: cell.cvPhase
-    });
-    drawPolyline3(ctx, pose.outline, true);
-    ctx.fillStyle = `hsla(${hue}, 50%, 46%, ${alpha * 0.5})`;
-    ctx.strokeStyle = `hsla(${hue + 6}, 42%, 64%, ${alpha * 0.62})`;
-    ctx.lineWidth = Math.max(0.5, Math.min(0.9, width * 0.08));
-    ctx.fill();
-    ctx.stroke();
-    if (length >= 12) {
-      const gx = cxr + ux * length * 0.33;
-      const gy = cyr + uy * length * 0.33;
-      ctx.fillStyle = `hsla(188, 16%, 84%, ${alpha * 0.2})`;
-      ctx.beginPath();
-      ctx.ellipse(gx, gy, length * 0.26, width * 0.4, heading, 0, TAU2);
-      ctx.fill();
-    }
-    if (pose.pellicleStrips.length > 0) {
-      ctx.strokeStyle = `hsla(${hue - 6}, 22%, 76%, ${alpha * 0.4})`;
-      ctx.lineWidth = Math.max(0.35, Math.min(0.55, width * 0.06));
-      for (const strip of pose.pellicleStrips) {
-        drawPolyline3(ctx, strip, false);
-        ctx.stroke();
-      }
-    }
-    for (const c of pose.chloroplasts) {
-      const fa = alpha * 0.74 * (0.65 + 0.35 * c.front);
-      ctx.fillStyle = `hsla(${hue + c.hueShift}, 64%, ${40 + c.lightShift}%, ${fa})`;
-      ctx.beginPath();
-      ctx.ellipse(c.x, c.y, c.rx, c.ry, c.angle, 0, TAU2);
-      ctx.fill();
-    }
-    if (pose.nucleus) {
-      ctx.fillStyle = `hsla(${hue - 2}, 20%, 44%, ${alpha * 0.34})`;
-      ctx.beginPath();
-      ctx.ellipse(pose.nucleus.x, pose.nucleus.y, pose.nucleus.rx, pose.nucleus.ry, pose.nucleus.angle, 0, TAU2);
-      ctx.fill();
-      ctx.strokeStyle = `hsla(${hue - 6}, 18%, 38%, ${alpha * 0.5})`;
-      ctx.lineWidth = 0.4;
-      ctx.beginPath();
-      ctx.ellipse(pose.nucleus.x, pose.nucleus.y, pose.nucleus.rx, pose.nucleus.ry, pose.nucleus.angle, 0, TAU2);
-      ctx.stroke();
-    }
-    pose.paramylon.forEach((p, j) => {
-      const fa = alpha * 0.42 * (0.55 + 0.45 * p.front);
-      ctx.fillStyle = `hsla(50, 12%, 74%, ${fa})`;
-      ctx.beginPath();
-      ctx.ellipse(p.x, p.y, p.rx, p.ry, p.angle, 0, TAU2);
-      ctx.fill();
-      if (j === 0) {
-        ctx.strokeStyle = `hsla(50, 14%, 68%, ${alpha * 0.45})`;
-        ctx.lineWidth = Math.max(0.3, width * 0.05);
-        ctx.beginPath();
-        ctx.ellipse(p.x, p.y, p.rx, p.ry, p.angle, 0, TAU2);
-        ctx.stroke();
-      }
-    });
-    if (pose.reservoir) {
-      ctx.fillStyle = `hsla(186, 18%, 78%, ${alpha * 0.3})`;
-      ctx.beginPath();
-      ctx.arc(pose.reservoir.x, pose.reservoir.y, pose.reservoir.r, 0, TAU2);
-      ctx.fill();
-    }
-    if (pose.contractileVacuole) {
-      ctx.fillStyle = `hsla(190, 16%, 86%, ${alpha * 0.34})`;
-      ctx.beginPath();
-      ctx.arc(pose.contractileVacuole.x, pose.contractileVacuole.y, Math.max(0.4, pose.contractileVacuole.r), 0, TAU2);
-      ctx.fill();
-    }
-    ctx.fillStyle = `hsla(8, 88%, 49%, ${alpha * (0.45 + 0.47 * pose.eyespotFront)})`;
-    ctx.beginPath();
-    ctx.arc(pose.eyespot.x, pose.eyespot.y, Math.max(0.6, length * 0.03), 0, TAU2);
-    ctx.fill();
-    const fp = pose.flagellumPoints;
-    if (fp.length >= 2) {
-      let flagFade = 1;
-      if (frame.hero) {
-        const hdx = finite(cell.x, 0) - finite(frame.hero.x, 0);
-        const hdy = finite(cell.y, 0) - finite(frame.hero.y, 0);
-        const reach = (Math.max(finiteOr(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) + flagellumLength) * 1.05;
-        const hdist = Math.hypot(hdx, hdy);
-        flagFade = hdist >= reach ? 1 : clamp((hdist / reach - 0.45) / 0.5, 0, 1);
-      }
-      ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.3 * flagFade})`;
-      ctx.lineWidth = Math.max(0.9, width * 0.18);
-      drawPolyline3(ctx, fp, false);
-      ctx.stroke();
-      ctx.strokeStyle = `hsla(${hue + 8}, 34%, 70%, ${alpha * 0.9 * flagFade})`;
-      ctx.lineWidth = Math.max(0.5, width * 0.1);
-      drawPolyline3(ctx, fp, false);
-      ctx.stroke();
-      const nprox = Math.max(2, Math.round(fp.length * 0.6));
-      ctx.lineWidth = Math.max(0.8, width * 0.16);
-      drawPolyline3(ctx, fp.slice(0, nprox), false);
-      ctx.stroke();
-    }
-  });
-  ctx.restore();
-}
 
-// src/theme-engine/renderers/cell/aquarium/euglena.ts
+// src/theme-engine/renderers/cell/aquarium/euglena-parts/behaviour.ts
 function euglenaModeView(mode) {
   switch (mode) {
     case "recording":
@@ -3538,7 +3344,200 @@ function updateEuglena(euglena, frame, view) {
     };
   });
 }
-
+// src/theme-engine/renderers/cell/aquarium/euglena-parts/draw.ts
+function euglenaDrawModeView(mode) {
+  switch (mode) {
+    case "recording":
+      return { alphaMul: 1.08 };
+    case "transcribing":
+      return { alphaMul: 0.8 };
+    case "error":
+      return { alphaMul: 0.55 };
+    case "idle":
+    default:
+      return { alphaMul: 1 };
+  }
+}
+function drawPolyline3(ctx, points, close) {
+  if (points.length === 0)
+    return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1;i < points.length; i++)
+    ctx.lineTo(points[i].x, points[i].y);
+  if (close)
+    ctx.closePath();
+}
+function metabolyEnvelope(burstPhase) {
+  const p = wrapUnit(burstPhase);
+  if (p < 0.6)
+    return 0;
+  return Math.sin((p - 0.6) / 0.4 * Math.PI);
+}
+function drawEuglena(ctx, euglena, frame, view) {
+  if (!view.enabled || euglena.length === 0 || view.euglena.count <= 0)
+    return;
+  const alpha = Math.max(0, Math.min(1, view.alpha * 0.72 * euglenaDrawModeView(frame.mode).alphaMul));
+  if (alpha <= 0)
+    return;
+  const scale = Math.max(0.1, finite(view.euglena.scale, 1));
+  const hue = finite(frame.baseHue, 50) + finite(view.euglena.hueOffset, 42);
+  const H = Math.max(1, finite(frame.height, 36));
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  euglena.forEach((cell, idx) => {
+    const tp = finiteOr(cell.turnProgress, 2);
+    const turnShrink = tp < 1 ? 0.5 + 0.5 * Math.abs(Math.cos(tp * Math.PI)) : 1;
+    const fullLength = euglenaDisplayLength(finite(cell.size, 1), scale);
+    const length = fullLength * turnShrink;
+    const turnWiden = 1 + 0.9 * (1 - turnShrink);
+    const width = fullLength * 0.22 * turnWiden;
+    const flagellumLength = length * 0.95;
+    const heading = finite(cell.heading, 0);
+    const chCount = length < 7 ? 0 : length < 14 ? 5 : length < 40 ? clamp(Math.round(length / 4), 8, 12) : clamp(Math.round(length / 4.5), 12, 20);
+    const stCount = length < 7 ? 0 : length < 14 ? 2 : length < 40 ? 4 : Math.min(7, Math.round(length / 9));
+    const pmCount = length < 14 ? 0 : length < 40 ? 1 : 2;
+    const includeNucleus = length >= 14;
+    const includeReservoir = length >= 7;
+    const includeCV = length >= 14;
+    const flagSegs = clamp(Math.round(length / 3), 10, 24);
+    const roll = wrapUnit(finite(cell.rollPhase, 0));
+    const aHelix = finiteOr(cell.spiralAmplitude, 0.15) * length;
+    const apparentW = width * (0.85 + 0.15 * Math.abs(Math.cos(roll * TAU2)));
+    const lmax = Math.max(0, 0.4 * H - apparentW / 2);
+    const aFit = Math.min(aHelix, 0.9 * lmax);
+    const lateral = lmax > 0 ? lmax * Math.tanh(aFit * Math.sin(roll * TAU2 + heading) / lmax) : 0;
+    const ux = Math.cos(heading);
+    const uy = Math.sin(heading);
+    const nx = -uy;
+    const ny = ux;
+    const cxr = finite(cell.x, 0) + nx * lateral;
+    const cyr = finite(cell.y, 0) + ny * lateral;
+    const bp = wrapUnit(finiteOr(cell.burstPhase, 0));
+    const hh = finite(cell.heading, 0);
+    const flick = bp < 0.08 ? Math.sin(bp / 0.08 * Math.PI) : 0;
+    const vigour = 0.8 + 0.12 * Math.sin(TAU2 * bp + hh) + 0.08 * Math.sin(TAU2 * bp * 2.7 + hh * 1.7) + 0.3 * flick;
+    const ampTip = clamp(length * 0.22, 2, 0.4 * H) * vigour;
+    const env = metabolyEnvelope(finiteOr(cell.burstPhase, 0));
+    const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {
+      centerX: cxr,
+      centerY: cyr,
+      length,
+      baseWidth: width,
+      heading,
+      flagellumLength,
+      flagellumPhase: cell.flagellumPhase,
+      flagellumAmp: ampTip,
+      maxFlagellumLateral: 0.4 * H,
+      flagellumSegments: flagSegs,
+      flagellumWaves: 1.5,
+      metabolyEnvelope: env,
+      organelleSeed: (view.seed ^ (idx + 1) * 2654435761) >>> 0,
+      chloroplastCount: chCount,
+      striaeCount: stCount,
+      paramylonCount: pmCount,
+      includeNucleus,
+      includeReservoir,
+      includeCV,
+      cvPhase: cell.cvPhase
+    });
+    drawPolyline3(ctx, pose.outline, true);
+    ctx.fillStyle = `hsla(${hue}, 50%, 46%, ${alpha * 0.5})`;
+    ctx.strokeStyle = `hsla(${hue + 6}, 42%, 64%, ${alpha * 0.62})`;
+    ctx.lineWidth = Math.max(0.5, Math.min(0.9, width * 0.08));
+    ctx.fill();
+    ctx.stroke();
+    if (length >= 12) {
+      const gx = cxr + ux * length * 0.33;
+      const gy = cyr + uy * length * 0.33;
+      ctx.fillStyle = `hsla(188, 16%, 84%, ${alpha * 0.2})`;
+      ctx.beginPath();
+      ctx.ellipse(gx, gy, length * 0.26, width * 0.4, heading, 0, TAU2);
+      ctx.fill();
+    }
+    if (pose.pellicleStrips.length > 0) {
+      ctx.strokeStyle = `hsla(${hue - 6}, 22%, 76%, ${alpha * 0.4})`;
+      ctx.lineWidth = Math.max(0.35, Math.min(0.55, width * 0.06));
+      for (const strip of pose.pellicleStrips) {
+        drawPolyline3(ctx, strip, false);
+        ctx.stroke();
+      }
+    }
+    for (const c of pose.chloroplasts) {
+      const fa = alpha * 0.74 * (0.65 + 0.35 * c.front);
+      ctx.fillStyle = `hsla(${hue + c.hueShift}, 64%, ${40 + c.lightShift}%, ${fa})`;
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, c.rx, c.ry, c.angle, 0, TAU2);
+      ctx.fill();
+    }
+    if (pose.nucleus) {
+      ctx.fillStyle = `hsla(${hue - 2}, 20%, 44%, ${alpha * 0.34})`;
+      ctx.beginPath();
+      ctx.ellipse(pose.nucleus.x, pose.nucleus.y, pose.nucleus.rx, pose.nucleus.ry, pose.nucleus.angle, 0, TAU2);
+      ctx.fill();
+      ctx.strokeStyle = `hsla(${hue - 6}, 18%, 38%, ${alpha * 0.5})`;
+      ctx.lineWidth = 0.4;
+      ctx.beginPath();
+      ctx.ellipse(pose.nucleus.x, pose.nucleus.y, pose.nucleus.rx, pose.nucleus.ry, pose.nucleus.angle, 0, TAU2);
+      ctx.stroke();
+    }
+    pose.paramylon.forEach((p, j) => {
+      const fa = alpha * 0.42 * (0.55 + 0.45 * p.front);
+      ctx.fillStyle = `hsla(50, 12%, 74%, ${fa})`;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.rx, p.ry, p.angle, 0, TAU2);
+      ctx.fill();
+      if (j === 0) {
+        ctx.strokeStyle = `hsla(50, 14%, 68%, ${alpha * 0.45})`;
+        ctx.lineWidth = Math.max(0.3, width * 0.05);
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, p.rx, p.ry, p.angle, 0, TAU2);
+        ctx.stroke();
+      }
+    });
+    if (pose.reservoir) {
+      ctx.fillStyle = `hsla(186, 18%, 78%, ${alpha * 0.3})`;
+      ctx.beginPath();
+      ctx.arc(pose.reservoir.x, pose.reservoir.y, pose.reservoir.r, 0, TAU2);
+      ctx.fill();
+    }
+    if (pose.contractileVacuole) {
+      ctx.fillStyle = `hsla(190, 16%, 86%, ${alpha * 0.34})`;
+      ctx.beginPath();
+      ctx.arc(pose.contractileVacuole.x, pose.contractileVacuole.y, Math.max(0.4, pose.contractileVacuole.r), 0, TAU2);
+      ctx.fill();
+    }
+    ctx.fillStyle = `hsla(8, 88%, 49%, ${alpha * (0.45 + 0.47 * pose.eyespotFront)})`;
+    ctx.beginPath();
+    ctx.arc(pose.eyespot.x, pose.eyespot.y, Math.max(0.6, length * 0.03), 0, TAU2);
+    ctx.fill();
+    const fp = pose.flagellumPoints;
+    if (fp.length >= 2) {
+      let flagFade = 1;
+      if (frame.hero) {
+        const hdx = finite(cell.x, 0) - finite(frame.hero.x, 0);
+        const hdy = finite(cell.y, 0) - finite(frame.hero.y, 0);
+        const reach = (Math.max(finiteOr(frame.hero.halfLen, frame.hero.radius), frame.hero.radius) + flagellumLength) * 1.05;
+        const hdist = Math.hypot(hdx, hdy);
+        flagFade = hdist >= reach ? 1 : clamp((hdist / reach - 0.45) / 0.5, 0, 1);
+      }
+      ctx.strokeStyle = `hsla(${hue + 8}, 20%, 66%, ${alpha * 0.3 * flagFade})`;
+      ctx.lineWidth = Math.max(0.9, width * 0.18);
+      drawPolyline3(ctx, fp, false);
+      ctx.stroke();
+      ctx.strokeStyle = `hsla(${hue + 8}, 34%, 70%, ${alpha * 0.9 * flagFade})`;
+      ctx.lineWidth = Math.max(0.5, width * 0.1);
+      drawPolyline3(ctx, fp, false);
+      ctx.stroke();
+      const nprox = Math.max(2, Math.round(fp.length * 0.6));
+      ctx.lineWidth = Math.max(0.8, width * 0.16);
+      drawPolyline3(ctx, fp.slice(0, nprox), false);
+      ctx.stroke();
+    }
+  });
+  ctx.restore();
+}
 // src/theme-engine/renderers/cell/aquarium/vorticella-parts/geometry.ts
 function vorticellaBellMetrics(cell, scale, H) {
   const Hc = Math.max(1, finite(H, 80));
