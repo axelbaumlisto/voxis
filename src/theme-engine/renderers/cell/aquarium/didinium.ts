@@ -319,7 +319,7 @@ export function updateDidinium(
       const surfaceY = prey.y + sx * sh + sy * ch;
       preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y };
       if (q < 1.24 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
-        contactTimer = 1.25 + seededUnit(nseed, 0, 0x2a91f00d) * 0.30;
+        contactTimer = 0.75 + seededUnit(nseed, 0, 0x2a91f00d) * 0.20;
       }
     }
     let obstaclePressure = 0;
@@ -368,7 +368,7 @@ export function updateDidinium(
           const hunt = clamp01((sense - d) / (sense * 0.75));
           huntWeight = hunt;
           const desired = Math.atan2(dy, dx); // aim at prey SURFACE, not centroid
-          const turnK = 2.0 + 4.5 * hunt;
+          const turnK = 3.0 + 6.5 * hunt;
           heading += wrapPi(desired - heading) * (1 - Math.exp(-turnK * dt)) * hunt;
         }
       }
@@ -411,8 +411,8 @@ export function updateDidinium(
       const corrX = preyData.surfaceX - nextX;
       const corrY = preyData.surfaceY - nextY;
       const corrL = Math.hypot(corrX, corrY) || 1;
-      const maxStep = L * (preyData.q < 1 ? 0.38 : 0.16);
-      const kLatch = 1 - Math.exp(-12 * dt);
+      const maxStep = L * (preyData.q < 1 ? 0.38 : 0.08);
+      const kLatch = 1 - Math.exp(-(preyData.q < 1 ? 12 : 4) * dt);
       const step = Math.min(maxStep, corrL * kLatch);
       nextX += (corrX / corrL) * step;
       nextY += (corrY / corrL) * step;
@@ -467,7 +467,7 @@ export function updateDidinium(
     if (wasContacting && contactTimer <= 0) {
       // Release after a short attack beat: turn away and cool down so the predator
       // does not immediately re-latch / buzz-saw through the hero.
-      huntCooldown = 6.0 + seededUnit(nseed, 0, 0x4a1b7c29) * 2.5;
+      huntCooldown = 10.0 + seededUnit(nseed, 0, 0x4a1b7c29) * 4.0;
       avoidIndex += 1;
       avoidFrom = heading;
       avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 0x359a71d1)));

@@ -38,14 +38,14 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
 
       // sessile stalked organism: Vorticella
       vorticellaCount: 1,
-      vorticellaAlongFrac: 0.22,
-      vorticellaScale: 1.05,
+      vorticellaAlongFrac: 0.30,
+      vorticellaScale: 1.12,
       vorticellaContractRate: 1.0,
 
       // predator swimmer: Didinium
       didiniumCount: 1,
-      didiniumSpeed: 0.36,
-      didiniumSpeedActive: 0.52,
+      didiniumSpeed: 0.78,
+      didiniumSpeedActive: 1.12,
       didiniumScale: 1.60,
 
       ...userParams,

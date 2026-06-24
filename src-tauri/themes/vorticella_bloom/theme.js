@@ -2720,8 +2720,9 @@ function drawMigrateInterval(cellSeed, migrateCount) {
 }
 function vorticellaLegAmount(leg, timer) {
   if (leg === 1) {
-    const u = clamp01(timer / T_C);
-    return 1 - Math.pow(1 - u, 3);
+    const fast = clamp01(timer / 0.035);
+    const tail = clamp01((timer - 0.035) / Math.max(0.000001, T_C - 0.035));
+    return 0.82 * (1 - Math.pow(1 - fast, 3)) + 0.18 * (1 - Math.pow(1 - tail, 3));
   }
   if (leg === 2)
     return 1;
@@ -2804,8 +2805,8 @@ function vorticellaTriggerRadius(obsRadius, motile) {
   const kind = motileKindId(motile);
   const strengthFallback = kind === KIND_ID.hero ? 1 : kind === KIND_ID.didinium ? 0.75 : kind === KIND_ID.euglena ? 0.35 : 0.5;
   const strength = clamp(finiteOr(motile.strength, strengthFallback), 0.15, 1.5);
-  const baseMul = kind === KIND_ID.euglena ? 1.05 : 1.12;
-  const bodyMul = kind === KIND_ID.hero ? 0.9 : kind === KIND_ID.didinium ? 0.8 : kind === KIND_ID.euglena ? 0.35 : 0.6;
+  const baseMul = kind === KIND_ID.euglena ? 1.3 : 1.55;
+  const bodyMul = kind === KIND_ID.hero ? 0.95 : kind === KIND_ID.didinium ? 0.9 : kind === KIND_ID.euglena ? 0.5 : 0.65;
   return obsRadius * baseMul + radius * bodyMul * strength;
 }
 function vorticellaContribute(cell, scale, frameHeight, idx) {
@@ -3546,7 +3547,7 @@ function updateDidinium(didinium, frame, view) {
       const surfaceY = prey.y + sx * sh + sy * ch;
       preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y };
       if (q < 1.24 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
-        contactTimer = 1.25 + seededUnit(nseed, 0, 714207245) * 0.3;
+        contactTimer = 0.75 + seededUnit(nseed, 0, 714207245) * 0.2;
       }
     }
     let obstaclePressure = 0;
@@ -3597,7 +3598,7 @@ function updateDidinium(didinium, frame, view) {
           const hunt = clamp01((sense - d) / (sense * 0.75));
           huntWeight = hunt;
           const desired = Math.atan2(dy, dx);
-          const turnK = 2 + 4.5 * hunt;
+          const turnK = 3 + 6.5 * hunt;
           heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt)) * hunt;
         }
       }
@@ -3622,8 +3623,8 @@ function updateDidinium(didinium, frame, view) {
       const corrX = preyData.surfaceX - nextX;
       const corrY = preyData.surfaceY - nextY;
       const corrL = Math.hypot(corrX, corrY) || 1;
-      const maxStep = L * (preyData.q < 1 ? 0.38 : 0.16);
-      const kLatch = 1 - Math.exp(-12 * dt);
+      const maxStep = L * (preyData.q < 1 ? 0.38 : 0.08);
+      const kLatch = 1 - Math.exp(-(preyData.q < 1 ? 12 : 4) * dt);
       const step = Math.min(maxStep, corrL * kLatch);
       nextX += corrX / corrL * step;
       nextY += corrY / corrL * step;
@@ -3660,7 +3661,7 @@ function updateDidinium(didinium, frame, view) {
       avoidProgress = 0;
     }
     if (wasContacting && contactTimer <= 0) {
-      huntCooldown = 6 + seededUnit(nseed, 0, 1243315241) * 2.5;
+      huntCooldown = 10 + seededUnit(nseed, 0, 1243315241) * 4;
       avoidIndex += 1;
       avoidFrom = heading;
       avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 899314129)));
@@ -4219,7 +4220,7 @@ function drawAquariumForeground(ctx, aquarium, _frame, params) {
       ctx.stroke();
     }
     ctx.restore();
-    const pierceLen = Math.min(24, Math.max(18, L * 0.55));
+    const pierceLen = Math.min(18, Math.max(14, L * 0.42));
     const px = snoutX + ux * pierceLen;
     const py = snoutY + uy * pierceLen;
     ctx.fillStyle = `hsla(205, 18%, 15%, ${alpha * 0.55 * env})`;
@@ -4241,14 +4242,14 @@ function drawAquariumForeground(ctx, aquarium, _frame, params) {
       ctx.lineTo(px, py);
       ctx.stroke();
     }
-    const fanAlpha = alpha * 0.58 * env;
-    ctx.lineWidth = 0.85;
-    for (let k = 0;k < 13; k++) {
+    const fanAlpha = alpha * 0.38 * env;
+    ctx.lineWidth = 0.8;
+    for (let k = 0;k < 9; k++) {
       if (k % 5 === 1)
         continue;
       const jitter = Math.sin((k + 1) * 12.9898) * 0.08;
-      const a = heading + Math.PI + (k - 6) * 0.13 + jitter;
-      const len = 8 + k * 5 % 6 * 0.95;
+      const a = heading + Math.PI + (k - 4) * 0.15 + jitter;
+      const len = 5.5 + k * 5 % 5 * 0.75;
       const aJ = 0.75 + 0.25 * Math.abs(Math.sin((k + 3) * 4.17));
       ctx.strokeStyle = `hsla(42, 46%, 95%, ${fanAlpha * aJ})`;
       ctx.beginPath();
@@ -4494,7 +4495,7 @@ function createCellRenderer(container, opts) {
         baseSwim = Math.max(params.idleSwimFrac * maxSwim, baseSwim);
       }
       const burst = useKick ? startleBurstSpeed(startle, baseR, params) : 0;
-      const predatorEscapeSpeed = predatorEnv > 0.02 ? predatorEnv * baseR * 0.9 : 0;
+      const predatorEscapeSpeed = predatorEnv > 0.02 ? predatorEnv * baseR * 1.25 : 0;
       const swimPx = baseSwim !== undefined ? baseSwim + burst + predatorEscapeSpeed : burst > 0 || predatorEscapeSpeed > 0 ? burst + predatorEscapeSpeed : undefined;
       wander = wanderStep(wander, dt, width, height, baseR, params, swimPx);
       const driftedX = width / 2 + (wander.x - width / 2) * drift01;
@@ -4620,7 +4621,7 @@ function createCellRenderer(container, opts) {
           predatorNx /= pl;
           predatorNy /= pl;
         }
-        const kick = Math.min(8, baseR * 0.28) * predatorEnv;
+        const kick = Math.min(10, baseR * 0.4) * predatorEnv;
         const rx = predatorNx * kick;
         const ry = predatorNy * kick;
         if (kick > 0.01) {

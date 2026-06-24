@@ -396,7 +396,7 @@ export function createCellRenderer(
         baseSwim = Math.max(params.idleSwimFrac * maxSwim, baseSwim);
       }
       const burst = useKick ? startleBurstSpeed(startle, baseR, params) : 0;
-      const predatorEscapeSpeed = predatorEnv > 0.02 ? predatorEnv * baseR * 0.9 : 0;
+      const predatorEscapeSpeed = predatorEnv > 0.02 ? predatorEnv * baseR * 1.25 : 0;
       const swimPx = baseSwim !== undefined
         ? baseSwim + burst + predatorEscapeSpeed
         : burst > 0 || predatorEscapeSpeed > 0 ? burst + predatorEscapeSpeed : undefined;
@@ -574,7 +574,7 @@ export function createCellRenderer(
           predatorNx /= pl;
           predatorNy /= pl;
         }
-        const kick = Math.min(8, baseR * 0.28) * predatorEnv;
+        const kick = Math.min(10, baseR * 0.40) * predatorEnv;
         const rx = predatorNx * kick;
         const ry = predatorNy * kick;
         if (kick > 0.01) {
