@@ -1805,296 +1805,8 @@ var DIDINIUM_BODY_SHAPE_MAX = (() => {
 function didiniumNormHalfWidth(u) {
   return bodyShape(u) / DIDINIUM_BODY_SHAPE_MAX;
 }
-// src/theme-engine/renderers/cell/aquarium/didinium-parts/draw.ts
-function didiniumModeAlphaMul(mode) {
-  switch (mode) {
-    case "recording":
-      return 1.08;
-    case "transcribing":
-      return 0.8;
-    case "error":
-      return 0.55;
-    case "idle":
-    default:
-      return 1;
-  }
-}
-function transform(cx, cy, ux, uy, along, lateral) {
-  const nx = -uy;
-  const ny = ux;
-  return { x: cx + ux * along + nx * lateral, y: cy + uy * along + ny * lateral };
-}
-function drawPolyline(ctx, points, close) {
-  if (points.length === 0)
-    return;
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (let i = 1;i < points.length; i++)
-    ctx.lineTo(points[i].x, points[i].y);
-  if (close)
-    ctx.closePath();
-}
-function drawDidinium(ctx, didinium, frame, view) {
-  if (!view.enabled || didinium.length === 0 || view.didinium.count <= 0)
-    return;
-  const alpha = Math.max(0, Math.min(1, view.alpha * 0.9 * didiniumModeAlphaMul(frame.mode)));
-  if (alpha <= 0)
-    return;
-  const scale = Math.max(0.1, finite(view.didinium.scale, 1));
-  const hue = 200 + finite(view.didinium.hueOffset, 0);
-  ctx.save();
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  didinium.forEach((cell) => {
-    const L = didiniumDisplayLength(finite(cell.size, 1), scale);
-    const halfLength = L / 2;
-    const wMax = L / DIDINIUM_ASPECT / 2;
-    const heading = finiteOr(cell.phase, finite(cell.heading, 0));
-    const ux = Math.cos(heading);
-    const uy = Math.sin(heading);
-    const cx = finite(cell.x, 0);
-    const cy = finite(cell.y, 0);
-    const roll = wrapUnit(finite(cell.rollPhase, 0));
-    const rollAng = roll * TAU2;
-    const rollCos = Math.cos(rollAng);
-    const widthMul = 0.96 + 0.04 * Math.abs(rollCos);
-    const halfWidthAt = (u) => wMax * widthMul * didiniumNormHalfWidth(u);
-    const SAMP = 64;
-    const upper = [];
-    const lower = [];
-    for (let i = 0;i <= SAMP; i++) {
-      const u = -Math.cos(Math.PI * i / SAMP);
-      const hw = halfWidthAt(u);
-      upper.push(transform(cx, cy, ux, uy, halfLength * u, hw));
-      lower.push(transform(cx, cy, ux, uy, halfLength * u, -hw));
-    }
-    const outline = [...upper, ...lower.reverse()];
-    ctx.save();
-    drawPolyline(ctx, outline, true);
-    ctx.clip();
-    const glowR = Math.max(1, halfLength * 1.05);
-    const grad = ctx.createRadialGradient(cx, cy, glowR * 0.1, cx, cy, glowR);
-    grad.addColorStop(0, `hsla(${hue}, 26%, 92%, ${alpha * 0.66})`);
-    grad.addColorStop(0.62, `hsla(${hue + 2}, 30%, 84%, ${alpha * 0.5})`);
-    grad.addColorStop(1, `hsla(${hue + 4}, 34%, 74%, ${alpha * 0.16})`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
-    const gSeed = finiteOr(cell.noiseSeed, 0) | 0;
-    const gCount = Math.round(clamp(L * 6, 60, 220));
-    for (let g = 0;g < gCount; g++) {
-      const gu = (seededUnit(gSeed, g, 1371344503) * 2 - 1) * 0.9;
-      const gs = (seededUnit(gSeed, g, 2585733948) * 2 - 1) * 0.92;
-      const hw = halfWidthAt(gu);
-      const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
-      const r = 0.5 + seededUnit(gSeed, g, 752460107) * 0.9;
-      const nearGirdle = Math.min(Math.abs(gu - DIDINIUM_GIRDLE_A_U), Math.abs(gu - DIDINIUM_GIRDLE_P_U));
-      const lane = smoothstep2(clamp01(1 - nearGirdle / 0.075));
-      ctx.fillStyle = `hsla(${hue}, 22%, ${90 - 8 * lane}%, ${alpha * (0.34 - 0.12 * lane)})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, TAU2);
-      ctx.fill();
-    }
-    const gCount2 = Math.round(clamp(L * 4, 40, 150));
-    for (let g = 0;g < gCount2; g++) {
-      const gu = (seededUnit(gSeed, g, 1033993285) * 2 - 1) * 0.9;
-      const gs = (seededUnit(gSeed, g, 1508030371) * 2 - 1) * 0.92;
-      const hw = halfWidthAt(gu);
-      const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
-      const r = 0.3 + seededUnit(gSeed, g, 348696353) * 0.5;
-      const nearGirdle = Math.min(Math.abs(gu - DIDINIUM_GIRDLE_A_U), Math.abs(gu - DIDINIUM_GIRDLE_P_U));
-      const lane = smoothstep2(clamp01(1 - nearGirdle / 0.075));
-      ctx.fillStyle = `hsla(${hue + 4}, 18%, ${94 - 6 * lane}%, ${alpha * (0.16 - 0.07 * lane)})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, TAU2);
-      ctx.fill();
-    }
-    ctx.restore();
-    for (let i = 0;i < upper.length - 1; i++) {
-      const u = -Math.cos(Math.PI * i / SAMP);
-      const flank = 1 - Math.abs(u);
-      const a = alpha * (0.1 + 0.18 * flank * flank);
-      ctx.strokeStyle = `hsla(${hue + 2}, 32%, 92%, ${a})`;
-      ctx.lineWidth = Math.max(0.5, wMax * 0.07);
-      ctx.beginPath();
-      ctx.moveTo(upper[i].x, upper[i].y);
-      ctx.lineTo(upper[i + 1].x, upper[i + 1].y);
-      ctx.moveTo(lower[i].x, lower[i].y);
-      ctx.lineTo(lower[i + 1].x, lower[i + 1].y);
-      ctx.stroke();
-    }
-    {
-      const muStart = -0.58;
-      const muEnd = 0.4;
-      const bowDepth = 0.72 * (0.45 + 0.55 * Math.abs(rollCos));
-      const MN = 40;
-      const side2 = rollCos >= 0 ? 1 : -1;
-      const macro = [];
-      for (let k = 0;k <= MN; k++) {
-        const f = k / MN;
-        const u = muStart + (muEnd - muStart) * (0.5 - 0.5 * Math.cos(Math.PI * f));
-        const bow = Math.sin(f * Math.PI) * bowDepth;
-        const lat = bow * halfWidthAt(u) * side2;
-        macro.push(transform(cx, cy, ux, uy, halfLength * u, lat));
-      }
-      const halfTh = Math.max(1.2, wMax * 0.2);
-      const left = [];
-      const right = [];
-      for (let k = 0;k <= MN; k++) {
-        const f = k / MN;
-        const taper = Math.pow(Math.sin(Math.max(0, Math.min(1, f)) * Math.PI), 0.45);
-        const a = macro[Math.max(0, k - 1)];
-        const b = macro[Math.min(MN, k + 1)];
-        let tx = b.x - a.x, ty = b.y - a.y;
-        const tl = Math.hypot(tx, ty) || 1;
-        tx /= tl;
-        ty /= tl;
-        const nx2 = -ty, ny2 = tx;
-        const th = halfTh * (0.55 + 0.45 * taper);
-        const p = macro[k];
-        left.push({ x: p.x + nx2 * th, y: p.y + ny2 * th });
-        right.push({ x: p.x - nx2 * th, y: p.y - ny2 * th });
-      }
-      const ribbon = [...left, ...right.reverse()];
-      drawPolyline(ctx, ribbon, true);
-      ctx.fillStyle = `hsla(${hue - 8}, 6%, 76%, ${alpha * 0.9})`;
-      ctx.fill();
-      ctx.save();
-      drawPolyline(ctx, ribbon, true);
-      ctx.clip();
-      const mnSeed = finiteOr(cell.noiseSeed, 0) | 0;
-      for (let m = 0;m < MN; m += 2) {
-        const c0 = macro[m];
-        const u01 = seededUnit(mnSeed, m, 1545415487);
-        const dark = u01 < 0.5;
-        const jx = (seededUnit(mnSeed, m, 752460107) - 0.5) * halfTh * 1.2;
-        const jy = (seededUnit(mnSeed, m, 2585733948) - 0.5) * halfTh * 1.2;
-        const r = halfTh * (0.4 + 0.5 * seededUnit(mnSeed, m, 348696353));
-        ctx.fillStyle = dark ? `hsla(${hue - 8}, 7%, 50%, ${alpha * 0.6})` : `hsla(${hue}, 7%, 90%, ${alpha * 0.5})`;
-        ctx.beginPath();
-        ctx.arc(c0.x + jx, c0.y + jy, r, 0, TAU2);
-        ctx.fill();
-      }
-      ctx.restore();
-      drawPolyline(ctx, ribbon, true);
-      ctx.strokeStyle = `hsla(${hue - 2}, 18%, 90%, ${alpha * 0.36})`;
-      ctx.lineWidth = Math.max(0.4, wMax * 0.04);
-      ctx.stroke();
-    }
-    const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
-    const RING_TILT = 0.1;
-    const gSeedR = finiteOr(cell.noiseSeed, 0) | 0;
-    const drawGirdle = (gu, seatHue, gi) => {
-      const hw = halfWidthAt(gu);
-      const baseAlong = halfLength * gu;
-      const NT = 104;
-      ctx.lineWidth = Math.max(0.3, wMax * 0.026);
-      for (let s = 0;s < NT; s++) {
-        const phi = s / NT * TAU2;
-        const depth = Math.cos(phi + rollAng);
-        if (depth < -0.1)
-          continue;
-        const front = clamp01(0.5 + 0.5 * depth);
-        const jit = (seededUnit(gSeedR, s + gi * 97, 752460107) - 0.5) * 0.1;
-        const lat = Math.cos(phi) * hw;
-        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
-        const wave = 0.5 + 0.5 * Math.sin(TAU2 * beat - phi * 3);
-        const cilLen = hw * (0.042 + 0.022 * wave) * (1 + jit);
-        const outLat = Math.cos(phi);
-        const outAlong = Math.sin(phi) * RING_TILT;
-        const bandJ1 = (seededUnit(gSeedR, s + gi * 131, 2083166993) - 0.5) * hw * 0.34;
-        const bandJ2 = (seededUnit(gSeedR, s + gi * 131, 1309787047) - 0.5) * hw * 0.34;
-        const base = transform(cx, cy, ux, uy, along + bandJ1 * 0.55, lat + bandJ2);
-        ctx.fillStyle = `hsla(${seatHue}, 34%, 94%, ${alpha * (0.07 + 0.22 * front)})`;
-        ctx.beginPath();
-        ctx.arc(base.x, base.y, Math.max(0.42, wMax * 0.052), 0, TAU2);
-        ctx.fill();
-        if (s % 2 === 0) {
-          const bandJ3 = (seededUnit(gSeedR, s + gi * 149, 796744337) - 0.5) * hw * 0.32;
-          const bandJ4 = (seededUnit(gSeedR, s + gi * 149, 1639241769) - 0.5) * hw * 0.32;
-          const dust = transform(cx, cy, ux, uy, along + outAlong * cilLen * 0.35 + bandJ3 * 0.45, lat + outLat * cilLen * 0.35 + bandJ4);
-          ctx.fillStyle = `hsla(${seatHue}, 36%, 96%, ${alpha * (0.05 + 0.15 * front)})`;
-          ctx.beginPath();
-          ctx.arc(dust.x, dust.y, Math.max(0.28, wMax * 0.03), 0, TAU2);
-          ctx.fill();
-        }
-      }
-    };
-    drawGirdle(DIDINIUM_GIRDLE_A_U, hue + 6, 0);
-    drawGirdle(DIDINIUM_GIRDLE_P_U, hue + 6, 1);
-    const drawBrushes = (gu) => {
-      const phi = rollAng;
-      const depth = Math.cos(phi);
-      if (depth < 0)
-        return;
-      const front = clamp01(0.5 + 0.5 * depth);
-      for (let r = 0;r < DIDINIUM_BRUSH_ROWS; r++) {
-        const bu = gu - 0.06 - r * 0.035;
-        const hw = halfWidthAt(bu);
-        const lat = Math.cos(phi) * hw * 0.62;
-        const along = halfLength * bu + Math.sin(phi) * hw * 0.34 * 0.62;
-        const dot = transform(cx, cy, ux, uy, along + hw * 0.028, lat + Math.sign(lat || 1) * hw * 0.028);
-        ctx.fillStyle = `hsla(${hue + 8}, 34%, 92%, ${alpha * 0.48 * front})`;
-        ctx.beginPath();
-        ctx.arc(dot.x, dot.y, Math.max(0.28, wMax * 0.026), 0, TAU2);
-        ctx.fill();
-      }
-    };
-    drawBrushes(DIDINIUM_GIRDLE_A_U);
-    drawBrushes(DIDINIUM_GIRDLE_P_U);
-    {
-      const coneBaseU = DIDINIUM_SHOULDER_U;
-      const tip = transform(cx, cy, ux, uy, halfLength * 1.02, 0);
-      const NS = 4;
-      for (let k = 1;k < NS; k++) {
-        const f = k / NS;
-        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU) * 0.22;
-        const dot = transform(cx, cy, ux, uy, halfLength * (coneBaseU + (1.02 - coneBaseU) * 0.62), lat);
-        ctx.fillStyle = `hsla(${hue + 4}, 14%, 88%, ${alpha * 0.08})`;
-        ctx.beginPath();
-        ctx.arc(dot.x, dot.y, Math.max(0.2, wMax * 0.018), 0, TAU2);
-        ctx.fill();
-      }
-      const collarHw = halfWidthAt(coneBaseU);
-      ctx.lineWidth = Math.max(0.35, wMax * 0.03);
-      for (let s = 0;s <= 10; s++) {
-        const f = s / 10;
-        const lat = (f * 2 - 1) * collarHw;
-        const depth = Math.cos(rollAng);
-        if (depth < -0.2)
-          continue;
-        const front = clamp01(0.5 + 0.5 * depth);
-        const base = transform(cx, cy, ux, uy, halfLength * coneBaseU, lat);
-        const tipC = transform(cx, cy, ux, uy, halfLength * (coneBaseU + 0.045), lat + Math.sign(lat || 1) * collarHw * 0.05);
-        ctx.strokeStyle = `hsla(${hue + 6}, 30%, 91%, ${alpha * (0.1 + 0.28 * front)})`;
-        ctx.beginPath();
-        ctx.moveTo(base.x, base.y);
-        ctx.lineTo(tipC.x, tipC.y);
-        ctx.stroke();
-      }
-      ctx.fillStyle = `hsla(${hue + 4}, 18%, 88%, ${alpha * 0.17})`;
-      ctx.beginPath();
-      ctx.arc(tip.x, tip.y, Math.max(0.36, wMax * 0.052), 0, TAU2);
-      ctx.fill();
-    }
-    {
-      const cvPulse = 0.5 - 0.5 * Math.cos(TAU2 * wrapUnit(finiteOr(cell.cvPhase, 0)));
-      const cvR = Math.max(0.5, wMax * (0.13 + 0.06 * cvPulse));
-      const p = transform(cx, cy, ux, uy, -halfLength * 0.86, 0);
-      ctx.fillStyle = `hsla(${hue + 2}, 22%, 90%, ${alpha * 0.22})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, cvR, 0, TAU2);
-      ctx.fill();
-      ctx.strokeStyle = `hsla(${hue + 4}, 32%, 96%, ${alpha * 0.78})`;
-      ctx.lineWidth = Math.max(0.4, wMax * 0.04);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, cvR, 0, TAU2);
-      ctx.stroke();
-    }
-  });
-  ctx.restore();
-}
 
-// src/theme-engine/renderers/cell/aquarium/didinium.ts
+// src/theme-engine/renderers/cell/aquarium/didinium-parts/behaviour.ts
 var DIDINIUM_SALT = 220011530;
 var STOPGO_FREQ = 0.32;
 var WANDER_FREQ = 0.1;
@@ -2418,7 +2130,294 @@ function updateDidinium(didinium, frame, view) {
     };
   });
 }
-
+// src/theme-engine/renderers/cell/aquarium/didinium-parts/draw.ts
+function didiniumModeAlphaMul(mode) {
+  switch (mode) {
+    case "recording":
+      return 1.08;
+    case "transcribing":
+      return 0.8;
+    case "error":
+      return 0.55;
+    case "idle":
+    default:
+      return 1;
+  }
+}
+function transform(cx, cy, ux, uy, along, lateral) {
+  const nx = -uy;
+  const ny = ux;
+  return { x: cx + ux * along + nx * lateral, y: cy + uy * along + ny * lateral };
+}
+function drawPolyline(ctx, points, close) {
+  if (points.length === 0)
+    return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1;i < points.length; i++)
+    ctx.lineTo(points[i].x, points[i].y);
+  if (close)
+    ctx.closePath();
+}
+function drawDidinium(ctx, didinium, frame, view) {
+  if (!view.enabled || didinium.length === 0 || view.didinium.count <= 0)
+    return;
+  const alpha = Math.max(0, Math.min(1, view.alpha * 0.9 * didiniumModeAlphaMul(frame.mode)));
+  if (alpha <= 0)
+    return;
+  const scale = Math.max(0.1, finite(view.didinium.scale, 1));
+  const hue = 200 + finite(view.didinium.hueOffset, 0);
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  didinium.forEach((cell) => {
+    const L = didiniumDisplayLength(finite(cell.size, 1), scale);
+    const halfLength = L / 2;
+    const wMax = L / DIDINIUM_ASPECT / 2;
+    const heading = finiteOr(cell.phase, finite(cell.heading, 0));
+    const ux = Math.cos(heading);
+    const uy = Math.sin(heading);
+    const cx = finite(cell.x, 0);
+    const cy = finite(cell.y, 0);
+    const roll = wrapUnit(finite(cell.rollPhase, 0));
+    const rollAng = roll * TAU2;
+    const rollCos = Math.cos(rollAng);
+    const widthMul = 0.96 + 0.04 * Math.abs(rollCos);
+    const halfWidthAt = (u) => wMax * widthMul * didiniumNormHalfWidth(u);
+    const SAMP = 64;
+    const upper = [];
+    const lower = [];
+    for (let i = 0;i <= SAMP; i++) {
+      const u = -Math.cos(Math.PI * i / SAMP);
+      const hw = halfWidthAt(u);
+      upper.push(transform(cx, cy, ux, uy, halfLength * u, hw));
+      lower.push(transform(cx, cy, ux, uy, halfLength * u, -hw));
+    }
+    const outline = [...upper, ...lower.reverse()];
+    ctx.save();
+    drawPolyline(ctx, outline, true);
+    ctx.clip();
+    const glowR = Math.max(1, halfLength * 1.05);
+    const grad = ctx.createRadialGradient(cx, cy, glowR * 0.1, cx, cy, glowR);
+    grad.addColorStop(0, `hsla(${hue}, 26%, 92%, ${alpha * 0.66})`);
+    grad.addColorStop(0.62, `hsla(${hue + 2}, 30%, 84%, ${alpha * 0.5})`);
+    grad.addColorStop(1, `hsla(${hue + 4}, 34%, 74%, ${alpha * 0.16})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
+    const gSeed = finiteOr(cell.noiseSeed, 0) | 0;
+    const gCount = Math.round(clamp(L * 6, 60, 220));
+    for (let g = 0;g < gCount; g++) {
+      const gu = (seededUnit(gSeed, g, 1371344503) * 2 - 1) * 0.9;
+      const gs = (seededUnit(gSeed, g, 2585733948) * 2 - 1) * 0.92;
+      const hw = halfWidthAt(gu);
+      const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
+      const r = 0.5 + seededUnit(gSeed, g, 752460107) * 0.9;
+      const nearGirdle = Math.min(Math.abs(gu - DIDINIUM_GIRDLE_A_U), Math.abs(gu - DIDINIUM_GIRDLE_P_U));
+      const lane = smoothstep2(clamp01(1 - nearGirdle / 0.075));
+      ctx.fillStyle = `hsla(${hue}, 22%, ${90 - 8 * lane}%, ${alpha * (0.34 - 0.12 * lane)})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, TAU2);
+      ctx.fill();
+    }
+    const gCount2 = Math.round(clamp(L * 4, 40, 150));
+    for (let g = 0;g < gCount2; g++) {
+      const gu = (seededUnit(gSeed, g, 1033993285) * 2 - 1) * 0.9;
+      const gs = (seededUnit(gSeed, g, 1508030371) * 2 - 1) * 0.92;
+      const hw = halfWidthAt(gu);
+      const p = transform(cx, cy, ux, uy, halfLength * gu, gs * hw);
+      const r = 0.3 + seededUnit(gSeed, g, 348696353) * 0.5;
+      const nearGirdle = Math.min(Math.abs(gu - DIDINIUM_GIRDLE_A_U), Math.abs(gu - DIDINIUM_GIRDLE_P_U));
+      const lane = smoothstep2(clamp01(1 - nearGirdle / 0.075));
+      ctx.fillStyle = `hsla(${hue + 4}, 18%, ${94 - 6 * lane}%, ${alpha * (0.16 - 0.07 * lane)})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, TAU2);
+      ctx.fill();
+    }
+    ctx.restore();
+    for (let i = 0;i < upper.length - 1; i++) {
+      const u = -Math.cos(Math.PI * i / SAMP);
+      const flank = 1 - Math.abs(u);
+      const a = alpha * (0.1 + 0.18 * flank * flank);
+      ctx.strokeStyle = `hsla(${hue + 2}, 32%, 92%, ${a})`;
+      ctx.lineWidth = Math.max(0.5, wMax * 0.07);
+      ctx.beginPath();
+      ctx.moveTo(upper[i].x, upper[i].y);
+      ctx.lineTo(upper[i + 1].x, upper[i + 1].y);
+      ctx.moveTo(lower[i].x, lower[i].y);
+      ctx.lineTo(lower[i + 1].x, lower[i + 1].y);
+      ctx.stroke();
+    }
+    {
+      const muStart = -0.58;
+      const muEnd = 0.4;
+      const bowDepth = 0.72 * (0.45 + 0.55 * Math.abs(rollCos));
+      const MN = 40;
+      const side2 = rollCos >= 0 ? 1 : -1;
+      const macro = [];
+      for (let k = 0;k <= MN; k++) {
+        const f = k / MN;
+        const u = muStart + (muEnd - muStart) * (0.5 - 0.5 * Math.cos(Math.PI * f));
+        const bow = Math.sin(f * Math.PI) * bowDepth;
+        const lat = bow * halfWidthAt(u) * side2;
+        macro.push(transform(cx, cy, ux, uy, halfLength * u, lat));
+      }
+      const halfTh = Math.max(1.2, wMax * 0.2);
+      const left = [];
+      const right = [];
+      for (let k = 0;k <= MN; k++) {
+        const f = k / MN;
+        const taper = Math.pow(Math.sin(Math.max(0, Math.min(1, f)) * Math.PI), 0.45);
+        const a = macro[Math.max(0, k - 1)];
+        const b = macro[Math.min(MN, k + 1)];
+        let tx = b.x - a.x, ty = b.y - a.y;
+        const tl = Math.hypot(tx, ty) || 1;
+        tx /= tl;
+        ty /= tl;
+        const nx2 = -ty, ny2 = tx;
+        const th = halfTh * (0.55 + 0.45 * taper);
+        const p = macro[k];
+        left.push({ x: p.x + nx2 * th, y: p.y + ny2 * th });
+        right.push({ x: p.x - nx2 * th, y: p.y - ny2 * th });
+      }
+      const ribbon = [...left, ...right.reverse()];
+      drawPolyline(ctx, ribbon, true);
+      ctx.fillStyle = `hsla(${hue - 8}, 6%, 76%, ${alpha * 0.9})`;
+      ctx.fill();
+      ctx.save();
+      drawPolyline(ctx, ribbon, true);
+      ctx.clip();
+      const mnSeed = finiteOr(cell.noiseSeed, 0) | 0;
+      for (let m = 0;m < MN; m += 2) {
+        const c0 = macro[m];
+        const u01 = seededUnit(mnSeed, m, 1545415487);
+        const dark = u01 < 0.5;
+        const jx = (seededUnit(mnSeed, m, 752460107) - 0.5) * halfTh * 1.2;
+        const jy = (seededUnit(mnSeed, m, 2585733948) - 0.5) * halfTh * 1.2;
+        const r = halfTh * (0.4 + 0.5 * seededUnit(mnSeed, m, 348696353));
+        ctx.fillStyle = dark ? `hsla(${hue - 8}, 7%, 50%, ${alpha * 0.6})` : `hsla(${hue}, 7%, 90%, ${alpha * 0.5})`;
+        ctx.beginPath();
+        ctx.arc(c0.x + jx, c0.y + jy, r, 0, TAU2);
+        ctx.fill();
+      }
+      ctx.restore();
+      drawPolyline(ctx, ribbon, true);
+      ctx.strokeStyle = `hsla(${hue - 2}, 18%, 90%, ${alpha * 0.36})`;
+      ctx.lineWidth = Math.max(0.4, wMax * 0.04);
+      ctx.stroke();
+    }
+    const beat = wrapUnit(finiteOr(cell.beatPhase, 0));
+    const RING_TILT = 0.1;
+    const gSeedR = finiteOr(cell.noiseSeed, 0) | 0;
+    const drawGirdle = (gu, seatHue, gi) => {
+      const hw = halfWidthAt(gu);
+      const baseAlong = halfLength * gu;
+      const NT = 104;
+      ctx.lineWidth = Math.max(0.3, wMax * 0.026);
+      for (let s = 0;s < NT; s++) {
+        const phi = s / NT * TAU2;
+        const depth = Math.cos(phi + rollAng);
+        if (depth < -0.1)
+          continue;
+        const front = clamp01(0.5 + 0.5 * depth);
+        const jit = (seededUnit(gSeedR, s + gi * 97, 752460107) - 0.5) * 0.1;
+        const lat = Math.cos(phi) * hw;
+        const along = baseAlong + Math.sin(phi) * hw * RING_TILT;
+        const wave = 0.5 + 0.5 * Math.sin(TAU2 * beat - phi * 3);
+        const cilLen = hw * (0.042 + 0.022 * wave) * (1 + jit);
+        const outLat = Math.cos(phi);
+        const outAlong = Math.sin(phi) * RING_TILT;
+        const bandJ1 = (seededUnit(gSeedR, s + gi * 131, 2083166993) - 0.5) * hw * 0.34;
+        const bandJ2 = (seededUnit(gSeedR, s + gi * 131, 1309787047) - 0.5) * hw * 0.34;
+        const base = transform(cx, cy, ux, uy, along + bandJ1 * 0.55, lat + bandJ2);
+        ctx.fillStyle = `hsla(${seatHue}, 34%, 94%, ${alpha * (0.07 + 0.22 * front)})`;
+        ctx.beginPath();
+        ctx.arc(base.x, base.y, Math.max(0.42, wMax * 0.052), 0, TAU2);
+        ctx.fill();
+        if (s % 2 === 0) {
+          const bandJ3 = (seededUnit(gSeedR, s + gi * 149, 796744337) - 0.5) * hw * 0.32;
+          const bandJ4 = (seededUnit(gSeedR, s + gi * 149, 1639241769) - 0.5) * hw * 0.32;
+          const dust = transform(cx, cy, ux, uy, along + outAlong * cilLen * 0.35 + bandJ3 * 0.45, lat + outLat * cilLen * 0.35 + bandJ4);
+          ctx.fillStyle = `hsla(${seatHue}, 36%, 96%, ${alpha * (0.05 + 0.15 * front)})`;
+          ctx.beginPath();
+          ctx.arc(dust.x, dust.y, Math.max(0.28, wMax * 0.03), 0, TAU2);
+          ctx.fill();
+        }
+      }
+    };
+    drawGirdle(DIDINIUM_GIRDLE_A_U, hue + 6, 0);
+    drawGirdle(DIDINIUM_GIRDLE_P_U, hue + 6, 1);
+    const drawBrushes = (gu) => {
+      const phi = rollAng;
+      const depth = Math.cos(phi);
+      if (depth < 0)
+        return;
+      const front = clamp01(0.5 + 0.5 * depth);
+      for (let r = 0;r < DIDINIUM_BRUSH_ROWS; r++) {
+        const bu = gu - 0.06 - r * 0.035;
+        const hw = halfWidthAt(bu);
+        const lat = Math.cos(phi) * hw * 0.62;
+        const along = halfLength * bu + Math.sin(phi) * hw * 0.34 * 0.62;
+        const dot = transform(cx, cy, ux, uy, along + hw * 0.028, lat + Math.sign(lat || 1) * hw * 0.028);
+        ctx.fillStyle = `hsla(${hue + 8}, 34%, 92%, ${alpha * 0.48 * front})`;
+        ctx.beginPath();
+        ctx.arc(dot.x, dot.y, Math.max(0.28, wMax * 0.026), 0, TAU2);
+        ctx.fill();
+      }
+    };
+    drawBrushes(DIDINIUM_GIRDLE_A_U);
+    drawBrushes(DIDINIUM_GIRDLE_P_U);
+    {
+      const coneBaseU = DIDINIUM_SHOULDER_U;
+      const tip = transform(cx, cy, ux, uy, halfLength * 1.02, 0);
+      const NS = 4;
+      for (let k = 1;k < NS; k++) {
+        const f = k / NS;
+        const lat = (f * 2 - 1) * halfWidthAt(coneBaseU) * 0.22;
+        const dot = transform(cx, cy, ux, uy, halfLength * (coneBaseU + (1.02 - coneBaseU) * 0.62), lat);
+        ctx.fillStyle = `hsla(${hue + 4}, 14%, 88%, ${alpha * 0.08})`;
+        ctx.beginPath();
+        ctx.arc(dot.x, dot.y, Math.max(0.2, wMax * 0.018), 0, TAU2);
+        ctx.fill();
+      }
+      const collarHw = halfWidthAt(coneBaseU);
+      ctx.lineWidth = Math.max(0.35, wMax * 0.03);
+      for (let s = 0;s <= 10; s++) {
+        const f = s / 10;
+        const lat = (f * 2 - 1) * collarHw;
+        const depth = Math.cos(rollAng);
+        if (depth < -0.2)
+          continue;
+        const front = clamp01(0.5 + 0.5 * depth);
+        const base = transform(cx, cy, ux, uy, halfLength * coneBaseU, lat);
+        const tipC = transform(cx, cy, ux, uy, halfLength * (coneBaseU + 0.045), lat + Math.sign(lat || 1) * collarHw * 0.05);
+        ctx.strokeStyle = `hsla(${hue + 6}, 30%, 91%, ${alpha * (0.1 + 0.28 * front)})`;
+        ctx.beginPath();
+        ctx.moveTo(base.x, base.y);
+        ctx.lineTo(tipC.x, tipC.y);
+        ctx.stroke();
+      }
+      ctx.fillStyle = `hsla(${hue + 4}, 18%, 88%, ${alpha * 0.17})`;
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, Math.max(0.36, wMax * 0.052), 0, TAU2);
+      ctx.fill();
+    }
+    {
+      const cvPulse = 0.5 - 0.5 * Math.cos(TAU2 * wrapUnit(finiteOr(cell.cvPhase, 0)));
+      const cvR = Math.max(0.5, wMax * (0.13 + 0.06 * cvPulse));
+      const p = transform(cx, cy, ux, uy, -halfLength * 0.86, 0);
+      ctx.fillStyle = `hsla(${hue + 2}, 22%, 90%, ${alpha * 0.22})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, cvR, 0, TAU2);
+      ctx.fill();
+      ctx.strokeStyle = `hsla(${hue + 4}, 32%, 96%, ${alpha * 0.78})`;
+      ctx.lineWidth = Math.max(0.4, wMax * 0.04);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, cvR, 0, TAU2);
+      ctx.stroke();
+    }
+  });
+  ctx.restore();
+}
 // src/theme-engine/renderers/cell/aquarium/hero.ts
 function heroSurfacePoint(hero, point) {
   if (!hero)
