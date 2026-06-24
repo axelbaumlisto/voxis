@@ -32,8 +32,10 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       euglenaSpeed: 0.11,
       euglenaSpeedActive: 0.22,
       euglenaScale: 2.2,
-      euglenaGravitaxis: 0,
-      euglenaPhototaxis: 0.05,
+      euglenaGravitaxis: 0.05,
+      euglenaPhototaxis: 0.18,
+      euglenaLoiter: 0,
+      euglenaWake: 0.3,
       euglenaRotDiffusion: 0,
 
       // sessile stalked organism: Vorticella

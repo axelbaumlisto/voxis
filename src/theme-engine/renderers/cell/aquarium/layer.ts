@@ -221,13 +221,13 @@ export function drawAquariumForeground(
 
     // Paramecium defensive trichocyst burst: asymmetric fan AWAY from predator,
     // not a regular radial UI sparkle.
-    const fanAlpha = alpha * 0.38 * env;
-    ctx.lineWidth = 0.8;
-    for (let k = 0; k < 9; k++) {
+    const fanAlpha = alpha * 0.25 * env;
+    ctx.lineWidth = 0.75;
+    for (let k = 0; k < 7; k++) {
       if (k % 5 === 1) continue; // irregular gaps: biological, not UI starburst
-      const jitter = Math.sin((k + 1) * 12.9898) * 0.08;
-      const a = heading + Math.PI + (k - 4) * 0.15 + jitter;
-      const len = 5.5 + ((k * 5) % 5) * 0.75;
+      const jitter = Math.sin((k + 1) * 12.9898) * 0.07;
+      const a = heading + Math.PI + (k - 3) * 0.16 + jitter;
+      const len = 4.8 + ((k * 5) % 4) * 0.7;
       const aJ = 0.75 + 0.25 * Math.abs(Math.sin((k + 3) * 4.17));
       ctx.strokeStyle = `hsla(42, 46%, 95%, ${fanAlpha * aJ})`;
       ctx.beginPath();
@@ -238,7 +238,7 @@ export function drawAquariumForeground(
 
     ctx.fillStyle = `hsla(44, 52%, 97%, ${alpha * 0.86 * env})`;
     ctx.beginPath();
-    ctx.arc(px, py, Math.max(1.2, L * 0.055), 0, Math.PI * 2);
+    ctx.arc(px, py, Math.max(1.0, L * 0.04), 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();

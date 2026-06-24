@@ -1658,12 +1658,16 @@ function euglenaSteerOverride(params) {
   const gravitaxis = nonNegative(params.euglenaGravitaxis, 0);
   const phototaxis = nonNegative(params.euglenaPhototaxis, 0);
   const separation = nonNegative(params.euglenaSeparation, 0);
-  if (gravitaxis === 0 && phototaxis === 0 && separation === 0)
+  const hasLoiter = params.euglenaLoiter !== undefined;
+  const hasWake = params.euglenaWake !== undefined;
+  if (gravitaxis === 0 && phototaxis === 0 && separation === 0 && !hasLoiter && !hasWake)
     return;
   return {
     gravitaxis,
     phototaxis,
-    ...separation === 0 ? {} : { separation }
+    ...separation === 0 ? {} : { separation },
+    ...hasLoiter ? { loiter: nonNegative(params.euglenaLoiter, 0) } : {},
+    ...hasWake ? { wake: nonNegative(params.euglenaWake, 0) } : {}
   };
 }
 function mediumOverride(params) {
@@ -3551,8 +3555,8 @@ function updateDidinium(didinium, frame, view) {
       const probeHeading = heading + wander;
       const approachDot = (Math.cos(probeHeading) * toTargetX + Math.sin(probeHeading) * toTargetY) / toTargetD;
       preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y, approachDot };
-      if (q < 1.12 && approachDot > 0.35 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
-        contactTimer = 0.52 + seededUnit(nseed, 0, 714207245) * 0.16;
+      if (q < 1.07 && approachDot > 0.55 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
+        contactTimer = 0.45 + seededUnit(nseed, 0, 714207245) * 0.14;
       }
     }
     let obstaclePressure = 0;
@@ -3598,11 +3602,11 @@ function updateDidinium(didinium, frame, view) {
         const dx = preyData.surfaceX - px0;
         const dy = preyData.surfaceY - py0;
         const d = Math.hypot(dx, dy) || 1;
-        const sense = clamp(L * 3.2, 48, 78);
+        const sense = clamp(L * 2, 32, 52);
         if (d < sense && preyData.approachDot > -0.15) {
           const cone = clamp01((preyData.approachDot + 0.15) / 0.65);
           const huntRaw = clamp01((sense - d) / (sense * 0.75)) * cone;
-          const hunt = preyData.q < 1.12 ? huntRaw : Math.min(0.55, huntRaw);
+          const hunt = preyData.q < 1.07 ? huntRaw : Math.min(0.35, huntRaw);
           huntWeight = hunt;
           const desired = Math.atan2(dy, dx);
           const turnK = 1.4 + 2.4 * hunt;
@@ -3668,7 +3672,7 @@ function updateDidinium(didinium, frame, view) {
       avoidProgress = 0;
     }
     if (wasContacting && contactTimer <= 0) {
-      huntCooldown = 10 + seededUnit(nseed, 0, 1243315241) * 4;
+      huntCooldown = 18 + seededUnit(nseed, 0, 1243315241) * 12;
       avoidIndex += 1;
       avoidFrom = heading;
       avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 899314129)));
@@ -4249,14 +4253,14 @@ function drawAquariumForeground(ctx, aquarium, _frame, params) {
       ctx.lineTo(px, py);
       ctx.stroke();
     }
-    const fanAlpha = alpha * 0.38 * env;
-    ctx.lineWidth = 0.8;
-    for (let k = 0;k < 9; k++) {
+    const fanAlpha = alpha * 0.25 * env;
+    ctx.lineWidth = 0.75;
+    for (let k = 0;k < 7; k++) {
       if (k % 5 === 1)
         continue;
-      const jitter = Math.sin((k + 1) * 12.9898) * 0.08;
-      const a = heading + Math.PI + (k - 4) * 0.15 + jitter;
-      const len = 5.5 + k * 5 % 5 * 0.75;
+      const jitter = Math.sin((k + 1) * 12.9898) * 0.07;
+      const a = heading + Math.PI + (k - 3) * 0.16 + jitter;
+      const len = 4.8 + k * 5 % 4 * 0.7;
       const aJ = 0.75 + 0.25 * Math.abs(Math.sin((k + 3) * 4.17));
       ctx.strokeStyle = `hsla(42, 46%, 95%, ${fanAlpha * aJ})`;
       ctx.beginPath();
@@ -4266,7 +4270,7 @@ function drawAquariumForeground(ctx, aquarium, _frame, params) {
     }
     ctx.fillStyle = `hsla(44, 52%, 97%, ${alpha * 0.86 * env})`;
     ctx.beginPath();
-    ctx.arc(px, py, Math.max(1.2, L * 0.055), 0, Math.PI * 2);
+    ctx.arc(px, py, Math.max(1, L * 0.04), 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
@@ -5213,8 +5217,10 @@ function mount(container, api) {
       euglenaSpeed: 0.11,
       euglenaSpeedActive: 0.22,
       euglenaScale: 2.2,
-      euglenaGravitaxis: 0,
-      euglenaPhototaxis: 0.05,
+      euglenaGravitaxis: 0.05,
+      euglenaPhototaxis: 0.18,
+      euglenaLoiter: 0,
+      euglenaWake: 0.3,
       euglenaRotDiffusion: 0,
       vorticellaCount: 1,
       vorticellaAlongFrac: 0.3,

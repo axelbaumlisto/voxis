@@ -448,6 +448,10 @@ export interface CellParams {
   euglenaPhototaxis?: number;
   /** Euglena same-species soft separation weight (0 = off). */
   euglenaSeparation?: number;
+  /** Euglena Paramecium standoff/loiter spring override. Undefined = species default. */
+  euglenaLoiter?: number;
+  /** Euglena Paramecium wake entrainment override. Undefined = species default. */
+  euglenaWake?: number;
   /** Euglena cosmetic rotational jitter, rad/sqrt(s) (0 = off). */
   euglenaRotDiffusion?: number;
   /** Number of vorticella companions. Default 0 = none. */
