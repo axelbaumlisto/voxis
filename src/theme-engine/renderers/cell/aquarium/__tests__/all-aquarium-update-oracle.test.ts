@@ -20,6 +20,7 @@ function allAquariumParams(): CellParams {
     euglenaSpeed: 0.34,
     euglenaSpeedActive: 0.65,
     euglenaScale: 2.2,
+    euglenaFlagellumRateScale: 0.45,
     euglenaGravitaxis: 0.03,
     euglenaPhototaxis: 0,
     euglenaPhotoIntent: 2.4,
@@ -142,7 +143,7 @@ describe("all_aquarium update oracle", () => {
       startle: 0,
       tumbleProgress: 1,
       rollPhase: 0.7204900612203637,
-      flagellumPhase: 0.16908209762686877,
+      flagellumPhase: 0.7132527723538029,
       burstPhase: 0.45764558582718085,
     });
 

@@ -243,6 +243,40 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(withIntent.y).toBeLessThanOrEqual(170);
   });
 
+  it("scales Euglena flagellum visual beat without changing body transit", () => {
+    const baseParams: CellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaScale: 2,
+    };
+    const initial = [testEuglena({
+      x: 120,
+      y: 80,
+      heading: 0,
+      flagellumPhase: 0.25,
+      flagellumRate: 3,
+      burstPhase: 0.4,
+      burstRate: 0,
+      tumbleProgress: 1,
+      startle: 0,
+    })];
+    const run = (euglenaFlagellumRateScale: number) => updateEuglena(
+      initial,
+      frame({ t: 0, dt: 0.1, width: 340, height: 170, activity: 0, audioLevel: 0 }),
+      aquariumParamsView({ ...baseParams, euglenaFlagellumRateScale }),
+    )[0];
+
+    const normal = run(1);
+    const slow = run(0.4);
+
+    expect(slow.x).toBeCloseTo(normal.x, 10);
+    expect(slow.y).toBeCloseTo(normal.y, 10);
+    expect(unitDelta(slow.flagellumPhase, initial[0].flagellumPhase)).toBeLessThan(unitDelta(normal.flagellumPhase, initial[0].flagellumPhase));
+  });
+
   it("updateEuglena applies mode multipliers only through dt-integrated phase deltas", () => {
     const view = aquariumParamsView({
       ...CELL_DEFAULTS,

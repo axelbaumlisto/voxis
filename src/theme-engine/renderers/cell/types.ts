@@ -440,6 +440,8 @@ export interface CellParams {
   euglenaSpeedActive?: number;
   /** Euglena size scalar. */
   euglenaScale?: number;
+  /** Visual multiplier for Euglena flagellum beat rate. Default 1. */
+  euglenaFlagellumRateScale?: number;
   /** Euglena palette offset from baseHue in degrees. Default 42 = chlorophyll green. */
   euglenaHueOffset?: number;
   /** Euglena negative-gravitaxis up-bias weight (0 = off). */

@@ -463,7 +463,8 @@ export function updateEuglena(
     }
     // cap effective beat freq so the 2nd lasso harmonic stays near 60fps Nyquist;
     // this reads as high-frequency shimmer instead of a slow tadpole-tail whip.
-    const fEff = Math.min(18, Math.max(0, finite(cell.flagellumRate, 0)) * act * beatBoost);
+    const flagellumRateScale = Math.max(0, finite(view.euglena.flagellumRateScale, 1));
+    const fEff = Math.min(18, Math.max(0, finite(cell.flagellumRate, 0)) * flagellumRateScale * act * beatBoost);
     const minX = wallInset;
     const maxX = Math.max(wallInset, safeWidth - wallInset);
     const minY = wallInset;

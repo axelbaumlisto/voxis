@@ -69,7 +69,7 @@ type DidiniumCfg = AquariumParamsView["didinium"] & AquariumLayerCfg;
 
 // Zeroed sibling blocks so each per-species view leaves only its own block live.
 const ZERO_DIATOMS = { count: 0, alpha: 0, driftSpeed: 0 } as const;
-const ZERO_EUGLENA = { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 42, photoIntent: 0 } as const;
+const ZERO_EUGLENA = { count: 0, speed: 0, speedActive: 0, scale: 1, flagellumRateScale: 1, hueOffset: 42, photoIntent: 0 } as const;
 const ZERO_VORTICELLA = { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 } as const;
 const ZERO_DIDINIUM = { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 0 } as const;
 

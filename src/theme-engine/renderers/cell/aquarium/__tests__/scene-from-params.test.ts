@@ -186,6 +186,7 @@ describe("sceneFromParams", () => {
             speed: 0.2,
             speedActive: 1.5,
             scale: 2.8,
+            flagellumRateScale: 1,
             hueOffset: 42,
             photoIntent: 0,
             steer: {
@@ -223,6 +224,7 @@ describe("sceneFromParams", () => {
             speed: 0.16,
             speedActive: 0.34,
             scale: 7.5,
+            flagellumRateScale: 1,
             hueOffset: 42,
             photoIntent: 0,
             steer: undefined,
