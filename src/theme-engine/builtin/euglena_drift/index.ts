@@ -29,13 +29,21 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // Single large euglena, prominent, roaming the full aquarium width.
       enableAquarium: true,
       aquariumSeed: 17,
-      aquariumAlpha: 0.92,
+      aquariumAlpha: 1.0,
       aquariumActivityBoost: 0.6,  // calmer active:idle speed contrast (~1.8:1)
       diatomCount: 0,
       euglenaCount: 1,
-      euglenaSpeed: 0.16,        // body-lengths/sec (idle) — calm glide
-      euglenaSpeedActive: 0.34,  // body-lengths/sec (recording)
-      euglenaScale: 7.5,
+      euglenaSpeed: 0.19,        // body-lengths/sec (idle) — calm glide
+      euglenaSpeedActive: 0.54,  // body-lengths/sec (recording)
+      euglenaScale: 4.05,        // larger solo hero; still keeps body+flagellum inside 320×160
+      euglenaFlagellumRateScale: 0.45,
+      euglenaGravitaxis: 0.02,
+      euglenaPhototaxis: 0,
+      euglenaPhotoIntent: 1.2,
+      euglenaMotorEnabled: true,
+      euglenaLoiter: 0,
+      euglenaWake: 0,
+      euglenaRotDiffusion: 0,
       vorticellaCount: 0,
       ...userParams,
     },
