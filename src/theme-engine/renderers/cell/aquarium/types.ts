@@ -173,6 +173,10 @@ export interface DidiniumState extends AquariumSeedPoint {
   readonly avoidTo?: number;
   /** Progress [0,1] through the current eased avoiding-reaction back-turn. */
   readonly avoidProgress?: number;
+  /** Seconds before another non-emergency avoiding reaction can trigger. */
+  readonly avoidCooldown?: number;
+  /** Latched wall-pressure band already answered by an avoiding reaction. */
+  readonly avoidWallBand?: number;
   /** Seconds remaining in predator contact/latch on a prey surface. */
   readonly contactTimer?: number;
   /** Initial duration of the current predator contact/latch. */

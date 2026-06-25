@@ -146,17 +146,18 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
     expect(next[0].contactTimer ?? 0).toBe(0);
   });
 
-  it("banks away from vorticella circle obstacles and resolves the shell boundedly", () => {
+  it("banks away from vorticella circle obstacles and resolves the shell with a dt velocity cap", () => {
     const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0, didiniumScale: 2 });
     const initial = [testDidinium({ x: 150, y: 80, heading: 0, phase: 0 })];
     const obstacle = { kind: "obstacle" as const, shape: "circle" as const, x: 175, y: 80, radius: 18, sourceId: sourceId("vorticella", 0) };
     const interaction = buildField([obstacle]);
-    const next = updateDidinium(initial, frame({ dt: 0.2, t: 2, width: 340, height: 170, interaction }), view);
+    const dt = 0.2;
+    const next = updateDidinium(initial, frame({ dt, t: 2, width: 340, height: 170, interaction }), view);
     expect(Math.abs(next[0].heading)).toBeGreaterThan(1.5);
     const beforeD = Math.hypot(initial[0].x - obstacle.x, initial[0].y - obstacle.y);
     const afterD = Math.hypot(next[0].x - obstacle.x, next[0].y - obstacle.y);
     expect(afterD).toBeGreaterThan(beforeD);
-    expect(Math.hypot(next[0].x - initial[0].x, next[0].y - initial[0].y)).toBeLessThanOrEqual(didiniumDisplayLength(1, 2) * 0.35 + 1e-6);
+    expect(Math.hypot(next[0].x - initial[0].x, next[0].y - initial[0].y)).toBeLessThanOrEqual(didiniumDisplayLength(1, 2) * 1.0 * dt + 1e-6);
   });
 
   it("softly avoids Euglena motiles without capture/latch semantics", () => {
@@ -172,19 +173,23 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
     expect(next[0].huntCooldown ?? 0).toBe(0);
   });
 
-  it("local forward hero encounter latches while the Didinium body stays outside the prey shell", () => {
+  it("local forward hero encounter latches while prey-shell servo is velocity-limited by dt", () => {
     const view = didiniumView({ didiniumSpeed: 0, didiniumSpeedActive: 0, didiniumScale: 2 });
     const initial = [testDidinium({ x: 240, y: 80, heading: Math.PI, phase: Math.PI })];
     const prey = { kind: "obstacle" as const, shape: "ellipse" as const, x: 200, y: 80, halfLen: 38, halfWid: 14, heading: 0, social: true, sourceId: sourceId("hero", 0) };
     const interaction = buildField([prey]);
-    const next = updateDidinium(initial, frame({ dt: 0.1, t: 2, width: 340, height: 170, interaction }), view);
+    const dt = 0.1;
+    const next = updateDidinium(initial, frame({ dt, t: 2, width: 340, height: 170, interaction }), view);
     expect(next[0].contactTimer).toBeGreaterThan(0);
     expect(next[0].contactDuration).toBe(next[0].contactTimer);
     expect(next[0].huntCooldown ?? 0).toBe(0);
-    const A = prey.halfLen + didiniumDisplayLength(1, 2) * 0.38;
+    const L = didiniumDisplayLength(1, 2);
+    const A = prey.halfLen + L * 0.38;
+    const beforeQ = Math.abs(initial[0].x - prey.x) / A;
     const q = Math.abs(next[0].x - prey.x) / A;
-    expect(q).toBeGreaterThan(1.0);
-    expect(q).toBeLessThan(1.2);
+    expect(q).toBeGreaterThan(beforeQ);
+    expect(q).toBeLessThan(1.0);
+    expect(Math.hypot(next[0].x - initial[0].x, next[0].y - initial[0].y)).toBeLessThanOrEqual(L * 1.2 * dt + 1e-6);
   });
 
   it("decays contact duration and enforces cooldown before another prey latch", () => {

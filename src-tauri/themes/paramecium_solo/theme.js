@@ -1820,11 +1820,25 @@ var WANDER_RAD = 0.42;
 var HELIX_LEAN = 0.07;
 var CURVE_FREQ = 0.09;
 var CURVE_BIAS = 0.18;
-var WALL_LOOK = 1.25;
+var WALL_LOOK = 1.33;
 var BACKUP_SECONDS = 0.08;
-var AVOID_SECONDS = 0.18;
-var AVOID_TURN_MIN = 2 * Math.PI / 3;
-var AVOID_TURN_MAX = 5 * Math.PI / 6;
+var AVOID_SECONDS = 0.13;
+var AVOID_TURN_MIN = 25 * Math.PI / 180;
+var AVOID_TURN_MAX = 70 * Math.PI / 180;
+var EMERGENCY_AVOID_TURN_MIN = 70 * Math.PI / 180;
+var EMERGENCY_AVOID_TURN_MAX = 85 * Math.PI / 180;
+var WALL_AVOID_COOLDOWN_MIN = 2.5;
+var WALL_AVOID_COOLDOWN_MAX = 4;
+var OBSTACLE_AVOID_COOLDOWN_MIN = 1.5;
+var OBSTACLE_AVOID_COOLDOWN_MAX = 3;
+var WALL_AVOID_ENTER = 0.08;
+var WALL_AVOID_EXIT = 0.03;
+var LATCH_SERVO_BL_PER_S = 0.45;
+var LATCH_INITIAL_CONTACT_BL_PER_S = 1.2;
+var LATCH_INITIAL_CONTACT_SECONDS = 0.15;
+var OBSTACLE_SHELL_BL_PER_S = 1;
+var OBSTACLE_EMERGENCY_BL_PER_S = 1.5;
+var CLAMP_SERVO_BL_PER_S = 0.25;
 function didiniumModeView(mode) {
   switch (mode) {
     case "recording":
@@ -1864,6 +1878,8 @@ function seedDidinium(count, seed, frame, salt = DIDINIUM_SALT) {
       avoidFrom: heading,
       avoidTo: heading,
       avoidProgress: 1,
+      avoidCooldown: 0,
+      avoidWallBand: 0,
       noiseSeed: mix32(seed ^ Math.imul(i + 1, 2654435761) ^ salt) >>> 0
     });
   }
@@ -1937,34 +1953,61 @@ function updateDidinium(didinium, frame, view) {
     let avoidFrom = finiteOr(cell.avoidFrom, heading);
     let avoidTo = finiteOr(cell.avoidTo, heading);
     let avoidProgress = clamp01(finiteOr(cell.avoidProgress, 1));
+    let avoidCooldown = Math.max(0, finiteOr(cell.avoidCooldown, 0) - dt);
+    let avoidWallBand = Math.max(0, Math.floor(finiteOr(cell.avoidWallBand, 0)));
     const side = finiteOr(cell.turnSide, 1) < 0 ? -1 : 1;
-    const hitWall = wallPressure > 0.12 && avoidProgress >= 1;
-    if (hitWall) {
+    const avoidTargetByDeflection = (from, inward, magnitude) => {
+      let turnSign = side;
+      const towardInwardDelta = wrapPi2(inward - from);
+      const before = Math.abs(towardInwardDelta);
+      const inwardMagnitude = Math.min(AVOID_TURN_MAX, Math.max(magnitude, before * 0.68));
+      const fixedSideAfter = Math.abs(wrapPi2(inward - (from + turnSign * inwardMagnitude)));
+      if (before < Math.PI - 0.001 && fixedSideAfter > before) {
+        const towardInward = Math.sign(towardInwardDelta);
+        if (towardInward !== 0)
+          turnSign = towardInward;
+      }
+      return from + turnSign * inwardMagnitude;
+    };
+    const startAvoid = (targetHeading, cooldown) => {
       avoidIndex += 1;
-      const magU = noise2D2(nseed ^ 791783381, avoidIndex, 0.71);
-      const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
       avoidFrom = heading;
-      const inward = Math.atan2(wallAwayY, wallAwayX);
-      avoidTo = inward + side * magnitude * 0.5;
+      avoidTo = targetHeading;
       avoidProgress = 0;
+      avoidCooldown = Math.max(avoidCooldown, cooldown);
+    };
+    const wallBand = wallPressure > WALL_AVOID_ENTER ? 1 : 0;
+    if (wallPressure < WALL_AVOID_EXIT)
+      avoidWallBand = 0;
+    const hitWall = wallBand !== 0 && avoidWallBand !== wallBand && avoidProgress >= 1 && avoidCooldown <= 0;
+    if (hitWall) {
+      const nextAvoidIndex = avoidIndex + 1;
+      const magU = noise2D2(nseed ^ 791783381, nextAvoidIndex, 0.71);
+      const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
+      const inward = Math.atan2(wallAwayY, wallAwayX);
+      const cooldownU = noise2D2(nseed ^ 1568279441, nextAvoidIndex, 0.37);
+      startAvoid(avoidTargetByDeflection(heading, inward, magnitude), WALL_AVOID_COOLDOWN_MIN + (WALL_AVOID_COOLDOWN_MAX - WALL_AVOID_COOLDOWN_MIN) * cooldownU);
+      avoidWallBand = wallBand;
     }
     const avoidTotal = BACKUP_SECONDS + AVOID_SECONDS;
     const backupFrac = BACKUP_SECONDS / avoidTotal;
-    let reversing = false;
+    let avoidSpeedScale = 1;
     if (avoidProgress < 1) {
+      const prev = avoidProgress;
       const next = Math.min(1, avoidProgress + dt / avoidTotal);
-      if (avoidProgress < backupFrac) {
-        reversing = true;
-      } else {
-        const turnK = 6;
-        heading += wrapPi2(avoidTo - heading) * (1 - Math.exp(-turnK * dt));
-        if (next >= 1)
-          heading = avoidTo;
+      if (prev < backupFrac) {
+        const u = clamp01((prev + next) * 0.5 / backupFrac);
+        avoidSpeedScale = 1 - 1.06 * Math.sin(Math.PI * u);
+      }
+      if (next > backupFrac) {
+        const turnU = clamp01((next - backupFrac) / (1 - backupFrac));
+        heading = avoidFrom + wrapPi2(avoidTo - avoidFrom) * turnU;
       }
       avoidProgress = next;
     } else if (wallPressure > 0.000001) {
-      const desired = Math.atan2(Math.sin(heading) + wallAwayY, Math.cos(heading) + wallAwayX);
-      const turnK = 3 + 7 * Math.min(1, wallPressure);
+      const inwardWeight = 1.7 + 2.6 * Math.min(1, wallPressure);
+      const desired = Math.atan2(Math.sin(heading) + wallAwayY * inwardWeight, Math.cos(heading) + wallAwayX * inwardWeight);
+      const turnK = 4.2 + 9 * Math.min(1, wallPressure);
       heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
     const field = frame.interaction;
@@ -1980,19 +2023,25 @@ function updateDidinium(didinium, frame, view) {
       const localY = -dx * sh + dy * ch;
       const A = Math.max(0.001, finiteOr(prey.halfLen, 1) + L * 0.38);
       const B = Math.max(0.001, finiteOr(prey.halfWid, 1) + L * 0.38);
-      const q = Math.sqrt(localX * localX / (A * A) + localY * localY / (B * B)) || 0.000001;
+      const probeHeading = heading + wander;
+      const qRaw = Math.sqrt(localX * localX / (A * A) + localY * localY / (B * B));
+      const q = qRaw || 0.000001;
       const targetQ = 1.03;
-      const sx = localX * (targetQ / q);
-      const sy = localY * (targetQ / q);
+      const fallbackWorldX = -Math.cos(probeHeading);
+      const fallbackWorldY = -Math.sin(probeHeading);
+      const shellLocalX = qRaw > 0.12 ? localX : fallbackWorldX * ch + fallbackWorldY * sh;
+      const shellLocalY = qRaw > 0.12 ? localY : -fallbackWorldX * sh + fallbackWorldY * ch;
+      const shellQ = Math.sqrt(shellLocalX * shellLocalX / (A * A) + shellLocalY * shellLocalY / (B * B)) || 0.000001;
+      const sx = shellLocalX * (targetQ / shellQ);
+      const sy = shellLocalY * (targetQ / shellQ);
       const surfaceX = prey.x + sx * ch - sy * sh;
       const surfaceY = prey.y + sx * sh + sy * ch;
       const toTargetX = q < 1 ? prey.x - px0 : surfaceX - px0;
       const toTargetY = q < 1 ? prey.y - py0 : surfaceY - py0;
       const toTargetD = Math.hypot(toTargetX, toTargetY) || 1;
-      const probeHeading = heading + wander;
       const approachDot = (Math.cos(probeHeading) * toTargetX + Math.sin(probeHeading) * toTargetY) / toTargetD;
       preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y, approachDot };
-      if (q < 1.07 && approachDot > 0.55 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
+      if (!wasContacting && q < 1.07 && approachDot > 0.55 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
         contactDuration = 2.4 + seededUnit(nseed, 0, 714207245) * 0.9;
         contactTimer = contactDuration;
       }
@@ -2063,7 +2112,11 @@ function updateDidinium(didinium, frame, view) {
     const eh = travel + lean;
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
-    const vSigned = reversing ? -vPx * 0.28 : vPx;
+    const contactElapsedForSwim = Math.max(0, contactDuration - contactTimer);
+    const contactRemainingForSwim = Math.max(0, contactTimer);
+    const contactStandOff = contactTimer > 0 && preyData ? Math.min(1, contactElapsedForSwim / LATCH_INITIAL_CONTACT_SECONDS, contactRemainingForSwim / LATCH_INITIAL_CONTACT_SECONDS) : 0;
+    const contactSwimScale = 1 - 0.88 * contactStandOff;
+    const vSigned = vPx * avoidSpeedScale * contactSwimScale;
     const rawX = px0 + ux * vSigned * dt;
     const rawY = py0 + uy * vSigned * dt;
     let nextX = rawX;
@@ -2072,7 +2125,9 @@ function updateDidinium(didinium, frame, view) {
       const corrX = preyData.surfaceX - nextX;
       const corrY = preyData.surfaceY - nextY;
       const corrL = Math.hypot(corrX, corrY) || 1;
-      const maxStep = L * (preyData.q < 1 ? 0.65 : 0.04);
+      const contactElapsed = Math.max(0, contactDuration - contactTimer);
+      const latchServoSpeed = contactElapsed <= LATCH_INITIAL_CONTACT_SECONDS ? LATCH_INITIAL_CONTACT_BL_PER_S : LATCH_SERVO_BL_PER_S;
+      const maxStep = L * latchServoSpeed * dt;
       const kLatch = preyData.q < 1 ? 1 : 1 - Math.exp(-2 * dt);
       const step = Math.min(maxStep, corrL * kLatch);
       nextX += corrX / corrL * step;
@@ -2087,41 +2142,64 @@ function updateDidinium(didinium, frame, view) {
       const minD = obs.radius + L * 0.45;
       if (d < minD) {
         const need = minD - d;
-        const step = Math.min(L * 0.35, need * (1 - Math.exp(-8 * dt)));
+        const obstacleServoSpeed = d < obs.radius ? OBSTACLE_EMERGENCY_BL_PER_S : OBSTACLE_SHELL_BL_PER_S;
+        const step = Math.min(L * obstacleServoSpeed * dt, need * (1 - Math.exp(-8 * dt)));
         nextX += dx / d * step;
         nextY += dy / d * step;
-        if (d < obs.radius + L * 0.9 && avoidProgress >= 1 && contactTimer <= 0) {
-          avoidIndex += 1;
-          avoidFrom = heading;
-          avoidTo = Math.atan2(dy, dx) + side * Math.PI * 0.55;
-          avoidProgress = 0;
+        if (d < obs.radius + L * 0.9 && avoidProgress >= 1 && contactTimer <= 0 && avoidCooldown <= 0) {
+          const nextAvoidIndex = avoidIndex + 1;
+          const cooldownU = noise2D2(nseed ^ 919247895, nextAvoidIndex, 0.83);
+          const magU = noise2D2(nseed ^ 2083492267, nextAvoidIndex, 0.19);
+          const magnitude = EMERGENCY_AVOID_TURN_MIN + (EMERGENCY_AVOID_TURN_MAX - EMERGENCY_AVOID_TURN_MIN) * magU;
+          startAvoid(avoidTargetByDeflection(heading, Math.atan2(dy, dx), magnitude), OBSTACLE_AVOID_COOLDOWN_MIN + (OBSTACLE_AVOID_COOLDOWN_MAX - OBSTACLE_AVOID_COOLDOWN_MIN) * cooldownU);
         }
       }
     }
-    nextX = clamp(nextX, margin, safeWidth - margin);
-    nextY = clamp(nextY, margin, safeHeight - margin);
-    if ((nextX !== rawX || nextY !== rawY) && avoidProgress >= 1 && contactTimer <= 0) {
-      avoidIndex += 1;
-      const magU = noise2D2(nseed ^ 791783381, avoidIndex, 0.71);
-      const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
-      avoidFrom = heading;
+    const preClampX = nextX;
+    const preClampY = nextY;
+    const maxX = safeWidth - margin;
+    const maxY = safeHeight - margin;
+    const targetClampX = clamp(nextX, margin, maxX);
+    const targetClampY = clamp(nextY, margin, maxY);
+    const clampPenetration = Math.max(margin - preClampX, preClampX - maxX, margin - preClampY, preClampY - maxY, 0);
+    const clampCorrX = targetClampX - nextX;
+    const clampCorrY = targetClampY - nextY;
+    const clampCorrL = Math.hypot(clampCorrX, clampCorrY);
+    const clamped = clampCorrL > 0.000000001;
+    if (clamped) {
+      const step = Math.min(L * CLAMP_SERVO_BL_PER_S * dt, clampCorrL);
+      nextX += clampCorrX / clampCorrL * step;
+      nextY += clampCorrY / clampCorrL * step;
+      nextX = clamp(nextX, 0, safeWidth);
+      nextY = clamp(nextY, 0, safeHeight);
+    }
+    if (clamped && avoidProgress >= 1 && contactTimer <= 0 && (avoidCooldown <= 0 || clampPenetration > L * 0.25)) {
+      const nextAvoidIndex = avoidIndex + 1;
+      const magU = noise2D2(nseed ^ 791783381, nextAvoidIndex, 0.71);
+      const magnitude = EMERGENCY_AVOID_TURN_MIN + (EMERGENCY_AVOID_TURN_MAX - EMERGENCY_AVOID_TURN_MIN) * magU;
       const inward = Math.atan2(wallAwayY, wallAwayX);
-      avoidTo = inward + side * magnitude * 0.5;
-      avoidProgress = 0;
+      const cooldownU = noise2D2(nseed ^ 1568279441, nextAvoidIndex, 0.37);
+      startAvoid(avoidTargetByDeflection(heading, inward, magnitude), WALL_AVOID_COOLDOWN_MIN + (WALL_AVOID_COOLDOWN_MAX - WALL_AVOID_COOLDOWN_MIN) * cooldownU);
+      avoidWallBand = wallBand || 1;
     }
     if (wasContacting && contactTimer <= 0) {
       huntCooldown = 22 + seededUnit(nseed, 0, 1243315241) * 14;
-      avoidIndex += 1;
-      avoidFrom = heading;
-      avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 899314129)));
-      avoidProgress = 0;
+      const nextAvoidIndex = avoidIndex + 1;
+      const cooldownU = noise2D2(nseed ^ 919247895, nextAvoidIndex, 0.83);
+      const releaseMag = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * seededUnit(nseed, nextAvoidIndex, 899314129);
+      startAvoid(heading + side * releaseMag, OBSTACLE_AVOID_COOLDOWN_MIN + (OBSTACLE_AVOID_COOLDOWN_MAX - OBSTACLE_AVOID_COOLDOWN_MIN) * cooldownU);
     }
+    const targetPhase = contactTimer > 0 ? heading : travel;
+    const previousPhase = finiteOr(cell.phase, targetPhase);
+    const inSharpPhaseEvent = avoidProgress < 1 || contactTimer > 0 || clamped;
+    const maxPhaseTurn = inSharpPhaseEvent ? 11.5 : 1.45;
+    const phase = previousPhase + clamp(wrapPi2(targetPhase - previousPhase), -maxPhaseTurn * dt, maxPhaseTurn * dt);
     const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
     return {
       ...cell,
       x: nextX,
       y: nextY,
-      phase: contactTimer > 0 ? heading : travel,
+      phase,
       heading,
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + spinFreq * dt),
       beatPhase: wrapUnit(finiteOr(cell.beatPhase, 0) + beatEff * dt),
@@ -2130,6 +2208,8 @@ function updateDidinium(didinium, frame, view) {
       avoidFrom,
       avoidTo,
       avoidProgress,
+      avoidCooldown,
+      avoidWallBand,
       contactTimer,
       contactDuration: contactTimer > 0 ? contactDuration : 0,
       huntCooldown

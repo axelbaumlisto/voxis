@@ -32,15 +32,28 @@ const HELIX_LEAN = 0.07; // corkscrew lean angle (rad); thin helix, coupled to t
 // made the partition error climb with t).
 const CURVE_FREQ = 0.09; // Hz-ish; how fast the one-sided turning bias varies
 const CURVE_BIAS = 0.18; // max one-sided lean (rad) — gentle, so it does not by itself loop
-const WALL_LOOK = 1.25; // body-lengths of anticipatory wall lookahead. MUST be small enough
-                     // that the tank centre is genuine open water (zero wall pressure):
-                     // the tank is only ~2.5 body-heights tall, so a large look made
-                     // pressure>0 everywhere → the avoiding reaction re-fired forever and
-                     // the cell circled the perimeter. Small look = bank only when close.
-const BACKUP_SECONDS = 0.08; // brief reverse jerk that opens the avoiding reaction
-const AVOID_SECONDS = 0.18; // eased duration of the fixed-side back-turn after the reverse
-const AVOID_TURN_MIN = (2 * Math.PI) / 3; // ~120° sharp re-orient
-const AVOID_TURN_MAX = (5 * Math.PI) / 6; // ~150°
+const WALL_LOOK = 1.33; // body-lengths of anticipatory wall lookahead. Kept below
+                     // the half-height of the large solo body, so the tank centre remains
+                     // genuine open water while giving the fast predator enough runway to
+                     // steer inward before touching the body-margin clamp.
+const BACKUP_SECONDS = 0.08; // brief reverse/pause that opens the avoiding reaction
+const AVOID_SECONDS = 0.13; // duration of the fixed-side back-turn after the reverse/pause
+const AVOID_TURN_MIN = (25 * Math.PI) / 180; // ~25° normal wall re-orient
+const AVOID_TURN_MAX = (70 * Math.PI) / 180; // ~70° normal wall re-orient
+const EMERGENCY_AVOID_TURN_MIN = (70 * Math.PI) / 180; // ~70° clamp/corner escape
+const EMERGENCY_AVOID_TURN_MAX = (85 * Math.PI) / 180; // ~85° rare clamp/corner escape
+const WALL_AVOID_COOLDOWN_MIN = 2.5;
+const WALL_AVOID_COOLDOWN_MAX = 4.0;
+const OBSTACLE_AVOID_COOLDOWN_MIN = 1.5;
+const OBSTACLE_AVOID_COOLDOWN_MAX = 3.0;
+const WALL_AVOID_ENTER = 0.08;
+const WALL_AVOID_EXIT = 0.03;
+const LATCH_SERVO_BL_PER_S = 0.45;
+const LATCH_INITIAL_CONTACT_BL_PER_S = 1.2;
+const LATCH_INITIAL_CONTACT_SECONDS = 0.15;
+const OBSTACLE_SHELL_BL_PER_S = 1.0;
+const OBSTACLE_EMERGENCY_BL_PER_S = 1.5;
+const CLAMP_SERVO_BL_PER_S = 0.25;
 
 interface DidiniumModeView {
   readonly motionMul: number;
@@ -87,6 +100,8 @@ export function seedDidinium(count: number, seed: number, frame: AquariumFrame, 
       avoidFrom: heading,
       avoidTo: heading,
       avoidProgress: 1,
+      avoidCooldown: 0,
+      avoidWallBand: 0,
       noiseSeed: mix32(seed ^ Math.imul(i + 1, 0x9e3779b1) ^ salt) >>> 0,
     });
   }
@@ -182,50 +197,83 @@ export function updateDidinium(
     let avoidFrom = finiteOr(cell.avoidFrom, heading);
     let avoidTo = finiteOr(cell.avoidTo, heading);
     let avoidProgress = clamp01(finiteOr(cell.avoidProgress, 1));
+    let avoidCooldown = Math.max(0, finiteOr(cell.avoidCooldown, 0) - dt);
+    let avoidWallBand = Math.max(0, Math.floor(finiteOr(cell.avoidWallBand, 0)));
     const side = finiteOr(cell.turnSide, 1) < 0 ? -1 : 1;
+    const avoidTargetByDeflection = (from: number, inward: number, magnitude: number) => {
+      let turnSign = side;
+      const towardInwardDelta = wrapPi(inward - from);
+      const before = Math.abs(towardInwardDelta);
+      const inwardMagnitude = Math.min(AVOID_TURN_MAX, Math.max(magnitude, before * 0.68));
+      const fixedSideAfter = Math.abs(wrapPi(inward - (from + turnSign * inwardMagnitude)));
+      if (before < Math.PI - 1e-3 && fixedSideAfter > before) {
+        const towardInward = Math.sign(towardInwardDelta);
+        if (towardInward !== 0) turnSign = towardInward;
+      }
+      return from + turnSign * inwardMagnitude;
+    };
+    const startAvoid = (targetHeading: number, cooldown: number) => {
+      avoidIndex += 1;
+      avoidFrom = heading;
+      avoidTo = targetHeading;
+      avoidProgress = 0;
+      avoidCooldown = Math.max(avoidCooldown, cooldown);
+    };
     // Trigger the Jennings avoiding reaction EARLY (while still well away from the
     // wall) so the cell smoothly turns BEFORE it ever reaches the clamp — no edge
     // hugging and no hard billiard flip. Turn AWAY from the wall (toward the
     // inward normal) on the fixed per-cell side, not a blind fixed magnitude.
     // with the small look, single-wall pressure maxes ~0.15 at the clamp; trigger
     // the eased Jennings turn just before contact (the clamp branch is the backstop).
-    const hitWall = wallPressure > 0.12 && avoidProgress >= 1;
+    const wallBand = wallPressure > WALL_AVOID_ENTER ? 1 : 0;
+    if (wallPressure < WALL_AVOID_EXIT) avoidWallBand = 0;
+    const hitWall = wallBand !== 0 && avoidWallBand !== wallBand && avoidProgress >= 1 && avoidCooldown <= 0;
     if (hitWall) {
-      avoidIndex += 1;
-      const magU = noise2D(nseed ^ 0x2f31a7d5, avoidIndex, 0.71);
+      const nextAvoidIndex = avoidIndex + 1;
+      const magU = noise2D(nseed ^ 0x2f31a7d5, nextAvoidIndex, 0.71);
       const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
-      avoidFrom = heading;
-      // bias the turn toward the inward direction (away from the wall) so it
-      // reliably clears the wall, then add the fixed-side Jennings sweep.
+      // bias the turn toward the inward direction (away from the wall), while
+      // preserving the birth-stable Jennings side unless it would turn outward.
       const inward = Math.atan2(wallAwayY, wallAwayX);
-      avoidTo = inward + side * magnitude * 0.5;
-      avoidProgress = 0;
+      const cooldownU = noise2D(nseed ^ 0x5d7a0b91, nextAvoidIndex, 0.37);
+      startAvoid(
+        avoidTargetByDeflection(heading, inward, magnitude),
+        WALL_AVOID_COOLDOWN_MIN + (WALL_AVOID_COOLDOWN_MAX - WALL_AVOID_COOLDOWN_MIN) * cooldownU,
+      );
+      avoidWallBand = wallBand;
     }
 
-    // The avoiding reaction runs over BACKUP_SECONDS (reverse jerk) + AVOID_SECONDS
-    // (fixed-side back-turn). avoidProgress in [0,1] spans the whole thing; the
-    // first backupFrac is the reverse, then the heading eases to avoidTo.
+    // The avoiding reaction runs over BACKUP_SECONDS (reverse/pause) +
+    // AVOID_SECONDS (fixed-side back-turn). avoidProgress in [0,1] spans the
+    // whole event; the first backupFrac is a brief eased pause/slight reverse,
+    // then the base heading advances at a bounded angular rate to avoidTo.
     const avoidTotal = BACKUP_SECONDS + AVOID_SECONDS;
     const backupFrac = BACKUP_SECONDS / avoidTotal;
-    let reversing = false;
+    let avoidSpeedScale = 1;
     if (avoidProgress < 1) {
+      const prev = avoidProgress;
       const next = Math.min(1, avoidProgress + dt / avoidTotal);
-      if (avoidProgress < backupFrac) {
-        reversing = true; // back up a short distance before turning (Jennings)
-      } else {
-        const turnK = 6.0; // sharp re-orient toward the fixed side
-        heading += wrapPi(avoidTo - heading) * (1 - Math.exp(-turnK * dt));
-        if (next >= 1) heading = avoidTo;
+      if (prev < backupFrac) {
+        const u = clamp01(((prev + next) * 0.5) / backupFrac);
+        avoidSpeedScale = 1 - 1.06 * Math.sin(Math.PI * u); // min ≈ -0.06, mostly pause
+      }
+      if (next > backupFrac) {
+        const turnU = clamp01((next - backupFrac) / (1 - backupFrac));
+        heading = avoidFrom + wrapPi(avoidTo - avoidFrom) * turnU;
       }
       avoidProgress = next;
     } else if (wallPressure > 1e-6) {
       // gentle anticipatory bank away before an actual hit (gated near walls only)
-      const desired = Math.atan2(Math.sin(heading) + wallAwayY, Math.cos(heading) + wallAwayX);
-      // strong, scaled anticipatory bank: with the larger look there is real
-      // runway between first wall pressure and the clamp, so a firm turn here wins
-      // the race and the cell veers away BEFORE it ever reaches the boundary (no
+      const inwardWeight = 1.7 + 2.6 * Math.min(1, wallPressure);
+      const desired = Math.atan2(
+        Math.sin(heading) + wallAwayY * inwardWeight,
+        Math.cos(heading) + wallAwayX * inwardWeight,
+      );
+      // Strong, scaled anticipatory bank: with the larger look there is real
+      // runway between first wall pressure and the clamp, so a firm smooth turn
+      // wins the race and the cell veers away BEFORE it reaches the boundary (no
       // rail-glide). turnK grows steeply with pressure.
-      const turnK = 3.0 + 7.0 * Math.min(1, wallPressure);
+      const turnK = 4.2 + 9.0 * Math.min(1, wallPressure);
       heading += wrapPi(desired - heading) * (1 - Math.exp(-turnK * dt));
     }
 
@@ -248,19 +296,25 @@ export function updateDidinium(
       const localY = -dx * sh + dy * ch;
       const A = Math.max(1e-3, finiteOr(prey.halfLen, 1) + L * 0.38);
       const B = Math.max(1e-3, finiteOr(prey.halfWid, 1) + L * 0.38);
-      const q = Math.sqrt((localX * localX) / (A * A) + (localY * localY) / (B * B)) || 1e-6;
+      const probeHeading = heading + wander;
+      const qRaw = Math.sqrt((localX * localX) / (A * A) + (localY * localY) / (B * B));
+      const q = qRaw || 1e-6;
       const targetQ = 1.03; // close latch: body stays outside while snout/filaments meet the membrane
-      const sx = localX * (targetQ / q);
-      const sy = localY * (targetQ / q);
+      const fallbackWorldX = -Math.cos(probeHeading);
+      const fallbackWorldY = -Math.sin(probeHeading);
+      const shellLocalX = qRaw > 0.12 ? localX : fallbackWorldX * ch + fallbackWorldY * sh;
+      const shellLocalY = qRaw > 0.12 ? localY : -fallbackWorldX * sh + fallbackWorldY * ch;
+      const shellQ = Math.sqrt((shellLocalX * shellLocalX) / (A * A) + (shellLocalY * shellLocalY) / (B * B)) || 1e-6;
+      const sx = shellLocalX * (targetQ / shellQ);
+      const sy = shellLocalY * (targetQ / shellQ);
       const surfaceX = prey.x + sx * ch - sy * sh;
       const surfaceY = prey.y + sx * sh + sy * ch;
       const toTargetX = q < 1 ? prey.x - px0 : surfaceX - px0;
       const toTargetY = q < 1 ? prey.y - py0 : surfaceY - py0;
       const toTargetD = Math.hypot(toTargetX, toTargetY) || 1;
-      const probeHeading = heading + wander;
       const approachDot = (Math.cos(probeHeading) * toTargetX + Math.sin(probeHeading) * toTargetY) / toTargetD;
       preyData = { q, surfaceX, surfaceY, preyX: prey.x, preyY: prey.y, approachDot };
-      if (q < 1.07 && approachDot > 0.55 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
+      if (!wasContacting && q < 1.07 && approachDot > 0.55 && huntCooldown <= 0 && contactTimer <= 0 && avoidProgress >= 1) {
         contactDuration = 2.4 + seededUnit(nseed, 0, 0x2a91f00d) * 0.9;
         contactTimer = contactDuration;
       }
@@ -344,7 +398,13 @@ export function updateDidinium(
     const eh = travel + lean; // velocity direction (travel + fast helix lean)
     const ux = Math.cos(eh);
     const uy = Math.sin(eh);
-    const vSigned = reversing ? -vPx * 0.28 : vPx; // brief reverse easing
+    const contactElapsedForSwim = Math.max(0, contactDuration - contactTimer);
+    const contactRemainingForSwim = Math.max(0, contactTimer);
+    const contactStandOff = contactTimer > 0 && preyData
+      ? Math.min(1, contactElapsedForSwim / LATCH_INITIAL_CONTACT_SECONDS, contactRemainingForSwim / LATCH_INITIAL_CONTACT_SECONDS)
+      : 0;
+    const contactSwimScale = 1 - 0.88 * contactStandOff;
+    const vSigned = vPx * avoidSpeedScale * contactSwimScale; // brief eased pause/slight reverse / contact stand-off
     const rawX = px0 + ux * vSigned * dt;
     const rawY = py0 + uy * vSigned * dt;
     let nextX = rawX;
@@ -356,7 +416,11 @@ export function updateDidinium(
       const corrX = preyData.surfaceX - nextX;
       const corrY = preyData.surfaceY - nextY;
       const corrL = Math.hypot(corrX, corrY) || 1;
-      const maxStep = L * (preyData.q < 1 ? 0.65 : 0.04);
+      const contactElapsed = Math.max(0, contactDuration - contactTimer);
+      const latchServoSpeed = contactElapsed <= LATCH_INITIAL_CONTACT_SECONDS
+        ? LATCH_INITIAL_CONTACT_BL_PER_S
+        : LATCH_SERVO_BL_PER_S;
+      const maxStep = L * latchServoSpeed * dt;
       const kLatch = preyData.q < 1 ? 1 : 1 - Math.exp(-2.0 * dt);
       const step = Math.min(maxStep, corrL * kLatch);
       nextX += (corrX / corrL) * step;
@@ -380,44 +444,85 @@ export function updateDidinium(
       const minD = obs.radius + L * 0.45;
       if (d < minD) {
         const need = minD - d;
-        const step = Math.min(L * 0.35, need * (1 - Math.exp(-8 * dt)));
+        const obstacleServoSpeed = d < obs.radius ? OBSTACLE_EMERGENCY_BL_PER_S : OBSTACLE_SHELL_BL_PER_S;
+        const step = Math.min(L * obstacleServoSpeed * dt, need * (1 - Math.exp(-8 * dt)));
         nextX += (dx / d) * step;
         nextY += (dy / d) * step;
-        if (d < obs.radius + L * 0.9 && avoidProgress >= 1 && contactTimer <= 0) {
-          avoidIndex += 1;
-          avoidFrom = heading;
-          avoidTo = Math.atan2(dy, dx) + side * Math.PI * 0.55;
-          avoidProgress = 0;
+        if (d < obs.radius + L * 0.9 && avoidProgress >= 1 && contactTimer <= 0 && avoidCooldown <= 0) {
+          const nextAvoidIndex = avoidIndex + 1;
+          const cooldownU = noise2D(nseed ^ 0x36ca9c17, nextAvoidIndex, 0.83);
+          const magU = noise2D(nseed ^ 0x7c2f91ab, nextAvoidIndex, 0.19);
+          const magnitude = EMERGENCY_AVOID_TURN_MIN + (EMERGENCY_AVOID_TURN_MAX - EMERGENCY_AVOID_TURN_MIN) * magU;
+          startAvoid(
+            avoidTargetByDeflection(heading, Math.atan2(dy, dx), magnitude),
+            OBSTACLE_AVOID_COOLDOWN_MIN + (OBSTACLE_AVOID_COOLDOWN_MAX - OBSTACLE_AVOID_COOLDOWN_MIN) * cooldownU,
+          );
         }
       }
     }
-    nextX = clamp(nextX, margin, safeWidth - margin);
-    nextY = clamp(nextY, margin, safeHeight - margin);
+    const preClampX = nextX;
+    const preClampY = nextY;
+    const maxX = safeWidth - margin;
+    const maxY = safeHeight - margin;
+    const targetClampX = clamp(nextX, margin, maxX);
+    const targetClampY = clamp(nextY, margin, maxY);
+    const clampPenetration = Math.max(
+      margin - preClampX,
+      preClampX - maxX,
+      margin - preClampY,
+      preClampY - maxY,
+      0,
+    );
+    const clampCorrX = targetClampX - nextX;
+    const clampCorrY = targetClampY - nextY;
+    const clampCorrL = Math.hypot(clampCorrX, clampCorrY);
+    const clamped = clampCorrL > 1e-9;
+    if (clamped) {
+      const step = Math.min(L * CLAMP_SERVO_BL_PER_S * dt, clampCorrL);
+      nextX += (clampCorrX / clampCorrL) * step;
+      nextY += (clampCorrY / clampCorrL) * step;
+      // Hard safety only for true off-canvas cases (e.g. forced spawn/outside-wall tests);
+      // the normal margin response above remains velocity-limited by dt.
+      nextX = clamp(nextX, 0, safeWidth);
+      nextY = clamp(nextY, 0, safeHeight);
+    }
     // Safety net only: if the cell still reaches the clamp (e.g. spawned in a
     // corner), KICK OFF the smooth avoiding reaction toward the inward normal
     // instead of a hard instantaneous heading flip (the flip read as the axis
     // "snapping"/skipping rather than turning). The eased turn above then carries
     // it inward over AVOID_SECONDS. Gated on a real clamp — open water never
     // clamps, so the dt-partition pure-forward path is unaffected.
-    if ((nextX !== rawX || nextY !== rawY) && avoidProgress >= 1 && contactTimer <= 0) {
-      avoidIndex += 1;
-      const magU = noise2D(nseed ^ 0x2f31a7d5, avoidIndex, 0.71);
-      const magnitude = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * magU;
-      avoidFrom = heading;
+    if (clamped && avoidProgress >= 1 && contactTimer <= 0 && (avoidCooldown <= 0 || clampPenetration > L * 0.25)) {
+      const nextAvoidIndex = avoidIndex + 1;
+      const magU = noise2D(nseed ^ 0x2f31a7d5, nextAvoidIndex, 0.71);
+      const magnitude = EMERGENCY_AVOID_TURN_MIN + (EMERGENCY_AVOID_TURN_MAX - EMERGENCY_AVOID_TURN_MIN) * magU;
       const inward = Math.atan2(wallAwayY, wallAwayX);
-      avoidTo = inward + side * magnitude * 0.5;
-      avoidProgress = 0;
+      const cooldownU = noise2D(nseed ^ 0x5d7a0b91, nextAvoidIndex, 0.37);
+      startAvoid(
+        avoidTargetByDeflection(heading, inward, magnitude),
+        WALL_AVOID_COOLDOWN_MIN + (WALL_AVOID_COOLDOWN_MAX - WALL_AVOID_COOLDOWN_MIN) * cooldownU,
+      );
+      avoidWallBand = wallBand || 1;
     }
 
     if (wasContacting && contactTimer <= 0) {
       // Release after a short attack beat: turn away and cool down so the predator
       // does not immediately re-latch / buzz-saw through the hero.
       huntCooldown = 22.0 + seededUnit(nseed, 0, 0x4a1b7c29) * 14.0;
-      avoidIndex += 1;
-      avoidFrom = heading;
-      avoidTo = heading + side * (Math.PI * (0.45 + 0.25 * seededUnit(nseed, avoidIndex, 0x359a71d1)));
-      avoidProgress = 0;
+      const nextAvoidIndex = avoidIndex + 1;
+      const cooldownU = noise2D(nseed ^ 0x36ca9c17, nextAvoidIndex, 0.83);
+      const releaseMag = AVOID_TURN_MIN + (AVOID_TURN_MAX - AVOID_TURN_MIN) * seededUnit(nseed, nextAvoidIndex, 0x359a71d1);
+      startAvoid(
+        heading + side * releaseMag,
+        OBSTACLE_AVOID_COOLDOWN_MIN + (OBSTACLE_AVOID_COOLDOWN_MAX - OBSTACLE_AVOID_COOLDOWN_MIN) * cooldownU,
+      );
     }
+
+    const targetPhase = contactTimer > 0 ? heading : travel;
+    const previousPhase = finiteOr(cell.phase, targetPhase);
+    const inSharpPhaseEvent = avoidProgress < 1 || contactTimer > 0 || clamped;
+    const maxPhaseTurn = inSharpPhaseEvent ? 11.5 : 1.45;
+    const phase = previousPhase + clamp(wrapPi(targetPhase - previousPhase), -maxPhaseTurn * dt, maxPhaseTurn * dt);
 
     // beat freq capped so the metachronal girdle shimmer stays < Nyquist.
     const beatEff = Math.min(6, Math.max(0, finite(cell.beatRate, 0)) * act);
@@ -429,7 +534,7 @@ export function updateDidinium(
       // phase carries the TRAVEL heading (snout leads the PATH); the fast helix
       // lean is left OUT of the body orientation so the body axis holds near the
       // helix axis instead of wagging (critic C). base `heading` = cruise dir.
-      phase: contactTimer > 0 ? heading : travel,
+      phase,
       heading,
       // visible axial roll: advance at the SAME un-scaled spinFreq (rollRate) as
       // the helix-lean clock, so the rendered girdle spin and the path corkscrew
@@ -442,6 +547,8 @@ export function updateDidinium(
       avoidFrom,
       avoidTo,
       avoidProgress,
+      avoidCooldown,
+      avoidWallBand,
       contactTimer,
       contactDuration: contactTimer > 0 ? contactDuration : 0,
       huntCooldown,
