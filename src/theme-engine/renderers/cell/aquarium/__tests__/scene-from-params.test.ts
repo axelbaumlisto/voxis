@@ -36,6 +36,36 @@ function duoAquariumParams(): CellParams {
   };
 }
 
+function driftingContourParams(): CellParams {
+  return {
+    ...CELL_DEFAULTS,
+    ...PARAMECIUM_CELL_PARAMS,
+    enableAquarium: true,
+    aquariumSeed: 2,
+    aquariumAlpha: 0.68,
+    aquariumActivityBoost: 1.0,
+    diatomCount: 0,
+    diatomAlpha: 0.16,
+    diatomDriftSpeed: 0.35,
+    euglenaCount: 1,
+    euglenaSpeed: 0.25,
+    euglenaSpeedActive: 0.5,
+    euglenaScale: 2.4,
+    euglenaFlagellumRateScale: 0.45,
+    euglenaGravitaxis: 0.01,
+    euglenaPhototaxis: 0,
+    euglenaPhotoIntent: 0.55,
+    euglenaMotorEnabled: true,
+    euglenaLoiter: 0,
+    euglenaWake: 0,
+    euglenaRotDiffusion: 0,
+    vorticellaCount: 1,
+    vorticellaScale: 2.6,
+    vorticellaAlongFrac: 0.35,
+    vorticellaContractRate: 1.2,
+  };
+}
+
 function parameciumSoloParams(): CellParams {
   return {
     ...CELL_DEFAULTS,
@@ -210,6 +240,51 @@ describe("sceneFromParams", () => {
               wake: 0,
             },
             medium: undefined,
+            seed: 2,
+            aquariumAlpha: 0.68,
+            activityBoost: 1,
+          },
+        },
+      ],
+    });
+  });
+
+  it("maps drifting_contour params to motor Euglena plus retained sessile Vorticella", () => {
+    expect(sceneFromParams(driftingContourParams())).toEqual({
+      seed: 2,
+      instances: [
+        {
+          species: "euglena",
+          count: 1,
+          cfg: {
+            count: 1,
+            speed: 0.25,
+            speedActive: 0.5,
+            scale: 2.4,
+            flagellumRateScale: 0.45,
+            hueOffset: 42,
+            photoIntent: 0.55,
+            motorEnabled: true,
+            steer: {
+              gravitaxis: 0.01,
+              phototaxis: 0,
+              loiter: 0,
+              wake: 0,
+            },
+            medium: undefined,
+            seed: 2,
+            aquariumAlpha: 0.68,
+            activityBoost: 1,
+          },
+        },
+        {
+          species: "vorticella",
+          count: 1,
+          cfg: {
+            count: 1,
+            contractRate: 1.2,
+            scale: 2.6,
+            alongFrac: 0.35,
             seed: 2,
             aquariumAlpha: 0.68,
             activityBoost: 1,
