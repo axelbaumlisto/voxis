@@ -136,11 +136,22 @@ const EXPECTED_DRIFTING_CONTOUR_PARAMS = {
   vorticellaContractRate: 1.2,
 } as const;
 
-// duo_aquarium = the 2-hero counterpart: identical to drifting_contour minus the
-// sessile vorticella (no vorticella* preview params at all; toEqual ignores the
-// undefined-valued keys, asserting the duo mount omits them).
+// duo_aquarium = the 2-hero counterpart: same Paramecium SoT, but Euglena uses
+// its independent motor profile and omits all vorticella preview params.
 const EXPECTED_DUO_AQUARIUM_PARAMS = {
   ...EXPECTED_DRIFTING_CONTOUR_PARAMS,
+  aquariumSeed: 2,
+  euglenaSpeed: 0.29,
+  euglenaSpeedActive: 0.62,
+  euglenaScale: 2.7,
+  euglenaFlagellumRateScale: 0.55,
+  euglenaGravitaxis: 0.02,
+  euglenaPhototaxis: 0,
+  euglenaPhotoIntent: 0.8,
+  euglenaMotorEnabled: true,
+  euglenaLoiter: 0,
+  euglenaWake: 0,
+  euglenaRotDiffusion: 0,
   vorticellaCount: 0,
   vorticellaScale: undefined,
   vorticellaContractRate: undefined,
@@ -311,6 +322,22 @@ describe("paramecium theme merged params parity", () => {
     await expect(mountTheme("drifting_contour", { euglenaScale: 99, fillAlpha: 0.99 })).resolves.toMatchObject({
       euglenaScale: 99,
       fillAlpha: 0.99,
+    });
+  });
+
+  it("keeps duo user params last so overrides can disable the motor", async () => {
+    await expect(mountTheme("duo_aquarium", {
+      euglenaMotorEnabled: false,
+      euglenaPhototaxis: 0.7,
+      euglenaRotDiffusion: 0.2,
+      euglenaLoiter: 1.1,
+      euglenaWake: 10,
+    })).resolves.toMatchObject({
+      euglenaMotorEnabled: false,
+      euglenaPhototaxis: 0.7,
+      euglenaRotDiffusion: 0.2,
+      euglenaLoiter: 1.1,
+      euglenaWake: 10,
     });
   });
 });

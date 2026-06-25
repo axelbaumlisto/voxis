@@ -9,24 +9,29 @@ import { seedEuglena } from "../euglena";
 import { REGISTRY, sceneFromParams } from "../registry";
 import type { AquariumFrame, AquariumLayerState } from "../types";
 
-function driftingContourParams(): CellParams {
+function duoAquariumParams(): CellParams {
   return {
     ...CELL_DEFAULTS,
     ...PARAMECIUM_CELL_PARAMS,
     enableAquarium: true,
-    aquariumSeed: 17,
+    aquariumSeed: 2,
     aquariumAlpha: 0.68,
     aquariumActivityBoost: 1.0,
     diatomCount: 0,
     diatomAlpha: 0.16,
     diatomDriftSpeed: 0.35,
     euglenaCount: 1,
-    euglenaSpeed: 0.20,
-    euglenaSpeedActive: 1.5,
-    euglenaScale: 2.8,
-    euglenaGravitaxis: 0.2,
-    euglenaPhototaxis: 0.6,
-    euglenaRotDiffusion: 0.12,
+    euglenaSpeed: 0.29,
+    euglenaSpeedActive: 0.62,
+    euglenaScale: 2.7,
+    euglenaFlagellumRateScale: 0.55,
+    euglenaGravitaxis: 0.02,
+    euglenaPhototaxis: 0,
+    euglenaPhotoIntent: 0.8,
+    euglenaMotorEnabled: true,
+    euglenaLoiter: 0,
+    euglenaWake: 0,
+    euglenaRotDiffusion: 0,
     vorticellaCount: 0,
   };
 }
@@ -182,30 +187,30 @@ describe("aquarium scene registry", () => {
 });
 
 describe("sceneFromParams", () => {
-  it("maps drifting_contour params to a duo scene", () => {
-    expect(sceneFromParams(driftingContourParams())).toEqual({
-      seed: 17,
+  it("maps duo_aquarium params to an independent motor-on Euglena scene", () => {
+    expect(sceneFromParams(duoAquariumParams())).toEqual({
+      seed: 2,
       instances: [
         {
           species: "euglena",
           count: 1,
           cfg: {
             count: 1,
-            speed: 0.2,
-            speedActive: 1.5,
-            scale: 2.8,
-            flagellumRateScale: 1,
+            speed: 0.29,
+            speedActive: 0.62,
+            scale: 2.7,
+            flagellumRateScale: 0.55,
             hueOffset: 42,
-            photoIntent: 0,
-            motorEnabled: false,
+            photoIntent: 0.8,
+            motorEnabled: true,
             steer: {
-              gravitaxis: 0.2,
-              phototaxis: 0.6,
+              gravitaxis: 0.02,
+              phototaxis: 0,
+              loiter: 0,
+              wake: 0,
             },
-            medium: {
-              rotDiffusion: 0.12,
-            },
-            seed: 17,
+            medium: undefined,
+            seed: 2,
             aquariumAlpha: 0.68,
             activityBoost: 1,
           },
