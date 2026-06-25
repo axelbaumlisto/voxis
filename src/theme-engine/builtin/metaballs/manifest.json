@@ -1,0 +1,13 @@
+{
+  "manifest_version": 2,
+  "id": "metaballs",
+  "name": "Metaballs",
+  "description": "Floating glossy blobs that fuse and split like the Metaballs sculpting app — they drift, merge, and swell with your voice.",
+  "api_version": 1,
+  "entry": "theme.js",
+  "params": {
+    "blobCount": 5,
+    "palette": ["#ff6a3d", "#ff2d77", "#8a4bff", "#1fb6ff", "#19f0b0"],
+    "threshold": 1.0
+  }
+}
