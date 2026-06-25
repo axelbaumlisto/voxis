@@ -381,8 +381,8 @@ export function updateEuglena(
       const motorBlockY = (motorTopGap < motorBlockLook ? 1 - motorTopGap / motorBlockLook : 0)
         - (motorBottomGap < motorBlockLook ? 1 - motorBottomGap / motorBlockLook : 0);
       const motorEdgeBlock = Math.hypot(motorBlockX, motorBlockY) > 1e-6;
-      const lightDx = safeWidth - px0;
-      const lightDy = safeHeight / 2 - py0;
+      const lightDx = safeWidth * 0.28 - px0;
+      const lightDy = safeHeight * 0.45 - py0;
       const lightDist = Math.hypot(lightDx, lightDy);
       const sensoryStimulus = clamp01(finite(frame.activity, 0) + 0.5 * finite(frame.audioLevel, 0) + 0.18 * photoIntent);
       const heroMotorPressure = heroParams !== null && heroQ < 1.12;

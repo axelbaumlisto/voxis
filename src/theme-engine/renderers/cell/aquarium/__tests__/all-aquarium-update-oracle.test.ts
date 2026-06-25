@@ -3,6 +3,7 @@ import { PARAMECIUM_CELL_PARAMS } from "../../../../builtin/_shared/paramecium";
 import { CELL_DEFAULTS } from "../../defaults";
 import type { CellParams } from "../../types";
 import { sourceId } from "../interaction";
+import { euglenaDisplayLength, euglenaPose } from "../euglena";
 import { buildAquariumInteractionField, seedAquarium, updateAquarium } from "../layer";
 import type { AquariumFrame, EuglenaState, VorticellaState, DidiniumState } from "../types";
 
@@ -27,6 +28,36 @@ interface MotorSample {
   readonly photoTargetAge?: number;
   readonly heroDistance: number;
   readonly heroBearing: number;
+  readonly visualMinX: number;
+  readonly visualMaxX: number;
+  readonly visualMinY: number;
+  readonly visualMaxY: number;
+}
+
+function euglenaVisualBounds(cell: EuglenaState, scale: number, height: number): { minX: number; maxX: number; minY: number; maxY: number } {
+  const length = euglenaDisplayLength(cell.size, scale);
+  const ampTip = Math.min(Math.max(length * 0.22, 2), 0.40 * height);
+  const pose = euglenaPose(cell.rollPhase, cell.metabolyPhase, {
+    centerX: cell.x,
+    centerY: cell.y,
+    length,
+    baseWidth: length * 0.22,
+    heading: cell.heading,
+    flagellumLength: length * 0.95,
+    flagellumPhase: cell.flagellumPhase,
+    flagellumAmp: ampTip,
+    maxFlagellumLateral: 0.40 * height,
+    flagellumSegments: Math.min(Math.max(Math.round(length / 3), 10), 24),
+    flagellumWaves: 1.5,
+    metabolyEnvelope: 1,
+  });
+  const pts = [...pose.outline, ...pose.flagellumPoints];
+  return {
+    minX: Math.min(...pts.map((p) => p.x)),
+    maxX: Math.max(...pts.map((p) => p.x)),
+    minY: Math.min(...pts.map((p) => p.y)),
+    maxY: Math.max(...pts.map((p) => p.y)),
+  };
 }
 
 function allAquariumBaseParams(): CellParams {
@@ -138,6 +169,7 @@ function simulateAllAquariumMotorOn(seconds = 90): readonly MotorSample[] {
     const hero = frame().hero;
     const heroDx = euglena.x - hero.x;
     const heroDy = euglena.y - hero.y;
+    const visual = euglenaVisualBounds(euglena, params.euglenaScale ?? 1, 170);
     samples.push({
       t,
       x: euglena.x,
@@ -151,6 +183,10 @@ function simulateAllAquariumMotorOn(seconds = 90): readonly MotorSample[] {
       photoTargetAge: euglena.photoTargetAge,
       heroDistance: Math.hypot(heroDx, heroDy) / hero.radius,
       heroBearing: Math.atan2(heroDy, heroDx),
+      visualMinX: visual.minX,
+      visualMaxX: visual.maxX,
+      visualMinY: visual.minY,
+      visualMaxY: visual.maxY,
     });
     previous = euglena;
   }
@@ -199,6 +235,9 @@ function summarizeMotorSamples(samples: readonly MotorSample[]) {
   const edgeDwellSeconds = maxConsecutiveSeconds(samples, (sample) => (
     sample.x < 55 || sample.x > 285 || sample.y < 32 || sample.y > 138
   ));
+  const visualEdgeDwellSeconds = maxConsecutiveSeconds(samples, (sample) => (
+    sample.visualMinX < 14 || sample.visualMaxX > 326 || sample.visualMinY < 14 || sample.visualMaxY > 156
+  ));
   const stillRunSeconds = maxConsecutiveSeconds(samples, (sample) => sample.speed < 0.5 && sample.phase !== "photoCheck");
   const heroDistanceCv = coefficientOfVariation(samples.map((sample) => sample.heroDistance));
   const maxHeroCirculation10s = maxWindowMetric(samples, 10 * 60, (window) => {
@@ -222,6 +261,7 @@ function summarizeMotorSamples(samples: readonly MotorSample[]) {
     speedP10: percentile(speeds, 0.10),
     speedP90: percentile(speeds, 0.90),
     edgeDwellSeconds,
+    visualEdgeDwellSeconds,
     stillRunSeconds,
     pathPerHeadingRad: path / Math.max(1e-9, headingAbs),
     dominantLaneRatio: Math.max(0, ...laneBins.values()) / Math.max(1, samples.length),
@@ -453,7 +493,8 @@ describe("all_aquarium update oracle", () => {
     expect(summary.medianCommitTurnDeg, "calm motor-on median commit turn should stay in a biological 25–60° band").toBeLessThanOrEqual(60);
     expect(summary.p90CommitTurnDeg, "calm motor-on p90 commit turn should avoid hard reversals").toBeLessThan(110);
     expect(summary.speedP90 - summary.speedP10, "motor-on Euglena should have visible speed variance").toBeGreaterThan(0.5);
-    expect(summary.edgeDwellSeconds, "motor-on Euglena should not dwell at any edge for more than 2s").toBeLessThan(2);
+    expect(summary.edgeDwellSeconds, "motor-on Euglena centroid should not dwell near any edge for more than 2s").toBeLessThan(2);
+    expect(summary.visualEdgeDwellSeconds, "motor-on Euglena body+flagellum should not dwell at any visual edge for more than 2s").toBeLessThan(2);
     expect(summary.stillRunSeconds, "motor-on Euglena should not be still in run/recover/turn phases for more than 0.5s").toBeLessThan(0.5);
   });
 

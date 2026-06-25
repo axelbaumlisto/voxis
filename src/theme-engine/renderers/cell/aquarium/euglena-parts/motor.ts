@@ -100,8 +100,8 @@ function runIntentHeading(context: EuglenaMotorContext, stimulus: number, photoA
   if (context.heroPressure || context.obstaclePressure || context.hazardPressure) return base;
   if (finiteOr(context.safetyPressure, 0) > 0.15) return base;
   const lowDrive = clamp01((PHOTO_PREFERRED_STIMULUS - stimulus) / PHOTO_PREFERRED_STIMULUS) * (1 - 0.45 * clamp01(photoAdapt));
-  if (lowDrive <= 0) return base;
-  return wrapPi(base + wrapPi(bearing - base) * 0.18 * lowDrive);
+  const comfortDrive = 0.80;
+  return wrapPi(base + wrapPi(bearing - base) * (comfortDrive + 0.18 * lowDrive));
 }
 
 function nextIntentHeading(context: EuglenaMotorContext, phaseIndex: number, photoAdapt: number): number {
