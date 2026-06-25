@@ -118,21 +118,27 @@ const EXPECTED_DRIFTING_CONTOUR_PARAMS = {
   enableInteriorField: true,
   cyclosisPeriod: 65,
   enableAquarium: true,
-  aquariumSeed: 17,
+  aquariumSeed: 2,
   aquariumAlpha: 0.68,
   aquariumActivityBoost: 1,
   diatomCount: 0,
   diatomAlpha: 0.16,
   diatomDriftSpeed: 0.35,
   euglenaCount: 1,
-  euglenaSpeed: 0.2,
-  euglenaSpeedActive: 1.5,
-  euglenaScale: 2.8,
-  euglenaGravitaxis: 0.2,
-  euglenaPhototaxis: 0.6,
-  euglenaRotDiffusion: 0.12,
+  euglenaSpeed: 0.25,
+  euglenaSpeedActive: 0.5,
+  euglenaScale: 2.4,
+  euglenaFlagellumRateScale: 0.45,
+  euglenaGravitaxis: 0.01,
+  euglenaPhototaxis: 0,
+  euglenaPhotoIntent: 0.55,
+  euglenaMotorEnabled: true,
+  euglenaLoiter: 0,
+  euglenaWake: 0,
+  euglenaRotDiffusion: 0,
   vorticellaCount: 1,
   vorticellaScale: 2.6,
+  vorticellaAlongFrac: 0.35,
   vorticellaContractRate: 1.2,
 } as const;
 
@@ -154,6 +160,7 @@ const EXPECTED_DUO_AQUARIUM_PARAMS = {
   euglenaRotDiffusion: 0,
   vorticellaCount: 0,
   vorticellaScale: undefined,
+  vorticellaAlongFrac: undefined,
   vorticellaContractRate: undefined,
 } as const;
 
@@ -318,8 +325,21 @@ describe("paramecium theme merged params parity", () => {
     await expect(mountTheme("duo_aquarium")).resolves.toEqual(EXPECTED_DUO_AQUARIUM_PARAMS);
   });
 
-  it("keeps user params last so overrides win", async () => {
-    await expect(mountTheme("drifting_contour", { euglenaScale: 99, fillAlpha: 0.99 })).resolves.toMatchObject({
+  it("keeps user params last so drifting_contour overrides can disable the motor", async () => {
+    await expect(mountTheme("drifting_contour", {
+      euglenaMotorEnabled: false,
+      euglenaPhototaxis: 0.7,
+      euglenaRotDiffusion: 0.2,
+      euglenaLoiter: 1.1,
+      euglenaWake: 10,
+      euglenaScale: 99,
+      fillAlpha: 0.99,
+    })).resolves.toMatchObject({
+      euglenaMotorEnabled: false,
+      euglenaPhototaxis: 0.7,
+      euglenaRotDiffusion: 0.2,
+      euglenaLoiter: 1.1,
+      euglenaWake: 10,
       euglenaScale: 99,
       fillAlpha: 0.99,
     });
