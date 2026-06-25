@@ -450,6 +450,8 @@ export interface CellParams {
   euglenaPhototaxis?: number;
   /** Euglena deterministic seek/adapt/retarget light-response weight (0 = off). */
   euglenaPhotoIntent?: number;
+  /** Default-off gate for the scoped Euglena motor state machine. */
+  euglenaMotorEnabled?: boolean;
   /** Euglena same-species soft separation weight (0 = off). */
   euglenaSeparation?: number;
   /** Euglena Paramecium standoff/loiter spring override. Undefined = species default. */

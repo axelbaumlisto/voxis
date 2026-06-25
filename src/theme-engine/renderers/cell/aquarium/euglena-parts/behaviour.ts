@@ -4,6 +4,7 @@ import type { AquariumFrame, AquariumParamsView, EuglenaState } from "../types";
 import { mix32, noise2D, seededUnit } from "../seeds";
 import { TAU, clamp, clamp01, finite, finiteOr, wrapUnit } from "../util";
 import { euglenaDisplayLength } from "./pose";
+import { advanceEuglenaMotor } from "./motor";
 import {
   DIDINIUM_HAZARD_WEIGHT,
   EUGLENA_STEER,
@@ -84,6 +85,13 @@ const TUMBLE_RATE_MAX = 0.16;       // fast end: ~6.25s min cycle
 const PHOTO_TARGET_REACHED_PX = 30; // retarget before a light run degenerates into edge waiting
 const PHOTO_TARGET_MAX_SECONDS = 11; // escape local bowls instead of orbiting a waypoint
 
+function withoutPhotoTargetState(cell: EuglenaState): EuglenaState {
+  const next = { ...cell };
+  delete next.photoTargetIndex;
+  delete next.photoTargetAge;
+  return next;
+}
+
 export const EUGLENA_RELEVANT_FIELDS: ReadonlySet<FieldKind> = new Set(["obstacle", "wake", "motile"]);
 
 export function euglenaContribute(cell: EuglenaState, idx: number, scale = 1): FieldContribution[] {
@@ -120,6 +128,7 @@ export function updateEuglena(
   const steer = view.euglena.steer ? { ...EUGLENA_STEER, ...view.euglena.steer } : EUGLENA_STEER;
   const medium = view.medium ? { ...MEDIUM, ...view.medium } : MEDIUM;
   const drag = Math.max(0.1, finite(medium.viscosity, 1)); // fluid resistance (water = 1)
+  const motorEnabled = view.euglena.motorEnabled === true;
 
   return euglena.map((cell, idx) => {
     const selfId = sourceId("euglena", idx);
@@ -201,12 +210,14 @@ export function updateEuglena(
     if (heroParams && heroQ > 1e-4 && heroQ < STARTLE_TRIGGER_Q) startle = 1;
     if (finite(frame.startle, 0) > 0.5) startle = 1;
 
-    let priorityPressure = 0;
+    let safetyPressure: number;
+    let safetyHeading: number;
     const photoIntent = Math.max(0, finite(view.euglena.photoIntent, 0));
     let photoTargetIndex = Math.max(0, Math.floor(finiteOr(cell.photoTargetIndex, 0)));
     let photoTargetAge = Math.max(0, finiteOr(cell.photoTargetAge, 0)) + dt;
     let photoTargetX = Number.NaN;
     let photoTargetY = Number.NaN;
+    let motorOutput: ReturnType<typeof advanceEuglenaMotor> | undefined;
     // === priority-weighted steering (tunable interaction arbitration) ===
     // Every behaviour adds a world-space direction vector scaled by its weight.
     // `forward` carries the current heading (short-way turns, minimal reverse);
@@ -252,7 +263,7 @@ export function updateEuglena(
       // swimmer has a readable light transit, then adapts and turns away. It is
       // scoped by a flat theme param (default 0), so existing Euglena themes keep
       // the old steering unless they explicitly opt in.
-      if (photoIntent > 0 && safeWidth > 0 && safeHeight > 0) {
+      if (!motorEnabled && photoIntent > 0 && safeWidth > 0 && safeHeight > 0) {
         const route = [
           [0.20, 0.25], [0.84, 0.30], [0.78, 0.66],
           [0.28, 0.72], [0.36, 0.38], [0.70, 0.22],
@@ -339,8 +350,9 @@ export function updateEuglena(
         }
       }
       const pressure = Math.hypot(sx - ux * steer.forward, sy - uy * steer.forward);
-      priorityPressure = pressure;
-      if (pressure > 1e-6) {
+      safetyPressure = pressure;
+      safetyHeading = Math.atan2(sy, sx);
+      if (!motorEnabled && pressure > 1e-6) {
         const desired = Math.atan2(sy, sx);
         // gentle viscous (low-Reynolds) reorientation: exact exponential approach,
         // frame-rate independent. The medium viscosity damps the turn rate so the
@@ -352,9 +364,74 @@ export function updateEuglena(
       }
     }
 
-    const vPxEff = vPx * (1 + steer.startleDart * startle) / Math.max(0.1, finite(medium.translationDrag, 1)); // inert translation drag default
-    let nextX = px0 + ux * vPxEff * dt;
-    let nextY = py0 + uy * vPxEff * dt;
+    if (motorEnabled) {
+      const motorLook = L * 2.8;
+      const motorLeftGap = px0 - wallInset;
+      const motorRightGap = safeWidth - wallInset - px0;
+      const motorTopGap = py0 - wallInset;
+      const motorBottomGap = safeHeight - wallInset - py0;
+      const motorEdgePressure =
+        motorLeftGap < motorLook
+        || motorRightGap < motorLook
+        || motorTopGap < motorLook
+        || motorBottomGap < motorLook;
+      const motorBlockLook = L;
+      const motorBlockX = (motorLeftGap < motorBlockLook ? 1 - motorLeftGap / motorBlockLook : 0)
+        - (motorRightGap < motorBlockLook ? 1 - motorRightGap / motorBlockLook : 0);
+      const motorBlockY = (motorTopGap < motorBlockLook ? 1 - motorTopGap / motorBlockLook : 0)
+        - (motorBottomGap < motorBlockLook ? 1 - motorBottomGap / motorBlockLook : 0);
+      const motorEdgeBlock = Math.hypot(motorBlockX, motorBlockY) > 1e-6;
+      const lightDx = safeWidth - px0;
+      const lightDy = safeHeight / 2 - py0;
+      const lightDist = Math.hypot(lightDx, lightDy);
+      const sensoryStimulus = clamp01(finite(frame.activity, 0) + 0.5 * finite(frame.audioLevel, 0) + 0.18 * photoIntent);
+      const heroMotorPressure = heroParams !== null && heroQ < 1.12;
+      const didiniumHazardPressure = (didiniumHazards ?? []).some((hazard) => {
+        const hdx = px0 - finite(hazard.x, 0);
+        const hdy = py0 - finite(hazard.y, 0);
+        const hazardRadius = Math.max(0, finiteOr(hazard.radius, L * 0.35));
+        return Math.hypot(hdx, hdy) < L * 0.65 + hazardRadius;
+      });
+      motorOutput = advanceEuglenaMotor(cell, {
+        dt,
+        currentHeading: heading,
+        noiseSeed,
+        rollPhase: finite(cell.rollPhase, 0),
+        activity: finite(frame.activity, 0),
+        audioLevel: finite(frame.audioLevel, 0),
+        stimulus: sensoryStimulus,
+        stimulusBearing: lightDist > 1e-6 ? Math.atan2(lightDy, lightDx) : undefined,
+        edgePressure: motorEdgePressure,
+        edgeBearing: motorEdgeBlock ? Math.atan2(motorBlockY, motorBlockX) : undefined,
+        heroPressure: heroMotorPressure,
+        obstaclePressure: safetyPressure > 0.65,
+        hazardPressure: didiniumHazardPressure,
+        safetyPressure,
+      });
+      if (motorOutput.phase === "run") {
+        heading += wrapPi(motorOutput.intentHeading - heading) * (1 - Math.exp(-0.85 * dt));
+      } else if (motorOutput.phase === "commitTurn") {
+        heading = motorOutput.turnFrom + wrapPi(motorOutput.turnTo - motorOutput.turnFrom) * clamp01(motorOutput.turnProgress);
+      } else if (motorOutput.phase === "recover") {
+        heading = motorOutput.intentHeading;
+      }
+      if (safetyPressure > 0.70) {
+        const turnK = (0.55 + 1.05 * Math.min(1, safetyPressure)) / drag;
+        heading += wrapPi(safetyHeading - heading) * (1 - Math.exp(-turnK * dt));
+      }
+      ux = Math.cos(heading);
+      uy = Math.sin(heading);
+    }
+
+    const motorSpeedMul = motorOutput?.speedMul ?? 1;
+    const vPxEff = vPx * motorSpeedMul * (1 + steer.startleDart * startle) / Math.max(0.1, finite(medium.translationDrag, 1)); // inert translation drag default
+    const helicalDrift = motorEnabled
+      ? Math.sin(TAU * (wrapUnit(finite(cell.rollPhase, 0)) + 0.17 * Math.sin(TAU * wrapUnit(finiteOr(cell.metabolyPhase, 0)))))
+        * Math.min(0.16 * L, Math.max(0, vPxEff) * 0.18)
+        * (0.45 + 0.55 * clamp01(motorOutput?.speedMul ?? 1))
+      : 0;
+    let nextX = px0 + (ux * vPxEff - uy * helicalDrift) * dt;
+    let nextY = py0 + (uy * vPxEff + ux * helicalDrift) * dt;
 
     // hydrodynamic drafting: when the euglena sits in the hero's wake, the
     // hero's swimming current advects it along the hero heading (the two drift
@@ -410,7 +487,12 @@ export function updateEuglena(
       }
     }
 
-    const rollDelta = Math.max(0, finite(cell.rollRate, 0)) * act * dt;
+    const motorScanCue = clamp01(finiteOr(motorOutput?.scanCue, 0));
+    const motorMetabolyCue = clamp01(finiteOr(motorOutput?.metabolyCue, 0));
+    const motorRollCue = motorEnabled ? 1 + 0.18 * motorScanCue : 1;
+    const motorMetabolyRateCue = motorEnabled ? 1 + 0.55 * motorMetabolyCue : 1;
+    const motorMetabolyPhaseCue = motorEnabled && dt > 0 ? 0.012 * motorMetabolyCue * Math.sin(TAU * wrapUnit(finite(cell.rollPhase, 0))) : 0;
+    const rollDelta = Math.max(0, finite(cell.rollRate, 0)) * act * motorRollCue * dt;
 
     // Discrete beat-switch tumble (run-and-tumble), NOT Brownian diffusion.
     // The existing burstPhase gate still triggers the event, but each cycle uses
@@ -427,8 +509,8 @@ export function updateEuglena(
     const effectiveBurstRate = burstBase > 0
       ? clamp(burstBase / intervalScale, TUMBLE_RATE_MIN, TUMBLE_RATE_MAX)
       : 0;
-    const newBurstPhase = wrapUnit(bphase + effectiveBurstRate * act * dt);
-    const firedTumble = effectiveBurstRate > 0 && newBurstPhase < bphase;
+    const newBurstPhase = motorEnabled ? bphase : wrapUnit(bphase + effectiveBurstRate * act * dt);
+    const firedTumble = !motorEnabled && effectiveBurstRate > 0 && newBurstPhase < bphase;
     if (firedTumble) {
       tumbleIndex += 1;
       const sign = noise2D(noiseSeed ^ 0x7a3f4d21, tumbleIndex, 0.23) < 0.5 ? -1 : 1;
@@ -441,12 +523,12 @@ export function updateEuglena(
     const flick = (effectiveBurstRate > 0 && (bphase < TUMBLE_WINDOW || tumbleProgress < 1))
       ? Math.sin(Math.min(1, tumbleProgress) * Math.PI)
       : 0;
-    const beatBoost = 1 + 1.3 * Math.max(0, flick);
-    if (tumbleProgress < 1) {
+    const beatBoost = motorOutput?.beatMul ?? (1 + 1.3 * Math.max(0, flick));
+    if (!motorEnabled && tumbleProgress < 1) {
       const nextProgress = Math.min(1, tumbleProgress + dt / TUMBLE_SECONDS);
       // Keep priority steering intact: the tumble is a low-priority reorientation
       // and is skipped while strong wall/hero/startle pressure is active.
-      if (priorityPressure < 0.9) {
+      if (safetyPressure < 0.9) {
         const turnK = 5.0 / drag; // ~1s smooth beat-switch reorientation
         heading += wrapPi(tumbleTo - heading) * (1 - Math.exp(-turnK * dt));
         if (nextProgress >= 1) heading = tumbleTo;
@@ -476,7 +558,7 @@ export function updateEuglena(
     if (clampedX >= maxX - 1e-6 && Math.cos(finalHeading) > 0) finalHeading = Math.atan2(Math.sin(finalHeading), -0.35);
     if (clampedY <= minY + 1e-6 && Math.sin(finalHeading) < 0) finalHeading = Math.atan2(0.35, Math.cos(finalHeading));
     if (clampedY >= maxY - 1e-6 && Math.sin(finalHeading) > 0) finalHeading = Math.atan2(-0.35, Math.cos(finalHeading));
-    if (photoIntent > 0) {
+    if (!motorEnabled && photoIntent > 0) {
       const reached = Number.isFinite(photoTargetX) && Number.isFinite(photoTargetY)
         && Math.hypot(clampedX - photoTargetX, clampedY - photoTargetY) < PHOTO_TARGET_REACHED_PX;
       const edgeBlocked = clampedX <= minX + 2 || clampedX >= maxX - 2;
@@ -486,22 +568,31 @@ export function updateEuglena(
       }
     }
     return {
-      ...cell,
+      ...(motorEnabled ? withoutPhotoTargetState(cell) : cell),
       x: clampedX,
       y: clampedY,
       phase: finalHeading,
       heading: finalHeading,
-      turnProgress: finiteOr(cell.turnProgress, 2),
-      turnFrom: finiteOr(cell.turnFrom, heading),
-      turnTo: finiteOr(cell.turnTo, heading),
+      turnProgress: motorOutput?.turnProgress ?? finiteOr(cell.turnProgress, 2),
+      turnFrom: motorOutput?.turnFrom ?? finiteOr(cell.turnFrom, heading),
+      turnTo: motorOutput?.turnTo ?? finiteOr(cell.turnTo, heading),
       tumbleIndex,
       tumbleFrom,
       tumbleTo,
       tumbleProgress,
       startle: startle * Math.exp(-dt / STARTLE_TAU),
-      ...(photoIntent > 0 ? { photoTargetIndex, photoTargetAge } : {}),
+      ...(!motorEnabled && photoIntent > 0 ? { photoTargetIndex, photoTargetAge } : {}),
+      ...(motorOutput ? {
+        motorPhase: motorOutput.phase,
+        motorAge: motorOutput.motorAge,
+        motorDuration: motorOutput.motorDuration,
+        motorIndex: motorOutput.motorIndex,
+        intentHeading: motorOutput.intentHeading,
+        photoAdapt: motorOutput.photoAdapt,
+        lastStimulus: motorOutput.lastStimulus,
+      } : {}),
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + rollDelta),
-      metabolyPhase: wrapUnit(finite(cell.metabolyPhase, 0) + Math.max(0, finite(cell.metabolyRate, 0)) * act * dt),
+      metabolyPhase: wrapUnit(finite(cell.metabolyPhase, 0) + Math.max(0, finite(cell.metabolyRate, 0)) * act * motorMetabolyRateCue * dt + motorMetabolyPhaseCue),
       flagellumPhase: wrapUnit(finite(cell.flagellumPhase, 0) + fEff * dt),
       cvPhase: wrapUnit(finiteOr(cell.cvPhase, 0) + Math.max(0, finiteOr(cell.cvRate, 0)) * act * dt),
       burstPhase: newBurstPhase,

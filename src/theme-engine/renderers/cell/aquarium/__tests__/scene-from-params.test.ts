@@ -189,6 +189,7 @@ describe("sceneFromParams", () => {
             flagellumRateScale: 1,
             hueOffset: 42,
             photoIntent: 0,
+            motorEnabled: false,
             steer: {
               gravitaxis: 0.2,
               phototaxis: 0.6,
@@ -227,6 +228,7 @@ describe("sceneFromParams", () => {
             flagellumRateScale: 1,
             hueOffset: 42,
             photoIntent: 0,
+            motorEnabled: false,
             steer: undefined,
             medium: undefined,
             seed: 17,

@@ -44,6 +44,7 @@ export interface AquariumParamsView {
     readonly flagellumRateScale: number;
     readonly hueOffset: number;
     readonly photoIntent: number;
+    readonly motorEnabled: boolean;
     readonly steer?: Partial<EuglenaSteer>;
   };
   readonly vorticella: {
@@ -109,6 +110,13 @@ export interface EuglenaState extends AquariumSeedPoint {
   readonly photoTargetAge?: number;
   /** Stable per-cell deterministic noise key for future stochastic behaviours. */
   readonly noiseSeed?: number;
+  readonly motorPhase?: "run" | "photoCheck" | "commitTurn" | "recover";
+  readonly motorAge?: number;
+  readonly motorDuration?: number;
+  readonly motorIndex?: number;
+  readonly intentHeading?: number;
+  readonly photoAdapt?: number;
+  readonly lastStimulus?: number;
 }
 
 export interface VorticellaState extends AquariumSeedPoint {

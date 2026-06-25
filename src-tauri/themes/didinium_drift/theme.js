@@ -1550,6 +1550,7 @@ var CELL_DEFAULTS = {
   euglenaGravitaxis: 0,
   euglenaPhototaxis: 0,
   euglenaPhotoIntent: 0,
+  euglenaMotorEnabled: false,
   euglenaSeparation: 0,
   euglenaRotDiffusion: 0,
   vorticellaCount: 0,
@@ -1697,6 +1698,7 @@ function aquariumParamsView(params) {
       flagellumRateScale: nonNegative(params.euglenaFlagellumRateScale, 1),
       hueOffset: finiteOr(params.euglenaHueOffset, 42),
       photoIntent: nonNegative(params.euglenaPhotoIntent, 0),
+      motorEnabled: params.euglenaMotorEnabled === true,
       steer: euglenaSteerOverride(params)
     },
     medium: mediumOverride(params),
@@ -2963,6 +2965,242 @@ function euglenaPose(rollPhase, metabolyPhase, options = {}) {
   };
 }
 
+// src/theme-engine/renderers/cell/aquarium/euglena-parts/motor.ts
+var RUN_MIN_SECONDS = 6;
+var RUN_MAX_SECONDS = 22;
+var PHOTO_CHECK_MIN_SECONDS = 0.4;
+var PHOTO_CHECK_MAX_SECONDS = 0.9;
+var COMMIT_TURN_MIN_SECONDS = 0.35;
+var COMMIT_TURN_MAX_SECONDS = 0.8;
+var RECOVER_MIN_SECONDS = 0.6;
+var RECOVER_MAX_SECONDS = 1.4;
+var PHOTO_PREFERRED_STIMULUS = 0.58;
+var PHOTO_STRESS_STIMULUS = 0.78;
+function unit(seed, index, salt) {
+  return mix32((seed | 0) ^ Math.imul((index | 0) + 1, 2654435761) ^ (salt | 0)) / 4294967296;
+}
+function wrapPi2(angle) {
+  return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+function durationFor(phase, seed, index) {
+  const u = unit(seed, index, 1831565813);
+  switch (phase) {
+    case "run": {
+      return RUN_MIN_SECONDS + (RUN_MAX_SECONDS - RUN_MIN_SECONDS) * Math.pow(u, 1.35);
+    }
+    case "photoCheck":
+      return PHOTO_CHECK_MIN_SECONDS + (PHOTO_CHECK_MAX_SECONDS - PHOTO_CHECK_MIN_SECONDS) * u;
+    case "commitTurn":
+      return COMMIT_TURN_MIN_SECONDS + (COMMIT_TURN_MAX_SECONDS - COMMIT_TURN_MIN_SECONDS) * u;
+    case "recover":
+      return RECOVER_MIN_SECONDS + (RECOVER_MAX_SECONDS - RECOVER_MIN_SECONDS) * u;
+  }
+}
+function stimulusFrom(context) {
+  const explicit = context.stimulus;
+  if (explicit !== undefined)
+    return clamp01(finite(explicit, 0));
+  return clamp01(finiteOr(context.activity, 0) + 0.5 * finiteOr(context.audioLevel, 0));
+}
+function sensoryPressureFor(stimulus, stimulusStep, photoAdapt) {
+  const stepDrive = clamp01(stimulusStep / 0.24);
+  const highDrive = clamp01((stimulus - PHOTO_STRESS_STIMULUS) / (1 - PHOTO_STRESS_STIMULUS));
+  return Math.max(stepDrive, highDrive) * (1 - 0.78 * clamp01(photoAdapt));
+}
+function nextPhaseAfterRun(stimulusPressure, pressure) {
+  return stimulusPressure > 0.3 || pressure > 0.45 ? "photoCheck" : "commitTurn";
+}
+function runIntentHeading(context, stimulus, photoAdapt) {
+  const base = finite(context.currentHeading, 0);
+  if (context.edgePressure && context.edgeBearing !== undefined && Number.isFinite(context.edgeBearing)) {
+    const inwardDelta = Math.max(-0.58, Math.min(0.58, wrapPi2(context.edgeBearing - base)));
+    return wrapPi2(base + inwardDelta);
+  }
+  const bearing = context.stimulusBearing;
+  if (bearing === undefined || !Number.isFinite(bearing))
+    return base;
+  if (context.heroPressure || context.obstaclePressure || context.hazardPressure)
+    return base;
+  if (finiteOr(context.safetyPressure, 0) > 0.15)
+    return base;
+  const lowDrive = clamp01((PHOTO_PREFERRED_STIMULUS - stimulus) / PHOTO_PREFERRED_STIMULUS) * (1 - 0.45 * clamp01(photoAdapt));
+  if (lowDrive <= 0)
+    return base;
+  return wrapPi2(base + wrapPi2(bearing - base) * 0.18 * lowDrive);
+}
+function nextIntentHeading(context, phaseIndex, photoAdapt) {
+  const seed = context.noiseSeed | 0;
+  const base = finite(context.currentHeading, 0);
+  const bearing = context.stimulusBearing;
+  const hasBearing = bearing !== undefined && Number.isFinite(bearing);
+  const signed = unit(seed, phaseIndex, 461845907) < 0.5 ? -1 : 1;
+  const rawAmplitude = 0.34 + unit(seed, phaseIndex, 2246822507) * 0.62;
+  const stimulusAmplitude = rawAmplitude * (1 + 0.32 * clamp01(finiteOr(context.stimulus, 0) - PHOTO_PREFERRED_STIMULUS));
+  const amplitude = stimulusAmplitude * (1 - 0.55 * clamp01(photoAdapt));
+  const safety = clamp01(finiteOr(context.safetyPressure, 0));
+  if (context.edgePressure && context.edgeBearing !== undefined && Number.isFinite(context.edgeBearing)) {
+    const inward = finiteOr(context.edgeBearing, base);
+    const inwardDelta = Math.max(-0.95, Math.min(0.95, wrapPi2(inward - base)));
+    const wobble = signed * Math.min(0.18, rawAmplitude * 0.12) * (1 - 0.35 * safety);
+    return wrapPi2(base + inwardDelta + wobble);
+  }
+  if (context.hazardPressure || safety > 0.7)
+    return wrapPi2(base + signed * Math.min(1.25, amplitude * 1.35));
+  if (hasBearing && !context.edgePressure && !context.heroPressure && !context.obstaclePressure) {
+    const target = finiteOr(bearing, base);
+    const bias = wrapPi2(target - base) * (0.12 + 0.26 * (1 - photoAdapt));
+    return wrapPi2(base + bias + signed * amplitude * 0.5);
+  }
+  return wrapPi2(base + signed * amplitude);
+}
+function outputFor(phase, age, duration, index, intentHeading, turnFrom, photoAdapt, lastStimulus) {
+  const progress = duration > 0 ? clamp01(age / duration) : 1;
+  switch (phase) {
+    case "run":
+      return {
+        phase,
+        motorAge: age,
+        motorDuration: duration,
+        motorIndex: index,
+        intentHeading,
+        photoAdapt,
+        lastStimulus,
+        speedMul: 1,
+        beatMul: 1,
+        turnProgress: 0,
+        turnFrom,
+        turnTo: intentHeading
+      };
+    case "photoCheck":
+      return {
+        phase,
+        motorAge: age,
+        motorDuration: duration,
+        motorIndex: index,
+        intentHeading,
+        photoAdapt,
+        lastStimulus,
+        speedMul: 0.62,
+        beatMul: 1.06,
+        turnProgress: 0,
+        turnFrom,
+        turnTo: intentHeading,
+        scanCue: Math.sin(progress * Math.PI),
+        metabolyCue: 0.08
+      };
+    case "commitTurn":
+      return {
+        phase,
+        motorAge: age,
+        motorDuration: duration,
+        motorIndex: index,
+        intentHeading,
+        photoAdapt,
+        lastStimulus,
+        speedMul: 0.74,
+        beatMul: 1.32,
+        turnProgress: progress,
+        turnFrom,
+        turnTo: intentHeading,
+        metabolyCue: 0.28
+      };
+    case "recover":
+      return {
+        phase,
+        motorAge: age,
+        motorDuration: duration,
+        motorIndex: index,
+        intentHeading,
+        photoAdapt,
+        lastStimulus,
+        speedMul: 0.65 + 0.35 * progress,
+        beatMul: 1.2 - 0.2 * progress,
+        turnProgress: 1,
+        turnFrom,
+        turnTo: intentHeading,
+        metabolyCue: 0.15 * (1 - progress)
+      };
+  }
+}
+function advanceEuglenaMotor(cell, context) {
+  const dt = Math.max(0, finite(context.dt, 0));
+  const seed = context.noiseSeed | 0;
+  const stimulus = stimulusFrom(context);
+  const lastStimulus0 = clamp01(finiteOr(cell.lastStimulus, stimulus));
+  const phase0 = cell.motorPhase ?? "run";
+  const index0 = Math.max(0, Math.floor(finiteOr(cell.motorIndex, 0)));
+  const duration0 = Math.max(0.001, finiteOr(cell.motorDuration, durationFor(phase0, seed, index0)));
+  const age0 = Math.max(0, finiteOr(cell.motorAge, 0));
+  const currentHeading = finite(context.currentHeading, finiteOr(cell.heading, 0));
+  const intentFallback = phase0 === "commitTurn" || phase0 === "recover" ? finiteOr(cell.turnTo, currentHeading) : currentHeading;
+  const intent0 = finiteOr(cell.intentHeading, intentFallback);
+  const turnFrom0 = finiteOr(cell.turnFrom, currentHeading);
+  const stimulusStep0 = Math.max(0, stimulus - lastStimulus0);
+  const pressure = context.edgePressure || context.heroPressure || context.obstaclePressure || context.hazardPressure ? 1 : clamp01(finiteOr(context.safetyPressure, 0));
+  const recoveryTau = 55;
+  const adaptationTau = 28;
+  const photoAdapt0 = clamp01(finiteOr(cell.photoAdapt, 0));
+  const targetAdapt = Math.max(clamp01(stimulusStep0 / 0.3), clamp01((stimulus - PHOTO_PREFERRED_STIMULUS) / (1 - PHOTO_PREFERRED_STIMULUS)));
+  const adaptAlpha = dt <= 0 ? 0 : 1 - Math.exp(-dt / (targetAdapt > photoAdapt0 ? adaptationTau : recoveryTau));
+  const photoAdapt = clamp01(photoAdapt0 + (targetAdapt - photoAdapt0) * adaptAlpha);
+  if (dt === 0) {
+    return outputFor(phase0, age0, duration0, index0, intent0, turnFrom0, photoAdapt0, lastStimulus0);
+  }
+  let phase = phase0;
+  let index = index0;
+  let duration = duration0;
+  let age = age0 + dt;
+  let intentHeading = intent0;
+  let turnFrom = turnFrom0;
+  const stimulusStep = Math.max(0, stimulus - lastStimulus0);
+  const stimulusPressure = sensoryPressureFor(stimulus, stimulusStep, photoAdapt);
+  const hasEdgeBearing = context.edgePressure && context.edgeBearing !== undefined && Number.isFinite(context.edgeBearing);
+  if (!hasEdgeBearing && phase === "run" && stimulusPressure > 0.42) {
+    const earlyAge = duration * (1 - 0.38 * stimulusPressure);
+    if (age >= Math.max(0.35, earlyAge)) {
+      phase = "photoCheck";
+      index += 1;
+      duration = durationFor(phase, seed, index);
+      age = Math.min(dt, duration);
+    }
+  }
+  if (hasEdgeBearing && phase === "photoCheck" && age > Math.min(duration, PHOTO_CHECK_MIN_SECONDS)) {
+    age = duration;
+  }
+  for (let guard = 0;guard < 8 && age >= duration; guard++) {
+    age -= duration;
+    index += 1;
+    if (phase === "run") {
+      phase = nextPhaseAfterRun(stimulusPressure, pressure);
+      duration = durationFor(phase, seed, index);
+      if (phase === "commitTurn") {
+        turnFrom = currentHeading;
+        intentHeading = nextIntentHeading(context, index, photoAdapt);
+      }
+    } else if (phase === "photoCheck") {
+      phase = "commitTurn";
+      duration = durationFor(phase, seed, index);
+      turnFrom = currentHeading;
+      intentHeading = nextIntentHeading(context, index, photoAdapt);
+    } else if (phase === "commitTurn") {
+      phase = "recover";
+      duration = durationFor(phase, seed, index);
+      turnFrom = intentHeading;
+    } else {
+      phase = "run";
+      duration = durationFor(phase, seed, index);
+      turnFrom = intentHeading;
+    }
+  }
+  if (age >= duration)
+    age = duration;
+  if (phase === "run") {
+    intentHeading = runIntentHeading(context, stimulus, photoAdapt);
+    turnFrom = currentHeading;
+  }
+  return outputFor(phase, age, duration, index, intentHeading, turnFrom, photoAdapt, stimulus);
+}
+
 // src/theme-engine/renderers/cell/aquarium/euglena-parts/steering.ts
 var EUGLENA_STEER = {
   forward: 1,
@@ -3053,6 +3291,12 @@ var TUMBLE_RATE_MIN = 0.045;
 var TUMBLE_RATE_MAX = 0.16;
 var PHOTO_TARGET_REACHED_PX = 30;
 var PHOTO_TARGET_MAX_SECONDS = 11;
+function withoutPhotoTargetState(cell) {
+  const next = { ...cell };
+  delete next.photoTargetIndex;
+  delete next.photoTargetAge;
+  return next;
+}
 var EUGLENA_RELEVANT_FIELDS = new Set(["obstacle", "wake", "motile"]);
 function euglenaContribute(cell, idx, scale = 1) {
   const length = euglenaDisplayLength(finite(cell.size, 1), scale);
@@ -3084,11 +3328,12 @@ function updateEuglena(euglena, frame, view) {
   const steer = view.euglena.steer ? { ...EUGLENA_STEER, ...view.euglena.steer } : EUGLENA_STEER;
   const medium = view.medium ? { ...MEDIUM, ...view.medium } : MEDIUM;
   const drag = Math.max(0.1, finite(medium.viscosity, 1));
+  const motorEnabled = view.euglena.motorEnabled === true;
   return euglena.map((cell, idx) => {
     const selfId = sourceId("euglena", idx);
     const L = euglenaDisplayLength(finite(cell.size, 1), scale);
     let heading = finite(cell.heading, 0);
-    const wrapPi2 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    const wrapPi3 = (a) => Math.atan2(Math.sin(a), Math.cos(a));
     const noiseSeed = finiteOr(cell.noiseSeed, 0) | 0;
     const px0 = finite(cell.x, 0);
     const py0 = finite(cell.y, 0);
@@ -3146,12 +3391,14 @@ function updateEuglena(euglena, frame, view) {
       startle = 1;
     if (finite(frame.startle, 0) > 0.5)
       startle = 1;
-    let priorityPressure = 0;
+    let safetyPressure;
+    let safetyHeading;
     const photoIntent = Math.max(0, finite(view.euglena.photoIntent, 0));
     let photoTargetIndex = Math.max(0, Math.floor(finiteOr(cell.photoTargetIndex, 0)));
     let photoTargetAge = Math.max(0, finiteOr(cell.photoTargetAge, 0)) + dt;
     let photoTargetX = Number.NaN;
     let photoTargetY = Number.NaN;
+    let motorOutput;
     {
       let sx = ux * steer.forward;
       let sy = uy * steer.forward;
@@ -3183,7 +3430,7 @@ function updateEuglena(euglena, frame, view) {
         sx += ldx / ldist * photoW;
         sy += ldy / ldist * photoW;
       }
-      if (photoIntent > 0 && safeWidth > 0 && safeHeight > 0) {
+      if (!motorEnabled && photoIntent > 0 && safeWidth > 0 && safeHeight > 0) {
         const route = [
           [0.2, 0.25],
           [0.84, 0.3],
@@ -3262,18 +3509,73 @@ function updateEuglena(euglena, frame, view) {
         }
       }
       const pressure = Math.hypot(sx - ux * steer.forward, sy - uy * steer.forward);
-      priorityPressure = pressure;
-      if (pressure > 0.000001) {
+      safetyPressure = pressure;
+      safetyHeading = Math.atan2(sy, sx);
+      if (!motorEnabled && pressure > 0.000001) {
         const desired = Math.atan2(sy, sx);
         const turnK = (1 + 2.5 * Math.min(1, pressure)) / drag;
-        heading += wrapPi2(desired - heading) * (1 - Math.exp(-turnK * dt));
+        heading += wrapPi3(desired - heading) * (1 - Math.exp(-turnK * dt));
         ux = Math.cos(heading);
         uy = Math.sin(heading);
       }
     }
-    const vPxEff = vPx * (1 + steer.startleDart * startle) / Math.max(0.1, finite(medium.translationDrag, 1));
-    let nextX = px0 + ux * vPxEff * dt;
-    let nextY = py0 + uy * vPxEff * dt;
+    if (motorEnabled) {
+      const motorLook = L * 2.8;
+      const motorLeftGap = px0 - wallInset;
+      const motorRightGap = safeWidth - wallInset - px0;
+      const motorTopGap = py0 - wallInset;
+      const motorBottomGap = safeHeight - wallInset - py0;
+      const motorEdgePressure = motorLeftGap < motorLook || motorRightGap < motorLook || motorTopGap < motorLook || motorBottomGap < motorLook;
+      const motorBlockLook = L;
+      const motorBlockX = (motorLeftGap < motorBlockLook ? 1 - motorLeftGap / motorBlockLook : 0) - (motorRightGap < motorBlockLook ? 1 - motorRightGap / motorBlockLook : 0);
+      const motorBlockY = (motorTopGap < motorBlockLook ? 1 - motorTopGap / motorBlockLook : 0) - (motorBottomGap < motorBlockLook ? 1 - motorBottomGap / motorBlockLook : 0);
+      const motorEdgeBlock = Math.hypot(motorBlockX, motorBlockY) > 0.000001;
+      const lightDx = safeWidth - px0;
+      const lightDy = safeHeight / 2 - py0;
+      const lightDist = Math.hypot(lightDx, lightDy);
+      const sensoryStimulus = clamp01(finite(frame.activity, 0) + 0.5 * finite(frame.audioLevel, 0) + 0.18 * photoIntent);
+      const heroMotorPressure = heroParams !== null && heroQ < 1.12;
+      const didiniumHazardPressure = (didiniumHazards ?? []).some((hazard) => {
+        const hdx = px0 - finite(hazard.x, 0);
+        const hdy = py0 - finite(hazard.y, 0);
+        const hazardRadius = Math.max(0, finiteOr(hazard.radius, L * 0.35));
+        return Math.hypot(hdx, hdy) < L * 0.65 + hazardRadius;
+      });
+      motorOutput = advanceEuglenaMotor(cell, {
+        dt,
+        currentHeading: heading,
+        noiseSeed,
+        rollPhase: finite(cell.rollPhase, 0),
+        activity: finite(frame.activity, 0),
+        audioLevel: finite(frame.audioLevel, 0),
+        stimulus: sensoryStimulus,
+        stimulusBearing: lightDist > 0.000001 ? Math.atan2(lightDy, lightDx) : undefined,
+        edgePressure: motorEdgePressure,
+        edgeBearing: motorEdgeBlock ? Math.atan2(motorBlockY, motorBlockX) : undefined,
+        heroPressure: heroMotorPressure,
+        obstaclePressure: safetyPressure > 0.65,
+        hazardPressure: didiniumHazardPressure,
+        safetyPressure
+      });
+      if (motorOutput.phase === "run") {
+        heading += wrapPi3(motorOutput.intentHeading - heading) * (1 - Math.exp(-0.85 * dt));
+      } else if (motorOutput.phase === "commitTurn") {
+        heading = motorOutput.turnFrom + wrapPi3(motorOutput.turnTo - motorOutput.turnFrom) * clamp01(motorOutput.turnProgress);
+      } else if (motorOutput.phase === "recover") {
+        heading = motorOutput.intentHeading;
+      }
+      if (safetyPressure > 0.7) {
+        const turnK = (0.55 + 1.05 * Math.min(1, safetyPressure)) / drag;
+        heading += wrapPi3(safetyHeading - heading) * (1 - Math.exp(-turnK * dt));
+      }
+      ux = Math.cos(heading);
+      uy = Math.sin(heading);
+    }
+    const motorSpeedMul = motorOutput?.speedMul ?? 1;
+    const vPxEff = vPx * motorSpeedMul * (1 + steer.startleDart * startle) / Math.max(0.1, finite(medium.translationDrag, 1));
+    const helicalDrift = motorEnabled ? Math.sin(TAU2 * (wrapUnit(finite(cell.rollPhase, 0)) + 0.17 * Math.sin(TAU2 * wrapUnit(finiteOr(cell.metabolyPhase, 0))))) * Math.min(0.16 * L, Math.max(0, vPxEff) * 0.18) * (0.45 + 0.55 * clamp01(motorOutput?.speedMul ?? 1)) : 0;
+    let nextX = px0 + (ux * vPxEff - uy * helicalDrift) * dt;
+    let nextY = py0 + (uy * vPxEff + ux * helicalDrift) * dt;
     if (heroParams && (!field || socialWake) && heroQ < HERO_WAKE_RANGE && heroQ > 0.0001) {
       const hd = finiteOr(socialWake?.heading, heroParams.heading);
       const hdx = Math.cos(hd), hdy = Math.sin(hd);
@@ -3317,7 +3619,12 @@ function updateEuglena(euglena, frame, view) {
         }
       }
     }
-    const rollDelta = Math.max(0, finite(cell.rollRate, 0)) * act * dt;
+    const motorScanCue = clamp01(finiteOr(motorOutput?.scanCue, 0));
+    const motorMetabolyCue = clamp01(finiteOr(motorOutput?.metabolyCue, 0));
+    const motorRollCue = motorEnabled ? 1 + 0.18 * motorScanCue : 1;
+    const motorMetabolyRateCue = motorEnabled ? 1 + 0.55 * motorMetabolyCue : 1;
+    const motorMetabolyPhaseCue = motorEnabled && dt > 0 ? 0.012 * motorMetabolyCue * Math.sin(TAU2 * wrapUnit(finite(cell.rollPhase, 0))) : 0;
+    const rollDelta = Math.max(0, finite(cell.rollRate, 0)) * act * motorRollCue * dt;
     const bphase = wrapUnit(finiteOr(cell.burstPhase, 0));
     const burstBase = Math.max(0, finiteOr(cell.burstRate, 0));
     let tumbleIndex = Math.max(0, Math.floor(finiteOr(cell.tumbleIndex, 0)));
@@ -3327,8 +3634,8 @@ function updateEuglena(euglena, frame, view) {
     const runU = Math.max(0.02, noise2D2(noiseSeed ^ 1821285621, tumbleIndex + 0.17, 0.31));
     const intervalScale = clamp(Math.pow(runU, -0.85), 0.6, 3.6);
     const effectiveBurstRate = burstBase > 0 ? clamp(burstBase / intervalScale, TUMBLE_RATE_MIN, TUMBLE_RATE_MAX) : 0;
-    const newBurstPhase = wrapUnit(bphase + effectiveBurstRate * act * dt);
-    const firedTumble = effectiveBurstRate > 0 && newBurstPhase < bphase;
+    const newBurstPhase = motorEnabled ? bphase : wrapUnit(bphase + effectiveBurstRate * act * dt);
+    const firedTumble = !motorEnabled && effectiveBurstRate > 0 && newBurstPhase < bphase;
     if (firedTumble) {
       tumbleIndex += 1;
       const sign = noise2D2(noiseSeed ^ 2050968865, tumbleIndex, 0.23) < 0.5 ? -1 : 1;
@@ -3339,12 +3646,12 @@ function updateEuglena(euglena, frame, view) {
       tumbleProgress = 0;
     }
     const flick = effectiveBurstRate > 0 && (bphase < TUMBLE_WINDOW || tumbleProgress < 1) ? Math.sin(Math.min(1, tumbleProgress) * Math.PI) : 0;
-    const beatBoost = 1 + 1.3 * Math.max(0, flick);
-    if (tumbleProgress < 1) {
+    const beatBoost = motorOutput?.beatMul ?? 1 + 1.3 * Math.max(0, flick);
+    if (!motorEnabled && tumbleProgress < 1) {
       const nextProgress = Math.min(1, tumbleProgress + dt / TUMBLE_SECONDS);
-      if (priorityPressure < 0.9) {
+      if (safetyPressure < 0.9) {
         const turnK = 5 / drag;
-        heading += wrapPi2(tumbleTo - heading) * (1 - Math.exp(-turnK * dt));
+        heading += wrapPi3(tumbleTo - heading) * (1 - Math.exp(-turnK * dt));
         if (nextProgress >= 1)
           heading = tumbleTo;
       }
@@ -3372,7 +3679,7 @@ function updateEuglena(euglena, frame, view) {
       finalHeading = Math.atan2(0.35, Math.cos(finalHeading));
     if (clampedY >= maxY - 0.000001 && Math.sin(finalHeading) > 0)
       finalHeading = Math.atan2(-0.35, Math.cos(finalHeading));
-    if (photoIntent > 0) {
+    if (!motorEnabled && photoIntent > 0) {
       const reached = Number.isFinite(photoTargetX) && Number.isFinite(photoTargetY) && Math.hypot(clampedX - photoTargetX, clampedY - photoTargetY) < PHOTO_TARGET_REACHED_PX;
       const edgeBlocked = clampedX <= minX + 2 || clampedX >= maxX - 2;
       if (reached || edgeBlocked || photoTargetAge > PHOTO_TARGET_MAX_SECONDS) {
@@ -3381,22 +3688,31 @@ function updateEuglena(euglena, frame, view) {
       }
     }
     return {
-      ...cell,
+      ...motorEnabled ? withoutPhotoTargetState(cell) : cell,
       x: clampedX,
       y: clampedY,
       phase: finalHeading,
       heading: finalHeading,
-      turnProgress: finiteOr(cell.turnProgress, 2),
-      turnFrom: finiteOr(cell.turnFrom, heading),
-      turnTo: finiteOr(cell.turnTo, heading),
+      turnProgress: motorOutput?.turnProgress ?? finiteOr(cell.turnProgress, 2),
+      turnFrom: motorOutput?.turnFrom ?? finiteOr(cell.turnFrom, heading),
+      turnTo: motorOutput?.turnTo ?? finiteOr(cell.turnTo, heading),
       tumbleIndex,
       tumbleFrom,
       tumbleTo,
       tumbleProgress,
       startle: startle * Math.exp(-dt / STARTLE_TAU),
-      ...photoIntent > 0 ? { photoTargetIndex, photoTargetAge } : {},
+      ...!motorEnabled && photoIntent > 0 ? { photoTargetIndex, photoTargetAge } : {},
+      ...motorOutput ? {
+        motorPhase: motorOutput.phase,
+        motorAge: motorOutput.motorAge,
+        motorDuration: motorOutput.motorDuration,
+        motorIndex: motorOutput.motorIndex,
+        intentHeading: motorOutput.intentHeading,
+        photoAdapt: motorOutput.photoAdapt,
+        lastStimulus: motorOutput.lastStimulus
+      } : {},
       rollPhase: wrapUnit(finite(cell.rollPhase, 0) + rollDelta),
-      metabolyPhase: wrapUnit(finite(cell.metabolyPhase, 0) + Math.max(0, finite(cell.metabolyRate, 0)) * act * dt),
+      metabolyPhase: wrapUnit(finite(cell.metabolyPhase, 0) + Math.max(0, finite(cell.metabolyRate, 0)) * act * motorMetabolyRateCue * dt + motorMetabolyPhaseCue),
       flagellumPhase: wrapUnit(finite(cell.flagellumPhase, 0) + fEff * dt),
       cvPhase: wrapUnit(finiteOr(cell.cvPhase, 0) + Math.max(0, finiteOr(cell.cvRate, 0)) * act * dt),
       burstPhase: newBurstPhase
@@ -4285,7 +4601,7 @@ function drawVorticella(ctx, vorticella, frame, view) {
 }
 // src/theme-engine/renderers/cell/aquarium/registry.ts
 var ZERO_DIATOMS = { count: 0, alpha: 0, driftSpeed: 0 };
-var ZERO_EUGLENA = { count: 0, speed: 0, speedActive: 0, scale: 1, flagellumRateScale: 1, hueOffset: 42, photoIntent: 0 };
+var ZERO_EUGLENA = { count: 0, speed: 0, speedActive: 0, scale: 1, flagellumRateScale: 1, hueOffset: 42, photoIntent: 0, motorEnabled: false };
 var ZERO_VORTICELLA = { count: 0, contractRate: 0, scale: 1, alongFrac: 0.5 };
 var ZERO_DIDINIUM = { count: 0, speed: 0, speedActive: 0, scale: 1, hueOffset: 0 };
 function viewForDiatom(cfg) {

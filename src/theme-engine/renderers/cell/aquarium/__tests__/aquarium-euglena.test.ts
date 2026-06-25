@@ -5,7 +5,14 @@ import { buildField, sourceId } from "../interaction";
 import { drawAquariumBackground, seedAquarium, updateAquarium } from "../layer";
 import { aquariumParamsView } from "../params";
 import type { AquariumFrame, AquariumLayerState, EuglenaState } from "../types";
-import { EUGLENA_STEER, MEDIUM, euglenaDisplayLength, euglenaPose, updateEuglena } from "../euglena";
+import { EUGLENA_STEER, MEDIUM, advanceEuglenaMotor, euglenaDisplayLength, euglenaPose, updateEuglena } from "../euglena";
+
+type MotorCellParams = CellParams & { readonly euglenaMotorEnabled?: boolean };
+type MotorEuglenaState = EuglenaState & {
+  readonly motorPhase?: "run" | "photoCheck" | "commitTurn" | "recover";
+  readonly motorAge?: number;
+  readonly motorDuration?: number;
+};
 
 function frame(overrides: Partial<AquariumFrame> = {}): AquariumFrame {
   return {
@@ -44,6 +51,10 @@ describe("aquarium layer Phase 3 euglena", () => {
 
   function unitDelta(next: number, previous: number): number {
     return ((next - previous) % 1 + 1) % 1;
+  }
+
+  function wrapPi(angle: number): number {
+    return Math.atan2(Math.sin(angle), Math.cos(angle));
   }
 
   function euglenaPolyArea(metabolyPhase: number): number {
@@ -93,6 +104,23 @@ describe("aquarium layer Phase 3 euglena", () => {
     };
   }
 
+  function applyMotorOutput(cell: EuglenaState, output: ReturnType<typeof advanceEuglenaMotor>): EuglenaState {
+    return {
+      ...cell,
+      heading: output.intentHeading,
+      turnProgress: output.turnProgress,
+      turnFrom: output.turnFrom,
+      turnTo: output.turnTo,
+      motorPhase: output.phase,
+      motorAge: output.motorAge,
+      motorDuration: output.motorDuration,
+      motorIndex: output.motorIndex,
+      intentHeading: output.intentHeading,
+      photoAdapt: output.photoAdapt,
+      lastStimulus: output.lastStimulus,
+    };
+  }
+
   function inspectEuglenaDraw(scale: number): { readonly calls: readonly string[]; readonly state: AquariumLayerState } {
     const calls: string[] = [];
     const ctx = {
@@ -131,6 +159,257 @@ describe("aquarium layer Phase 3 euglena", () => {
     drawAquariumBackground(ctx, state, frame({ width: 172, height: 36, baseHue: 50 }), params);
     return { calls, state };
   }
+
+  describe("euglena motor helper", () => {
+    it("repeats the exact same output for the same input sequence", () => {
+      const run = () => {
+        let cell = testEuglena({ heading: 0.3, noiseSeed: 1234, motorPhase: "run", motorAge: 2.9, motorDuration: 3, lastStimulus: 0.1 });
+        const outputs: ReturnType<typeof advanceEuglenaMotor>[] = [];
+        for (const [dt, stimulus] of [[0.12, 0.9], [0.31, 0.9], [0.5, 0.55], [0.8, 0.3]] as const) {
+          const output = advanceEuglenaMotor(cell, {
+            dt,
+            currentHeading: cell.heading,
+            noiseSeed: 1234,
+            rollPhase: cell.rollPhase,
+            stimulus,
+            stimulusBearing: 1.1,
+          });
+          outputs.push(output);
+          cell = applyMotorOutput(cell, output);
+        }
+        return outputs;
+      };
+
+      expect(run()).toEqual(run());
+    });
+
+    it("dt=0 does not advance motor age or phase", () => {
+      const cell = testEuglena({
+        heading: 0.2,
+        noiseSeed: 99,
+        motorPhase: "photoCheck",
+        motorAge: 0.2,
+        motorDuration: 0.45,
+        motorIndex: 4,
+        intentHeading: 0.8,
+        photoAdapt: 0.35,
+        lastStimulus: 0.6,
+      });
+
+      const output = advanceEuglenaMotor(cell, {
+        dt: 0,
+        currentHeading: cell.heading,
+        noiseSeed: 99,
+        rollPhase: cell.rollPhase,
+        stimulus: 0.95,
+      });
+
+      expect(output.phase).toBe("photoCheck");
+      expect(output.motorAge).toBe(0.2);
+      expect(output.motorDuration).toBe(0.45);
+      expect(output.motorIndex).toBe(4);
+      expect(output.intentHeading).toBe(0.8);
+      expect(output.photoAdapt).toBe(0.35);
+      expect(output.lastStimulus).toBe(0.6);
+    });
+
+    it("different deterministic seeds change phase duration or intent heading", () => {
+      const cell = testEuglena({ heading: -0.1, motorPhase: "run", motorAge: 3, motorDuration: 3, lastStimulus: 0.4 });
+      const context = { dt: 0.01, currentHeading: cell.heading, rollPhase: cell.rollPhase, stimulus: 0.4 };
+      const a = advanceEuglenaMotor({ ...cell, noiseSeed: 111 }, { ...context, noiseSeed: 111 });
+      const b = advanceEuglenaMotor({ ...cell, noiseSeed: 222 }, { ...context, noiseSeed: 222 });
+
+      expect(a.phase).toBe("commitTurn");
+      expect(b.phase).toBe("commitTurn");
+      expect(a.motorDuration === b.motorDuration && a.intentHeading === b.intentHeading).toBe(false);
+    });
+
+    it("a stimulus jump can produce photoCheck, commitTurn, then recover", () => {
+      let cell = testEuglena({
+        heading: 0,
+        noiseSeed: 0xabc,
+        motorPhase: "run",
+        motorAge: 2.99,
+        motorDuration: 3,
+        motorIndex: 0,
+        lastStimulus: 0.05,
+      });
+      const baseContext = {
+        currentHeading: cell.heading,
+        noiseSeed: 0xabc,
+        rollPhase: cell.rollPhase,
+        stimulus: 0.85,
+        stimulusBearing: Math.PI / 3,
+      };
+
+      const photoCheck = advanceEuglenaMotor(cell, { ...baseContext, dt: 0.02 });
+      expect(photoCheck.phase).toBe("photoCheck");
+      expect(photoCheck.photoAdapt).toBeGreaterThan(0);
+      cell = applyMotorOutput(cell, photoCheck);
+
+      const commitTurn = advanceEuglenaMotor(cell, {
+        ...baseContext,
+        currentHeading: cell.heading,
+        dt: photoCheck.motorDuration - photoCheck.motorAge + 1e-6,
+      });
+      expect(commitTurn.phase).toBe("commitTurn");
+      expect(commitTurn.turnTo).not.toBe(commitTurn.turnFrom);
+      cell = applyMotorOutput(cell, commitTurn);
+
+      const recover = advanceEuglenaMotor(cell, {
+        ...baseContext,
+        currentHeading: cell.heading,
+        dt: commitTurn.motorDuration - commitTurn.motorAge + 1e-6,
+      });
+      expect(recover.phase).toBe("recover");
+      expect(recover.turnProgress).toBe(1);
+    });
+
+    it("sustained strong stimulus raises photoAdapt and weakens later turn output", () => {
+      const seed = 0x51ab1e;
+      let cell = testEuglena({
+        heading: 0,
+        noiseSeed: seed,
+        motorPhase: "run",
+        motorAge: 0,
+        motorDuration: 3,
+        motorIndex: 0,
+        photoAdapt: 0,
+        lastStimulus: 0.1,
+      });
+      const step = (dt: number, stimulus: number) => {
+        const output = advanceEuglenaMotor(cell, {
+          dt,
+          currentHeading: cell.heading,
+          noiseSeed: seed,
+          rollPhase: cell.rollPhase,
+          stimulus,
+          stimulusBearing: Math.PI / 2,
+        });
+        cell = applyMotorOutput(cell, output);
+        return output;
+      };
+
+      let highAdapt = 0;
+      for (let i = 0; i < Math.round(35 / 0.5); i++) highAdapt = step(0.5, 0.9).photoAdapt;
+      expect(highAdapt, "20–40s sustained stimulus should build adaptation").toBeGreaterThan(0.45);
+
+      for (let i = 0; i < Math.round(30 / 0.5); i++) step(0.5, 0.1);
+      const partialRecovery = cell.photoAdapt ?? 0;
+      expect(partialRecovery, "adaptation should start recovering when stimulus drops").toBeLessThan(highAdapt);
+      expect(partialRecovery, "recovery should be slower than the stimulus-on adaptation window").toBeGreaterThan(0.15);
+
+      for (let i = 0; i < Math.round(90 / 0.5); i++) step(0.5, 0.1);
+      expect(cell.photoAdapt ?? 0, "longer low-stimulus period should restore sensitivity").toBeLessThan(partialRecovery * 0.55);
+
+      const turnProbe = (photoAdapt: number) => advanceEuglenaMotor(testEuglena({
+        heading: 0,
+        noiseSeed: seed,
+        motorPhase: "photoCheck",
+        motorAge: 0.49,
+        motorDuration: 0.5,
+        motorIndex: 8,
+        photoAdapt,
+        lastStimulus: 0.9,
+      }), {
+        dt: 0.02,
+        currentHeading: 0,
+        noiseSeed: seed,
+        rollPhase: 0.25,
+        stimulus: 0.9,
+      });
+      const freshTurn = turnProbe(0);
+      const adaptedTurn = turnProbe(highAdapt);
+      const freshAmp = Math.abs(wrapPi(freshTurn.turnTo - freshTurn.turnFrom));
+      const adaptedAmp = Math.abs(wrapPi(adaptedTurn.turnTo - adaptedTurn.turnFrom));
+
+      expect(freshTurn.phase).toBe("commitTurn");
+      expect(adaptedTurn.phase).toBe("commitTurn");
+      expect(adaptedAmp, "adapted photo response should weaken committed turn output").toBeLessThan(freshAmp * 0.75);
+    });
+
+    it("phase output exposes Task6 speed/beat bands and recover ramps back to run", () => {
+      const base = testEuglena({ heading: 0, noiseSeed: 0x71a5, lastStimulus: 0.4, intentHeading: 0, turnFrom: 0, turnTo: Math.PI / 2 });
+      const output = (phase: MotorEuglenaState["motorPhase"], age: number, duration = 1) => advanceEuglenaMotor({
+        ...base,
+        motorPhase: phase,
+        motorAge: age,
+        motorDuration: duration,
+        motorIndex: 2,
+      }, {
+        dt: 0,
+        currentHeading: base.heading,
+        noiseSeed: 0x71a5,
+        rollPhase: base.rollPhase,
+        stimulus: 0.4,
+      });
+
+      const run = output("run", 0.2);
+      const photoCheck = output("photoCheck", 0.2);
+      const commitTurn = output("commitTurn", 0.2);
+      const recoverStart = output("recover", 0);
+      const recoverEnd = output("recover", 1);
+
+      expect(run.speedMul).toBe(1);
+      expect(run.beatMul).toBe(1);
+      expect(photoCheck.speedMul).toBeGreaterThanOrEqual(0.35);
+      expect(photoCheck.speedMul).toBeLessThanOrEqual(0.65);
+      expect(photoCheck.beatMul).toBeLessThan(1.25);
+      expect(photoCheck.metabolyCue ?? 0).toBeLessThanOrEqual(0.1);
+      expect(commitTurn.speedMul).toBeGreaterThanOrEqual(0.45);
+      expect(commitTurn.speedMul).toBeLessThanOrEqual(0.75);
+      expect(commitTurn.beatMul).toBeGreaterThanOrEqual(1.25);
+      expect(commitTurn.beatMul).toBeLessThanOrEqual(1.8);
+      expect(commitTurn.turnProgress).toBeGreaterThan(0);
+      expect(recoverStart.speedMul).toBeLessThan(recoverEnd.speedMul);
+      expect(recoverEnd.speedMul).toBe(1);
+      expect(recoverStart.beatMul).toBeGreaterThan(recoverEnd.beatMul);
+      expect(recoverEnd.beatMul).toBe(1);
+    });
+
+    it("stimulus jumps increase photoCheck/commitTurn transitions compared with steady low stimulus", () => {
+      const run = (jump: boolean) => {
+        const seed = 0xadc0de;
+        let cell = testEuglena({
+          heading: 0.1,
+          noiseSeed: seed,
+          motorPhase: "run",
+          motorAge: 0,
+          motorDuration: 3,
+          motorIndex: 0,
+          photoAdapt: 0,
+          lastStimulus: 0.2,
+        });
+        let previousPhase = cell.motorPhase;
+        let photoCheckEntries = 0;
+        let sensoryTurnEntries = 0;
+        for (let i = 1; i <= Math.round(8 / 0.25); i++) {
+          const stimulus = jump && i >= 4 ? 0.95 : 0.2;
+          const output = advanceEuglenaMotor(cell, {
+            dt: 0.25,
+            currentHeading: cell.heading,
+            noiseSeed: seed,
+            rollPhase: cell.rollPhase,
+            stimulus,
+            stimulusBearing: Math.PI / 2,
+          });
+          if (output.phase !== previousPhase && (output.phase === "photoCheck" || output.phase === "commitTurn")) {
+            sensoryTurnEntries += 1;
+            if (output.phase === "photoCheck") photoCheckEntries += 1;
+          }
+          previousPhase = output.phase;
+          cell = applyMotorOutput(cell, output);
+        }
+        return { photoCheckEntries, sensoryTurnEntries };
+      };
+
+      const low = run(false);
+      const jumped = run(true);
+
+      expect(jumped.photoCheckEntries, "step-up stimulus should add sensory photoCheck hesitation").toBeGreaterThan(low.photoCheckEntries);
+      expect(jumped.sensoryTurnEntries, "step-up stimulus should increase photoCheck/commitTurn occurrence").toBeGreaterThan(low.sensoryTurnEntries);
+    });
+  });
 
   it("updateAquarium moves euglena deterministically with dt-integrated phases", () => {
     const params: CellParams = {
@@ -275,6 +554,110 @@ describe("aquarium layer Phase 3 euglena", () => {
     expect(slow.x).toBeCloseTo(normal.x, 10);
     expect(slow.y).toBeCloseTo(normal.y, 10);
     expect(unitDelta(slow.flagellumPhase, initial[0].flagellumPhase)).toBeLessThan(unitDelta(normal.flagellumPhase, initial[0].flagellumPhase));
+  });
+
+  it("motor phase drives visible displacement without breaking the flagellum rate cap", () => {
+    const baseParams: MotorCellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 1,
+      euglenaSpeedActive: 1,
+      euglenaScale: 2,
+      aquariumActivityBoost: 1,
+      euglenaMotorEnabled: true,
+      euglenaFlagellumRateScale: 1,
+    };
+    const start = testEuglena({
+      x: 120,
+      y: 80,
+      heading: 0,
+      swimSpeed: 1,
+      rollRate: 0,
+      metabolyRate: 0,
+      flagellumPhase: 0.25,
+      flagellumRate: 30,
+      burstPhase: 0.4,
+      burstRate: 0,
+      tumbleProgress: 1,
+      startle: 0,
+      noiseSeed: 0x6eed,
+      lastStimulus: 0.4,
+    });
+    const runPhase = (phase: MotorEuglenaState["motorPhase"], scale = 1) => updateEuglena([{
+      ...start,
+      motorPhase: phase,
+      motorAge: 0.1,
+      motorDuration: 0.5,
+      motorIndex: 2,
+      intentHeading: 0,
+      turnFrom: 0,
+      turnTo: Math.PI / 2,
+    }], frame({ t: 0, dt: 0.1, width: 340, height: 170, activity: 0, audioLevel: 0 }), aquariumParamsView({
+      ...baseParams,
+      euglenaFlagellumRateScale: scale,
+    }))[0] as MotorEuglenaState;
+    const displacement = (cell: EuglenaState) => Math.hypot(cell.x - start.x, cell.y - start.y);
+
+    const run = runPhase("run");
+    const photoCheck = runPhase("photoCheck");
+    const commitTurn = runPhase("commitTurn");
+    const capped = runPhase("commitTurn", 10);
+
+    expect(displacement(run), "run speedMul should read as full cruise").toBeGreaterThan(displacement(commitTurn));
+    expect(displacement(commitTurn), "commitTurn should still translate more than a photoCheck hesitation").toBeGreaterThan(displacement(photoCheck));
+    expect(displacement(photoCheck) / displacement(run), "photoCheck speedMul should stay in the 0.35–0.65 visible hesitation band").toBeGreaterThanOrEqual(0.35);
+    expect(displacement(photoCheck) / displacement(run), "photoCheck speedMul should stay in the 0.35–0.65 visible hesitation band").toBeLessThanOrEqual(0.65);
+    expect(displacement(commitTurn) / displacement(run), "commitTurn speedMul should stay in the 0.45–0.75 reorientation band").toBeGreaterThanOrEqual(0.45);
+    expect(displacement(commitTurn) / displacement(run), "commitTurn speedMul should stay in the 0.45–0.75 reorientation band").toBeLessThanOrEqual(0.75);
+    expect(unitDelta(capped.flagellumPhase, start.flagellumPhase), "beatMul must still respect the global visual cap").toBeLessThanOrEqual(0.8 + 1e-12);
+  });
+
+  it("motor beatMul affects flagellum phase through the global visual scale", () => {
+    const baseParams: MotorCellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 0,
+      euglenaSpeedActive: 0,
+      aquariumActivityBoost: 1,
+      euglenaMotorEnabled: true,
+      euglenaFlagellumRateScale: 0.5,
+    };
+    const start = testEuglena({
+      x: 120,
+      y: 80,
+      heading: 0,
+      swimSpeed: 0,
+      flagellumPhase: 0.25,
+      flagellumRate: 8,
+      rollRate: 0,
+      metabolyRate: 0,
+      burstPhase: 0.4,
+      burstRate: 0,
+      tumbleProgress: 1,
+      startle: 0,
+      noiseSeed: 0x6eed,
+      lastStimulus: 0.4,
+    });
+    const step = (phase: MotorEuglenaState["motorPhase"]) => updateEuglena([{
+      ...start,
+      motorPhase: phase,
+      motorAge: 0.1,
+      motorDuration: 0.5,
+      motorIndex: 2,
+      intentHeading: 0,
+      turnFrom: 0,
+      turnTo: Math.PI / 2,
+    }], frame({ t: 0, dt: 0.1, width: 340, height: 170, activity: 0, audioLevel: 0 }), aquariumParamsView(baseParams))[0] as MotorEuglenaState;
+
+    const run = step("run");
+    const photoCheck = step("photoCheck");
+    const commitTurn = step("commitTurn");
+
+    expect(unitDelta(photoCheck.flagellumPhase, start.flagellumPhase), "photoCheck scan should not make the flagellum frantic").toBeGreaterThan(unitDelta(run.flagellumPhase, start.flagellumPhase));
+    expect(unitDelta(commitTurn.flagellumPhase, start.flagellumPhase), "commitTurn beat switch should be visibly faster than run").toBeGreaterThan(unitDelta(photoCheck.flagellumPhase, start.flagellumPhase));
+    expect(unitDelta(commitTurn.flagellumPhase, start.flagellumPhase), "global euglenaFlagellumRateScale should still cap motor beatMul").toBeCloseTo(8 * 0.5 * 1.32 * 0.1, 10);
   });
 
   it("updateEuglena applies mode multipliers only through dt-integrated phase deltas", () => {
@@ -535,6 +918,46 @@ describe("aquarium layer Phase 3 euglena", () => {
     // and it decays toward zero when contact ends (far away, no trigger)
     const far = updateEuglena([{ ...once, x: 20, y: 20, startle: 1 }], frame({ dt: 0.5, width: 300, height: 300 }), view)[0];
     expect(far.startle).toBeLessThan(1);
+  });
+
+  it("RED Task0: motor-on forced commitTurn drives visible turnProgress from 0 to 1", () => {
+    const params: MotorCellParams = {
+      ...CELL_DEFAULTS,
+      enableAquarium: true,
+      euglenaCount: 1,
+      euglenaSpeed: 0,
+      euglenaSpeedActive: 0,
+      aquariumActivityBoost: 1,
+      euglenaMotorEnabled: true,
+    };
+    const view = aquariumParamsView(params);
+    const start: MotorEuglenaState = testEuglena({
+      x: 150,
+      y: 150,
+      heading: 0,
+      swimSpeed: 0,
+      burstRate: 0,
+      turnProgress: 0,
+      turnFrom: 0,
+      turnTo: Math.PI / 2,
+      motorPhase: "commitTurn",
+      motorAge: 0,
+      motorDuration: 0.5,
+    });
+
+    const mid = updateEuglena([start], frame({ dt: 0.25, width: 300, height: 300, activity: 0 }), view)[0] as MotorEuglenaState;
+    const end = updateEuglena([mid], frame({ dt: 0.25, width: 300, height: 300, activity: 0 }), view)[0] as MotorEuglenaState;
+
+    expect(mid.motorPhase, "forced motor commitTurn should remain in the motor state machine during the cue").toBe("commitTurn");
+    expect(mid.turnProgress, "forced commitTurn should advance the visible turn cue after half duration").toBeGreaterThan(0);
+    expect(mid.turnProgress, "forced commitTurn should not complete before its duration").toBeLessThan(1);
+    expect(mid.turnFrom, "forced commitTurn should expose the visible source heading").toBeCloseTo(start.turnFrom ?? 0, 6);
+    expect(mid.turnTo, "forced commitTurn should expose the visible target heading").toBeCloseTo(start.turnTo ?? 0, 6);
+    expect(Math.abs(wrapPi(mid.heading - start.heading)), "forced commitTurn should visibly rotate heading during the cue").toBeGreaterThan(0.1);
+    expect(end.turnProgress, "forced commitTurn should complete visible turnProgress at the end of duration").toBe(1);
+    expect(end.turnFrom, "completed commitTurn should preserve visible source heading for draw").toBeCloseTo(start.turnTo ?? 0, 6);
+    expect(end.turnTo, "completed commitTurn should preserve visible target heading for draw").toBeCloseTo(start.turnTo ?? 0, 6);
+    expect(end.heading, "forced commitTurn should finish at turnTo heading").toBeCloseTo(start.turnTo ?? 0, 6);
   });
 
   it("discrete tumble reorients deterministically by 30-150 degrees over about 1s", () => {

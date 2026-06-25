@@ -109,6 +109,7 @@ export const CELL_DEFAULTS: CellParams = {
   euglenaGravitaxis: 0,
   euglenaPhototaxis: 0,
   euglenaPhotoIntent: 0,
+  euglenaMotorEnabled: false,
   euglenaSeparation: 0,
   euglenaRotDiffusion: 0,
   vorticellaCount: 0,

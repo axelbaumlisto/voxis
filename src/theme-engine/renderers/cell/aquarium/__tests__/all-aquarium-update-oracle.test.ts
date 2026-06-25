@@ -6,7 +6,30 @@ import { sourceId } from "../interaction";
 import { buildAquariumInteractionField, seedAquarium, updateAquarium } from "../layer";
 import type { AquariumFrame, EuglenaState, VorticellaState, DidiniumState } from "../types";
 
-function allAquariumParams(): CellParams {
+type EuglenaMotorPhase = "run" | "photoCheck" | "commitTurn" | "recover";
+type MotorCellParams = CellParams & { readonly euglenaMotorEnabled?: boolean };
+type MotorEuglenaState = EuglenaState & {
+  readonly motorPhase?: EuglenaMotorPhase;
+  readonly motorAge?: number;
+  readonly motorDuration?: number;
+};
+
+interface MotorSample {
+  readonly t: number;
+  readonly x: number;
+  readonly y: number;
+  readonly heading: number;
+  readonly speed: number;
+  readonly phase?: EuglenaMotorPhase;
+  readonly turnFrom?: number;
+  readonly turnTo?: number;
+  readonly photoTargetIndex?: number;
+  readonly photoTargetAge?: number;
+  readonly heroDistance: number;
+  readonly heroBearing: number;
+}
+
+function allAquariumBaseParams(): CellParams {
   return {
     ...CELL_DEFAULTS,
     ...PARAMECIUM_CELL_PARAMS,
@@ -24,6 +47,7 @@ function allAquariumParams(): CellParams {
     euglenaGravitaxis: 0.03,
     euglenaPhototaxis: 0,
     euglenaPhotoIntent: 2.4,
+    euglenaMotorEnabled: true,
     euglenaLoiter: 0,
     euglenaWake: 0.12,
     euglenaRotDiffusion: 0,
@@ -35,6 +59,17 @@ function allAquariumParams(): CellParams {
     didiniumSpeed: 1.55,
     didiniumSpeedActive: 2.2,
     didiniumScale: 1.60,
+  };
+}
+
+function allAquariumParams(): CellParams {
+  return allAquariumBaseParams();
+}
+
+function allAquariumLegacyDefaultOffParams(): MotorCellParams {
+  return {
+    ...allAquariumBaseParams(),
+    euglenaMotorEnabled: false,
   };
 }
 
@@ -54,6 +89,148 @@ function frame(overrides: Partial<AquariumFrame> = {}): AquariumFrame {
   };
 }
 
+function allAquariumMotorOnParams(): MotorCellParams {
+  return allAquariumParams();
+}
+
+function wrapPi(angle: number): number {
+  return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+
+function finiteNumber(value: number | undefined, fallback: number): number {
+  return value === undefined || !Number.isFinite(value) ? fallback : value;
+}
+
+function percentile(values: readonly number[], q: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor(q * (sorted.length - 1))));
+  return sorted[idx];
+}
+
+function coefficientOfVariation(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  if (mean === 0) return 0;
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
+  return Math.sqrt(variance) / Math.abs(mean);
+}
+
+function maxWindowMetric(samples: readonly MotorSample[], windowFrames: number, metric: (window: readonly MotorSample[]) => number): number {
+  let max = 0;
+  for (let start = 0; start + windowFrames <= samples.length; start++) {
+    max = Math.max(max, metric(samples.slice(start, start + windowFrames)));
+  }
+  return max;
+}
+
+function simulateAllAquariumMotorOn(seconds = 90): readonly MotorSample[] {
+  const params = allAquariumMotorOnParams();
+  const dt = 1 / 60;
+  let state = seedAquarium(frame({ t: 0, dt, width: 340, height: 170, mode: "recording" }), params);
+  let previous = state.euglena[0];
+  const samples: MotorSample[] = [];
+
+  for (let i = 1; i <= Math.round(seconds / dt); i++) {
+    const t = i * dt;
+    state = updateAquarium(state, frame({ t, dt, width: 340, height: 170, mode: "recording", activity: 0.45, audioLevel: 0.30 }), params);
+    const euglena = state.euglena[0] as MotorEuglenaState;
+    const hero = frame().hero;
+    const heroDx = euglena.x - hero.x;
+    const heroDy = euglena.y - hero.y;
+    samples.push({
+      t,
+      x: euglena.x,
+      y: euglena.y,
+      heading: euglena.heading,
+      speed: Math.hypot(euglena.x - previous.x, euglena.y - previous.y) / dt,
+      phase: euglena.motorPhase,
+      turnFrom: euglena.turnFrom,
+      turnTo: euglena.turnTo,
+      photoTargetIndex: euglena.photoTargetIndex,
+      photoTargetAge: euglena.photoTargetAge,
+      heroDistance: Math.hypot(heroDx, heroDy) / hero.radius,
+      heroBearing: Math.atan2(heroDy, heroDx),
+    });
+    previous = euglena;
+  }
+
+  return samples;
+}
+
+function maxConsecutiveSeconds(samples: readonly MotorSample[], predicate: (sample: MotorSample) => boolean): number {
+  let current = 0;
+  let max = 0;
+  for (const sample of samples) {
+    if (predicate(sample)) {
+      current += 1;
+      max = Math.max(max, current);
+    } else {
+      current = 0;
+    }
+  }
+  return max / 60;
+}
+
+function summarizeMotorSamples(samples: readonly MotorSample[]) {
+  const phaseCounts: Partial<Record<EuglenaMotorPhase, number>> = {};
+  let commitTurnEvents = 0;
+  let path = 0;
+  let headingAbs = 0;
+  let previous = samples[0];
+  const commitTurnAngles: number[] = [];
+
+  for (const sample of samples) {
+    if (sample.phase) phaseCounts[sample.phase] = (phaseCounts[sample.phase] ?? 0) + 1;
+    if (sample.phase === "commitTurn" && previous?.phase !== "commitTurn") {
+      commitTurnEvents += 1;
+      const turn = Math.abs(wrapPi(finiteNumber(sample.turnTo, sample.heading) - finiteNumber(sample.turnFrom, previous.heading)));
+      if (turn > 1e-6) commitTurnAngles.push(turn * 180 / Math.PI);
+    }
+    if (previous) {
+      path += Math.hypot(sample.x - previous.x, sample.y - previous.y);
+      headingAbs += Math.abs(wrapPi(sample.heading - previous.heading));
+    }
+    previous = sample;
+  }
+
+  const speeds = samples.map((sample) => sample.speed);
+  const photoCheckRatio = (phaseCounts.photoCheck ?? 0) / Math.max(1, samples.length);
+  const edgeDwellSeconds = maxConsecutiveSeconds(samples, (sample) => (
+    sample.x < 55 || sample.x > 285 || sample.y < 32 || sample.y > 138
+  ));
+  const stillRunSeconds = maxConsecutiveSeconds(samples, (sample) => sample.speed < 0.5 && sample.phase !== "photoCheck");
+  const heroDistanceCv = coefficientOfVariation(samples.map((sample) => sample.heroDistance));
+  const maxHeroCirculation10s = maxWindowMetric(samples, 10 * 60, (window) => {
+    let bearingTravel = 0;
+    for (let i = 1; i < window.length; i++) bearingTravel += Math.abs(wrapPi(window[i].heroBearing - window[i - 1].heroBearing));
+    return bearingTravel / (2 * Math.PI);
+  });
+
+  const laneBins = new Map<number, number>();
+  for (const sample of samples) {
+    const bin = Math.floor(sample.y / 10);
+    laneBins.set(bin, (laneBins.get(bin) ?? 0) + 1);
+  }
+
+  return {
+    phaseCounts,
+    photoCheckRatio,
+    commitTurnEvents,
+    medianCommitTurnDeg: percentile(commitTurnAngles, 0.50),
+    p90CommitTurnDeg: percentile(commitTurnAngles, 0.90),
+    speedP10: percentile(speeds, 0.10),
+    speedP90: percentile(speeds, 0.90),
+    edgeDwellSeconds,
+    stillRunSeconds,
+    pathPerHeadingRad: path / Math.max(1e-9, headingAbs),
+    dominantLaneRatio: Math.max(0, ...laneBins.values()) / Math.max(1, samples.length),
+    legacyWaypointRouteFrames: samples.filter((sample) => sample.photoTargetIndex !== undefined || sample.photoTargetAge !== undefined).length,
+    heroDistanceCv,
+    maxHeroCirculation10s,
+  };
+}
+
 function expectCloseState<T extends Record<string, unknown>>(
   actual: T,
   expected: Partial<Record<keyof T, number>>,
@@ -65,8 +242,8 @@ function expectCloseState<T extends Record<string, unknown>>(
 }
 
 describe("all_aquarium update oracle", () => {
-  it("freezes one seeded hero/Euglena/Vorticella/Didinium update step", () => {
-    const params = allAquariumParams();
+  it("freezes one seeded hero/Euglena/Vorticella/Didinium update step with the legacy default-off motor path", () => {
+    const params = allAquariumLegacyDefaultOffParams();
     const seedFrame = frame();
     const updateFrame = frame({ t: 1.25, dt: 0.05 });
 
@@ -191,8 +368,8 @@ describe("all_aquarium update oracle", () => {
     });
   });
 
-  it("keeps the all_aquarium Euglena visibly traversing instead of station-keeping", () => {
-    const params = allAquariumParams();
+  it("keeps the legacy default-off all_aquarium Euglena visibly traversing instead of station-keeping", () => {
+    const params = allAquariumLegacyDefaultOffParams();
     let state = seedAquarium(frame({ t: 0, mode: "recording", activity: 0.4, audioLevel: 0.4 }), params);
     const xs: number[] = [];
     const ys: number[] = [];
@@ -209,8 +386,8 @@ describe("all_aquarium update oracle", () => {
     expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(60);
   });
 
-  it("does not wait at an edge during long all_aquarium photo-intent transit", () => {
-    const params = allAquariumParams();
+  it("does not wait at an edge during long legacy default-off all_aquarium photo-intent transit", () => {
+    const params = allAquariumLegacyDefaultOffParams();
     let state = seedAquarium(frame({ t: 0, mode: "recording", activity: 0.4, audioLevel: 0.4 }), params);
     let leftEdgeFrames = 0;
     let rightEdgeFrames = 0;
@@ -245,5 +422,49 @@ describe("all_aquarium update oracle", () => {
     expect(maxStillRunFrames / 60).toBeLessThan(0.5);
     expect(Math.max(...sampledX) - Math.min(...sampledX)).toBeGreaterThan(130);
     expect(Math.max(...sampledY) - Math.min(...sampledY)).toBeGreaterThan(60);
+  });
+
+  it("all_aquarium motor-on exposes living Euglena motor phases and acceptance metrics", () => {
+    const params = allAquariumMotorOnParams();
+    const initial = seedAquarium(frame(), params);
+    const field = buildAquariumInteractionField(
+      initial.euglena,
+      initial.vorticella,
+      frame().hero,
+      params.vorticellaScale,
+      frame().height,
+      initial.didinium,
+      params.euglenaScale,
+      params.didiniumScale,
+    );
+    const samples = simulateAllAquariumMotorOn(90);
+    const summary = summarizeMotorSamples(samples);
+
+    expect(field.motiles[0]).toMatchObject({ kind: "motile", role: "neutral", sourceId: sourceId("euglena", 0) });
+    expect(summary.phaseCounts.run ?? 0, "motorPhase=run should exist when euglenaMotorEnabled is true").toBeGreaterThan(0);
+    expect(summary.phaseCounts.photoCheck ?? 0, "motorPhase=photoCheck should exist when euglenaMotorEnabled is true").toBeGreaterThan(0);
+    expect(summary.phaseCounts.commitTurn ?? 0, "motorPhase=commitTurn should exist when euglenaMotorEnabled is true").toBeGreaterThan(0);
+    expect(summary.phaseCounts.recover ?? 0, "motorPhase=recover should exist when euglenaMotorEnabled is true").toBeGreaterThan(0);
+    expect(summary.photoCheckRatio, "photoCheck/slow assessment frames should be 3–15% of motor-on runtime").toBeGreaterThanOrEqual(0.03);
+    expect(summary.photoCheckRatio, "photoCheck/slow assessment frames should be 3–15% of motor-on runtime").toBeLessThanOrEqual(0.15);
+    expect(summary.commitTurnEvents, "calm motor-on Euglena should commit about 5–9 visible turns in 90s").toBeGreaterThanOrEqual(5);
+    expect(summary.commitTurnEvents, "calm motor-on Euglena should not read as a frequent route-correction follower").toBeLessThanOrEqual(9);
+    expect(summary.medianCommitTurnDeg, "calm motor-on median commit turn should stay in a biological 25–60° band").toBeGreaterThanOrEqual(25);
+    expect(summary.medianCommitTurnDeg, "calm motor-on median commit turn should stay in a biological 25–60° band").toBeLessThanOrEqual(60);
+    expect(summary.p90CommitTurnDeg, "calm motor-on p90 commit turn should avoid hard reversals").toBeLessThan(110);
+    expect(summary.speedP90 - summary.speedP10, "motor-on Euglena should have visible speed variance").toBeGreaterThan(0.5);
+    expect(summary.edgeDwellSeconds, "motor-on Euglena should not dwell at any edge for more than 2s").toBeLessThan(2);
+    expect(summary.stillRunSeconds, "motor-on Euglena should not be still in run/recover/turn phases for more than 0.5s").toBeLessThan(0.5);
+  });
+
+  it("motor-on all_aquarium rejects fixed waypoint rails, orbiting, and companion-like circulation", () => {
+    const samples = simulateAllAquariumMotorOn(90);
+    const summary = summarizeMotorSamples(samples);
+
+    expect(summary.legacyWaypointRouteFrames, "motor-on mode should not expose the legacy photoTarget waypoint rail signature").toBe(0);
+    expect(summary.pathPerHeadingRad, "motor-on path should materially improve over the ~11px/rad route-following baseline").toBeGreaterThanOrEqual(18);
+    expect(summary.dominantLaneRatio, "motor-on path should not repeatedly occupy one artificial horizontal band").toBeLessThan(0.25);
+    expect(summary.heroDistanceCv, "motor-on Euglena should not hold a fixed normalized distance around the hero").toBeGreaterThan(0.12);
+    expect(summary.maxHeroCirculation10s, "motor-on Euglena should not companion-orbit around the hero for a sustained 10s window").toBeLessThan(0.5);
   });
 });

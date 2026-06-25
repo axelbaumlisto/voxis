@@ -25,17 +25,20 @@ describe("aquariumParamsView", () => {
   it("builds euglena steer + medium overrides only when taxis/jitter params are set", () => {
     const none = aquariumParamsView({ ...CELL_DEFAULTS, enableAquarium: true, euglenaCount: 1 });
     expect(none.euglena.steer).toBeUndefined(); // 0 weights => module defaults
+    expect(none.euglena.motorEnabled).toBe(false);
     expect(none.medium).toBeUndefined();
     const on = aquariumParamsView({
       ...CELL_DEFAULTS,
       enableAquarium: true,
       euglenaCount: 1,
+      euglenaMotorEnabled: true,
       euglenaGravitaxis: 0.2,
       euglenaPhototaxis: 0.6,
       euglenaSeparation: 0.7,
       euglenaRotDiffusion: 0.12,
     });
     expect(on.euglena.steer).toEqual({ gravitaxis: 0.2, phototaxis: 0.6, separation: 0.7 });
+    expect(on.euglena.motorEnabled).toBe(true);
     expect(on.medium).toEqual({ rotDiffusion: 0.12 });
   });
 
@@ -65,7 +68,7 @@ describe("aquariumParamsView", () => {
       alpha: 0.25,
       activityBoost: 0.7,
       diatoms: { count: 3, alpha: 0.2, driftSpeed: 0.8 },
-      euglena: { count: 2, speed: 1.1, speedActive: 2.4, scale: 0.9, flagellumRateScale: 1, hueOffset: 42, photoIntent: 0, steer: { gravitaxis: 0, phototaxis: 0, separation: 0.4 } },
+      euglena: { count: 2, speed: 1.1, speedActive: 2.4, scale: 0.9, flagellumRateScale: 1, hueOffset: 42, photoIntent: 0, motorEnabled: false, steer: { gravitaxis: 0, phototaxis: 0, separation: 0.4 } },
       medium: undefined,
       vorticella: { count: 1, contractRate: 0.6, scale: 1.2, alongFrac: 0.5 },
       didinium: { count: 0, speed: 1.0, speedActive: 2.0, scale: 1.0, hueOffset: 0 },
