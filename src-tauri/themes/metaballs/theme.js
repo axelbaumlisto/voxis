@@ -99,18 +99,20 @@ function mount(container, api) {
   const ctx = canvas.getContext("2d");
   const image = ctx.createImageData(W, H);
   const data = image.data;
+  const seed = Math.random() * 1000;
   const blobs = [];
   for (let i = 0;i < blobCount; i++) {
-    const t2 = (i + 0.5) / blobCount;
+    const ang = i / blobCount * Math.PI * 2 + seed + Math.sin(seed + i) * 0.8;
+    const rad = Math.min(W, H) * (0.12 + 0.1 * ((Math.sin(seed * 3 + i * 2.7) + 1) / 2));
     blobs.push({
-      x: t2 * W,
-      y: H * (0.4 + 0.2 * Math.sin(i * 1.7)),
-      vx: (Math.sin(i * 2.3) * 0.6 + 0.5) * (i % 2 ? 1 : -1),
-      vy: (Math.cos(i * 1.9) * 0.3 + 0.2) * (i % 3 ? 1 : -1),
-      baseR: 4 + i % 3 * 1.1,
-      r: 4,
+      x: W / 2 + Math.cos(ang) * rad,
+      y: H / 2 + Math.sin(ang) * rad,
+      vx: Math.cos(ang) * 0.6,
+      vy: Math.sin(ang) * 0.6,
+      baseR: 4.5 + i % 3 * 1.6,
+      r: 4.5,
       color: palette[i % palette.length],
-      phase: i * 1.3,
+      phase: i * 1.3 + seed,
       binIndex: 2 + i * 2
     });
   }
@@ -136,20 +138,20 @@ function mount(container, api) {
     time += 1;
     const energy = modeEnergy();
     const renderThrottled = mode === "idle" && level < 0.01 && time % 2 !== 0;
-    const swell = 1 + level * 0.8 + (mode === "recording" ? 0.12 : 0);
+    const swell = 1 + level * 0.4 + (mode === "recording" ? 0.1 : 0);
     const cx = W / 2;
     const cy = H / 2;
     for (let i = 0;i < blobs.length; i++) {
       const b = blobs[i];
-      b.vx += (cx - b.x) * 0.0006;
-      b.vy += (cy - b.y) * 0.001;
+      b.vx += (cx - b.x) * 0.0022;
+      b.vy += (cy - b.y) * 0.0022;
       for (let j = i + 1;j < blobs.length; j++) {
         const o = blobs[j];
         const dx = o.x - b.x;
         const dy = o.y - b.y;
         const dist = Math.sqrt(dx * dx + dy * dy) + 0.001;
-        const want = (b.r + o.r) * 0.85;
-        const f = (dist - want) * 0.0008;
+        const want = (b.r + o.r) * 1.05;
+        const f = (dist - want) * 0.0013;
         const ux = dx / dist, uy = dy / dist;
         b.vx += ux * f;
         b.vy += uy * f;
@@ -160,14 +162,17 @@ function mount(container, api) {
     for (let i = 0;i < blobs.length; i++) {
       const b = blobs[i];
       const binv = bins.length ? bins[Math.min(bins.length - 1, b.binIndex)] || 0 : 0;
-      const speed = 0.35 + energy * 0.6;
+      const speed = 0.5 + energy * 0.7;
       b.x += b.vx * speed;
-      b.y += b.vy * speed * 0.6;
-      b.vx += Math.sin(time * 0.013 + b.phase) * 0.008;
-      b.vy += Math.cos(time * 0.017 + b.phase) * 0.006;
-      b.vx = Math.max(-0.9, Math.min(0.9, b.vx * 0.985));
-      b.vy = Math.max(-0.7, Math.min(0.7, b.vy * 0.985));
-      const pad = 2;
+      b.y += b.vy * speed;
+      b.vx += Math.sin(time * 0.02 + b.phase) * 0.03;
+      b.vy += Math.cos(time * 0.023 + b.phase * 1.4) * 0.03;
+      b.vx = Math.max(-1.1, Math.min(1.1, b.vx * 0.99));
+      b.vy = Math.max(-1.1, Math.min(1.1, b.vy * 0.99));
+      const breathe = 1 + 0.1 * Math.sin(time * 0.05 + b.phase);
+      const maxR = Math.min(W, H) * 0.13;
+      b.r = Math.min(maxR, b.baseR * swell * breathe * (1 + binv * 0.3));
+      const pad = b.r * 1.4;
       if (b.x < pad) {
         b.x = pad;
         b.vx = Math.abs(b.vx);
@@ -184,8 +189,6 @@ function mount(container, api) {
         b.y = H - pad;
         b.vy = -Math.abs(b.vy);
       }
-      const breathe = 1 + 0.1 * Math.sin(time * 0.05 + b.phase);
-      b.r = b.baseR * swell * breathe * (1 + binv * 0.35);
     }
     if (!renderThrottled)
       render(energy);
@@ -252,7 +255,7 @@ function mount(container, api) {
       bcb[i] = b.color.b;
     }
     const padThr = threshold > 0 ? Math.min(1, threshold) : 1;
-    const boxPad = Math.ceil(2 + maxR * (1 / Math.sqrt(padThr) - 1));
+    const boxPad = Math.ceil(4 + maxR * (Math.sqrt(blobCount) / Math.sqrt(padThr)));
     const x0 = Math.max(0, Math.floor(minX - boxPad));
     const x1 = Math.min(W, Math.ceil(maxX + boxPad));
     const y0 = Math.max(0, Math.floor(minY - boxPad));
@@ -285,6 +288,15 @@ function mount(container, api) {
       fld.cg = cg;
       fld.cb = cb;
       fld.wsum = wsum;
+    }
+    function fieldAt(px, py) {
+      let field = 0;
+      for (let i = 0;i < blobCount; i++) {
+        const dx = px - bx[i];
+        const dy = py - by[i];
+        field += brr[i] / (dx * dx + dy * dy + 1);
+      }
+      return field;
     }
     function surfaceNormal() {
       const t2 = clamp01((fld.field - threshold) / 1.6);
@@ -352,12 +364,28 @@ function mount(container, api) {
       for (let px = x0;px < x1; px++) {
         sampleField(px, py);
         const idx = (py * W + px) * 4;
-        const alpha = (fld.field - threshold) * 6 + 0.5;
-        if (alpha > 0.02) {
+        const field = fld.field;
+        if (field >= threshold) {
           surfaceNormal();
-          shadeMetal(alpha);
-          const a = Math.min(1, alpha);
-          setPixel(data, idx, shaded.r, shaded.g, shaded.b, a);
+          shadeMetal(1);
+          setPixel(data, idx, shaded.r, shaded.g, shaded.b, 1);
+        } else if (field >= threshold * 0.82) {
+          let inside = 0;
+          if (fieldAt(px - 0.3, py - 0.3) >= threshold)
+            inside++;
+          if (fieldAt(px + 0.3, py - 0.3) >= threshold)
+            inside++;
+          if (fieldAt(px - 0.3, py + 0.3) >= threshold)
+            inside++;
+          if (fieldAt(px + 0.3, py + 0.3) >= threshold)
+            inside++;
+          if (inside > 0) {
+            surfaceNormal();
+            shadeMetal(1);
+            setPixel(data, idx, shaded.r, shaded.g, shaded.b, inside / 4);
+          } else {
+            setPixel(data, idx, 0, 0, 0, 0);
+          }
         } else {
           setPixel(data, idx, 0, 0, 0, 0);
         }
