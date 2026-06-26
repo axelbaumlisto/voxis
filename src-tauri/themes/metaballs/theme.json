@@ -9,7 +9,7 @@
   "entry": "theme.js",
   "params": {
     "blobCount": 5,
-    "palette": ["#ff6a3d", "#ff2d77", "#8a4bff", "#1fb6ff", "#19f0b0"],
+    "palette": ["#ff1f1f", "#1f6bff", "#19e060", "#ffd400", "#ff1fd0"],
     "threshold": 1.0
   }
 }

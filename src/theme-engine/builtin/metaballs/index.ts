@@ -36,76 +36,84 @@ function hexToRgb(hex: string): RGB {
 
 // R1 — single source of truth for the tunable material params. Every value here
 // was previously an inline magic number in render()/tonemap(); naming them makes
-// the metallic look discoverable in one place. This naming is a pure material/
-// helper refactor: same numbers, just named (it does not change pixels — note
-// the silhouette edge AA is a separate, intentional behaviour change elsewhere).
+// the metallic look discoverable in one place. The R1 extraction was pixel-
+// identical (same numbers, just named); B1 has since RETUNED several values
+// (darker albedo, near-white sky spike, narrower sheen, calmer iridescence)
+// for the dark liquid-metal look — see each field's note. The silhouette edge
+// AA is a separate, intentional behaviour change elsewhere.
 // Hot-path note: render() destructures these into per-frame local
 // `const` numbers at the top of the function so the inner pixel loops never do
 // per-pixel object-property reads. The MAT object stays the single source of
 // truth; the per-frame locals are the hot-path reads.
 const MAT = {
-  // B1 — Liquid-metal albedo pulled DARK (chrome/mercury, not pearly soap).
-  // Was (50,54,60) pale mid-grey → the dark albedo never showed through the
-  // additive env+sheen. A genuinely dark neutral base lets shadow/grazing
-  // areas go near-black so the bright sky/specular spikes read as metal.
-  albedoBaseR: 20,
-  albedoBaseG: 23,
-  albedoBaseB: 28,
-  tintDesat: 0.30, // how much per-channel chroma survives (vs. pulled to luma)
-  tintScale: 0.14, // overall tint contribution mixed into the base
-  // B1 — Ambient occlusion: floor dropped 0.45→0.10 so grazing/silhouette
-  // regions go near-dark (range widened so the core still lights to ~1.0).
-  // Mercury/chrome = mostly mid/dark with a few bright spikes.
-  aoFloor: 0.10,
-  aoRange: 0.90,
-  // B1 — Environment studio gradient widened for HARD light→dark contrast:
-  // near-dark ambient/floor (0.20→0.05, bounce 0.30→0.10) next to a sky that
-  // blows toward near-white (0.95→1.60). B2 then SOFTENED the band slope to 4
-  // so the reflection is continuous across the fused body (no per-blob rings).
-  envFloor: 0.05,
-  envSky: 1.60,
-  envFloorBounce: 0.10,
-  skyEdge: 0.60, // sky band starts above this reflected-y coord
-  floorEdge: 0.30, // floor band starts below this reflected-y coord
-  envBandSlope: 4, // sky/floor gradient steepness (softer = continuous reflection, no per-blob rings)
-  envTint: 0.85, // palette-tinted env reflection weight (identity rides here)
-  // B1 — Reflected light strips: NARROWER (widths 5.5/6.5→9/11) and the sheen
-  // peak BRIGHTER (150→230) so the specular streak is a sharp bright line, not
-  // a broad soft sheen.
-  bandCenter: 0.66,
-  bandWidth: 9,
-  band2Center: 0.32,
-  band2Width: 11,
-  band2Scale: 0.5,
-  sheenScale: 230, // bright achromatic sheen from the strips (narrow + intense)
-  // B1 — Iridescence pulled to the RIM/grazing only: the band-driven term that
-  // washed the flat centre is cut hard (0.12→0.03) so the interior reads as
-  // metal, not pastel; clamp lowered (0.7→0.5) so even the rim stays tinted
-  // reflection rather than a saturated soap fringe.
-  iridFresWeight: 0.55,
-  iridBandWeight: 0.03,
-  iridClamp: 0.5,
-  // B1 — Specular highlight + white-hot core boosted (sharper, brighter spike)
-  // so the bright end of the dark→bright range spikes toward near-white.
-  specBase: 1.10,
-  specEnergy: 0.70,
-  hotBase: 1.00,
-  hotEnergy: 0.60,
-  // Filmic tonemap exposure (was 1.45; lowered for the darker chrome base).
-  exposure: 1.05,
+  // G1 — Gooey conversion: the body is now the blob's SATURATED colour at full
+  // brightness (matte/semigloss jelly, like the real Apposite Metaballs app),
+  // not dark iridescent chrome. The per-pixel albedo ar/ag/ab is fed directly
+  // (chroma-boosted) as the body colour; the entire metal stack (dark albedo,
+  // env studio reflection, sheen bands, iridescence, hot core) is removed.
+  // Optional chroma boost fights field-blend desaturation at fused necks.
+  // S8 — raised 1.12 → 1.5 so the colour regions read as SATURATED matte clay
+  // (the reference blobs are highly saturated), paired with the f² colour
+  // weighting below (flat lobes, narrow neck blend) so necks stay saturated
+  // instead of greying. Albedo is clamped ≥0 before the linear (gamma-2.0)
+  // decode so a boosted low channel can't go negative-then-squared-positive.
+  chromaBoost: 1.5,
+  // S8 — DEEPEN VOLUME. AO floor crevice/silhouette occlusion. S8e — FLATTENED
+  // FURTHER to kill the residual IDLE lit-disc cores: floor RAISED 0.66 → 0.72,
+  // range CUT 0.34 → 0.20 (ao = aoFloor + aoRange*nz → 0.72..0.92). The nz-driven
+  // term is the per-blob centre-brightener: nz peaks at every separated idle
+  // detail-dome centre (it faces the viewer), so aoRange*nz painted each idle
+  // blob a brighter circular core → distinct "lit discs". S8d cut this to 0.34;
+  // S8e cuts the centre-vs-edge DELTA a further ~40% (0.34 → 0.20) while nudging
+  // the floor up (0.66 → 0.72) so the overall lit level is preserved. AO now only
+  // darkens NECKS/crevices (concavity), never brightens dome centres into discs;
+  // the directional diffuse (N·L) stays the SOLE value driver, so idle reads as
+  // one fused clay mass instead of separate glowing spheres.
+  aoFloor: 0.72,
+  aoRange: 0.2,
+  // Diffuse term. S8d — OPAQUE CLAY. ambient lowered 0.13 → 0.11 so the unlit
+  // hemisphere goes genuinely DARK (the cool fill below keeps it coloured, not
+  // dead black) → the colour reads as lit OPAQUE surface albedo with a real dark
+  // side, NOT a self-illuminated orb. The diffuse wrap is steepened further (see
+  // shadeGooey: ndl*0.8+0.2) so the body shows a clear bright-lit → dark gradient
+  // ACROSS the body like store_3's blue blob.
+  ambient: 0.11,
+  lightStr: 0.85,
+  // S8 — COOL FILL LIGHT. A weak bluish diffuse from the OPPOSITE side (lower-
+  // right) of the warm upper-left key, so shadows read as the matte clay/gooey
+  // volume of the reference instead of crushing to black. Cheap: one extra
+  // N·L2 (dot + clamp, no LUT / transcendental), multiplied by the body albedo
+  // and a cool tint, added in LINEAR alongside the key diffuse.
+  fillStr: 0.13,
+  fillColR: 0.55,
+  fillColG: 0.72,
+  fillColB: 1.0,
+  // S4 — BROAD SOFT SPECULAR BLOOM (replaces the tight POW32 ridge → the
+  // razor highlight line the user complained about). Two energy-normalized
+  // Blinn-Phong lobes, both baked into build-time LUTs (the conserving norm
+  // (n+2)/(2π) is folded in so brightness tracks lobe width with zero per-pixel
+  // pow):
+  //  • main lobe — low exponent (~10) for a wide soft feathered bright core,
+  //    energy-scaled so recording blooms brighter than idle.
+  //  • sheen lobe — very low exponent (~3), low intensity, gives the radial
+  //    "lit side brightens toward the light" falloff the reference shows.
+  // The spec is an additive LINEAR light term (added in linear space, then
+  // sqrt-encoded to sRGB with the body); no separate filmic tonemap. Strengths
+  // are tuned DOWN so the broad add does NOT clip a hard-edged flat-white 255
+  // plateau — the core is bright but FEATHERS into a soft gradient.
+  specExp: 10,        // main bright-core lobe exponent (broad, soft)
+  sheenExp: 3,        // very broad radial sheen lobe exponent
+  specBase: 0.09,     // S8d — trimmed 0.13 → 0.09: each detail dome catching its own
+                      // soft highlight read as per-orb bright cores; damping the
+                      // spec keeps a subtle single-ish highlight on the lit cap and
+                      // kills the multi-orb glow (NO macro normal used).
+  specEnergy: 0.10,   // extra main-lobe intensity scaled by audio energy
+  // S8c — sheen CUT 0.18 → 0.07. The very broad (exp3) near-white sheen lobe was
+  // laying a milky/frosted film over the WHOLE body → the translucent-shell read.
+  // Cutting it makes the body a MATTE opaque surface; the tighter specLUT (exp10)
+  // bloom stays as the single highlight.
+  sheenStrength: 0.07, // broad sheen lobe intensity (linear)
 } as const;
-
-// Fix 2.1 — filmic ACES-ish tonemap hoisted to module scope (pure, no per-frame
-// closure allocation). Preserves bright sheen while lifting the body.
-// R1 — exposure is now a MAT param passed in (was a hardcoded 1.1 here) so all
-// material tunables live in one place; Fix 3.5 rationale below still applies.
-function tonemap(v: number, exposure: number): number {
-  // Fix 3.5 — exposure lowered (was 1.45) to suit the darker chrome base so the
-  // bright sheen/sky reflection rolls off instead of blowing to flat white.
-  const x = (v / 255) * exposure;
-  const y = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-  return clamp01(y) * 255;
-}
 
 // R2 — tiny hot-path helpers to DRY the per-channel triples / repeated clamps.
 // All three are trivial and inline under V8; kept pixel-identical to the
@@ -115,10 +123,16 @@ function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x));
 }
 
-// mix preserves the original arithmetic `a*(1-t)+b*t` (NOT the algebraically
-// equal `a+(b-a)*t`) so the float ops — and thus the final bytes — are identical.
-function mix(a: number, b: number, t: number): number {
-  return a * (1 - t) + b * t;
+// S7 — cheap deterministic per-pixel hash → uniform in [0,1). Integer-only
+// (Math.imul + xorshifts, NO per-pixel transcendental), keyed by (x, y, salt)
+// so the TPDF dither grain below is stable per pixel/frame (deterministic, not
+// Math.random) yet decorrelated between channels via distinct salts. Used ONLY
+// to break 8-bit output banding on the RGB colour channels.
+function hashU(x: number, y: number, salt: number): number {
+  let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(salt | 0, 2246822519)) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
 }
 
 // setPixel writes one RGBA pixel with the exact same Math.min(255,...) /
@@ -143,6 +157,18 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   const W = api.size.width;
   const H = api.size.height;
 
+  // S3 — render the backing store at the DEVICE pixel ratio so a Retina
+  // compositor doesn't bilinearly upscale a 120² store (the soft/low-res look).
+  // Cap at 2 and round to an integer to keep a crisp 1:1 pixel mapping; guard →
+  // 1 when devicePixelRatio is undefined (e.g. jsdom). The entire simulation
+  // runs in DEVICE pixels: CW×CH is the backing-store resolution and every
+  // pixel-space constant below scales by `dpr`, so the visual layout is
+  // identical — just at higher resolution. At dpr=1, CW=W/CH=H and every `*dpr`
+  // is a multiply-by-1.0 (IEEE identity) → byte-identical to before.
+  const dpr = Math.min(2, Math.max(1, Math.round((globalThis.devicePixelRatio || 1))));
+  const CW = W * dpr;
+  const CH = H * dpr;
+
   // Fix 4.2 — palette element validation. A non-string element makes hexToRgb
   // throw → hard fallback. Keep only parseable hex strings; if none survive,
   // use the default palette instead of throwing.
@@ -154,34 +180,19 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     : [];
   const palette: RGB[] = (validHex.length > 0 ? validHex : DEFAULT_PALETTE).map(hexToRgb);
 
-  // Fix 2.1 — Iridescent thin-film tint LUT. The pearly hue sweep
-  // (cyan → magenta → gold → cyan) is precomputed once instead of doing 3×
-  // Math.sin per pixel. Keyed by the fractional phase in [0,1); sin is periodic
-  // so fract(phase) reproduces the original closure to within ≤1/255 rounding.
-  const IRID_N = 256;
-  const iridR = new Float64Array(IRID_N);
-  const iridG = new Float64Array(IRID_N);
-  const iridB = new Float64Array(IRID_N);
-  for (let i = 0; i < IRID_N; i++) {
-    const a = (i / IRID_N) * Math.PI * 2;
-    iridR[i] = 128 + 127 * Math.sin(a + 0.0);
-    iridG[i] = 128 + 127 * Math.sin(a + 2.094);
-    iridB[i] = 128 + 127 * Math.sin(a + 4.188);
-  }
-  // map any phase to the nearest LUT entry (wraps via fract)
-  function iridIndex(phase: number): number {
-    const f = phase - Math.floor(phase);
-    return (f * IRID_N) | 0;
-  }
-
-  // Fix 2.2 — specular falloff LUTs keyed by N·H (ndh) clamped to [0,1];
-  // index = ndh*255. Replaces Math.pow(ndh, 90) / Math.pow(ndh, 220) per pixel.
-  const POW90 = new Float64Array(256);
-  const POW220 = new Float64Array(256);
+  // S4 — two spec lobe LUTs keyed by N·H (ndh) clamped to [0,1]; index =
+  // ndh*255. Each bakes the energy-conserving Blinn-Phong norm (n+2)/(2π) at
+  // build so brightness scales with lobe width (no per-pixel pow). `specLUT` is
+  // the broad bright-core lobe (low exp ~10); `sheenLUT` is the very broad,
+  // low-intensity radial sheen (exp ~3). Both replace the old tight POW32 ridge.
+  const specNorm = (MAT.specExp + 2) / (2 * Math.PI);
+  const sheenNorm = (MAT.sheenExp + 2) / (2 * Math.PI);
+  const specLUT = new Float64Array(256);
+  const sheenLUT = new Float64Array(256);
   for (let i = 0; i < 256; i++) {
     const n = i / 255;
-    POW90[i] = Math.pow(n, 90);
-    POW220[i] = Math.pow(n, 220);
+    specLUT[i] = specNorm * Math.pow(n, MAT.specExp);
+    sheenLUT[i] = sheenNorm * Math.pow(n, MAT.sheenExp);
   }
 
   // Fix 4.3 — round blobCount to an integer before clamping to [2,8] so a
@@ -207,14 +218,15 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   const bcb = new Float64Array(blobCount);
 
   const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
+  // Backing store at device resolution; CSS still fills the element (100%).
+  canvas.width = CW;
+  canvas.height = CH;
   canvas.style.width = "100%";
   canvas.style.height = "100%";
   canvas.style.display = "block";
   container.appendChild(canvas);
   const ctx = canvas.getContext("2d")!;
-  const image = ctx.createImageData(W, H);
+  const image = ctx.createImageData(CW, CH);
   const data = image.data;
 
   // ---- init blobs ----
@@ -229,14 +241,21 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     // jittered angle + radius so the cluster isn't a perfect symmetric ring
     // (that read as a plain ball); asymmetry makes it wander into shapes.
     const ang = (i / blobCount) * Math.PI * 2 + seed + Math.sin(seed + i) * 0.8;
-    const rad = Math.min(W, H) * (0.12 + 0.10 * ((Math.sin(seed * 3 + i * 2.7) + 1) / 2));
+    // S9 — SCALE THE FORM IN-FRAME. The fused body previously filled only ~30%
+    // of the canvas with a big empty transparent margin; the reference blobs
+    // fill ~50-65%. The spawn-ring radius is widened (0.12→0.16 base, +0.12
+    // jitter) so the cluster spreads over more area while the centre-pull keeps
+    // it fused and framed. baseR / init r are scaled up proportionally to the
+    // bigger maxR (≈1.5×, see below) so the geometry grows uniformly and the
+    // aspect/fusion feel is unchanged.
+    const rad = Math.min(CW, CH) * (0.16 + 0.12 * ((Math.sin(seed * 3 + i * 2.7) + 1) / 2));
     blobs.push({
-      x: W / 2 + Math.cos(ang) * rad,
-      y: H / 2 + Math.sin(ang) * rad,
-      vx: Math.cos(ang) * 0.6,
-      vy: Math.sin(ang) * 0.6,
-      baseR: 4.5 + (i % 3) * 1.6,
-      r: 4.5,
+      x: CW / 2 + Math.cos(ang) * rad,
+      y: CH / 2 + Math.sin(ang) * rad,
+      vx: Math.cos(ang) * 0.6 * dpr,
+      vy: Math.sin(ang) * 0.6 * dpr,
+      baseR: (6.8 + (i % 3) * 2.4) * dpr,
+      r: 6.8 * dpr,
       color: palette[i % palette.length],
       phase: i * 1.3 + seed,
       binIndex: 2 + i * 2,
@@ -282,8 +301,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     // --- inter-blob attraction so they meet, fuse, then drift apart (morph) ---
     // A slow centre-seeking pull keeps them clustering and merging like the
     // real Metaballs app, rather than bouncing past each other.
-    const cx = W / 2;
-    const cy = H / 2;
+    const cx = CW / 2;
+    const cy = CH / 2;
     for (let i = 0; i < blobs.length; i++) {
       const b = blobs[i];
       // gentle centre pull — just enough to keep the cluster roughly centred,
@@ -316,16 +335,19 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       b.y += b.vy * speed;
       // stronger per-blob wander on independent phases → the lobes keep moving
       // and reshaping, so the blob is constantly morphing into new figures.
-      b.vx += Math.sin(time * 0.02 + b.phase) * 0.03;
-      b.vy += Math.cos(time * 0.023 + b.phase * 1.4) * 0.03;
-      // damp / clamp velocity
-      b.vx = Math.max(-1.1, Math.min(1.1, b.vx * 0.99));
-      b.vy = Math.max(-1.1, Math.min(1.1, b.vy * 0.99));
+      b.vx += Math.sin(time * 0.02 + b.phase) * 0.03 * dpr;
+      b.vy += Math.cos(time * 0.023 + b.phase * 1.4) * 0.03 * dpr;
+      // damp / clamp velocity (limit is in device px/frame → scales with dpr)
+      b.vx = Math.max(-1.1 * dpr, Math.min(1.1 * dpr, b.vx * 0.99));
+      b.vy = Math.max(-1.1 * dpr, Math.min(1.1 * dpr, b.vy * 0.99));
       // breathing + audio swell + per-blob voice pop
       const breathe = 1 + 0.1 * Math.sin(time * 0.05 + b.phase);
-      // Cap radius modestly so the fused cluster floats inside the square with
-      // dark margin all around — never expands to clip the edges.
-      const maxR = Math.min(W, H) * 0.13;
+      // S9 — bigger radius cap so the fused cluster fills ~50-60% of the frame
+      // (was 0.13 → ~30% with a large empty margin). 0.19 fills the frame like
+      // the reference while the 1.4× wall pad below still keeps the body + its
+      // soft AA/bloom halo clear of the canvas border (verified at the loudest
+      // recording level, where swell pushes radii to this cap).
+      const maxR = Math.min(CW, CH) * 0.19;
       b.r = Math.min(maxR, b.baseR * swell * breathe * (1 + binv * 0.3));
 
       // Soft walls padded by 1.4× radius so the fused iso-surface (which reaches
@@ -333,9 +355,9 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // and fuse freely — the liquid metal morph is intact in every direction.
       const pad = b.r * 1.4;
       if (b.x < pad) { b.x = pad; b.vx = Math.abs(b.vx); }
-      if (b.x > W - pad) { b.x = W - pad; b.vx = -Math.abs(b.vx); }
+      if (b.x > CW - pad) { b.x = CW - pad; b.vx = -Math.abs(b.vx); }
       if (b.y < pad) { b.y = pad; b.vy = Math.abs(b.vy); }
-      if (b.y > H - pad) { b.y = H - pad; b.vy = -Math.abs(b.vy); }
+      if (b.y > CH - pad) { b.y = CH - pad; b.vy = -Math.abs(b.vy); }
     }
 
     if (!renderThrottled) render(energy);
@@ -347,17 +369,18 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     // R1 — destructure MAT into per-frame local const numbers (once per frame).
     // The inner pixel loops below read these locals, never MAT.* properties.
     const {
-      albedoBaseR, albedoBaseG, albedoBaseB, tintDesat, tintScale,
-      aoFloor, aoRange,
-      envFloor, envSky, envFloorBounce, skyEdge, floorEdge, envBandSlope, envTint,
-      bandCenter, bandWidth, band2Center, band2Width, band2Scale, sheenScale,
-      iridFresWeight, iridBandWeight, iridClamp,
-      specBase, specEnergy, hotBase, hotEnergy, exposure,
+      chromaBoost, aoFloor, aoRange, ambient, lightStr,
+      specBase, specEnergy, sheenStrength,
+      fillStr, fillColR, fillColG, fillColB,
     } = MAT;
-    // Light + view setup for a metallic Blinn-Phong + env-reflection look.
+    // Light + view setup for a Half-Lambert wrap + broad Blinn-Phong highlight.
     // Light from upper-left, viewer straight on (0,0,1).
     const Llen = Math.sqrt(0.5 * 0.5 + 0.72 * 0.72 + 0.55 * 0.55);
     const Lx = -0.5 / Llen, Ly = -0.72 / Llen, Lz = 0.55 / Llen;
+    // S8 — COOL FILL light direction: opposite side (lower-right), shallow Z so
+    // it grazes the shadow side the key misses. Normalized once per frame.
+    const Flen = Math.sqrt(0.5 * 0.5 + 0.6 * 0.6 + 0.35 * 0.35);
+    const Fx = 0.5 / Flen, Fy = 0.6 / Flen, Fz = 0.35 / Flen;
     // half vector between light and view (0,0,1)
     let Hx = Lx, Hy = Ly, Hz = Lz + 1;
     const Hl = Math.sqrt(Hx * Hx + Hy * Hy + Hz * Hz); Hx /= Hl; Hy /= Hl; Hz /= Hl;
@@ -368,7 +391,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     // only inside it. Clear the whole buffer first so everything outside the
     // box is transparent — visually identical to clearing & scanning the lot.
     data.fill(0);
-    let minX = W, minY = H, maxX = 0, maxY = 0, maxR = 0;
+    let minX = CW, minY = CH, maxX = 0, maxY = 0, maxR = 0;
     for (let i = 0; i < blobs.length; i++) {
       const b = blobs[i];
       if (b.x - b.r < minX) minX = b.x - b.r;
@@ -395,11 +418,11 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     // threshold is already floored >0 at mount (m4); Math.min(1, ...) keeps the
     // divide-by-sqrt(padThr) below well-defined. Defensive, no live <=0 branch.
     const padThr = Math.min(1, threshold);
-    const boxPad = Math.ceil(4 + maxR * (Math.sqrt(blobCount) / Math.sqrt(padThr)));
+    const boxPad = Math.ceil(4 * dpr + maxR * (Math.sqrt(blobCount) / Math.sqrt(padThr)));
     const x0 = Math.max(0, Math.floor(minX - boxPad));
-    const x1 = Math.min(W, Math.ceil(maxX + boxPad));
+    const x1 = Math.min(CW, Math.ceil(maxX + boxPad));
     const y0 = Math.max(0, Math.floor(minY - boxPad));
-    const y1 = Math.min(H, Math.ceil(maxY + boxPad));
+    const y1 = Math.min(CH, Math.ceil(maxY + boxPad));
 
     // R3 — SRP decomposition of the per-pixel hot path into three named
     // sub-steps. They are CLOSURES defined here (after the per-frame MAT locals,
@@ -410,8 +433,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     // This is the material/helper refactor: each helper holds the same
     // arithmetic, in the same order on the same operands, as the previous
     // monolithic loop body. NOTE: this is NOT a global pixel-identical claim —
-    // shadeMetal now receives real edge coverage (inside/4) so its iridescence
-    // edgeFade is an intentional silhouette AA change, not a no-op.
+    // shadeGooey now receives the ANALYTIC coverage (S5) via alpha so its
+    // silhouette AA matches the coverage composite, not a no-op.
     const fld = { field: 0, gx: 0, gy: 0, cr: 0, cg: 0, cb: 0, wsum: 0 };
     const nrm = { nx: 0, ny: 0, nz: 0 };
     const shaded = { r: 0, g: 0, b: 0 };
@@ -429,10 +452,21 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
         const rr = brr[i];
         const f = rr / d2;
         field += f;
-        cr += bcr[i] * f;
-        cg += bcg[i] * f;
-        cb += bcb[i] * f;
-        wsum += f;
+        // S8 — KILL THE PLASMA-CORE GLOW. The colour blend is weighted by f²
+        // (not f) so the blob with the highest LOCAL field dominates its whole
+        // lobe as a near-flat saturated colour, with the cross-fade compressed
+        // into a narrow neck where two f² weights are comparable. The old linear
+        // f weighting let the nearest blob's colour peak sharply at its exact
+        // centre (a bright saturated "core dot" → the glowing-plasma read) while
+        // greying the necks by 3-way averaging. f² (one extra multiply, no pow)
+        // flattens each lobe to a solid colour region and keeps necks saturated.
+        // `field` itself still sums the linear f, so all geometry, the analytic
+        // gradient, coverage and the iso-surface (S1/S5) are byte-identical.
+        const cw = f * f;
+        cr += bcr[i] * cw;
+        cg += bcg[i] * cw;
+        cb += bcb[i] * cw;
+        wsum += cw;
         gx += (-2 * rr * dx) / (d2 * d2);
         gy += (-2 * rr * dy) / (d2 * d2);
       }
@@ -440,31 +474,35 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       fld.cr = cr; fld.cg = cg; fld.cb = cb; fld.wsum = wsum;
     }
 
-    // Cheap field-only evaluation (no gradient/colour) for edge anti-aliasing:
-    // used to supersample coverage right at the silhouette so the binary mask
-    // gets a smooth outline WITHOUT a translucent field halo spreading outward.
-    function fieldAt(px: number, py: number): number {
-      let field = 0;
-      for (let i = 0; i < blobCount; i++) {
-        const dx = px - bx[i];
-        const dy = py - by[i];
-        field += brr[i] / (dx * dx + dy * dy + 1);
-      }
-      return field;
-    }
-
     // 2. normal reconstruction — rebuild a spherical surface normal from the
     //    height field + its gradient (reads fld, writes nrm).
     function surfaceNormal(): void {
-      // t: how deep inside the iso-surface (0 at rim → 1 at core). Saturate
-      // FAST (small divisor) + smoothstep so the whole interior plateaus at
-      // nz≈1 — flat and continuous — and only the thin RIM has tilt. This is
-      // the key to one fused look: with nz≈1 inside, nx/ny→0 there, so the
-      // per-blob field bumps no longer each form a dome/AO-ring/reflection
-      // band. All the relief lives at the silhouette, not per sub-blob.
-      const traw = clamp01((fld.field - threshold) / 0.7);
-      const t = traw * traw * (3 - 2 * traw); // smoothstep → soft plateau
-      const nz = Math.sqrt(Math.min(1, t + 0.04)); // faces viewer across the body
+      // S1 — RESTORE BODY CURVATURE. t: how deep inside the iso-surface (0 at
+      // rim → 1 at core). The divisor is now /3.0 (was /0.7) so `traw` ramps
+      // GRADUALLY across the whole body instead of snapping to 1 just above
+      // threshold. The plateau bias is lowered +0.04 → +0.02. Result: nzCurved
+      // ramps rim→centre, so the FUSED body reads as one smooth dome (the
+      // normal varies across it → a real large-scale shading gradient, and the
+      // highlight can spread later in S4 instead of clinging to a 1px rim).
+      const traw = clamp01((fld.field - threshold) / 3.0);
+      const t = traw * traw * (3 - 2 * traw); // smoothstep → gentle dome ramp
+      const nzCurved = Math.sqrt(Math.min(1, t + 0.02)); // faces viewer at core
+      // GUARD the old artifact (why the flatten was originally added): WIDELY-
+      // SEPARATED blobs must not each grow their own dome / dark AO-ring at
+      // their rim. Gate the curvature by FIELD MAGNITUDE: domeStrength is a
+      // smoothstep from 0 at the iso-rim (field≈threshold) to 1 in the high-
+      // field fused interior. S8e — onset RAISED: divisor threshold*1.5 →
+      // threshold*2.5 so domeStrength reaches 1 only at a HIGHER field (truly-
+      // fused body), not on moderate idle fields. SEPARATED low-field idle blobs
+      // therefore keep a flatter top (less per-blob dome curvature → fewer lit
+      // discs), while the loud/rec fused high-field body still gets full
+      // curvature. Blending nz from flat(≈1) toward nzCurved by domeStrength makes
+      // horiz→0 (so nx,ny→0) in the thin low-field rim band of separated blobs →
+      // they stay flat-topped with no per-blob ring.
+      // Cheap: only mul/add (no per-pixel transcendental).
+      const draw = clamp01((fld.field - threshold) / (threshold * 2.5));
+      const domeStrength = draw * draw * (3 - 2 * draw); // smoothstep gate
+      const nz = 1 + (nzCurved - 1) * domeStrength; // flat(1) → curved blend
       const horiz = Math.sqrt(Math.max(0, 1 - nz * nz));
       const glen = Math.sqrt(fld.gx * fld.gx + fld.gy * fld.gy) + 1e-6;
       // outward normal: away from bump centre (= -gradient direction)
@@ -473,140 +511,170 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       nrm.nz = nz;
     }
 
-    // 3. metal shading — albedo + AO + env reflection + iridescence + specular +
-    //    hot core + error tint + tonemap (reads fld + nrm, writes shaded). This
-    //    is the bulk of the look; kept as one cohesive "shade this surface" unit.
-    function shadeMetal(alpha: number): void {
-      const ar = fld.cr / fld.wsum, ag = fld.cg / fld.wsum, ab = fld.cb / fld.wsum; // albedo (metal tint)
+    // 3. gooey shading — the body is the field-weighted blob colour at full
+    //    saturation (chroma-boosted), lit by a soft Half-Lambert wrap diffuse,
+    //    gently darkened toward the silhouette for volume, with ONE broad soft
+    //    specular highlight (no chrome env, no iridescence, no hot core). S2 —
+    //    the diffuse/AO/spec lighting stage runs in LINEAR space (cheap
+    //    gamma-2.0) and is encoded back to sRGB at output (reads fld + nrm,
+    //    writes shaded).
+    function shadeGooey(px: number, py: number): void {
+      const ar = fld.cr / fld.wsum, ag = fld.cg / fld.wsum, ab = fld.cb / fld.wsum; // field-weighted blob colour
       const nx = nrm.nx, ny = nrm.ny, nz = nrm.nz;
 
-      // razor-sharp specular highlight (polished chrome)
+      // Body albedo = saturated blob colour, used directly. A gentle chroma
+      // boost fights any field-blend desaturation at fused necks. (The per-blob
+      // colour BLEND above stays in sRGB by taste — only the lighting STAGE
+      // below is linear.)
+      const lum = ar * 0.299 + ag * 0.587 + ab * 0.114;
+      // S8 — clamp ≥0: the higher chromaBoost (1.5) can push a low channel below
+      // zero; without the clamp the gamma-2.0 decode (squaring) would flip it
+      // back positive (a colour artifact). Math.max keeps saturated hues clean.
+      const albR = Math.max(0, lum + (ar - lum) * chromaBoost);
+      const albG = Math.max(0, lum + (ag - lum) * chromaBoost);
+      const albB = Math.max(0, lum + (ab - lum) * chromaBoost);
+
+      // S2 — decode albedo to LINEAR before lighting. Multiplying sRGB-encoded
+      // bytes by diffuse/AO is physically wrong (muddy, non-linear midtones,
+      // worse banding). Cheap gamma-2.0 decode, one multiply per channel (no
+      // Math.pow): lin = (c/255)^2.
+      // S6 — ERROR PATH FIX. In error mode, override the linear albedo with a
+      // saturated alert red BEFORE lighting, then run the IDENTICAL diff*ao +
+      // broad spec bloom pipeline below. The error blob gets the same
+      // curvature/material/bloom as the normal modes, just red — instead of the
+      // old crude post-lighting r*1.2+0.22 / g*=0.16 / bl*=0.13 wash that
+      // crushed the carefully-built bloom into a flat red. Values are in LINEAR
+      // space (sqrt-encoded at output → reads as a clean ~#f02b1f red); the
+      // rainbow palette is fully overridden so no hue bleeds through.
+      let lr: number, lg: number, lb: number;
+      if (errTint) {
+        lr = 0.85; lg = 0.02; lb = 0.02;
+      } else {
+        lr = (albR / 255) * (albR / 255);
+        lg = (albG / 255) * (albG / 255);
+        lb = (albB / 255) * (albB / 255);
+      }
+
+      // Directional diffuse — S8d: STEEPENED WRAP → deeper, opaque-clay shadow.
+      // S8c used w = max(0, ndl*0.7+0.3) (terminator at ndl≈-0.43); the unlit
+      // hemisphere still got partial light so the patches read as soft self-lit
+      // orbs. Now w = max(0, ndl*0.8+0.2): the terminator moves up to ndl≈-0.25,
+      // so MORE of the away-from-key hemisphere drops to the (low) ambient floor
+      // → a clear, high-contrast bright-lit → genuinely DARK gradient ACROSS the
+      // body (like store_3's blue blob). VALUE is driven ONLY by this directional
+      // N·L — never by field magnitude (audited: albedo ar/ag/ab = cr/wsum is a
+      // pure hue ratio, no field/wsum term scales brightness). The cool fill below
+      // keeps the dark side COLOURED, not black. Cheap: one mul+add, no pow.
+      // diff = ambient + lightStr*w → 0.11 .. 0.96.
+      const ndl = nx * Lx + ny * Ly + nz * Lz;
+      const w = Math.max(0, ndl * 0.8 + 0.2); // steeper wrap → deeper dark side
+      const diff = ambient + lightStr * w;
+
+      // Edge darkening for volume (replaces AO). S8d — floor RAISED to 0.66,
+      // range CUT to 0.34 so AO is a NARROW silhouette/neck cue only and no
+      // longer paints a per-blob centre-bright core (nz peaks at each dome
+      // centre). The steeper directional diffuse is now the sole value driver;
+      // the cool fill keeps darkened rim/necks coloured, not crushed to mud.
+      const ao = aoFloor + aoRange * nz; // S8e — 0.72 .. 0.92 (narrow neck cue)
+
+      // S8 — COOL FILL LIGHT. A weak bluish diffuse from the opposite (lower-
+      // right) side fills the key's shadow so the body reads as rounded matte
+      // clay, not a flat-lit disc with dead-black occlusion. Cheap: one dot +
+      // clamp (no wrap/LUT/pow). Multiplied by the body albedo (so it tints the
+      // local hue, staying coloured) and a cool RGB tint, added in LINEAR.
+      const ndf = Math.max(0, nx * Fx + ny * Fy + nz * Fz);
+      const fill = fillStr * ndf;
+
+      // S4 — BROAD SOFT BLOOM. Sum the two lobes (main bright core + very broad
+      // radial sheen) in LINEAR. The main lobe is energy-scaled so recording
+      // blooms brighter. Both are read from build-time LUTs (no per-pixel pow).
+      // S8c — REVERTED S8b: N·H is back on the DETAIL normal (nx,ny,nz). The S8b
+      // macro body-centroid sphere normal over-rounded the body into an "egg" and
+      // reinforced the glow; with S8c's low ambient + sharp diffuse + cut sheen
+      // the detail-normal specLUT (exp10) reads as one broad highlight on the lit
+      // cap without a milky film.
       const ndh = Math.max(0, nx * Hx + ny * Hy + nz * Hz);
       const ndhI = ndh < 1 ? (ndh * 255) | 0 : 255;
-      const spec = POW90[ndhI] * (specBase + energy * specEnergy);
-      // fresnel rim (grazing edges reflect more → bright metallic rim)
-      const om = 1 - nz;
-      const fres = om * om * Math.sqrt(om); // (1-nz)^2.5
+      const spec = specLUT[ndhI] * (specBase + energy * specEnergy)
+        + sheenLUT[ndhI] * sheenStrength;
 
-      // --- Fix 3.1 dark neutral metal albedo + subtle desaturated tint ---
-      // The saturated palette no longer fills the body (that read as jelly);
-      // blob identity colour is pushed into the reflection + iridescence
-      // terms below. The body is a dark neutral metal (~rgb 28,30,34) with
-      // only a whisper of heavily-desaturated per-blob tint.
-      // Liquid-metal base: a lit mid-tone neutral metal (not a black hole),
-      // carrying a whisper of desaturated per-blob tint so the centre reads
-      // as flowing chrome/mercury rather than dark oil.
-      const lum = ar * 0.299 + ag * 0.587 + ab * 0.114;
-      const albR = albedoBaseR + (lum + (ar - lum) * tintDesat) * tintScale;
-      const albG = albedoBaseG + (lum + (ag - lum) * tintDesat) * tintScale;
-      const albB = albedoBaseB + (lum + (ab - lum) * tintDesat) * tintScale;
-      // Fix 3.2 ambient-occlusion darkening toward the silhouette: the body
-      // is darker where the normal grazes (low nz) so the core reads rounded
-      // (replaces the removed diffuse * 0.35 body lift).
-      const ao = aoFloor + aoRange * nz;
+      // Highlight colour ≈ WHITE (dielectric) but tinted ≤15% toward the LINEAR
+      // albedo so the bloom transitions THROUGH colour at its feathered edge
+      // instead of a hard white→hue jump. Kept subtle (0.85 white + 0.15 hue).
+      const specR = spec * (0.85 + 0.15 * lr);
+      const specG = spec * (0.85 + 0.15 * lg);
+      const specB = spec * (0.85 + 0.15 * lb);
 
-      // --- Fix 3.3 environment reflection: high-contrast vertical studio
-      // gradient sampled by the reflect vector R = reflect(V, N), V=(0,0,1).
-      // R = V - 2(N·V)N → with V=(0,0,1): Rx=-2*nz*nx, Ry=-2*nz*ny.
-      const Rx = -2 * nz * nx;
-      const Ry = -2 * nz * ny;
-      // vertical studio coord: ~1 = sky overhead, ~0 = floor below
-      const ry = 0.5 - Ry * 0.85 + Rx * 0.15;
-      // near-white sky band on top, near-black middle, dim floor bounce below
-      const sky = clamp01((ry - skyEdge) * envBandSlope);
-      const floor = clamp01((floorEdge - ry) * envBandSlope);
-      // mercury studio: lit mid-tone body + a bright sky sweep up top and a
-      // darker belly below → high-contrast liquid-metal reflection.
-      const env = envFloor + envSky * sky + envFloorBounce * floor;
-      // crisp reflected light strips sweeping the body → liquid-metal banding
-      const bnd = Math.max(0, 1 - Math.abs(ry - bandCenter) * bandWidth);
-      const bnd2 = Math.max(0, 1 - Math.abs(ry - band2Center) * band2Width);
-      const band = (bnd * bnd) * (bnd * bnd);
-      const band2 = (bnd2 * bnd2) * (bnd2 * bnd2) * band2Scale;
+      // Compose ALL lighting in linear: coloured body (albedo × diff × ao) plus
+      // the additive near-white bloom, accumulated in linear light. In error
+      // mode the only difference is the red albedo above — the SAME diff*ao and
+      // additive white bloom run, so the error blob has identical shading.
+      const r = lr * (diff * ao + fill * fillColR) + specR;
+      const g = lg * (diff * ao + fill * fillColG) + specG;
+      const bl = lb * (diff * ao + fill * fillColB) + specB;
 
-      // --- Fix 3.4 iridescent thin-film on the dark base ---
-      // Strong at grazing angles (high fresnel), suppressed across the flat
-      // centre, and feathered out of the 1px alpha edge via smoothstep so the
-      // green/magenta CA-style rim fringe disappears. A slow time drift makes
-      // it shimmer when blobs move.
-      const iphase = fres * 1.3 + (nx * 0.5 + ny * 0.5) * 0.4 + 0.15 + time * 0.004;
-      const iri = iridIndex(iphase);
-      const irR = iridR[iri], irG = iridG[iri], irB = iridB[iri];
-      // Feather the iridescence by pixel coverage: edge-band pixels pass their
-      // sub-sample coverage (inside/4) so the fringe is smoothstep-attenuated at
-      // the silhouette, calming the saturated cyan/magenta rim. Interior pixels
-      // pass 1 → edgeFade = 1 (full iridescence). Keeps the body reading as
-      // metal, not pastel soap.
-      const edgeFade = alpha < 1 ? alpha * alpha * (3 - 2 * alpha) : 1; // smoothstep
-      let iAmt = (fres * iridFresWeight + band * iridBandWeight) * edgeFade;
-      if (iAmt > iridClamp) iAmt = iridClamp;
-
-      // Compose: dark body (albedo·AO) + palette-tinted environment reflection
-      // — blob identity colour now comes from this reflection — + achromatic
-      // white sheen from the reflected strips.
-      const sheen = (band + band2) * sheenScale; // bright achromatic reflection
-      let baseR = albR * ao + ar * env * envTint + sheen;
-      let baseG = albG * ao + ag * env * envTint + sheen;
-      let baseB = albB * ao + ab * env * envTint + sheen;
-      baseR = mix(baseR, irR, iAmt);
-      baseG = mix(baseG, irG, iAmt);
-      baseB = mix(baseB, irB, iAmt);
-
-      let r = baseR + spec * 255;
-      let g = baseG + spec * 255;
-      let bl = baseB + spec * 255;
-
-      // white-hot chrome core in the tightest highlight
-      const hot = POW220[ndhI] * 255 * (hotBase + energy * hotEnergy);
-      r += hot; g += hot; bl += hot;
-
-      // Fix 5.3 — clean alert red: boost red hard and crush green/blue much
-      // harder than before (was r*0.5+120, g*0.4, b*0.42 → muddy pink). The
-      // brightness shape from spec/hot is preserved; tonemap rolls off the hot
-      // red so the chrome highlight still reads on the dark-metal base (Fix 3).
-      if (errTint) { r = r * 1.2 + 60; g *= 0.16; bl *= 0.13; }
-
-      // cinematic tone-map (filmic ACES-ish) — preserves bright sheen, lifts body
-      shaded.r = tonemap(r, exposure);
-      shaded.g = tonemap(g, exposure);
-      shaded.b = tonemap(bl, exposure);
+      // Encode linear → sRGB at output (cheap gamma-2.0: out = sqrt(lin)*255).
+      // One Math.sqrt per channel; clamp linear to [0,1] first so sqrt stays in
+      // range and the body never exceeds 255.
+      //
+      // S7 — TPDF DITHER. The encode above quantizes to 8-bit on write (setPixel
+      // → Uint8ClampedArray rounds to int), so the smooth S2/S4 linear→sRGB
+      // gradients stair-step into faint banding on the broad bloom/body. Add a
+      // triangular-PDF dither of ±1 LSB (one 8-bit step) to each RGB channel
+      // BEFORE the typed array rounds it: this decorrelates the quantization
+      // error and dissolves the bands into imperceptible grain (the standard,
+      // ~free fix). TPDF = u1 + u2 - 1 (two independent uniforms → triangular in
+      // [-1,+1]); applied per channel with independent grain (distinct hash
+      // salts). RGB ONLY — alpha stays exact analytic coverage (S5); dithering
+      // it would sparkle the AA edge. The fully-transparent path (coverage<=0)
+      // never reaches here, so transparent pixels keep RGB=0.
+      const f = time;
+      const dr = hashU(px, py, f * 6 + 1) + hashU(px, py, f * 6 + 2) - 1;
+      const dg = hashU(px, py, f * 6 + 3) + hashU(px, py, f * 6 + 4) - 1;
+      const db = hashU(px, py, f * 6 + 5) + hashU(px, py, f * 6 + 6) - 1;
+      shaded.r = Math.sqrt(clamp01(r)) * 255 + dr;
+      shaded.g = Math.sqrt(clamp01(g)) * 255 + dg;
+      shaded.b = Math.sqrt(clamp01(bl)) * 255 + db;
     }
 
-    // composite: per-pixel mask → shade or clear → write (the remaining render
-    // responsibility: alpha/edge + setPixel).
+    // composite: per-pixel mask → analytic coverage → shade or clear → write.
     for (let py = y0; py < y1; py++) {
       for (let px = x0; px < x1; px++) {
         sampleField(px, py);
 
-        const idx = (py * W + px) * 4;
+        const idx = (py * CW + px) * 4;
         const field = fld.field;
 
-        // Inside the surface → fully opaque metal. Outside, but close to the
-        // boundary → supersample coverage for a smooth anti-aliased outline.
-        // Far outside → fully transparent (no field halo).
-        if (field >= threshold) {
-          surfaceNormal();
-          shadeMetal(1);
-          setPixel(data, idx, shaded.r, shaded.g, shaded.b, 1);
-        } else if (field >= threshold * 0.82) {
-          // Edge band: take 4 sub-pixel field samples; alpha = fraction of them
-          // that land INSIDE the surface. This anti-aliases the silhouette by
-          // coverage (never extends past the surface as a coloured fringe).
-          let inside = 0;
-          if (fieldAt(px - 0.3, py - 0.3) >= threshold) inside++;
-          if (fieldAt(px + 0.3, py - 0.3) >= threshold) inside++;
-          if (fieldAt(px - 0.3, py + 0.3) >= threshold) inside++;
-          if (fieldAt(px + 0.3, py + 0.3) >= threshold) inside++;
-          if (inside > 0) {
-            surfaceNormal();
-            shadeMetal(inside / 4);
-            setPixel(data, idx, shaded.r, shaded.g, shaded.b, inside / 4);
-          } else {
-            setPixel(data, idx, 0, 0, 0, 0);
-          }
-        } else {
-          // fully transparent background — overlay shows through
+        // S5 — ANALYTIC GRADIENT ANTI-ALIASING. Replaces the old 4-tap
+        // supersample (4 extra fieldAt() evals per edge pixel) with a single
+        // field eval + the analytic in-plane gradient already accumulated in
+        // sampleField. The signed distance from the pixel centre to the iso-
+        // surface is ≈ (field - threshold) / |∇field| (in device px, since the
+        // gradient is per-device-pixel). Converting that distance to coverage
+        // over a 1px-wide band gives a continuous 256-level alpha:
+        //   coverage = clamp01( (field - threshold) / glen + 0.5 )
+        // This is the standard analytic edge AA: one field eval + a few muls,
+        // cheaper than 4 field evals AND smoother (continuous coverage vs 4
+        // discrete levels). At dpr (S3) the silhouette is already supersampled;
+        // this finishes it into a smooth sub-pixel curve.
+        const glen = Math.sqrt(fld.gx * fld.gx + fld.gy * fld.gy);
+        // Guard flat regions (glen → 0): the analytic distance is undefined
+        // (divide-by-zero → ±Inf, or 0/0 → NaN at field==threshold). Fall back
+        // to the old hard threshold step so coverage stays a clean 0/1.
+        const coverage = glen < 1e-9
+          ? (field >= threshold ? 1 : 0)
+          : clamp01((field - threshold) / glen + 0.5);
+
+        if (coverage <= 0) {
+          // fully outside the surface → transparent background (shows through).
           setPixel(data, idx, 0, 0, 0, 0);
+        } else {
+          // coverage in (0,1] → shade once and composite at that coverage.
+          // coverage===1 is the hard-inside fast path (fully opaque); 0<cov<1
+          // is the anti-aliased rim. shadeGooey runs exactly once either way.
+          surfaceNormal();
+          shadeGooey(px, py);
+          setPixel(data, idx, shaded.r, shaded.g, shaded.b, coverage);
         }
       }
     }
