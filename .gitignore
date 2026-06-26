@@ -40,3 +40,6 @@ src/soupawhisper/
 # Keep benchmark scripts, ignore Python legacy scripts
 scripts/*.py
 .worktrees/
+
+# Standalone embeddable visualizer package (own git repo at github.com/axelbaumlisto/metaballs-viz)
+/metaballs-viz/
