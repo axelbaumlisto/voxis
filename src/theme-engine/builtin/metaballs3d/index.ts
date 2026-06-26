@@ -22,7 +22,7 @@ const FRAG = `
 precision highp float;
 
 uniform vec2  uResolution;
-uniform float uTime;
+uniform float uPhase;       // CPU-accumulated orbit phase (replaces spd*t)
 uniform float uLevel;
 uniform float uColorMode;
 
@@ -30,8 +30,6 @@ uniform float uColorMode;
 uniform float uShine;       // highlight tightness (default 28)
 uniform float uSpecW;       // overall specular weight (default 0.6)
 uniform float uSaturation;  // chroma boost factor (default 1.45)
-uniform float uSpeed;       // orbit speed multiplier (default 1.0)
-uniform float uModeSpeed;   // S3 per-frame mode churn factor (idle .8 / rec 1 / transcribing 1.35 / error 1)
 uniform float uZoom;        // scene scale / framing (default 1.7)
 uniform vec3  uCol1;        // sphere colors (defaults #e63333,#1a1ae6,#33e633,#e6e60d)
 uniform vec3  uCol2;
@@ -53,8 +51,11 @@ float smin(float a, float b, float blendRadius) {
   return mix(b, a, c) - blendRadius * c * (1.0 - c);
 }
 
-void main() {
-  vec2 uv = gl_FragCoord.xy / uResolution.xy;
+// Renders one ray for a given pixel coordinate. Returns straight-alpha RGBA:
+// vec4(0) outside the silhouette (transparent), vec4(rgb,1) on a surface hit.
+// Called 4x by main() with jittered offsets for edge anti-aliasing (MSAA).
+vec4 render(vec2 fragCoord) {
+  vec2 uv = fragCoord / uResolution.xy;
   // square aspect-correct ray through the scene
   float aspect = uResolution.x / uResolution.y;
   vec2 p = (uv - 0.5);
@@ -64,18 +65,17 @@ void main() {
   vec3 rayDir = normalize(vec3(p * uZoom, 1.0));
   vec3 iterPos = vec3(p * uZoom, 1.0);
 
-  float t = uTime;
-  // audio drives motion energy + sphere radius (louder = bigger, livelier)
-  float energy = 0.5 + uLevel;          // 0.5 idle .. 1.5 loud
+  // audio drives sphere radius (louder = bigger). Orbit motion is driven by
+  // uPhase, which is integrated on the CPU so a change in speed never causes a
+  // phase jump (the classic sin(spd*t) jerk). Same per-sphere frequency ratios.
   float rad = 0.5 + 0.30 * uLevel;      // sphere radius pulses with level
-  float spd = 0.5 * energy * uSpeed * uModeSpeed;
 
   // orbits with enough spread that lobes stay distinct (gooey morph, saturated
   // color regions) but the cluster stays centered on (0,0,5)
-  vec3 c1 = vec3( 0.95*sin(spd*t),        -1.25*sin(spd*t),      5.0);
-  vec3 c2 = vec3(-0.90*cos(spd*t),         1.20*sin(spd*t),      5.0);
-  vec3 c3 = vec3( 1.05*cos(spd*t),        -1.00*cos(spd*t),      5.0);
-  vec3 c4 = vec3( 1.30*cos(0.6*spd*t/0.5), 1.30*cos(0.7*spd*t/0.5),5.0);
+  vec3 c1 = vec3( 0.95*sin(uPhase),     -1.25*sin(uPhase),     5.0);
+  vec3 c2 = vec3(-0.90*cos(uPhase),      1.20*sin(uPhase),     5.0);
+  vec3 c3 = vec3( 1.05*cos(uPhase),     -1.00*cos(uPhase),     5.0);
+  vec3 c4 = vec3( 1.30*cos(1.2*uPhase),  1.30*cos(1.4*uPhase), 5.0);
 
   vec3 color  = vec3(0.0);
   vec3 normal = vec3(0.0, 1.0, 0.0);
@@ -109,7 +109,7 @@ void main() {
     iterPos += d * rayDir;
   }
 
-  if (!hit) { gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0); return; } // transparent bg
+  if (!hit) return vec4(0.0, 0.0, 0.0, 0.0); // transparent bg
 
   // error mode -> saturated red surface
   if (uColorMode > 0.5) color = vec3(0.9, 0.08, 0.08);
@@ -142,7 +142,23 @@ void main() {
   vec3 outc = lit * color;
   // gamma-2.2 encode for cleaner gradients
   outc = pow(clamp(outc, 0.0, 1.0), vec3(1.0/2.2));
-  gl_FragColor = vec4(outc, 1.0);
+  return vec4(outc, 1.0);
+}
+
+void main() {
+  // 4x MSAA: average straight-alpha RGBA over a rotated-grid of sub-pixel rays.
+  // This anti-aliases both the outer silhouette (alpha feathers over ~1px) and
+  // the color at the rim. Interior stays alpha=1, well-outside stays alpha=0.
+  vec4 acc = vec4(0.0);
+  acc += render(gl_FragCoord.xy + vec2(-0.125, -0.375));
+  acc += render(gl_FragCoord.xy + vec2( 0.375, -0.125));
+  acc += render(gl_FragCoord.xy + vec2(-0.375,  0.125));
+  acc += render(gl_FragCoord.xy + vec2( 0.125,  0.375));
+  acc *= 0.25;
+  // un-premultiply: averaged rgb is coverage-weighted, but the context is
+  // premultipliedAlpha:false, so divide back out to straight alpha.
+  if (acc.a > 0.0) acc.rgb /= acc.a;
+  gl_FragColor = acc;
 }
 `;
 
@@ -253,10 +269,9 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
   const uRes = gl.getUniformLocation(prog, "uResolution");
-  const uTime = gl.getUniformLocation(prog, "uTime");
+  const uPhase = gl.getUniformLocation(prog, "uPhase");
   const uLevel = gl.getUniformLocation(prog, "uLevel");
   const uColorMode = gl.getUniformLocation(prog, "uColorMode");
-  const uModeSpeed = gl.getUniformLocation(prog, "uModeSpeed");
 
   // S2: read api.params with defensive defaults (defaults == current look) and
   // set the static tunables once — they don't change per frame.
@@ -271,7 +286,6 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   gl.uniform1f(gl.getUniformLocation(prog, "uShine"), shine);
   gl.uniform1f(gl.getUniformLocation(prog, "uSpecW"), specW);
   gl.uniform1f(gl.getUniformLocation(prog, "uSaturation"), saturation);
-  gl.uniform1f(gl.getUniformLocation(prog, "uSpeed"), speed);
   gl.uniform1f(gl.getUniformLocation(prog, "uZoom"), zoom);
   gl.uniform3f(gl.getUniformLocation(prog, "uCol1"), cols[0][0], cols[0][1], cols[0][2]);
   gl.uniform3f(gl.getUniformLocation(prog, "uCol2"), cols[1][0], cols[1][1], cols[1][2]);
@@ -284,7 +298,12 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   let mode = "idle";
   let level = 0;
   let smoothLevel = 0;
-  const start = performance.now();
+  // Orbit phase integrated on the CPU each frame. Decoupling phase from
+  // (speed * uTime) means a change in speed alters the RATE only, never the
+  // absolute phase — so audio-driven speed changes can't teleport the blobs.
+  let phase = 0;
+  let prevNow = performance.now();
+  const start = prevNow;
   let raf = 0;
   let running = true;
 
@@ -295,9 +314,13 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
 
   function frame() {
     if (!running) return;
-    const t = (performance.now() - start) / 1000;
+    const now = performance.now();
+    const t = (now - start) / 1000;
+    // real elapsed seconds, clamped to avoid a huge first-frame / tab-restore jump
+    const dt = Math.max(0, Math.min(0.05, (now - prevNow) / 1000));
+    prevNow = now;
     // S3: map mode -> (target energy level, orbit-speed churn). Computed ONCE per
-    // frame in JS (no per-pixel cost); uModeSpeed multiplies orbit speed in shader.
+    // frame in JS (no per-pixel cost); modeSpeed multiplies the phase rate below.
     //   idle        : calm slow breathing  ~0.12 +/- 0.04*sin   speed 0.8
     //   recording   : follows live audio level                  speed 1.0
     //   transcribing: steady mid "thinking" energy 0.40          speed 1.35 (churn)
@@ -316,12 +339,18 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       target = level;
       modeSpeed = 1.0;
     }
-    // keep smoothing so mode transitions ease in, never jump
-    smoothLevel += (target - smoothLevel) * 0.12;
+    // keep smoothing so mode transitions ease in, never jump (gentle response
+    // so motion stays smooth while talking)
+    smoothLevel += (target - smoothLevel) * 0.08;
 
-    gl!.uniform1f(uTime, t);
+    // accumulate orbit phase at the current rate (mirrors the old shader spd:
+    // 0.5 * energy * uSpeed * uModeSpeed, energy = 0.5 + smoothLevel)
+    const energy = 0.5 + smoothLevel;
+    const spdJs = 0.5 * energy * speed * modeSpeed;
+    phase += spdJs * dt;
+
+    gl!.uniform1f(uPhase, phase);
     gl!.uniform1f(uLevel, smoothLevel);
-    gl!.uniform1f(uModeSpeed, modeSpeed);
     gl!.uniform1f(uColorMode, mode === "error" ? 1.0 : 0.0);
     gl!.clearColor(0, 0, 0, 0);
     gl!.clear(gl!.COLOR_BUFFER_BIT);
