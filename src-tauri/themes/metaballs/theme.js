@@ -321,11 +321,11 @@ function mount(container, api) {
       const r = lr * (diff * ao + fill * fillColR) + specR;
       const g = lg * (diff * ao + fill * fillColG) + specG;
       const bl = lb * (diff * ao + fill * fillColB) + specB;
-      const f = time;
-      const dr = hashU(px, py, f * 6 + 1) + hashU(px, py, f * 6 + 2) - 1;
-      const dg = hashU(px, py, f * 6 + 3) + hashU(px, py, f * 6 + 4) - 1;
-      const db = hashU(px, py, f * 6 + 5) + hashU(px, py, f * 6 + 6) - 1;
-      shaded.r = Math.sqrt(clamp01(r)) * 255 + dr;
+      const ditherFrame = time;
+      const dR = hashU(px, py, ditherFrame * 6 + 1) + hashU(px, py, ditherFrame * 6 + 2) - 1;
+      const dg = hashU(px, py, ditherFrame * 6 + 3) + hashU(px, py, ditherFrame * 6 + 4) - 1;
+      const db = hashU(px, py, ditherFrame * 6 + 5) + hashU(px, py, ditherFrame * 6 + 6) - 1;
+      shaded.r = Math.sqrt(clamp01(r)) * 255 + dR;
       shaded.g = Math.sqrt(clamp01(g)) * 255 + dg;
       shaded.b = Math.sqrt(clamp01(bl)) * 255 + db;
     }
