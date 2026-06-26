@@ -5,34 +5,34 @@ function hexToRgb(hex) {
   return { r: n >> 16 & 255, g: n >> 8 & 255, b: n & 255 };
 }
 var MAT = {
-  albedoBaseR: 50,
-  albedoBaseG: 54,
-  albedoBaseB: 60,
+  albedoBaseR: 20,
+  albedoBaseG: 23,
+  albedoBaseB: 28,
   tintDesat: 0.3,
   tintScale: 0.14,
-  aoFloor: 0.45,
-  aoRange: 0.55,
-  envFloor: 0.2,
-  envSky: 0.95,
-  envFloorBounce: 0.3,
+  aoFloor: 0.1,
+  aoRange: 0.9,
+  envFloor: 0.05,
+  envSky: 1.6,
+  envFloorBounce: 0.1,
   skyEdge: 0.6,
   floorEdge: 0.3,
-  envBandSlope: 6,
-  envTint: 0.9,
+  envBandSlope: 4,
+  envTint: 0.85,
   bandCenter: 0.66,
-  bandWidth: 5.5,
+  bandWidth: 9,
   band2Center: 0.32,
-  band2Width: 6.5,
-  band2Scale: 0.7,
-  sheenScale: 150,
-  iridFresWeight: 0.6,
-  iridBandWeight: 0.12,
-  iridClamp: 0.7,
-  specBase: 0.85,
-  specEnergy: 0.6,
-  hotBase: 0.6,
-  hotEnergy: 0.5,
-  exposure: 1.1
+  band2Width: 11,
+  band2Scale: 0.5,
+  sheenScale: 230,
+  iridFresWeight: 0.55,
+  iridBandWeight: 0.03,
+  iridClamp: 0.5,
+  specBase: 1.1,
+  specEnergy: 0.7,
+  hotBase: 1,
+  hotEnergy: 0.6,
+  exposure: 1.05
 };
 function tonemap(v, exposure) {
   const x = v / 255 * exposure;
@@ -82,7 +82,7 @@ function mount(container, api) {
   }
   const blobCount = Math.max(2, Math.min(8, Math.round(Number(cfg.blobCount) || 5)));
   const t = Number(cfg.threshold);
-  const threshold = Number.isFinite(t) ? t : 1;
+  const threshold = Number.isFinite(t) && t > 0 ? t : 1;
   const bx = new Float64Array(blobCount);
   const by = new Float64Array(blobCount);
   const brr = new Float64Array(blobCount);
@@ -137,7 +137,7 @@ function mount(container, api) {
   function step() {
     time += 1;
     const energy = modeEnergy();
-    const renderThrottled = mode === "idle" && level < 0.01 && time % 2 !== 0;
+    const renderThrottled = time % 2 !== 0;
     const swell = 1 + level * 0.4 + (mode === "recording" ? 0.1 : 0);
     const cx = W / 2;
     const cy = H / 2;
@@ -254,7 +254,7 @@ function mount(container, api) {
       bcg[i] = b.color.g;
       bcb[i] = b.color.b;
     }
-    const padThr = threshold > 0 ? Math.min(1, threshold) : 1;
+    const padThr = Math.min(1, threshold);
     const boxPad = Math.ceil(4 + maxR * (Math.sqrt(blobCount) / Math.sqrt(padThr)));
     const x0 = Math.max(0, Math.floor(minX - boxPad));
     const x1 = Math.min(W, Math.ceil(maxX + boxPad));
@@ -299,7 +299,8 @@ function mount(container, api) {
       return field;
     }
     function surfaceNormal() {
-      const t2 = clamp01((fld.field - threshold) / 1.6);
+      const traw = clamp01((fld.field - threshold) / 0.7);
+      const t2 = traw * traw * (3 - 2 * traw);
       const nz = Math.sqrt(Math.min(1, t2 + 0.04));
       const horiz = Math.sqrt(Math.max(0, 1 - nz * nz));
       const glen = Math.sqrt(fld.gx * fld.gx + fld.gy * fld.gy) + 0.000001;
@@ -381,7 +382,7 @@ function mount(container, api) {
             inside++;
           if (inside > 0) {
             surfaceNormal();
-            shadeMetal(1);
+            shadeMetal(inside / 4);
             setPixel(data, idx, shaded.r, shaded.g, shaded.b, inside / 4);
           } else {
             setPixel(data, idx, 0, 0, 0, 0);
@@ -396,7 +397,8 @@ function mount(container, api) {
   const unsubscribe = api.onState((s) => {
     mode = s.mode;
     bins = s.spectrumBins || [];
-    level += (s.audioLevel - level) * 0.3;
+    const lvl = Number.isFinite(s.audioLevel) ? s.audioLevel : 0;
+    level += (lvl - level) * 0.3;
   });
   function onVisibility() {
     if (document.hidden) {

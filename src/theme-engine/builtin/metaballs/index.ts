@@ -3,7 +3,8 @@
  * Metaballs — floating glossy blobs that fuse and split, inspired by the
  * Apposite "Metaballs" sculpting app (iPhone/iPad/Vision Pro).
  *
- * A scalar metaball field is evaluated per-pixel over the 172×36 overlay.
+ * A scalar metaball field is evaluated per-pixel over the square overlay
+ * declared in the manifest (120×120).
  * Blobs drift, bounce off the walls, and merge smoothly where their fields
  * overlap. The whole organism breathes with `audioLevel` (radius swell) and
  * the low spectrum bins nudge individual blobs so it reacts to your voice.
@@ -35,47 +36,63 @@ function hexToRgb(hex: string): RGB {
 
 // R1 — single source of truth for the tunable material params. Every value here
 // was previously an inline magic number in render()/tonemap(); naming them makes
-// the metallic look discoverable in one place. PIXEL-IDENTICAL: same numbers,
-// just named. Hot-path note: render() destructures these into per-frame local
+// the metallic look discoverable in one place. This naming is a pure material/
+// helper refactor: same numbers, just named (it does not change pixels — note
+// the silhouette edge AA is a separate, intentional behaviour change elsewhere).
+// Hot-path note: render() destructures these into per-frame local
 // `const` numbers at the top of the function so the inner pixel loops never do
 // per-pixel object-property reads. The MAT object stays the single source of
 // truth; the per-frame locals are the hot-path reads.
 const MAT = {
-  // Liquid-metal albedo: dark neutral base rgb + a whisper of desaturated tint.
-  albedoBaseR: 50,
-  albedoBaseG: 54,
-  albedoBaseB: 60,
+  // B1 — Liquid-metal albedo pulled DARK (chrome/mercury, not pearly soap).
+  // Was (50,54,60) pale mid-grey → the dark albedo never showed through the
+  // additive env+sheen. A genuinely dark neutral base lets shadow/grazing
+  // areas go near-black so the bright sky/specular spikes read as metal.
+  albedoBaseR: 20,
+  albedoBaseG: 23,
+  albedoBaseB: 28,
   tintDesat: 0.30, // how much per-channel chroma survives (vs. pulled to luma)
   tintScale: 0.14, // overall tint contribution mixed into the base
-  // Ambient occlusion: darker toward the silhouette (low nz).
-  aoFloor: 0.45,
-  aoRange: 0.55,
-  // Environment studio gradient.
-  envFloor: 0.20,
-  envSky: 0.95,
-  envFloorBounce: 0.30,
+  // B1 — Ambient occlusion: floor dropped 0.45→0.10 so grazing/silhouette
+  // regions go near-dark (range widened so the core still lights to ~1.0).
+  // Mercury/chrome = mostly mid/dark with a few bright spikes.
+  aoFloor: 0.10,
+  aoRange: 0.90,
+  // B1 — Environment studio gradient widened for HARD light→dark contrast:
+  // near-dark ambient/floor (0.20→0.05, bounce 0.30→0.10) next to a sky that
+  // blows toward near-white (0.95→1.60). B2 then SOFTENED the band slope to 4
+  // so the reflection is continuous across the fused body (no per-blob rings).
+  envFloor: 0.05,
+  envSky: 1.60,
+  envFloorBounce: 0.10,
   skyEdge: 0.60, // sky band starts above this reflected-y coord
   floorEdge: 0.30, // floor band starts below this reflected-y coord
-  envBandSlope: 6, // sky/floor gradient steepness
-  envTint: 0.9, // palette-tinted env reflection weight
-  // Reflected light strips (liquid-metal banding).
+  envBandSlope: 4, // sky/floor gradient steepness (softer = continuous reflection, no per-blob rings)
+  envTint: 0.85, // palette-tinted env reflection weight (identity rides here)
+  // B1 — Reflected light strips: NARROWER (widths 5.5/6.5→9/11) and the sheen
+  // peak BRIGHTER (150→230) so the specular streak is a sharp bright line, not
+  // a broad soft sheen.
   bandCenter: 0.66,
-  bandWidth: 5.5,
+  bandWidth: 9,
   band2Center: 0.32,
-  band2Width: 6.5,
-  band2Scale: 0.7,
-  sheenScale: 150, // bright achromatic sheen from the strips
-  // Iridescent thin-film on the rim.
-  iridFresWeight: 0.6,
-  iridBandWeight: 0.12,
-  iridClamp: 0.7,
-  // Specular highlight + white-hot core energy mix.
-  specBase: 0.85,
-  specEnergy: 0.6,
-  hotBase: 0.6,
-  hotEnergy: 0.5,
+  band2Width: 11,
+  band2Scale: 0.5,
+  sheenScale: 230, // bright achromatic sheen from the strips (narrow + intense)
+  // B1 — Iridescence pulled to the RIM/grazing only: the band-driven term that
+  // washed the flat centre is cut hard (0.12→0.03) so the interior reads as
+  // metal, not pastel; clamp lowered (0.7→0.5) so even the rim stays tinted
+  // reflection rather than a saturated soap fringe.
+  iridFresWeight: 0.55,
+  iridBandWeight: 0.03,
+  iridClamp: 0.5,
+  // B1 — Specular highlight + white-hot core boosted (sharper, brighter spike)
+  // so the bright end of the dark→bright range spikes toward near-white.
+  specBase: 1.10,
+  specEnergy: 0.70,
+  hotBase: 1.00,
+  hotEnergy: 0.60,
   // Filmic tonemap exposure (was 1.45; lowered for the darker chrome base).
-  exposure: 1.1,
+  exposure: 1.05,
 } as const;
 
 // Fix 2.1 — filmic ACES-ish tonemap hoisted to module scope (pure, no per-frame
@@ -172,8 +189,13 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   const blobCount = Math.max(2, Math.min(8, Math.round(Number(cfg.blobCount) || 5)));
   // Fix 4.1 — respect a legal `threshold: 0` (the old `|| 1.0` coerced it back
   // to 1.0). Only fall back when the value is not finite.
+  // m4 — floor a non-positive or non-finite threshold to 1.0. A threshold of 0
+  // (or negative) is not a valid iso-level: the field (always > 0 everywhere)
+  // would be >= 0 for every pixel, so the whole bbox would shade as a solid
+  // opaque rectangle instead of a blob. The >0 floor prevents that. (The bbox
+  // padThr guard below additionally protects the divide-by-sqrt(threshold).)
   const t = Number(cfg.threshold);
-  const threshold = Number.isFinite(t) ? t : 1.0;
+  const threshold = Number.isFinite(t) && t > 0 ? t : 1.0;
 
   // Fix 2.3 — flat per-blob buffers refilled once per frame so the inner pixel
   // loop reads typed arrays instead of object props. Allocated once at mount.
@@ -241,14 +263,18 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   function step() {
     time += 1;
     const energy = modeEnergy();
-    // Fix 1.2 — idle frame throttle: when truly idle (no audio) skip the
-    // expensive per-pixel render on most frames. Physics still advances so the
-    // blobs are in the right place the instant audio/mode activity resumes.
-    // Never throttle while recording/transcribing/error or when audio present.
-    // Load is tiny (~6% of one core); only a gentle idle halving (30fps) is
-    // worth it — heavy throttling looked choppy. The real battery win is the
-    // visibility pause (rAF fully stops when the overlay is hidden).
-    const renderThrottled = mode === "idle" && level < 0.01 && (time % 2 !== 0);
+    // A2 — 30fps render throttle for ALL modes: skip the expensive per-pixel
+    // render() on odd frames while physics (step) keeps advancing every frame.
+    // Recording/transcribing previously rendered full 60fps; on the larger
+    // square canvas the bbox collapses to a full-canvas scan, so that was a big
+    // CPU spike. On a 120px widget 30fps is visually indistinguishable. After a
+    // mode change the next render lands on the following even frame, so the worst
+    // case is up to ~33ms (2 frames) of staleness — harmless since physics is
+    // already up to date when that even frame renders. The very first frame after
+    // mount (time=1) is also skipped, which is harmless because the buffer is
+    // still transparent. The real battery win is still the visibility pause (rAF
+    // fully stops when the overlay is hidden).
+    const renderThrottled = (time % 2 !== 0);
     // Modest swell: the voice is felt as morph + jitter + sheen, not as the
     // blob ballooning to fill the whole canvas (that clipped on every edge).
     const swell = 1 + level * 0.4 + (mode === "recording" ? 0.1 : 0);
@@ -366,7 +392,9 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     // distance r/sqrt(threshold); a tight cluster of N blobs reaches roughly
     // sqrt(N) further. Pad generously by the largest radius so the whole
     // organic surface is always inside the scanned box.
-    const padThr = threshold > 0 ? Math.min(1, threshold) : 1;
+    // threshold is already floored >0 at mount (m4); Math.min(1, ...) keeps the
+    // divide-by-sqrt(padThr) below well-defined. Defensive, no live <=0 branch.
+    const padThr = Math.min(1, threshold);
     const boxPad = Math.ceil(4 + maxR * (Math.sqrt(blobCount) / Math.sqrt(padThr)));
     const x0 = Math.max(0, Math.floor(minX - boxPad));
     const x1 = Math.min(W, Math.ceil(maxX + boxPad));
@@ -379,8 +407,11 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     // no params and no per-pixel allocation. They write results into per-frame
     // SCRATCH objects allocated ONCE here (3 objects/frame, never per pixel) —
     // this is the explicit no-GC-pressure guidance in the plan's Notes/risks.
-    // PIXEL-IDENTICAL: each helper holds the exact same arithmetic, in the same
-    // order on the same operands, as the previous monolithic loop body.
+    // This is the material/helper refactor: each helper holds the same
+    // arithmetic, in the same order on the same operands, as the previous
+    // monolithic loop body. NOTE: this is NOT a global pixel-identical claim —
+    // shadeMetal now receives real edge coverage (inside/4) so its iridescence
+    // edgeFade is an intentional silhouette AA change, not a no-op.
     const fld = { field: 0, gx: 0, gy: 0, cr: 0, cg: 0, cb: 0, wsum: 0 };
     const nrm = { nx: 0, ny: 0, nz: 0 };
     const shaded = { r: 0, g: 0, b: 0 };
@@ -425,9 +456,15 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     // 2. normal reconstruction — rebuild a spherical surface normal from the
     //    height field + its gradient (reads fld, writes nrm).
     function surfaceNormal(): void {
-      // t: how deep inside the iso-surface (0 at rim → 1 at core)
-      const t = clamp01((fld.field - threshold) / 1.6);
-      const nz = Math.sqrt(Math.min(1, t + 0.04)); // faces viewer at core
+      // t: how deep inside the iso-surface (0 at rim → 1 at core). Saturate
+      // FAST (small divisor) + smoothstep so the whole interior plateaus at
+      // nz≈1 — flat and continuous — and only the thin RIM has tilt. This is
+      // the key to one fused look: with nz≈1 inside, nx/ny→0 there, so the
+      // per-blob field bumps no longer each form a dome/AO-ring/reflection
+      // band. All the relief lives at the silhouette, not per sub-blob.
+      const traw = clamp01((fld.field - threshold) / 0.7);
+      const t = traw * traw * (3 - 2 * traw); // smoothstep → soft plateau
+      const nz = Math.sqrt(Math.min(1, t + 0.04)); // faces viewer across the body
       const horiz = Math.sqrt(Math.max(0, 1 - nz * nz));
       const glen = Math.sqrt(fld.gx * fld.gx + fld.gy * fld.gy) + 1e-6;
       // outward normal: away from bump centre (= -gradient direction)
@@ -495,9 +532,12 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       const iphase = fres * 1.3 + (nx * 0.5 + ny * 0.5) * 0.4 + 0.15 + time * 0.004;
       const iri = iridIndex(iphase);
       const irR = iridR[iri], irG = iridG[iri], irB = iridB[iri];
+      // Feather the iridescence by pixel coverage: edge-band pixels pass their
+      // sub-sample coverage (inside/4) so the fringe is smoothstep-attenuated at
+      // the silhouette, calming the saturated cyan/magenta rim. Interior pixels
+      // pass 1 → edgeFade = 1 (full iridescence). Keeps the body reading as
+      // metal, not pastel soap.
       const edgeFade = alpha < 1 ? alpha * alpha * (3 - 2 * alpha) : 1; // smoothstep
-      // iridescence rides the rim only — keep the body reading as metal,
-      // not pastel soap.
       let iAmt = (fres * iridFresWeight + band * iridBandWeight) * edgeFade;
       if (iAmt > iridClamp) iAmt = iridClamp;
 
@@ -559,7 +599,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
           if (fieldAt(px + 0.3, py + 0.3) >= threshold) inside++;
           if (inside > 0) {
             surfaceNormal();
-            shadeMetal(1);
+            shadeMetal(inside / 4);
             setPixel(data, idx, shaded.r, shaded.g, shaded.b, inside / 4);
           } else {
             setPixel(data, idx, 0, 0, 0, 0);
@@ -576,8 +616,11 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   const unsubscribe = api.onState((s) => {
     mode = s.mode;
     bins = s.spectrumBins || [];
-    // smooth audio level
-    level += (s.audioLevel - level) * 0.3;
+    // smooth audio level — m3: guard against a non-finite audioLevel (NaN/∞)
+    // which would poison `level` permanently (NaN propagates through every
+    // subsequent frame's swell/radius math).
+    const lvl = Number.isFinite(s.audioLevel) ? s.audioLevel : 0;
+    level += (lvl - level) * 0.3;
   });
 
   // Fix 1.1 — stop the rAF loop entirely while the tab/window is hidden, and
