@@ -1,0 +1,18 @@
+{
+  "manifest_version": 2,
+  "id": "metaballs3d",
+  "name": "Metaballs 3D",
+  "description": "Volumetric raymarched metaballs — glossy 3D blobs that fuse and flow with your voice (WebGL).",
+  "api_version": 1,
+  "overlay_width": 120,
+  "overlay_height": 120,
+  "entry": "theme.js",
+  "params": {
+    "shine": 28,
+    "specWeight": 0.6,
+    "saturation": 1.45,
+    "speed": 1.0,
+    "zoom": 1.7,
+    "colors": ["#e63333", "#1a1ae6", "#33e633", "#e6e60d"]
+  }
+}
