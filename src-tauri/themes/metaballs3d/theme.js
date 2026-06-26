@@ -53,7 +53,10 @@ vec4 render(vec2 fragCoord) {
   // audio drives sphere radius (louder = bigger). Orbit motion is driven by
   // uPhase, which is integrated on the CPU so a change in speed never causes a
   // phase jump (the classic sin(spd*t) jerk). Same per-sphere frequency ratios.
-  float rad = 0.5 + 0.30 * uLevel;      // sphere radius pulses with level
+  // strong voice PULSE: radius swells clearly on loud transients. At uLevel~0.9
+  // the cluster noticeably throbs but the wider zoom keeps it from clipping the
+  // frame or merging into a featureless ball.
+  float rad = 0.5 + 0.55 * uLevel;      // sphere radius pulses with level
 
   // orbits with enough spread that lobes stay distinct (gooey morph, saturated
   // color regions) but the cluster stays centered on (0,0,5)
@@ -125,6 +128,10 @@ vec4 render(vec2 fragCoord) {
   color = clamp(lum + (color - lum) * uSaturation, 0.0, 1.0);
 
   vec3 outc = lit * color;
+  // subtle voice GLOW: lift brightness on loud moments so the pulse also reads
+  // as "alive" (capped at +25% so it never blows out to white). RGB only, alpha
+  // stays 1.0; the miss path above already returns a fully transparent pixel.
+  outc *= (1.0 + 0.25 * uLevel);
   // gamma-2.2 encode for cleaner gradients
   outc = pow(clamp(outc, 0.0, 1.0), vec3(1.0/2.2));
   return vec4(outc, 1.0);
@@ -287,7 +294,8 @@ function mount(container, api) {
       target = level;
       modeSpeed = 1;
     }
-    smoothLevel += (target - smoothLevel) * 0.08;
+    const a = target > smoothLevel ? 0.35 : 0.1;
+    smoothLevel += (target - smoothLevel) * a;
     const energy = 0.5 + smoothLevel;
     const spdJs = 0.5 * energy * speed * modeSpeed;
     phase += spdJs * dt;
