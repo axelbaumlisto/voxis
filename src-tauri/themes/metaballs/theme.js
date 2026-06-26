@@ -18,7 +18,9 @@ var MAT = {
   sheenExp: 3,
   specBase: 0.09,
   specEnergy: 0.1,
-  sheenStrength: 0.07
+  sheenStrength: 0.07,
+  rimK: 2.2,
+  domeStr: 0.5
 };
 function clamp01(x) {
   return Math.max(0, Math.min(1, x));
@@ -130,7 +132,7 @@ function mount(container, api) {
         const dx = o.x - b.x;
         const dy = o.y - b.y;
         const dist = Math.sqrt(dx * dx + dy * dy) + 0.001;
-        const want = (b.r + o.r) * 1.05;
+        const want = (b.r + o.r) * 0.92;
         const f = (dist - want) * 0.0013;
         const ux = dx / dist, uy = dy / dist;
         b.vx += ux * f;
@@ -188,7 +190,9 @@ function mount(container, api) {
       fillStr,
       fillColR,
       fillColG,
-      fillColB
+      fillColB,
+      rimK,
+      domeStr
     } = MAT;
     const Llen = Math.sqrt(0.5 * 0.5 + 0.72 * 0.72 + 0.55 * 0.55);
     const Lx = -0.5 / Llen, Ly = -0.72 / Llen, Lz = 0.55 / Llen;
@@ -250,17 +254,30 @@ function mount(container, api) {
       fld.gx = gx;
       fld.gy = gy;
     }
-    function surfaceNormal() {
-      const traw = clamp01((fld.field - threshold) / 3);
-      const t2 = traw * traw * (3 - 2 * traw);
-      const nzCurved = Math.sqrt(Math.min(1, t2 + 0.02));
-      const draw = clamp01((fld.field - threshold) / (threshold * 1.5));
-      const domeStrength = draw * draw * (3 - 2 * draw);
-      const nz = 1 + (nzCurved - 1) * domeStrength;
-      const horiz = Math.sqrt(Math.max(0, 1 - nz * nz));
+    function surfaceNormal(px, py) {
+      const iraw = clamp01((fld.field - threshold) / (threshold * (rimK - 1)));
+      const ic = iraw * iraw * (3 - 2 * iraw);
+      const rimTilt = 1 - ic;
       const glen = Math.sqrt(fld.gx * fld.gx + fld.gy * fld.gy) + 0.000001;
-      nrm.nx = -fld.gx / glen * horiz;
-      nrm.ny = -fld.gy / glen * horiz;
+      let ix = -fld.gx / glen * rimTilt;
+      let iy = -fld.gy / glen * rimTilt;
+      const ddx = px - gradCx;
+      const ddy = py - gradCy;
+      const dlen = Math.sqrt(ddx * ddx + ddy * ddy) + 0.000001;
+      const dr = Math.min(1, dlen * gradInvR);
+      const domeMag = domeStr * dr * ic;
+      ix += ddx / dlen * domeMag;
+      iy += ddy / dlen * domeMag;
+      const ilen = Math.sqrt(ix * ix + iy * iy);
+      const horiz = Math.min(1, ilen);
+      const nz = Math.sqrt(Math.max(0, 1 - horiz * horiz));
+      if (ilen > 0.000001) {
+        nrm.nx = ix / ilen * horiz;
+        nrm.ny = iy / ilen * horiz;
+      } else {
+        nrm.nx = 0;
+        nrm.ny = 0;
+      }
       nrm.nz = nz;
     }
     function shadeGooey(px, py) {
@@ -322,7 +339,7 @@ function mount(container, api) {
         if (coverage <= 0) {
           setPixel(data, idx, 0, 0, 0, 0);
         } else {
-          surfaceNormal();
+          surfaceNormal(px, py);
           shadeGooey(px, py);
           setPixel(data, idx, shaded.r, shaded.g, shaded.b, coverage);
         }

@@ -112,6 +112,24 @@ const MAT = {
   // Cutting it makes the body a MATTE opaque surface; the tighter specLUT (exp10)
   // bloom stays as the single highlight.
   sheenStrength: 0.07, // broad sheen lobe intensity (linear)
+  // S8g — KILL PER-BLOB "PUCKS" + ONE GLOBAL BODY DOME. The S8f normal derived
+  // nz (doming toward viewer) from FIELD MAGNITUDE, which has a separate local
+  // maximum at EVERY blob centre → each centre domed into its own circular bump
+  // with a roll-off ring (the "шайбы/pucks"). Two params fix it:
+  //  • rimK — the field multiple of threshold at which a pixel counts as fully
+  //    INTERIOR. The organic in-plane rim tilt (from the field gradient) is gated
+  //    to the rim BAND only (field threshold..threshold*rimK); deep inside, the
+  //    gradient tilt is 0 so fused blobs form ONE smooth interior with NO per-blob
+  //    dimples/peaks. The gradient is still smooth along the outline + at necks,
+  //    so the organic silhouette and gentle necks survive.
+  //  • domeStr — strength of ONE WEAK global body dome (radial from the canvas
+  //    centroid) added to the SHADING normal so the whole fused mass has a soft
+  //    overall rounded light→dark gradient (volume) WITHOUT per-blob bumps. Kept
+  //    weak + combined with the organic rim tilt so the SILHOUETTE stays organic
+  //    (coverage owns the outline, untouched) — NOT a smooth egg. nz now comes
+  //    from this smooth global dome, never from per-blob field peaks.
+  rimK: 2.2,     // field/threshold above which a pixel is fully interior (rim tilt → 0)
+  domeStr: 0.5,  // weak global body-dome in-plane tilt at the body radius (volume)
 } as const;
 
 // R2 — tiny hot-path helpers to DRY the per-channel triples / repeated clamps.
@@ -331,7 +349,11 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
         const dx = o.x - b.x;
         const dy = o.y - b.y;
         const dist = Math.sqrt(dx * dx + dy * dy) + 1e-3;
-        const want = (b.r + o.r) * 1.05;     // slight spread → necks/lobes, still fused
+        // S8g — MORE FUSION: want-distance 1.05 → 0.92 so blob centres sit closer
+        // and their fields overlap into one broader plateau (fewer distinct
+        // interior maxima → the rim-gated normal sees one merged mass, not
+        // several). Still >0 spread so necks/lobes morph (not a collapsed ball).
+        const want = (b.r + o.r) * 0.92;     // closer → broader fused plateau
         const f = (dist - want) * 0.0013;     // +: attract, -: repel
         const ux = dx / dist, uy = dy / dist;
         b.vx += ux * f; b.vy += uy * f;
@@ -385,6 +407,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       chromaBoost, aoFloor, aoRange, ambient, lightStr,
       specBase, specEnergy, sheenStrength,
       fillStr, fillColR, fillColG, fillColB,
+      rimK, domeStr,
     } = MAT;
     // Light + view setup for a Half-Lambert wrap + broad Blinn-Phong highlight.
     // Light from upper-left, viewer straight on (0,0,1).
@@ -491,41 +514,62 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       fld.field = field; fld.gx = gx; fld.gy = gy;
     }
 
-    // 2. normal reconstruction — rebuild a spherical surface normal from the
-    //    height field + its gradient (reads fld, writes nrm).
-    function surfaceNormal(): void {
-      // S1 — RESTORE BODY CURVATURE. t: how deep inside the iso-surface (0 at
-      // rim → 1 at core). The divisor is now /3.0 (was /0.7) so `traw` ramps
-      // GRADUALLY across the whole body instead of snapping to 1 just above
-      // threshold. The plateau bias is lowered +0.04 → +0.02. Result: nzCurved
-      // ramps rim→centre, so the FUSED body reads as one smooth dome (the
-      // normal varies across it → a real large-scale shading gradient, and the
-      // highlight can spread later in S4 instead of clinging to a 1px rim).
-      const traw = clamp01((fld.field - threshold) / 3.0);
-      const t = traw * traw * (3 - 2 * traw); // smoothstep → gentle dome ramp
-      const nzCurved = Math.sqrt(Math.min(1, t + 0.02)); // faces viewer at core
-      // GUARD the old artifact (why the flatten was originally added): WIDELY-
-      // SEPARATED blobs must not each grow their own dome / dark AO-ring at
-      // their rim. Gate the curvature by FIELD MAGNITUDE: domeStrength is a
-      // smoothstep from 0 at the iso-rim (field≈threshold) to 1 in the high-
-      // field fused interior. S8f — onset RESTORED to the S1 value: divisor
-      // threshold*2.5 → threshold*1.5 so domeStrength reaches 1 at a LOWER field,
-      // giving the fused body its FULL rounded curvature again. S8e had raised
-      // this to flatten per-blob domes (a workaround for the per-blob colour
-      // discs); now that colour is a smooth spatial gradient (not per-blob), the
-      // flatten is no longer needed → restore the volume. The thin low-field rim
-      // band still stays flat (domeStrength→0 at the iso-rim guards the old
-      // per-blob-ring artifact), but the whole fused mass reads as one smooth
-      // dome with a real light→dark gradient across it.
-      // Cheap: only mul/add (no per-pixel transcendental).
-      const draw = clamp01((fld.field - threshold) / (threshold * 1.5));
-      const domeStrength = draw * draw * (3 - 2 * draw); // smoothstep gate
-      const nz = 1 + (nzCurved - 1) * domeStrength; // flat(1) → curved blend
-      const horiz = Math.sqrt(Math.max(0, 1 - nz * nz));
+    // 2. normal reconstruction — S8g: ONE smooth organic surface, NO per-blob
+    //    pucks. The previous S8f normal domed nz from FIELD MAGNITUDE, which has
+    //    a local maximum at EVERY blob centre → each centre grew its own circular
+    //    bump + roll-off ring (the "шайбы/pucks"). The fix derives the in-plane
+    //    tilt from the field GRADIENT but GATES it to the rim BAND only, and adds
+    //    ONE weak global body dome for volume. Reads fld + (px,py), writes nrm.
+    function surfaceNormal(px: number, py: number): void {
+      // INTERIOR-NESS: 0 at the iso-rim (field≈threshold) → 1 once the field is a
+      // modest multiple (rimK) of threshold (clearly INSIDE the fused body).
+      // smoothstep so it ramps cleanly. The gradient (per-blob-peaky) tilt is
+      // gated by (1-ic): full at the rim, ZERO in the deep interior → fused blobs
+      // form ONE smooth interior with no per-blob dimples/peaks, and the
+      // interior per-blob rings vanish. (rimK-1 guards divide-by-zero: rimK>1.)
+      const iraw = clamp01((fld.field - threshold) / (threshold * (rimK - 1)));
+      const ic = iraw * iraw * (3 - 2 * iraw); // smoothstep interior-ness
+      const rimTilt = 1 - ic;                  // 1 at rim → 0 deep interior
+
+      // RIM in-plane tilt: outward along -gradient (the field gradient is smooth
+      // along the silhouette AND at necks, so this rolls the normal over exactly
+      // at the outline / gentle necks — the organic edges — without touching the
+      // interior). Magnitude = rimTilt: ≈1 at the very edge (nz→0, faces sideways)
+      // → 0 deep inside.
       const glen = Math.sqrt(fld.gx * fld.gx + fld.gy * fld.gy) + 1e-6;
-      // outward normal: away from bump centre (= -gradient direction)
-      nrm.nx = (-fld.gx / glen) * horiz;
-      nrm.ny = (-fld.gy / glen) * horiz;
+      let ix = (-fld.gx / glen) * rimTilt;
+      let iy = (-fld.gy / glen) * rimTilt;
+
+      // WEAK GLOBAL BODY DOME (volume, NOT a per-blob bump). ONE radial tilt from
+      // the body centroid (canvas centre) so the whole fused mass reads as a soft
+      // overall light→dark rounded form. KEPT WEAK (domeStr) and added to the
+      // organic rim tilt — the SILHOUETTE is owned by coverage (untouched), so the
+      // outline stays organic, NOT a smooth egg. dr≈0 at centre → grows outward;
+      // one sqrt/px (same class as glen, no transcendental). Gated by ic so the
+      // dome is full in the interior and fades into the rim roll (no double-roll
+      // at the silhouette). The dome adds the gentle large-scale N·L gradient that
+      // gives volume with no interior bumps.
+      const ddx = px - gradCx;
+      const ddy = py - gradCy;
+      const dlen = Math.sqrt(ddx * ddx + ddy * ddy) + 1e-6;
+      const dr = Math.min(1, dlen * gradInvR);          // 0 centre → 1 body edge
+      const domeMag = domeStr * dr * ic;                // weak, interior-only
+      ix += (ddx / dlen) * domeMag;
+      iy += (ddy / dlen) * domeMag;
+
+      // Reconstruct the unit normal: horiz = |in-plane| (clamped), nz faces the
+      // viewer for the remainder. Deep interior with no edge nearby → tiny horiz
+      // → nz≈1 (smooth facing surface); rim → horiz→1 → nz→0.
+      const ilen = Math.sqrt(ix * ix + iy * iy);
+      const horiz = Math.min(1, ilen);
+      const nz = Math.sqrt(Math.max(0, 1 - horiz * horiz));
+      if (ilen > 1e-6) {
+        nrm.nx = (ix / ilen) * horiz;
+        nrm.ny = (iy / ilen) * horiz;
+      } else {
+        nrm.nx = 0;
+        nrm.ny = 0;
+      }
       nrm.nz = nz;
     }
 
@@ -712,7 +756,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
           // coverage in (0,1] → shade once and composite at that coverage.
           // coverage===1 is the hard-inside fast path (fully opaque); 0<cov<1
           // is the anti-aliased rim. shadeGooey runs exactly once either way.
-          surfaceNormal();
+          surfaceNormal(px, py);
           shadeGooey(px, py);
           setPixel(data, idx, shaded.r, shaded.g, shaded.b, coverage);
         }
