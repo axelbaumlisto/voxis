@@ -6,9 +6,9 @@ function hexToRgb(hex) {
 }
 var MAT = {
   chromaBoost: 1.5,
-  aoFloor: 0.72,
-  aoRange: 0.2,
-  ambient: 0.11,
+  aoFloor: 0.58,
+  aoRange: 0.42,
+  ambient: 0.14,
   lightStr: 0.85,
   fillStr: 0.13,
   fillColR: 0.55,
@@ -46,6 +46,15 @@ function mount(container, api) {
   const isHex = (v) => typeof v === "string" && /^#?[0-9a-fA-F]{3,8}$/.test(v.trim());
   const validHex = Array.isArray(cfg.palette) ? cfg.palette.filter(isHex) : [];
   const palette = (validHex.length > 0 ? validHex : DEFAULT_PALETTE).map(hexToRgb);
+  const nStops = palette.length;
+  const pr = new Float64Array(nStops);
+  const pg = new Float64Array(nStops);
+  const pb = new Float64Array(nStops);
+  for (let i = 0;i < nStops; i++) {
+    pr[i] = palette[i].r;
+    pg[i] = palette[i].g;
+    pb[i] = palette[i].b;
+  }
   const specNorm = (MAT.specExp + 2) / (2 * Math.PI);
   const sheenNorm = (MAT.sheenExp + 2) / (2 * Math.PI);
   const specLUT = new Float64Array(256);
@@ -61,9 +70,6 @@ function mount(container, api) {
   const bx = new Float64Array(blobCount);
   const by = new Float64Array(blobCount);
   const brr = new Float64Array(blobCount);
-  const bcr = new Float64Array(blobCount);
-  const bcg = new Float64Array(blobCount);
-  const bcb = new Float64Array(blobCount);
   const canvas = document.createElement("canvas");
   canvas.width = CW;
   canvas.height = CH;
@@ -86,7 +92,6 @@ function mount(container, api) {
       vy: Math.sin(ang) * 0.6 * dpr,
       baseR: (6.8 + i % 3 * 2.4) * dpr,
       r: 6.8 * dpr,
-      color: palette[i % palette.length],
       phase: i * 1.3 + seed,
       binIndex: 2 + i * 2
     });
@@ -194,6 +199,13 @@ function mount(container, api) {
     Hx /= Hl;
     Hy /= Hl;
     Hz /= Hl;
+    const gradCx = CW / 2;
+    const gradCy = CH / 2;
+    const gradInvR = 1 / (Math.min(CW, CH) * 0.5);
+    const gradPhase = time * 0.0016;
+    const gradTheta = time * 0.0009;
+    const gradAx = Math.cos(gradTheta);
+    const gradAy = Math.sin(gradTheta);
     data.fill(0);
     let minX = CW, minY = CH, maxX = 0, maxY = 0, maxR = 0;
     for (let i = 0;i < blobs.length; i++) {
@@ -211,9 +223,6 @@ function mount(container, api) {
       bx[i] = b.x;
       by[i] = b.y;
       brr[i] = b.r * b.r;
-      bcr[i] = b.color.r;
-      bcg[i] = b.color.g;
-      bcb[i] = b.color.b;
     }
     const padThr = Math.min(1, threshold);
     const boxPad = Math.ceil(4 * dpr + maxR * (Math.sqrt(blobCount) / Math.sqrt(padThr)));
@@ -221,12 +230,11 @@ function mount(container, api) {
     const x1 = Math.min(CW, Math.ceil(maxX + boxPad));
     const y0 = Math.max(0, Math.floor(minY - boxPad));
     const y1 = Math.min(CH, Math.ceil(maxY + boxPad));
-    const fld = { field: 0, gx: 0, gy: 0, cr: 0, cg: 0, cb: 0, wsum: 0 };
+    const fld = { field: 0, gx: 0, gy: 0 };
     const nrm = { nx: 0, ny: 0, nz: 0 };
     const shaded = { r: 0, g: 0, b: 0 };
     function sampleField(px, py) {
       let field = 0;
-      let cr = 0, cg = 0, cb = 0, wsum = 0;
       let gx = 0, gy = 0;
       for (let i = 0;i < blobCount; i++) {
         const dx = px - bx[i];
@@ -235,27 +243,18 @@ function mount(container, api) {
         const rr = brr[i];
         const f = rr / d2;
         field += f;
-        const cw = f * f;
-        cr += bcr[i] * cw;
-        cg += bcg[i] * cw;
-        cb += bcb[i] * cw;
-        wsum += cw;
         gx += -2 * rr * dx / (d2 * d2);
         gy += -2 * rr * dy / (d2 * d2);
       }
       fld.field = field;
       fld.gx = gx;
       fld.gy = gy;
-      fld.cr = cr;
-      fld.cg = cg;
-      fld.cb = cb;
-      fld.wsum = wsum;
     }
     function surfaceNormal() {
       const traw = clamp01((fld.field - threshold) / 3);
       const t2 = traw * traw * (3 - 2 * traw);
       const nzCurved = Math.sqrt(Math.min(1, t2 + 0.02));
-      const draw = clamp01((fld.field - threshold) / (threshold * 2.5));
+      const draw = clamp01((fld.field - threshold) / (threshold * 1.5));
       const domeStrength = draw * draw * (3 - 2 * draw);
       const nz = 1 + (nzCurved - 1) * domeStrength;
       const horiz = Math.sqrt(Math.max(0, 1 - nz * nz));
@@ -265,8 +264,17 @@ function mount(container, api) {
       nrm.nz = nz;
     }
     function shadeGooey(px, py) {
-      const ar = fld.cr / fld.wsum, ag = fld.cg / fld.wsum, ab = fld.cb / fld.wsum;
       const { nx, ny, nz } = nrm;
+      let u = 0.5 + 0.5 * (gradAx * (px - gradCx) * gradInvR + gradAy * (py - gradCy) * gradInvR) + gradPhase;
+      u -= Math.floor(u);
+      const su = u * nStops;
+      const s0 = Math.floor(su);
+      const fr = su - s0;
+      const i0 = s0 % nStops;
+      const i1 = (i0 + 1) % nStops;
+      const ar = pr[i0] + (pr[i1] - pr[i0]) * fr;
+      const ag = pg[i0] + (pg[i1] - pg[i0]) * fr;
+      const ab = pb[i0] + (pb[i1] - pb[i0]) * fr;
       const lum = ar * 0.299 + ag * 0.587 + ab * 0.114;
       const albR = Math.max(0, lum + (ar - lum) * chromaBoost);
       const albG = Math.max(0, lum + (ag - lum) * chromaBoost);

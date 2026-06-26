@@ -23,7 +23,6 @@ interface Blob {
   vy: number;
   baseR: number; // base radius in px
   r: number;     // current radius
-  color: RGB;
   phase: number; // for idle breathing offset
   binIndex: number;
 }
@@ -58,26 +57,26 @@ const MAT = {
   // instead of greying. Albedo is clamped ≥0 before the linear (gamma-2.0)
   // decode so a boosted low channel can't go negative-then-squared-positive.
   chromaBoost: 1.5,
-  // S8 — DEEPEN VOLUME. AO floor crevice/silhouette occlusion. S8e — FLATTENED
-  // FURTHER to kill the residual IDLE lit-disc cores: floor RAISED 0.66 → 0.72,
-  // range CUT 0.34 → 0.20 (ao = aoFloor + aoRange*nz → 0.72..0.92). The nz-driven
-  // term is the per-blob centre-brightener: nz peaks at every separated idle
-  // detail-dome centre (it faces the viewer), so aoRange*nz painted each idle
-  // blob a brighter circular core → distinct "lit discs". S8d cut this to 0.34;
-  // S8e cuts the centre-vs-edge DELTA a further ~40% (0.34 → 0.20) while nudging
-  // the floor up (0.66 → 0.72) so the overall lit level is preserved. AO now only
-  // darkens NECKS/crevices (concavity), never brightens dome centres into discs;
-  // the directional diffuse (N·L) stays the SOLE value driver, so idle reads as
-  // one fused clay mass instead of separate glowing spheres.
-  aoFloor: 0.72,
-  aoRange: 0.2,
-  // Diffuse term. S8d — OPAQUE CLAY. ambient lowered 0.13 → 0.11 so the unlit
-  // hemisphere goes genuinely DARK (the cool fill below keeps it coloured, not
-  // dead black) → the colour reads as lit OPAQUE surface albedo with a real dark
-  // side, NOT a self-illuminated orb. The diffuse wrap is steepened further (see
-  // shadeGooey: ndl*0.8+0.2) so the body shows a clear bright-lit → dark gradient
-  // ACROSS the body like store_3's blue blob.
-  ambient: 0.11,
+  // S8 — DEEPEN VOLUME. AO floor crevice/silhouette occlusion. S8f — RESTORED
+  // ROUNDNESS: floor 0.72 → 0.58, range 0.20 → 0.42 (ao = aoFloor + aoRange*nz
+  // → 0.58..1.0). S8d/S8e had cut this range hard to kill per-blob "lit disc"
+  // cores — but that flattening was a workaround for the per-BLOB albedo colour
+  // (nz peaking at each blob centre painted a brighter circular core in that
+  // blob's hue). S8f drives albedo from a SMOOTH SPATIAL gradient (not blob
+  // centres), so an nz-driven AO term can no longer create coloured discs. With
+  // that gone we restore the full rounded-volume AO span: nz×aoRange now gives
+  // the bright dome-centre → dark silhouette/neck falloff that reads as real 3D
+  // clay, paired with the steep directional diffuse below.
+  aoFloor: 0.58,
+  aoRange: 0.42,
+  // Diffuse term. S8d — OPAQUE CLAY. ambient lowered so the unlit hemisphere
+  // goes genuinely DARK (the cool fill below keeps it coloured, not dead black)
+  // → the colour reads as lit OPAQUE surface albedo with a real dark side, NOT a
+  // self-illuminated orb. S8f — nudged 0.11 → 0.14: with the restored AO/dome
+  // volume the shadow side gathered too much, so a touch more ambient keeps the
+  // dark side coloured (not crushed) while the steep wrap (ndl*0.8+0.2) keeps a
+  // clear bright-lit → dark gradient ACROSS the body like store_3's blue blob.
+  ambient: 0.14,
   lightStr: 0.85,
   // S8 — COOL FILL LIGHT. A weak bluish diffuse from the OPPOSITE side (lower-
   // right) of the warm upper-left key, so shadows read as the matte clay/gooey
@@ -180,6 +179,24 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     : [];
   const palette: RGB[] = (validHex.length > 0 ? validHex : DEFAULT_PALETTE).map(hexToRgb);
 
+  // S8f — FLOWING GRADIENT PALETTE LUT. The body colour is no longer the
+  // dominant blob's hue (per-blob colour discs); it is a SMOOTH multi-stop
+  // gradient that sweeps across the whole fused mass and flows/rotates over
+  // time. Flatten the palette RGB into parallel Float64Arrays so the per-pixel
+  // gradient lerp reads typed arrays (no per-pixel object-property reads). nStops
+  // is the number of palette colours; the gradient wraps so the last stop blends
+  // back to the first (a seamless cyclic sweep). All stops kept — magenta→purple
+  // →blue→green→… → a continuous multi-hue flow.
+  const nStops = palette.length;
+  const pr = new Float64Array(nStops);
+  const pg = new Float64Array(nStops);
+  const pb = new Float64Array(nStops);
+  for (let i = 0; i < nStops; i++) {
+    pr[i] = palette[i].r;
+    pg[i] = palette[i].g;
+    pb[i] = palette[i].b;
+  }
+
   // S4 — two spec lobe LUTs keyed by N·H (ndh) clamped to [0,1]; index =
   // ndh*255. Each bakes the energy-conserving Blinn-Phong norm (n+2)/(2π) at
   // build so brightness scales with lobe width (no per-pixel pow). `specLUT` is
@@ -213,9 +230,6 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   const bx = new Float64Array(blobCount);
   const by = new Float64Array(blobCount);
   const brr = new Float64Array(blobCount);
-  const bcr = new Float64Array(blobCount);
-  const bcg = new Float64Array(blobCount);
-  const bcb = new Float64Array(blobCount);
 
   const canvas = document.createElement("canvas");
   // Backing store at device resolution; CSS still fills the element (100%).
@@ -256,7 +270,6 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       vy: Math.sin(ang) * 0.6 * dpr,
       baseR: (6.8 + (i % 3) * 2.4) * dpr,
       r: 6.8 * dpr,
-      color: palette[i % palette.length],
       phase: i * 1.3 + seed,
       binIndex: 2 + i * 2,
     });
@@ -385,6 +398,24 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     let Hx = Lx, Hy = Ly, Hz = Lz + 1;
     const Hl = Math.sqrt(Hx * Hx + Hy * Hy + Hz * Hz); Hx /= Hl; Hy /= Hl; Hz /= Hl;
 
+    // S8f — FLOWING GRADIENT SETUP (per frame, NEVER per pixel). The body hue is
+    // a smooth low-frequency sweep across the whole fused mass that both DRIFTS
+    // (phase) and ROTATES (direction) slowly over time. All the transcendentals
+    // (cos/sin for the rotating sweep direction, the time-driven phase) are
+    // computed ONCE here using the shared `time` frame counter (the same one S7
+    // dither reads, advanced every step, rendered at the A2 30fps throttle). The
+    // per-pixel hot path (shadeGooey) then only does mul/add/floor/fract/lerp.
+    // Rates are tiny so the cycle takes many seconds — a calm flow, not flicker:
+    //   phase  = time * 0.0016  → full hue drift ≈ (1/0.0016)/30 ≈ 21s
+    //   theta  = time * 0.0009  → full sweep rotation ≈ 37s
+    const gradCx = CW / 2;
+    const gradCy = CH / 2;
+    const gradInvR = 1 / (Math.min(CW, CH) * 0.5); // 1/body-radius (low freq)
+    const gradPhase = time * 0.0016;
+    const gradTheta = time * 0.0009;
+    const gradAx = Math.cos(gradTheta);
+    const gradAy = Math.sin(gradTheta);
+
     // Fix 1.3 — bounding-box render. The blobs only occupy a small slice of the
     // pill, so compute the AABB of all blob extents (x±r, y±r), pad a couple of
     // px for the iso-surface/AA band, clamp to the canvas, and iterate pixels
@@ -399,13 +430,11 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       if (b.y - b.r < minY) minY = b.y - b.r;
       if (b.y + b.r > maxY) maxY = b.y + b.r;
       if (b.r > maxR) maxR = b.r;
-      // Fix 2.3 — refill flat per-blob buffers once per frame
+      // Fix 2.3 — refill flat per-blob buffers once per frame. S8f — colour is
+      // no longer per-blob, so bcr/bcg/bcb are gone; only geometry is buffered.
       bx[i] = b.x;
       by[i] = b.y;
       brr[i] = b.r * b.r;
-      bcr[i] = b.color.r;
-      bcg[i] = b.color.g;
-      bcb[i] = b.color.b;
     }
     // Bounding-box pad. CRITICAL: the summed metaball field reaches well beyond
     // a single blob's radius — when blobs overlap their fields add, so the
@@ -435,7 +464,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     // monolithic loop body. NOTE: this is NOT a global pixel-identical claim —
     // shadeGooey now receives the ANALYTIC coverage (S5) via alpha so its
     // silhouette AA matches the coverage composite, not a no-op.
-    const fld = { field: 0, gx: 0, gy: 0, cr: 0, cg: 0, cb: 0, wsum: 0 };
+    const fld = { field: 0, gx: 0, gy: 0 };
     const nrm = { nx: 0, ny: 0, nz: 0 };
     const shaded = { r: 0, g: 0, b: 0 };
 
@@ -443,7 +472,6 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     //    weighted colour, and the analytic in-plane gradient at (px, py).
     function sampleField(px: number, py: number): void {
       let field = 0;
-      let cr = 0, cg = 0, cb = 0, wsum = 0;
       let gx = 0, gy = 0; // analytic field gradient (in-plane)
       for (let i = 0; i < blobCount; i++) {
         const dx = px - bx[i];
@@ -452,26 +480,15 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
         const rr = brr[i];
         const f = rr / d2;
         field += f;
-        // S8 — KILL THE PLASMA-CORE GLOW. The colour blend is weighted by f²
-        // (not f) so the blob with the highest LOCAL field dominates its whole
-        // lobe as a near-flat saturated colour, with the cross-fade compressed
-        // into a narrow neck where two f² weights are comparable. The old linear
-        // f weighting let the nearest blob's colour peak sharply at its exact
-        // centre (a bright saturated "core dot" → the glowing-plasma read) while
-        // greying the necks by 3-way averaging. f² (one extra multiply, no pow)
-        // flattens each lobe to a solid colour region and keeps necks saturated.
-        // `field` itself still sums the linear f, so all geometry, the analytic
-        // gradient, coverage and the iso-surface (S1/S5) are byte-identical.
-        const cw = f * f;
-        cr += bcr[i] * cw;
-        cg += bcg[i] * cw;
-        cb += bcb[i] * cw;
-        wsum += cw;
+        // S8f — NO per-blob colour accumulation. The body hue now comes from a
+        // smooth SPATIAL gradient (built per pixel in shadeGooey from px/py),
+        // not from which blob dominates, so the f² colour blend / wsum are gone.
+        // `field` and the analytic gradient gx/gy (= coverage/AA + geometry) are
+        // UNCHANGED — only colour sourcing changed.
         gx += (-2 * rr * dx) / (d2 * d2);
         gy += (-2 * rr * dy) / (d2 * d2);
       }
       fld.field = field; fld.gx = gx; fld.gy = gy;
-      fld.cr = cr; fld.cg = cg; fld.cb = cb; fld.wsum = wsum;
     }
 
     // 2. normal reconstruction — rebuild a spherical surface normal from the
@@ -491,16 +508,17 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // SEPARATED blobs must not each grow their own dome / dark AO-ring at
       // their rim. Gate the curvature by FIELD MAGNITUDE: domeStrength is a
       // smoothstep from 0 at the iso-rim (field≈threshold) to 1 in the high-
-      // field fused interior. S8e — onset RAISED: divisor threshold*1.5 →
-      // threshold*2.5 so domeStrength reaches 1 only at a HIGHER field (truly-
-      // fused body), not on moderate idle fields. SEPARATED low-field idle blobs
-      // therefore keep a flatter top (less per-blob dome curvature → fewer lit
-      // discs), while the loud/rec fused high-field body still gets full
-      // curvature. Blending nz from flat(≈1) toward nzCurved by domeStrength makes
-      // horiz→0 (so nx,ny→0) in the thin low-field rim band of separated blobs →
-      // they stay flat-topped with no per-blob ring.
+      // field fused interior. S8f — onset RESTORED to the S1 value: divisor
+      // threshold*2.5 → threshold*1.5 so domeStrength reaches 1 at a LOWER field,
+      // giving the fused body its FULL rounded curvature again. S8e had raised
+      // this to flatten per-blob domes (a workaround for the per-blob colour
+      // discs); now that colour is a smooth spatial gradient (not per-blob), the
+      // flatten is no longer needed → restore the volume. The thin low-field rim
+      // band still stays flat (domeStrength→0 at the iso-rim guards the old
+      // per-blob-ring artifact), but the whole fused mass reads as one smooth
+      // dome with a real light→dark gradient across it.
       // Cheap: only mul/add (no per-pixel transcendental).
-      const draw = clamp01((fld.field - threshold) / (threshold * 2.5));
+      const draw = clamp01((fld.field - threshold) / (threshold * 1.5));
       const domeStrength = draw * draw * (3 - 2 * draw); // smoothstep gate
       const nz = 1 + (nzCurved - 1) * domeStrength; // flat(1) → curved blend
       const horiz = Math.sqrt(Math.max(0, 1 - nz * nz));
@@ -519,13 +537,35 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     //    gamma-2.0) and is encoded back to sRGB at output (reads fld + nrm,
     //    writes shaded).
     function shadeGooey(px: number, py: number): void {
-      const ar = fld.cr / fld.wsum, ag = fld.cg / fld.wsum, ab = fld.cb / fld.wsum; // field-weighted blob colour
       const nx = nrm.nx, ny = nrm.ny, nz = nrm.nz;
 
-      // Body albedo = saturated blob colour, used directly. A gentle chroma
-      // boost fights any field-blend desaturation at fused necks. (The per-blob
-      // colour BLEND above stays in sRGB by taste — only the lighting STAGE
-      // below is linear.)
+      // S8f — FLOWING MULTI-HUE GRADIENT ALBEDO. The body colour is a SMOOTH
+      // low-frequency sweep across the whole fused mass, projected onto the
+      // slowly-rotating direction (gradAx,gradAy) and drifting by gradPhase — so
+      // the gradient FLOWS and ROTATES over time with NO per-blob discs and NO
+      // hard colour boundaries. Per pixel this is ONLY mul/add/floor/fract/lerp
+      // (all cos/sin/phase were precomputed per frame in render setup):
+      //   u = 0.5 + 0.5*( ax*(px-cx)/R + ay*(py-cy)/R ) + phase
+      // u spans ~one palette sweep across the body (low freq → no repeating
+      // bands). Wrap u to [0,1), scale by nStops, floor/fract → LERP between the
+      // two adjacent palette stops (cyclic: last → first) for a continuous
+      // magenta→purple→blue→green→… flow.
+      let u = 0.5
+        + 0.5 * (gradAx * (px - gradCx) * gradInvR + gradAy * (py - gradCy) * gradInvR)
+        + gradPhase;
+      u -= Math.floor(u);            // wrap to [0,1)
+      const su = u * nStops;
+      const s0 = Math.floor(su);
+      const fr = su - s0;            // [0,1) blend factor between adjacent stops
+      const i0 = s0 % nStops;
+      const i1 = (i0 + 1) % nStops;
+      const ar = pr[i0] + (pr[i1] - pr[i0]) * fr;
+      const ag = pg[i0] + (pg[i1] - pg[i0]) * fr;
+      const ab = pb[i0] + (pb[i1] - pb[i0]) * fr;
+
+      // Body albedo = the gradient colour, used directly. A gentle chroma boost
+      // keeps the flow vivid (no muddy grey at stop blends). Only the lighting
+      // STAGE below is linear.
       const lum = ar * 0.299 + ag * 0.587 + ab * 0.114;
       // S8 — clamp ≥0: the higher chromaBoost (1.5) can push a low channel below
       // zero; without the clamp the gamma-2.0 decode (squaring) would flip it
@@ -562,10 +602,10 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       // so MORE of the away-from-key hemisphere drops to the (low) ambient floor
       // → a clear, high-contrast bright-lit → genuinely DARK gradient ACROSS the
       // body (like store_3's blue blob). VALUE is driven ONLY by this directional
-      // N·L — never by field magnitude (audited: albedo ar/ag/ab = cr/wsum is a
-      // pure hue ratio, no field/wsum term scales brightness). The cool fill below
-      // keeps the dark side COLOURED, not black. Cheap: one mul+add, no pow.
-      // diff = ambient + lightStr*w → 0.11 .. 0.96.
+      // N·L — never by field magnitude (audited: the S8f gradient albedo ar/ag/ab
+      // is a pure spatial-hue term, no field/wsum scales brightness). The cool
+      // fill below keeps the dark side COLOURED, not black. Cheap: one mul+add,
+      // no pow. diff = ambient + lightStr*w → 0.14 .. 0.99.
       const ndl = nx * Lx + ny * Ly + nz * Lz;
       const w = Math.max(0, ndl * 0.8 + 0.2); // steeper wrap → deeper dark side
       const diff = ambient + lightStr * w;
