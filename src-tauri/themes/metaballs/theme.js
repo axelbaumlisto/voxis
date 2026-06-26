@@ -6,9 +6,9 @@ function hexToRgb(hex) {
 }
 var MAT = {
   chromaBoost: 1.5,
-  aoFloor: 0.58,
-  aoRange: 0.42,
-  ambient: 0.14,
+  aoFloor: 0.48,
+  aoRange: 0.52,
+  ambient: 0.11,
   lightStr: 0.85,
   fillStr: 0.13,
   fillColR: 0.55,
@@ -20,7 +20,7 @@ var MAT = {
   specEnergy: 0.1,
   sheenStrength: 0.07,
   rimK: 2.2,
-  domeStr: 0.5
+  domeStr: 1.1
 };
 function clamp01(x) {
   return Math.max(0, Math.min(1, x));
@@ -206,6 +206,8 @@ function mount(container, api) {
     const gradCx = CW / 2;
     const gradCy = CH / 2;
     const gradInvR = 1 / (Math.min(CW, CH) * 0.5);
+    const domeInvR = 1 / (Math.min(CW, CH) * 0.32);
+    const domeStrEff = domeStr * (1 - 0.25 * clamp01((level - 0.5) / 0.5));
     const gradPhase = time * 0.0016;
     const gradTheta = time * 0.0009;
     const gradAx = Math.cos(gradTheta);
@@ -264,8 +266,8 @@ function mount(container, api) {
       const ddx = px - gradCx;
       const ddy = py - gradCy;
       const dlen = Math.sqrt(ddx * ddx + ddy * ddy) + 0.000001;
-      const dr = Math.min(1, dlen * gradInvR);
-      const domeMag = domeStr * dr * ic;
+      const dr = Math.min(1, dlen * domeInvR);
+      const domeMag = domeStrEff * dr * ic;
       ix += ddx / dlen * domeMag;
       iy += ddy / dlen * domeMag;
       const ilen = Math.sqrt(ix * ix + iy * iy);
