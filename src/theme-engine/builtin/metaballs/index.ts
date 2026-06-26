@@ -41,14 +41,18 @@ const MAT = {
   // necks so colour regions read as saturated matte clay. Albedo is clamped ≥0
   // before the gamma-2.0 decode (see shadeGooey).
   chromaBoost: 1.5,
-  // Edge/dome occlusion for volume: ao = aoFloor + aoRange*nz → 0.58..1.0
-  // (bright dome centre → dark silhouette/neck falloff = real 3D clay).
-  aoFloor: 0.58,
-  aoRange: 0.42,
+  // Edge/dome occlusion for volume: ao = aoFloor + aoRange*nz → 0.48..1.0
+  // (bright dome centre → dark silhouette/neck falloff = real 3D clay). Widened
+  // from 0.58/0.42 once the corrected global dome makes nz actually sweep
+  // 1.0(centre)→~0.5(edge), so AO now drives real across-body volume not just a
+  // thin rim.
+  aoFloor: 0.48,
+  aoRange: 0.52,
   // Diffuse: low ambient keeps the unlit hemisphere genuinely dark (opaque clay
   // with a real dark side, not a self-illuminated orb); the cool fill below
-  // keeps that dark side coloured.
-  ambient: 0.14,
+  // keeps that dark side coloured. Lowered 0.14→0.11 for a deeper coloured
+  // shadow side now that the dome produces a real terminator.
+  ambient: 0.11,
   lightStr: 0.85,
   // Cool bluish fill light from the opposite side of the warm key, so shadows
   // read as matte volume instead of crushing to black. One extra N·L (no LUT),
@@ -74,7 +78,7 @@ const MAT = {
   // dimples/pucks. domeStr: one weak global body dome (radial from centroid)
   // added to the shading normal for overall rounded volume without per-blob bumps.
   rimK: 2.2,     // field/threshold above which a pixel is fully interior (rim tilt → 0)
-  domeStr: 0.5,  // weak global body-dome in-plane tilt at the body radius (volume)
+  domeStr: 1.1,  // global body-dome in-plane tilt at the body radius (volume); used with domeInvR matched to the real mass so dr ramps to ~1 at the silhouette → nz sweeps 1.0→~0.5 (rounded clay, no per-blob pucks)
 } as const;
 
 function clamp01(x: number): number {
@@ -334,7 +338,22 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     // lerp. Rates are tiny so the cycle takes many seconds (a calm flow).
     const gradCx = CW / 2;
     const gradCy = CH / 2;
-    const gradInvR = 1 / (Math.min(CW, CH) * 0.5); // 1/body-radius (low freq)
+    const gradInvR = 1 / (Math.min(CW, CH) * 0.5); // 1/body-radius for the COLOUR sweep (low freq) — DO NOT retune (sets the hue gradient width)
+    // Separate, tighter inverse-radius for the SHADING dome only, matched to the
+    // real fused mass (~0.32 of min(CW,CH)) so the dome `dr` ramps to ~1.0 at the
+    // actual silhouette (gradInvR's 0.5 = half-canvas would cap dr at ~0.45 and
+    // never round the body). Kept separate so the colour sweep above is untouched.
+    const domeInvR = 1 / (Math.min(CW, CH) * 0.32);
+    // Energy-gate the global dome strength on the smoothed audio LOUDNESS
+    // (`level`, the per-frame signal that is ~0 idle, ~0.5 at rec05, ~0.85 at
+    // rec085 — modeEnergy() is a constant per mode and can't distinguish loud
+    // from quiet recording). FULL at idle/low (level<=0.5 → clamp term 0 →
+    // factor exactly 1.0, byte-identical to the calm look) and knocked down to
+    // ~0.825x at level 0.85 / ~0.75x at peak so loud recording doesn't
+    // over-round the silhouette into an egg — keeps more organic bumps/necks
+    // while the volume shading (dome) is only slightly relaxed. One per-frame
+    // mul/clamp, depends only on level (not pixel).
+    const domeStrEff = domeStr * (1 - 0.25 * clamp01((level - 0.5) / 0.5));
     const gradPhase = time * 0.0016;
     const gradTheta = time * 0.0009;
     const gradAx = Math.cos(gradTheta);
@@ -429,8 +448,8 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
       const ddx = px - gradCx;
       const ddy = py - gradCy;
       const dlen = Math.sqrt(ddx * ddx + ddy * ddy) + 1e-6;
-      const dr = Math.min(1, dlen * gradInvR);          // 0 centre → 1 body edge
-      const domeMag = domeStr * dr * ic;                // weak, interior-only
+      const dr = Math.min(1, dlen * domeInvR);          // 0 centre → 1 body edge (domeInvR matched to real mass)
+      const domeMag = domeStrEff * dr * ic;             // weak, interior-only (energy-gated)
       ix += (ddx / dlen) * domeMag;
       iy += (ddy / dlen) * domeMag;
 
