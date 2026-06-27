@@ -147,12 +147,19 @@ vec4 render(vec2 fragCoord) {
   // as "alive" (capped at +25% so it never blows out to white). RGB only, alpha
   // stays 1.0; the miss path above already returns a fully transparent pixel.
   outc *= (1.0 + 0.25 * uLevel);
-  // Reinhard tonemap: the 3-light additive sum drives lit well above 1.0, so a
-  // hard clamp blew the lit core out to a flat milky white. Roll highlights off
-  // smoothly instead so the spherical form + color survive even when loud.
-  // exposure pre-scale keeps midtones close to the old look before compression.
+  // LUMINANCE-based Reinhard tonemap: compress only the brightness, preserve
+  // chroma. Per-channel Reinhard (outc/(1+outc)) crushes the brightest channel
+  // hardest and desaturates toward grey (washed-out pastel). Instead tonemap the
+  // luminance and scale the color by the ratio, so highlights roll off smoothly
+  // (no milky blowout) WHILE the hue stays saturated and juicy.
   outc *= 1.6;
-  outc = outc / (1.0 + outc);
+  float L = dot(outc, vec3(0.299, 0.587, 0.114));
+  float Lt = L / (1.0 + L);
+  outc *= (L > 1e-4) ? (Lt / L) : 1.0;
+  // re-saturate post-tonemap so the lobes read as vivid color regions, not
+  // washed pastel (tonemapping always pulls a little chroma).
+  float lum2 = dot(outc, vec3(0.299, 0.587, 0.114));
+  outc = clamp(lum2 + (outc - lum2) * 1.25, 0.0, 1.0);
   // gamma-2.2 encode for cleaner gradients
   outc = pow(clamp(outc, 0.0, 1.0), vec3(1.0/2.2));
   return vec4(outc, 1.0);
@@ -291,7 +298,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   const params = (api.params && typeof api.params === "object" ? api.params : {}) as Record<string, unknown>;
   const shine = numOr(params.shine, 28.0, 1.0, 400.0);
   const specW = numOr(params.specWeight, 0.6, 0.0, 2.0);
-  const saturation = numOr(params.saturation, 1.45, 0.0, 3.0);
+  const saturation = numOr(params.saturation, 1.7, 0.0, 3.0);
   const speed = numOr(params.speed, 1.0, 0.0, 5.0);
   const zoom = numOr(params.zoom, 1.7, 0.5, 4.0);
   const cols = resolveColors(params.colors);
