@@ -1,7 +1,7 @@
 /**
  * Status utilities for recording state display.
  *
- * DRY: Shared between Layout.tsx and StatusBar.tsx
+ * DRY: Shared by Layout.tsx (status bar)
  */
 
 export type RecordingState = "idle" | "recording" | "transcribing";
@@ -83,7 +83,7 @@ export function formatHotkey(hotkeyStr: string): string {
 }
 
 /**
- * Format hotkey for StatusBar (simpler version with + notation).
+ * Format hotkey for the status bar (simpler version with + notation).
  */
 export function formatHotkeySimple(hotkeyStr: string): string {
   return hotkeyStr
