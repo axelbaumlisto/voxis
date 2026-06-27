@@ -10,9 +10,8 @@ import {
   SettingDefinition,
   SettingOption,
 } from "../lib/settingsRegistry";
-import { renderField } from "../lib/fieldRegistry";
 import Section from "../components/settings/Section";
-import { renderCustomWidget } from "../lib/customWidgetRegistry";
+import { renderBuiltinField, renderCustomWidget } from "./settingsRenderers";
 import "../styles/settings.css";
 
 function SettingsPage() {
@@ -122,7 +121,7 @@ function SettingsPage() {
 
     return (
       <div key={setting.key}>
-        {renderField(setting.widgetType, {
+        {renderBuiltinField(setting.widgetType, {
           label,
           description,
           value,
