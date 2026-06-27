@@ -252,7 +252,7 @@ pub fn get_theme_manifest(
 
 /// Diagnostic command — lets the overlay webview log a marker to the Rust
 /// tracing stream. Used during E2E development to verify that the React
-/// app inside the NSPanel actually runs and receives state events.
+/// app inside the overlay webview actually runs and receives state events.
 #[tauri::command]
 #[specta::specta]
 pub fn debug_log_overlay(message: String) {
@@ -271,7 +271,7 @@ pub fn debug_log_overlay(message: String) {
 #[specta::specta]
 pub fn debug_eval_overlay(app: tauri::AppHandle, script: String) -> Result<(), String> {
     use tauri::Manager;
-    let label = crate::overlay_native::nspanel::OVERLAY_PANEL_LABEL;
+    let label = crate::overlay_native::OVERLAY_PANEL_LABEL;
     let window = app
         .get_webview_window(label)
         .ok_or_else(|| format!("overlay webview '{label}' not found"))?;

@@ -99,15 +99,18 @@ enigo = { version = "0.6", default-features = false, features = ["x11rb"] }
 # fully gone now. Cuts ~30 transitive crates and several seconds of
 # cold compile time.
 
-# macOS: AppKit private APIs for NSPanel (focus-stealing-free overlay).
+# macOS: AppKit deps for the webview overlay (focus-stealing-free, all-Spaces).
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.24"
 core-foundation = "0.10"
 tauri-plugin-macos-permissions = "2.3.0"
-# NSPanel backend (alternative to subprocess overlay, opt-in).
-# Requires `tauri/macos-private-api` feature (see override below).
-tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
-# macOS-only override: enable `macos-private-api` needed by tauri-nspanel.
+# Thin AppKit NSWindow tuning for the webview overlay (level + Spaces parity
+# with the old NSPanel). Unifies with the in-tree 0.6.4 / 0.3.2 pulled by
+# tauri/wry — no duplicate crate version.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder"] }
+# macOS-only override: enable `macos-private-api` needed by the webview
+# overlay's transparent window (Tauri gates macOS transparency behind it).
 tauri = { version = "2", features = ["tray-icon", "devtools", "macos-private-api"] }
 
 # X11 thread safety (XInitThreads for rdev + GTK)

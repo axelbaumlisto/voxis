@@ -66,7 +66,7 @@ fn err(msg: impl Into<String>) -> Response {
 
 /// Belt-and-suspenders emit — sends to both `app.emit` (broadcast) and
 /// every webview window's `.emit` (targeted). Some Tauri versions drop
-/// app-bus events on NSPanel-wrapped webviews; this guarantees delivery.
+/// app-bus events on the overlay webview; this guarantees delivery.
 fn emit_everywhere<T: serde::Serialize + Clone>(
     app: &AppHandle,
     event: &str,

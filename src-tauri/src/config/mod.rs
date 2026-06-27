@@ -160,8 +160,9 @@ pub struct OverlayConfig {
     /// Visualization theme name.
     #[serde(default = "default_overlay_theme")]
     pub theme: String,
-    /// Overlay backend: `"auto"` (default, picks best), `"native"`, `"subprocess"`,
-    /// `"nspanel"` (macOS only, opt-in), or `"none"`.
+    /// Overlay backend: `"auto"` (default, picks best), `"webview"`, or `"none"`.
+    /// Legacy values (`"native"`, `"subprocess"`, `"nspanel"`) fall back to the
+    /// webview overlay for back-compat.
     #[serde(default = "default_overlay_backend")]
     pub backend: String,
 }
@@ -181,7 +182,9 @@ impl Default for OverlayConfig {
 }
 
 fn default_overlay_backend() -> String {
-    "auto".to_string()
+    // Single cross-platform overlay backend. Legacy values ("auto"/"native"/
+    // "subprocess"/"nspanel") still route here via graceful fallback.
+    "webview".to_string()
 }
 
 /// LLM post-processing settings.

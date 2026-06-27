@@ -3400,12 +3400,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
-name = "pastey"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5a797f0e07bdf071d15742978fc3128ec6c22891c31a3a931513263904c982a"
-
-[[package]]
 name = "pathdiff"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4960,18 +4954,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tauri-nspanel"
-version = "2.1.0"
-source = "git+https://github.com/ahkohd/tauri-nspanel?branch=v2.1#a3122e894383aa068ec5365a42994e3ac94ba1b6"
-dependencies = [
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "pastey",
- "tauri",
-]
-
-[[package]]
 name = "tauri-plugin"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5925,6 +5907,8 @@ dependencies = [
  "gtk",
  "hound",
  "mockito",
+ "objc2",
+ "objc2-app-kit",
  "once_cell",
  "png 0.17.16",
  "pretty_assertions",
@@ -5941,7 +5925,6 @@ dependencies = [
  "specta-typescript",
  "tauri",
  "tauri-build",
- "tauri-nspanel",
  "tauri-plugin-macos-permissions",
  "tauri-plugin-notification",
  "tauri-plugin-os",

@@ -82,20 +82,19 @@ export const OVERLAY_SIZE_OPTIONS: SelectOption[] = [
 ];
 
 // =============================================================================
-// Overlay Backend Options
+// Overlay Backend
 // =============================================================================
 
 // Phase 7 cleanup removed the `native` (in-process egui+glfw) and
 // `subprocess` (separate egui binary) backends. The Rust side still
 // accepts those two strings as graceful-fallback aliases for `auto`,
 // but the UI no longer offers them — the only real choices left are
-// the React/webview overlay (Webview or NSPanel on macOS).
-export const OVERLAY_BACKEND_OPTIONS: SelectOption[] = [
-  { label: "Auto (recommended)", value: "auto" },
-  { label: "Webview (cross-platform)", value: "webview" },
-  { label: "NSPanel (macOS only)", value: "nspanel" },
-  { label: "Off", value: "none" },
-];
+// the React/webview overlay (single cross-platform path on all platforms).
+// There is a SINGLE overlay backend (React/webview) on every platform, so the
+// UI exposes overlay rendering as a simple on/off switch (see
+// OverlayBackendSelector): On = "webview", Off = "none". The Rust side still
+// accepts legacy strings ("auto"/"native"/"subprocess"/"nspanel") as
+// graceful-fallback aliases that route to the webview backend.
 
 // =============================================================================
 // VAD Options
