@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation, Navigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useEffect, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRecordingContext } from "../contexts/RecordingContext";
@@ -91,7 +91,7 @@ function Layout() {
   const statusText = getStatusText({ state: state as RecordingState, error, hotkey }, t);
   const statusIcon = getStatusIcon(state as RecordingState, error);
 
-  // Redirect to history if on home page
+  // History is the home page; keep the History tab active on `/` too.
   const isHome = location.pathname === "/";
 
   return (
@@ -133,7 +133,7 @@ function Layout() {
 
       {/* Main Content */}
       <main className="main-content">
-        {isHome ? <Navigate to="/history" replace /> : <Outlet />}
+        <Outlet />
       </main>
 
       {/* Spectrum Visualizer */}

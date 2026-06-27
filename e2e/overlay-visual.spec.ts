@@ -158,8 +158,8 @@ test.describe("Overlay Visual Verification", () => {
 
     await page.goto("/");
     await page.waitForLoadState("networkidle");
-    // Wait for redirect from / to /history to complete
-    await page.waitForURL("/history");
+    // History IS the home page — `/` renders History directly (no redirect).
+    await expect(page.locator("h1")).toContainText("History");
   });
 
   test("theme selector appears in settings", async ({ page }) => {

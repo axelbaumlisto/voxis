@@ -4,6 +4,7 @@ import { useHistory } from "../hooks/useHistory";
 import { useCopyToClipboard } from "../lib/clipboard";
 import AsyncContent from "../components/AsyncContent";
 import HistoryList from "../components/history/HistoryList";
+import FailedTranscriptionList from "../components/history/FailedTranscriptionList";
 import "../styles/history.css";
 
 function HistoryPage() {
@@ -49,6 +50,8 @@ function HistoryPage() {
           </div>
         </div>
       </header>
+
+      <FailedTranscriptionList />
 
       <div className="history-search">
         <input

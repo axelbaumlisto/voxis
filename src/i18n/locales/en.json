@@ -28,13 +28,6 @@
     "quit": "Quit"
   },
   "home": {
-    "record": "[ Record ]",
-    "stop": "[ Stop ]",
-    "transcribing": "[ ... ]",
-    "lastTranscription": "Last Transcription",
-    "copiedToClipboard": "Copied to clipboard",
-    "emptyState": "Press your hotkey or click the button to start recording",
-    "emptyHint": "Transcriptions will appear here",
     "generateFromHistory": "Generate from History"
   },
   "status": {

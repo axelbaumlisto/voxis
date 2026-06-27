@@ -28,13 +28,6 @@
     "quit": "Выход"
   },
   "home": {
-    "record": "[ Запись ]",
-    "stop": "[ Стоп ]",
-    "transcribing": "[ ... ]",
-    "lastTranscription": "Последняя транскрипция",
-    "copiedToClipboard": "Скопировано в буфер обмена",
-    "emptyState": "Нажмите горячую клавишу или кнопку для начала записи",
-    "emptyHint": "Транскрипции появятся здесь",
     "generateFromHistory": "Сгенерировать из истории"
   },
   "status": {
