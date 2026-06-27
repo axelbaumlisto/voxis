@@ -139,15 +139,43 @@ fn collect_history_texts(entries: &[crate::storage::HistoryEntry]) -> String {
     serde_json::to_string(&texts).unwrap_or_default()
 }
 
-/// Process LLM suggestions through the correction tracker.
+/// Breakdown of how a batch of LLM suggestions was handled by the tracker.
+///
+/// Invariant: `recorded + promoted + skipped == suggestions.len()` for the
+/// slice passed to [`process_llm_suggestions`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct SuggestionBreakdown {
+    /// New/updated pending suggestions waiting in the panel for review.
+    recorded: usize,
+    /// Auto-promoted straight into the dictionary (auto mode, threshold hit).
+    promoted: usize,
+    /// Nothing actionable: already in dictionary, previously rejected, ignored,
+    /// or the tracker errored.
+    skipped: usize,
+}
+
+/// Process LLM suggestions through the correction tracker, classifying each
+/// outcome into one of three buckets so the UI can give honest feedback
+/// (e.g. "2 new suggestions, 1 added, 3 skipped") instead of a single inflated
+/// "found" count.
 fn process_llm_suggestions(
     tracker: &CorrectionTracker,
     suggestions: &[DictionarySuggestion],
-) -> usize {
-    suggestions
-        .iter()
-        .filter(|s| tracker.on_suggestion(s).is_ok())
-        .count()
+) -> SuggestionBreakdown {
+    use crate::learning::SuggestionResult::*;
+
+    let mut breakdown = SuggestionBreakdown::default();
+    for s in suggestions {
+        match tracker.on_suggestion(s) {
+            Ok(Recorded { .. }) => breakdown.recorded += 1,
+            Ok(Promoted { .. }) => breakdown.promoted += 1,
+            Ok(AlreadyInDictionary) | Ok(PreviouslyRejected) | Ok(Ignored) => {
+                breakdown.skipped += 1
+            }
+            Err(_) => breakdown.skipped += 1,
+        }
+    }
+    breakdown
 }
 
 // =============================================================================
@@ -179,10 +207,23 @@ impl From<TrackedSuggestion> for PendingSuggestion {
 }
 
 /// Result of reprocessing history through LLM.
+///
+/// `suggestions_found` is the honest total of actionable outcomes
+/// (`recorded + promoted`); the three buckets break that down so the UI can
+/// explain what happened (new pending suggestions vs. auto-added to dictionary
+/// vs. skipped duplicates/rejections). The bucket fields are `#[serde(default)]`
+/// so older payloads carrying only `processed`/`suggestions_found` still
+/// deserialize.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ReprocessResult {
     pub processed: usize,
     pub suggestions_found: usize,
+    #[serde(default)]
+    pub recorded: usize,
+    #[serde(default)]
+    pub promoted: usize,
+    #[serde(default)]
+    pub skipped: usize,
 }
 
 // =============================================================================
@@ -278,6 +319,9 @@ pub async fn reprocess_history_for_suggestions(
         return Ok(ReprocessResult {
             processed: 0,
             suggestions_found: 0,
+            recorded: 0,
+            promoted: 0,
+            skipped: 0,
         });
     }
 
@@ -291,13 +335,18 @@ pub async fn reprocess_history_for_suggestions(
 
     // Track suggestions.
     let tracker = create_tracker(&factory)?;
-    let suggestions_found = process_llm_suggestions(&tracker, &result.suggestions);
+    let breakdown = process_llm_suggestions(&tracker, &result.suggestions);
 
     let _ = app.emit("suggestions-updated", ());
 
     Ok(ReprocessResult {
         processed: entries.len(),
-        suggestions_found,
+        // Honest "found" = actionable outcomes only (new pending + auto-added),
+        // not skipped duplicates/rejections.
+        suggestions_found: breakdown.recorded + breakdown.promoted,
+        recorded: breakdown.recorded,
+        promoted: breakdown.promoted,
+        skipped: breakdown.skipped,
     })
 }
 
@@ -329,10 +378,16 @@ mod tests {
         let result = ReprocessResult {
             processed: 10,
             suggestions_found: 3,
+            recorded: 2,
+            promoted: 1,
+            skipped: 4,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"processed\":10"));
         assert!(json.contains("\"suggestions_found\":3"));
+        assert!(json.contains("\"recorded\":2"));
+        assert!(json.contains("\"promoted\":1"));
+        assert!(json.contains("\"skipped\":4"));
     }
 
     #[test]
@@ -372,10 +427,26 @@ mod tests {
 
     #[test]
     fn test_reprocess_result_deserialize() {
+        // Legacy payload (pre-three-bucket) must still deserialize: the new
+        // fields rely on #[serde(default)] and fall back to 0.
         let json = r#"{"processed":25,"suggestions_found":7}"#;
         let result: ReprocessResult = serde_json::from_str(json).unwrap();
         assert_eq!(result.processed, 25);
         assert_eq!(result.suggestions_found, 7);
+        assert_eq!(result.recorded, 0);
+        assert_eq!(result.promoted, 0);
+        assert_eq!(result.skipped, 0);
+    }
+
+    #[test]
+    fn test_reprocess_result_deserialize_with_buckets() {
+        let json = r#"{"processed":10,"suggestions_found":3,"recorded":2,"promoted":1,"skipped":4}"#;
+        let result: ReprocessResult = serde_json::from_str(json).unwrap();
+        assert_eq!(result.processed, 10);
+        assert_eq!(result.suggestions_found, 3);
+        assert_eq!(result.recorded, 2);
+        assert_eq!(result.promoted, 1);
+        assert_eq!(result.skipped, 4);
     }
 
     #[test]
@@ -383,6 +454,9 @@ mod tests {
         let result = ReprocessResult {
             processed: 0,
             suggestions_found: 0,
+            recorded: 0,
+            promoted: 0,
+            skipped: 0,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"processed\":0"));
@@ -837,14 +911,14 @@ mod tests {
     }
 
     #[test]
-    fn test_process_llm_suggestions_counts_all_successful() {
+    fn test_process_llm_suggestions_classifies_recorded_vs_skipped() {
         use crate::llm::DictionarySuggestion;
         use crate::storage::test_utils::create_temp_paths;
 
         let (_temp, paths) = create_temp_paths();
         let factory = StorageFactory::new(paths);
 
-        // Add an entry to dictionary first
+        // Add an entry to dictionary first → that suggestion is skipped.
         factory.dictionary().add("existing", "EXISTING").unwrap();
 
         let tracker = create_tracker(&factory).unwrap();
@@ -860,15 +934,104 @@ mod tests {
             },
         ];
 
-        // Process suggestions
-        let count = process_llm_suggestions(&tracker, &suggestions);
+        let breakdown = process_llm_suggestions(&tracker, &suggestions);
 
-        // Both return Ok (AlreadyInDictionary and Recorded), so count is 2
-        assert_eq!(count, 2);
+        // existing → AlreadyInDictionary (skipped); new_word → Recorded.
+        assert_eq!(breakdown.recorded, 1);
+        assert_eq!(breakdown.promoted, 0);
+        assert_eq!(breakdown.skipped, 1);
+        // Invariant holds.
+        assert_eq!(
+            breakdown.recorded + breakdown.promoted + breakdown.skipped,
+            suggestions.len()
+        );
 
-        // But only the new word should be pending
+        // Only the new word should be pending.
         let pending = factory.corrections().pending_count().unwrap();
         assert_eq!(pending, 1);
+    }
+
+    #[test]
+    fn test_process_llm_suggestions_mixed_buckets() {
+        // {fresh, already-in-dict, previously-rejected} → recorded=1, skipped=2.
+        use crate::llm::DictionarySuggestion;
+        use crate::storage::test_utils::create_temp_paths;
+
+        let (_temp, paths) = create_temp_paths();
+        let factory = StorageFactory::new(paths);
+
+        // already-in-dict
+        factory.dictionary().add("indict", "INDICT").unwrap();
+
+        let tracker = create_tracker(&factory).unwrap();
+
+        // previously-rejected: record then reject so a later record returns 0
+        // (PreviouslyRejected).
+        tracker
+            .on_suggestion(&DictionarySuggestion {
+                source: "rejected".into(),
+                replacement: "REJECTED".into(),
+            })
+            .unwrap();
+        tracker.reject_by_source("rejected", "REJECTED").unwrap();
+
+        let suggestions = vec![
+            DictionarySuggestion {
+                source: "fresh".into(),
+                replacement: "FRESH".into(),
+            },
+            DictionarySuggestion {
+                source: "indict".into(),
+                replacement: "INDICT".into(),
+            },
+            DictionarySuggestion {
+                source: "rejected".into(),
+                replacement: "REJECTED".into(),
+            },
+        ];
+
+        let breakdown = process_llm_suggestions(&tracker, &suggestions);
+
+        assert_eq!(breakdown.recorded, 1);
+        assert_eq!(breakdown.promoted, 0);
+        assert_eq!(breakdown.skipped, 2);
+        assert_eq!(
+            breakdown.recorded + breakdown.promoted + breakdown.skipped,
+            suggestions.len()
+        );
+    }
+
+    #[test]
+    fn test_process_llm_suggestions_auto_promote_counts_as_promoted() {
+        // Auto mode + threshold 1 → first sighting promotes straight to dict.
+        use crate::learning::{CorrectionTracker, LearningMode};
+        use crate::llm::DictionarySuggestion;
+        use crate::storage::test_utils::create_temp_paths;
+
+        let (_temp, paths) = create_temp_paths();
+        let factory = StorageFactory::new(paths);
+
+        let tracker = CorrectionTracker::new(
+            LearningMode::Auto,
+            1, // threshold reached on first sighting
+            factory.corrections_dyn(),
+            factory.dictionary_dyn(),
+        );
+
+        let suggestions = vec![DictionarySuggestion {
+            source: "promote_me".into(),
+            replacement: "PROMOTE_ME".into(),
+        }];
+
+        let breakdown = process_llm_suggestions(&tracker, &suggestions);
+
+        assert_eq!(breakdown.recorded, 0);
+        assert_eq!(breakdown.promoted, 1);
+        assert_eq!(breakdown.skipped, 0);
+
+        // Promoted entries go straight to the dictionary, not the pending panel.
+        assert!(factory.dictionary().contains("promote_me").unwrap());
+        assert_eq!(factory.corrections().pending_count().unwrap(), 0);
     }
 
     #[test]
@@ -882,10 +1045,12 @@ mod tests {
 
         let suggestions: Vec<DictionarySuggestion> = vec![];
 
-        // Process empty list
-        let count = process_llm_suggestions(&tracker, &suggestions);
+        let breakdown = process_llm_suggestions(&tracker, &suggestions);
 
-        // Should return 0
-        assert_eq!(count, 0);
+        // All buckets zero for empty input.
+        assert_eq!(breakdown, SuggestionBreakdown::default());
+        assert_eq!(breakdown.recorded, 0);
+        assert_eq!(breakdown.promoted, 0);
+        assert_eq!(breakdown.skipped, 0);
     }
 }
