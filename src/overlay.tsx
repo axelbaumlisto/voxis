@@ -49,8 +49,8 @@ export function OverlayApp() {
   const themeId = forcedTheme ?? snapshot.themeId;
 
   // Manifest params for the active theme. Specta skips the `params` field
-  // (serde skip), so the generated ThemeManifest type lacks it. We cast
-  // through unknown to access the field at runtime.
+  // (serde skip), so the generated ThemeManifest type lacks it. We access
+  // it via a precise typed shape at runtime.
   const [params, setParams] = useState<unknown>(null);
   useEffect(() => {
     let cancelled = false;
@@ -59,8 +59,7 @@ export function OverlayApp() {
       .getThemeManifest(themeId)
       .then((manifest) => {
         if (cancelled || !manifest) return;
-        const m = manifest as unknown as Record<string, unknown>;
-        setParams(m.params ?? null);
+        setParams((manifest as { params?: unknown }).params ?? null);
       })
       .catch(() => {
         // getThemeManifest is best-effort; themes work without params.

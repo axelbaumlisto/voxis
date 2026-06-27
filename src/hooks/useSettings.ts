@@ -42,7 +42,7 @@ function setNestedValue(
     return {
       ...obj,
       [parent]: {
-        ...(parentObj as unknown as Record<string, unknown>),
+        ...(parentObj as Record<string, unknown>),
         [child]: value,
       },
     };

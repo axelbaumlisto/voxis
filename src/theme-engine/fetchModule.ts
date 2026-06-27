@@ -23,5 +23,8 @@ export async function fetchThemeModule(themeId: string): Promise<ThemeModule> {
     );
   }
   // Defensive: if the binding shape ever changes to a plain string
-  return loadThemeModuleFromSource(result as unknown as string);
+  if (typeof result === "string") {
+    return loadThemeModuleFromSource(result);
+  }
+  throw new Error("unexpected readThemeScript shape");
 }

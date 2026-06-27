@@ -17,7 +17,7 @@ export function getConfigValue(config: AppConfig, path: string): unknown {
   const [parent, child] = parts;
   const parentObj = config[parent as keyof AppConfig];
   if (typeof parentObj === "object" && parentObj !== null) {
-    return (parentObj as unknown as Record<string, unknown>)[child];
+    return (parentObj as Record<string, unknown>)[child];
   }
   return undefined;
 }
