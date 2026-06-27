@@ -78,6 +78,7 @@ function ProviderSelect({
             selectedId={providerId}
             onChange={handleProviderChange}
             showMissingSelection={false}
+            ariaLabel="LLM Provider"
           />
           <ProviderActions
             currentProvider={currentProvider}
@@ -104,6 +105,7 @@ function ProviderSelect({
           options={models.map((m) => ({ id: m.id, label: m.name }))}
           selectedId={modelId}
           onChange={onModelChange}
+          ariaLabel="LLM Model"
         />
       </FieldWrapper>
 

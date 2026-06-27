@@ -1,4 +1,28 @@
-import FieldWrapper from "./FieldWrapper";
+import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
+
+function InputControl(props: {
+  type: "text" | "number";
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  readonly: boolean;
+  ariaInvalid?: boolean;
+}) {
+  const id = useFieldControlId();
+  return (
+    <input
+      id={id}
+      type={props.type}
+      className="settings-field-input"
+      value={props.value}
+      onChange={(e) => props.onChange(e.target.value)}
+      placeholder={props.placeholder}
+      readOnly={props.readonly}
+      aria-invalid={props.ariaInvalid}
+      style={props.readonly ? { opacity: 0.7, cursor: "default" } : undefined}
+    />
+  );
+}
 
 interface InputFieldProps {
   label: string;
@@ -23,15 +47,13 @@ function InputField({
 }: InputFieldProps) {
   return (
     <FieldWrapper label={label} description={description}>
-      <input
+      <InputControl
         type={type}
-        className="settings-field-input"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
         placeholder={placeholder}
-        readOnly={readonly}
-        aria-invalid={ariaInvalid}
-        style={readonly ? { opacity: 0.7, cursor: "default" } : undefined}
+        readonly={readonly}
+        ariaInvalid={ariaInvalid}
       />
     </FieldWrapper>
   );

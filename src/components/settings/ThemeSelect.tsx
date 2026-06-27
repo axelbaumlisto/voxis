@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import FieldWrapper from "./FieldWrapper";
+import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
 import { useVisualizationThemes } from "../../hooks/useVisualizationThemes";
 import { previewVisualizationTheme } from "../../lib/commands";
+import type { SettingOption } from "../../lib/settingsRegistry";
 
 
 interface ThemeSelectProps {
@@ -43,18 +44,12 @@ function ThemeSelect({ label, description, value, onChange }: ThemeSelectProps) 
 
   return (
     <FieldWrapper label={label} description={helperText}>
-      <select
-        className="settings-field-input"
+      <ThemeSelectControl
+        label={label}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label={label}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+        options={options}
+        onChange={onChange}
+      />
       <div className="theme-preview-actions">
         <button
           type="button"
@@ -74,6 +69,36 @@ function ThemeSelect({ label, description, value, onChange }: ThemeSelectProps) 
         </button>
       </div>
     </FieldWrapper>
+  );
+}
+
+/** Inner control: consumes the FieldWrapper id so the label resolves to it. */
+function ThemeSelectControl({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: SettingOption[];
+  onChange: (value: string) => void;
+}) {
+  const controlId = useFieldControlId();
+  return (
+    <select
+      id={controlId}
+      className="settings-field-input"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={label}
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
   );
 }
 

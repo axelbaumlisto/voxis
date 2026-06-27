@@ -10,7 +10,7 @@
  * onChange that emits the modified shape. The settings page passes
  * one such pair per nested-config key.
  */
-import FieldWrapper from "./FieldWrapper";
+import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
 
 export interface AudioFeedbackProps {
   label: string;
@@ -29,20 +29,7 @@ export default function AudioFeedback({
   return (
     <FieldWrapper label={label} description={description}>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <label
-          style={{ display: "flex", alignItems: "center", gap: 8 }}
-          data-testid="audio-feedback-toggle-wrapper"
-        >
-          <input
-            type="checkbox"
-            checked={safe.enabled}
-            data-testid="audio-feedback-toggle"
-            onChange={(e) =>
-              onChange({ ...safe, enabled: e.target.checked })
-            }
-          />
-          <span>Enable beeps</span>
-        </label>
+        <AudioFeedbackToggle label={label} safe={safe} onChange={onChange} />
         <label
           style={{
             display: "flex",
@@ -71,5 +58,34 @@ export default function AudioFeedback({
         </label>
       </div>
     </FieldWrapper>
+  );
+}
+
+/** Inner control: consumes the FieldWrapper id so the label resolves to it. */
+function AudioFeedbackToggle({
+  label,
+  safe,
+  onChange,
+}: {
+  label: string;
+  safe: { enabled: boolean; volume: number };
+  onChange: (value: { enabled: boolean; volume: number }) => void;
+}) {
+  const controlId = useFieldControlId();
+  return (
+    <label
+      style={{ display: "flex", alignItems: "center", gap: 8 }}
+      data-testid="audio-feedback-toggle-wrapper"
+    >
+      <input
+        id={controlId}
+        type="checkbox"
+        checked={safe.enabled}
+        data-testid="audio-feedback-toggle"
+        aria-label={label}
+        onChange={(e) => onChange({ ...safe, enabled: e.target.checked })}
+      />
+      <span>Enable beeps</span>
+    </label>
   );
 }

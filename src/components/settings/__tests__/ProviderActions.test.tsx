@@ -33,7 +33,7 @@ describe("ProviderActions", () => {
         />
       );
 
-      const addButton = screen.getByRole("button", { name: "+" });
+      const addButton = screen.getByRole("button", { name: "Add custom provider" });
       expect(addButton).toBeInTheDocument();
     });
 
@@ -48,7 +48,7 @@ describe("ProviderActions", () => {
         />
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "+" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add custom provider" }));
       expect(onAdd).toHaveBeenCalledTimes(1);
     });
 
@@ -75,7 +75,7 @@ describe("ProviderActions", () => {
         />
       );
 
-      const addButton = screen.getByRole("button", { name: "+" });
+      const addButton = screen.getByRole("button", { name: "Add custom provider" });
       expect(addButton).toHaveClass("provider-action-btn");
     });
   });
@@ -105,6 +105,39 @@ describe("ProviderActions", () => {
       );
 
       expect(screen.queryByTitle("Remove provider")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Accessible names (a11y)", () => {
+    it("add button has accessible name", () => {
+      render(
+        <ProviderActions
+          currentProvider={undefined}
+          onAdd={vi.fn()}
+          onEdit={vi.fn()}
+          onRemove={vi.fn()}
+        />
+      );
+      expect(
+        screen.getByRole("button", { name: "Add custom provider" })
+      ).toBeInTheDocument();
+    });
+
+    it("edit and delete buttons have accessible names", () => {
+      render(
+        <ProviderActions
+          currentProvider={mockCustomProvider}
+          onAdd={vi.fn()}
+          onEdit={vi.fn()}
+          onRemove={vi.fn()}
+        />
+      );
+      expect(
+        screen.getByRole("button", { name: "Edit provider" })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Remove provider" })
+      ).toBeInTheDocument();
     });
   });
 
@@ -207,7 +240,7 @@ describe("ProviderActions", () => {
         />
       );
 
-      expect(screen.getByRole("button", { name: "+" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Add custom provider" })).toBeInTheDocument();
       expect(screen.queryByTitle("Edit provider")).not.toBeInTheDocument();
       expect(screen.queryByTitle("Remove provider")).not.toBeInTheDocument();
     });

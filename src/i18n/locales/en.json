@@ -4,6 +4,7 @@
     "saving": "Saving...",
     "save": "Save",
     "cancel": "Cancel",
+    "close": "Close",
     "error": "Error: {{message}}",
     "copied": "Copied!",
     "refresh": "Refresh",
