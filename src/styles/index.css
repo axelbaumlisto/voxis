@@ -135,6 +135,19 @@ textarea:focus {
   border-color: var(--accent);
 }
 
+/* a11y: visible keyboard-focus ring (mouse focus unaffected). Class-qualified
+   focus styles like .permission-banner-action:focus have higher specificity
+   and win, avoiding a double-outline. The input/select/textarea selector
+   re-asserts the ring so the element-specific `outline: none` above does not
+   suppress it for keyboard users (border-color change is kept on top). */
+:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* TUI Layout - Tab based */
 .layout {
   display: flex;
