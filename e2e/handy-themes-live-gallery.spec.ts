@@ -78,8 +78,6 @@ const GALLERY_DIR = "test-results/handy-gallery";
 const THEMES = [
   { id: "winamp_classic", family: "bars",         probe: "#ef3110", minDiff: 200 },
   { id: "default",        family: "bars",         probe: "#64b5f6", minDiff: 200 },
-  { id: "dark",           family: "bars",         probe: "#b388ff", minDiff: 200 },
-  { id: "monochrome",     family: "bars",         probe: "#a0a0a0", minDiff: 200 },
   { id: "neon",           family: "bars",         probe: "#ff00ff", minDiff: 200 },
   { id: "drifting_contour", family: "organic_ring", probe: "#d9a865", minDiff: 30 },
   { id: "living_reed",    family: "organic_ring", probe: "#7cc287", minDiff: 30 },

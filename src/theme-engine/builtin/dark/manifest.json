@@ -1,8 +1,0 @@
-{
-  "manifest_version": 2,
-  "id": "dark",
-  "name": "Dark",
-  "description": "Purple gradient spectrum analyzer bars",
-  "api_version": 1,
-  "entry": "theme.js"
-}

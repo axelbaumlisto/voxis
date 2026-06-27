@@ -66,9 +66,7 @@ test.describe("Visualization Themes", () => {
       const themes = [
         { id: "default", name: "Default", description: "Blue, green, orange colors" },
         { id: "winamp_classic", name: "Winamp Classic", description: "Classic Winamp fire spectrum (red → yellow → green)" },
-        { id: "dark", name: "Dark Purple", description: "Dark theme with purple accents" },
         { id: "neon", name: "Neon", description: "Bright neon colors" },
-        { id: "monochrome", name: "Monochrome", description: "Grayscale theme" },
       ];
 
       const callbacks = new Map<number, (data: any) => void>();
@@ -156,9 +154,7 @@ test.describe("Visualization Themes", () => {
     expect(themes.map((t: any) => t.id)).toEqual([
       "default",
       "winamp_classic",
-      "dark",
       "neon",
-      "monochrome",
     ]);
 
     // Verify each theme has required fields
@@ -198,7 +194,7 @@ test.describe("Visualization Themes", () => {
     await page.goto("/");
     await page.waitForSelector(".status-bar");
 
-    const themeIds = ["default", "winamp_classic", "dark", "neon", "monochrome"];
+    const themeIds = ["default", "winamp_classic", "neon"];
 
     for (const themeId of themeIds) {
       const result = await page.evaluate(async (id) => {
@@ -283,9 +279,7 @@ test.describe("Visualization Themes", () => {
             return [
               { id: "default", name: "Custom Default", description: "Custom Default (custom)" },
               { id: "winamp_classic", name: "Winamp Classic", description: "Classic Winamp fire spectrum" },
-              { id: "dark", name: "Dark Purple", description: "Dark theme with purple accents" },
               { id: "neon", name: "Neon", description: "Bright neon colors" },
-              { id: "monochrome", name: "Monochrome", description: "Grayscale theme" },
               { id: "my_custom", name: "My Custom Theme", description: "Custom theme" },
             ];
           }

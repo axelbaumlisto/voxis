@@ -61,9 +61,7 @@ test.describe("Overlay Visual Verification", () => {
       const themes = [
         { id: "default", name: "Default", description: "Blue, green, orange colors" },
         { id: "winamp_classic", name: "Winamp Classic", description: "Classic Winamp fire spectrum (red → yellow → green)" },
-        { id: "dark", name: "Dark Purple", description: "Dark theme with purple accents" },
         { id: "neon", name: "Neon", description: "Bright neon colors" },
-        { id: "monochrome", name: "Monochrome", description: "Grayscale theme" },
       ];
 
       const callbacks = new Map<number, (data: unknown) => void>();
@@ -238,7 +236,7 @@ test.describe("Overlay Visual Verification", () => {
 
   test("all themes can be selected and saved", async ({ page }) => {
     // Start from non-default themes to ensure each change triggers hasChanges
-    const themes = ["winamp_classic", "dark", "neon", "monochrome", "default"];
+    const themes = ["winamp_classic", "neon", "default"];
 
     // Navigate to settings
     await page.click('a[href="/settings"]');

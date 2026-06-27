@@ -25,9 +25,7 @@ const OVERLAY_BIN = resolve(
 
 const THEMES = [
   { id: "default", name: "Default — traveling stadium wave (8 bars)" },
-  { id: "dark", name: "Dark — cubic ease breathing (5 bars)" },
   { id: "neon", name: "Neon — Knight Rider scanner (10 bars)" },
-  { id: "monochrome", name: "Monochrome — pendulum wave (7 bars)" },
   { id: "winamp_classic", name: "Winamp Classic — bouncing EQ (10 bars)" },
 ];
 

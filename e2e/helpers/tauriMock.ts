@@ -67,9 +67,7 @@ export function addTauriMockEssentials(page: Page) {
               return [
                 { id: "default", name: "Default", description: "Default theme" },
                 { id: "winamp_classic", name: "Winamp Classic", description: "Classic fire spectrum" },
-                { id: "dark", name: "Dark Purple", description: "Dark purple theme" },
                 { id: "neon", name: "Neon", description: "Neon theme" },
-                { id: "monochrome", name: "Monochrome", description: "Grayscale" },
               ];
             }
           case "list_audio_devices":

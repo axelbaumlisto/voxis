@@ -115,11 +115,9 @@ export const AUDIO_BOOST_OPTIONS: SelectOption[] = [
 ];
 
 export const OVERLAY_THEME_OPTIONS: SelectOption[] = [
-  { label: "Default (Blue/Green)", value: "default" },
+  { label: "Default (Blue)", value: "default" },
   { label: "Winamp Classic", value: "winamp_classic" },
-  { label: "Dark Purple", value: "dark" },
   { label: "Neon", value: "neon" },
-  { label: "Monochrome", value: "monochrome" },
 ];
 
 // =============================================================================

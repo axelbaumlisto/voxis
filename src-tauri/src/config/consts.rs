@@ -172,8 +172,7 @@ pub const DEFAULT_LEARNING_THRESHOLD: u32 = 3;
 pub const DEFAULT_OVERLAY_THEME: &str = "default";
 
 /// Valid overlay themes.
-pub const VALID_OVERLAY_THEMES: &[&str] =
-    &["default", "winamp_classic", "dark", "neon", "monochrome"];
+pub const VALID_OVERLAY_THEMES: &[&str] = &["default", "winamp_classic", "neon"];
 
 /// Default paste shortcuts on Linux (Ctrl+Shift+V for terminals).
 pub const DEFAULT_PASTE_SHORTCUTS: &str = "ctrl_shift_v";

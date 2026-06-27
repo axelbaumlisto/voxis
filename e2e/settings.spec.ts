@@ -73,9 +73,7 @@ test.describe("Settings Page", () => {
               return [
                 { id: "default", name: "Default", description: "Default" },
                 { id: "winamp_classic", name: "Winamp Classic", description: "Fire spectrum" },
-                { id: "dark", name: "Dark Purple", description: "Purple" },
                 { id: "neon", name: "Neon", description: "Neon" },
-                { id: "monochrome", name: "Monochrome", description: "Grayscale" },
               ];
             case "get_theme_colors":
               return {
