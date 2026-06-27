@@ -1,166 +1,79 @@
 /**
- * Tests for OverlayBackendSelector.
+ * Tests for OverlayBackendSelector (on/off toggle).
  *
- * The selector must:
- *  - render every option from OVERLAY_BACKEND_OPTIONS
- *  - show the current value as selected
- *  - emit onChange with the new value on selection
- *  - disable the `nspanel` option on non-macOS platforms with a hint
+ * There is now ONE overlay backend (webview) on every platform, so the control
+ * is a boolean switch. The toggle must:
+ *  - render checked when the backend is anything other than "none"
+ *  - render unchecked when the backend is "none"
+ *  - emit onChange("webview") when turned on, onChange("none") when turned off
  *  - warn the user that a restart is required when the value changes
- *
- * Platform detection is mocked via `Object.defineProperty(navigator, "platform")`
- * because jsdom exposes a writable descriptor.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
 import OverlayBackendSelector from "../OverlayBackendSelector";
-import { OVERLAY_BACKEND_OPTIONS } from "../../../lib/constants";
-
-function setPlatform(platform: string) {
-  Object.defineProperty(window.navigator, "platform", {
-    value: platform,
-    configurable: true,
-  });
-}
-
-const ORIGINAL_PLATFORM = window.navigator.platform;
 
 describe("OverlayBackendSelector", () => {
-  beforeEach(() => {
-    setPlatform("MacIntel"); // assume macOS by default
-  });
-
-  afterEach(() => {
-    setPlatform(ORIGINAL_PLATFORM);
-  });
-
-  it("renders all backend options", () => {
+  it("renders checked when overlay is enabled (non-'none' value)", () => {
     render(
-      <OverlayBackendSelector
-        label="Backend"
-        value="auto"
-        onChange={() => {}}
-      />,
+      <OverlayBackendSelector label="Overlay" value="webview" onChange={() => {}} />,
     );
-
-    const options = screen.getAllByRole("option");
-    expect(options).toHaveLength(OVERLAY_BACKEND_OPTIONS.length);
-    for (const opt of OVERLAY_BACKEND_OPTIONS) {
-      expect(
-        options.find((o) => (o as HTMLOptionElement).value === opt.value),
-      ).toBeTruthy();
-    }
+    const toggle = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
   });
 
-  it("marks the current value as selected", () => {
+  it("treats any legacy non-'none' value (e.g. 'auto') as enabled", () => {
     render(
-      <OverlayBackendSelector
-        label="Backend"
-        value="webview"
-        onChange={() => {}}
-      />,
+      <OverlayBackendSelector label="Overlay" value="auto" onChange={() => {}} />,
     );
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    expect(select.value).toBe("webview");
+    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
   });
 
-  it("calls onChange with the new value when user selects another option", () => {
+  it("renders unchecked when overlay is off ('none')", () => {
+    render(
+      <OverlayBackendSelector label="Overlay" value="none" onChange={() => {}} />,
+    );
+    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("emits 'webview' when turned on and 'none' when turned off", () => {
     const onChange = vi.fn();
-    render(
-      <OverlayBackendSelector label="Backend" value="auto" onChange={onChange} />,
+    const { rerender } = render(
+      <OverlayBackendSelector label="Overlay" value="none" onChange={onChange} />,
     );
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(onChange).toHaveBeenLastCalledWith("webview");
 
-    const select = screen.getByRole("combobox");
-    fireEvent.change(select, { target: { value: "nspanel" } });
-    expect(onChange).toHaveBeenCalledWith("nspanel");
-    expect(onChange).toHaveBeenCalledTimes(1);
+    rerender(
+      <OverlayBackendSelector label="Overlay" value="webview" onChange={onChange} />,
+    );
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(onChange).toHaveBeenLastCalledWith("none");
   });
 
   it("renders the label and description from props", () => {
     render(
       <OverlayBackendSelector
-        label="Overlay Backend"
-        description="Pick how the overlay renders"
-        value="auto"
+        label="Overlay"
+        description="Show the recording overlay"
+        value="webview"
         onChange={() => {}}
       />,
     );
-    expect(screen.getByText("Overlay Backend")).toBeInTheDocument();
-    expect(screen.getByText("Pick how the overlay renders")).toBeInTheDocument();
-  });
-
-  it("disables nspanel option on non-macOS platforms", () => {
-    setPlatform("Win32");
-    render(
-      <OverlayBackendSelector label="Backend" value="auto" onChange={() => {}} />,
-    );
-
-    const nspanelOption = screen
-      .getAllByRole("option")
-      .find((o) => (o as HTMLOptionElement).value === "nspanel") as
-      | HTMLOptionElement
-      | undefined;
-
-    expect(nspanelOption).toBeDefined();
-    expect(nspanelOption?.disabled).toBe(true);
-  });
-
-  it("enables nspanel option on macOS", () => {
-    setPlatform("MacIntel");
-    render(
-      <OverlayBackendSelector label="Backend" value="auto" onChange={() => {}} />,
-    );
-
-    const nspanelOption = screen
-      .getAllByRole("option")
-      .find((o) => (o as HTMLOptionElement).value === "nspanel") as
-      | HTMLOptionElement
-      | undefined;
-
-    expect(nspanelOption).toBeDefined();
-    expect(nspanelOption?.disabled).toBe(false);
-  });
-
-  it("shows a platform hint when nspanel is disabled", () => {
-    setPlatform("Linux x86_64");
-    render(
-      <OverlayBackendSelector label="Backend" value="auto" onChange={() => {}} />,
-    );
-    const hint = screen.getByTestId("overlay-backend-platform-hint");
-    expect(hint).toBeInTheDocument();
-    expect(hint.textContent).toMatch(/macOS only/i);
-  });
-
-  it("does not show the platform hint when nspanel is enabled", () => {
-    setPlatform("MacIntel");
-    render(
-      <OverlayBackendSelector label="Backend" value="auto" onChange={() => {}} />,
-    );
-    expect(
-      screen.queryByTestId("overlay-backend-platform-hint"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("Overlay")).toBeInTheDocument();
+    expect(screen.getByText("Show the recording overlay")).toBeInTheDocument();
   });
 
   it("shows a restart-required notice once the value diverges from the initial value", () => {
     const onChange = vi.fn();
     const { rerender } = render(
-      <OverlayBackendSelector label="Backend" value="auto" onChange={onChange} />,
+      <OverlayBackendSelector label="Overlay" value="webview" onChange={onChange} />,
     );
-    // Initially no notice.
     expect(screen.queryByText(/restart/i)).not.toBeInTheDocument();
 
-    // User changes value.
-    fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: "webview" },
-    });
-    // Parent reflects new value back.
+    fireEvent.click(screen.getByRole("checkbox"));
     rerender(
-      <OverlayBackendSelector
-        label="Backend"
-        value="webview"
-        onChange={onChange}
-      />,
+      <OverlayBackendSelector label="Overlay" value="none" onChange={onChange} />,
     );
     expect(screen.getByText(/restart/i)).toBeInTheDocument();
   });
@@ -168,25 +81,18 @@ describe("OverlayBackendSelector", () => {
   it("hides the restart notice when value returns to its initial value", () => {
     const onChange = vi.fn();
     const { rerender } = render(
-      <OverlayBackendSelector label="Backend" value="auto" onChange={onChange} />,
+      <OverlayBackendSelector label="Overlay" value="webview" onChange={onChange} />,
     );
 
-    fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: "webview" },
-    });
+    fireEvent.click(screen.getByRole("checkbox"));
     rerender(
-      <OverlayBackendSelector
-        label="Backend"
-        value="webview"
-        onChange={onChange}
-      />,
+      <OverlayBackendSelector label="Overlay" value="none" onChange={onChange} />,
     );
     expect(screen.getByText(/restart/i)).toBeInTheDocument();
 
-    // Revert.
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "auto" } });
+    fireEvent.click(screen.getByRole("checkbox"));
     rerender(
-      <OverlayBackendSelector label="Backend" value="auto" onChange={onChange} />,
+      <OverlayBackendSelector label="Overlay" value="webview" onChange={onChange} />,
     );
     expect(screen.queryByText(/restart/i)).not.toBeInTheDocument();
   });

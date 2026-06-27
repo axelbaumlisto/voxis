@@ -1,10 +1,9 @@
 mod backend;
-pub mod nspanel;
 pub mod theme;
 pub mod webview;
 
 pub use backend::{NoopOverlay, OverlayBackend};
-pub use nspanel::OVERLAY_PANEL_LABEL;
+pub use webview::OVERLAY_PANEL_LABEL;
 pub use theme::{ThemeInfo, ThemeTestResult};
 
 pub type OverlayState = crate::overlay::types::OverlayState;
@@ -29,10 +28,13 @@ pub struct CreateOverlayParams<'a> {
 /// Create an overlay backend based on configuration.
 ///
 /// `params.backend` selects implementation:
-/// - `"auto"` (default) — NSPanel on macOS (if AppHandle), Webview elsewhere
-/// - `"nspanel"` — macOS-only NSPanel webview (requires `app_handle`)
+/// - `"auto"` (default) — Tauri WebviewWindow on all platforms
 /// - `"webview"` — plain Tauri WebviewWindow (cross-platform)
 /// - `"none"` — NoopOverlay
+///
+/// On macOS the webview keeps the overlay behaviours that matter (no focus
+/// steal, all-Spaces, over-fullscreen) via `.focusable(false)` + a thin
+/// AppKit `NSWindow` tuning helper instead of a separate NSPanel backend.
 ///
 /// Phase 7 cleanup: the legacy `native` (in-process egui+glfw) and
 /// `subprocess` (separate egui binary) backends were removed. They
@@ -60,26 +62,6 @@ pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend
 
     // Explicit backend selection.
     match params.backend {
-        "nspanel" => {
-            #[cfg(target_os = "macos")]
-            if let Some(app) = params.app_handle.as_ref() {
-                match nspanel::NsPanelOverlay::new(
-                    app.clone(),
-                    params.position,
-                    params.margin,
-                ) {
-                    Ok(o) => return Box::new(o),
-                    Err(e) => tracing::warn!("NSPanel overlay failed: {}; falling back", e),
-                }
-            } else {
-                tracing::warn!("NSPanel requires app_handle; falling back to auto");
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = &params.app_handle;
-                tracing::warn!("NSPanel is macOS-only; falling back to auto");
-            }
-        }
         "webview" => {
             if let Some(o) = try_webview() {
                 return o;
@@ -99,23 +81,10 @@ pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend
     }
 
     // ----------------------------------------------------------------
-    // Auto chain:
-    //   1. NSPanel webview on macOS (preferred for borderless pill)
-    //   2. Tauri Webview overlay everywhere else
-    //   3. NoopOverlay if no AppHandle available
+    // Auto chain (all platforms):
+    //   1. Tauri Webview overlay (the single rendering path)
+    //   2. NoopOverlay if no AppHandle available
     // ----------------------------------------------------------------
-    #[cfg(target_os = "macos")]
-    if let Some(app) = params.app_handle.as_ref() {
-        match nspanel::NsPanelOverlay::new(
-            app.clone(),
-            params.position,
-            params.margin,
-        ) {
-            Ok(o) => return Box::new(o),
-            Err(e) => tracing::warn!("auto: NSPanel failed ({e}); trying webview"),
-        }
-    }
-
     if let Some(o) = try_webview() {
         return o;
     }

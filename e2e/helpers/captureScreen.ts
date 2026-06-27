@@ -3,7 +3,7 @@
  * pixels. If a capture returns blank, that is a bug in the app, not in this
  * code. We pin the technique to fullscreen `screencapture -x` then crop with
  * `sips`, because that is what the user's `clipshot` toolchain already proves
- * works for our NSPanel.
+ * works for our overlay pill window.
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";

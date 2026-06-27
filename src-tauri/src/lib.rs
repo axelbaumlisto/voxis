@@ -204,9 +204,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init());
 
     #[cfg(target_os = "macos")]
-    let builder = builder
-        .plugin(tauri_plugin_macos_permissions::init())
-        .plugin(tauri_nspanel::init());
+    let builder = builder.plugin(tauri_plugin_macos_permissions::init());
 
     builder
         .setup(setup::configure_app)

@@ -14,7 +14,7 @@ pub trait OverlayBackend: Send + Sync {
     fn set_theme(&self, theme_name: &str);
     /// Resize the OS window to `(width, height)` if `Some`, or reset to the
     /// default pill size (PILL_WIDTH × PILL_HEIGHT) if `None`.
-    /// No-op on backends that don't support dynamic resizing (NSPanel, Noop).
+    /// No-op on backends that don't support dynamic resizing (Noop).
     fn resize_for_theme(&self, _size: Option<(u32, u32)>) {}
     fn shutdown(&mut self);
     fn is_running(&self) -> bool;

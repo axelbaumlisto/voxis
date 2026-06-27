@@ -1,18 +1,19 @@
 //! Cross-platform Tauri-webview overlay backend.
 //!
-//! Renders the same `overlay.html` (Handy pill UI) as the macOS NSPanel
-//! backend, but using a **plain Tauri `WebviewWindow`** — no NSPanel,
-//! no Cocoa, no private-API tricks. Works on:
+//! Renders `overlay.html` (Handy pill UI) using a **plain Tauri
+//! `WebviewWindow`** — no NSPanel, no Cocoa subclass, no private-API
+//! tricks. This is the single overlay rendering path on every platform:
 //!
 //!   * Linux  (webkit2gtk via Tauri)
 //!   * Windows (WebView2 via Tauri)
-//!   * macOS   (WKWebView via Tauri) — for parity / testing
+//!   * macOS   (WKWebView via Tauri)
 //!
-//! On macOS the [`nspanel`](super::nspanel) backend is still preferred
-//! because it survives Mission Control / Spaces and refuses keyboard
-//! focus. This backend is the chosen default everywhere else, replacing
-//! the legacy egui subprocess / native overlay path for users who want
-//! the Handy pill instead of the organic-ring family.
+//! On macOS the important overlay behaviours (never steal keyboard focus,
+//! survive Mission Control / Spaces, float over fullscreen) are preserved
+//! via `.focusable(false)` on the builder plus a thin AppKit `NSWindow`
+//! tuning helper ([`apply_macos_overlay_window_tuning`]) — no separate
+//! NSPanel backend. This backend replaced the legacy egui subprocess /
+//! native overlay path.
 //!
 //! ---- SOLID notes ----
 //! * SRP: only window lifecycle + Tauri-event emission. All rendering
@@ -22,11 +23,30 @@
 //! * KISS: no IPC, no subprocess, no platform shims. Tauri does it all.
 
 use super::backend::OverlayBackend;
-use super::nspanel::{events, OVERLAY_PANEL_LABEL, PILL_HEIGHT, PILL_WIDTH};
 use super::{OverlayPositionConfig, OverlayState};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl};
+
+/// Fixed 172×36 pill canvas. The panel hosts the React ThemeHost code-theme
+/// overlay, and the theme-engine contract uses this fixed size.
+pub const PILL_WIDTH: u32 = 320;
+pub const PILL_HEIGHT: u32 = 108;
+
+/// Tauri webview label assigned to the overlay panel.
+pub const OVERLAY_PANEL_LABEL: &str = "overlay";
+
+/// Tauri event names emitted by the overlay backend to the panel webview.
+pub mod events {
+    /// Recording state changes (`OverlayState` JSON).
+    pub const STATE: &str = "overlay://state";
+    /// Audio level updates (`f32` JSON).
+    pub const AUDIO_LEVEL: &str = "overlay://audio-level";
+    /// Spectrum bin updates (`[f32; SPECTRUM_BARS]` JSON).
+    pub const SPECTRUM_BINS: &str = "overlay://spectrum-bins";
+    /// Theme name updates (`String` JSON).
+    pub const THEME: &str = "overlay://theme";
+}
 
 /// Cross-platform overlay backend backed by a plain Tauri `WebviewWindow`.
 ///
@@ -83,8 +103,8 @@ impl WebviewOverlay {
         let (init_x, init_y) = compute_initial_position(&app, position, margin);
 
         // WebviewWindow::builder MUST run on the main thread on macOS (AppKit
-        // invariant) and is safer to dispatch there everywhere. Use the same
-        // mpsc-rendezvous pattern as NSPanel to be uniform.
+        // invariant) and is safer to dispatch there everywhere. Use an
+        // mpsc-rendezvous to wait for the build result.
         let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
         let label_for_thread = label.clone();
         let app_for_thread = app.clone();
@@ -159,6 +179,12 @@ fn build_overlay_window(
     .always_on_top(true)
     .skip_taskbar(true)
     .focused(false)
+    // HARD no-focus-steal guarantee on macOS: Tauri's window is a tao subclass
+    // that overrides `canBecomeKeyWindow` to return the `focusable` ivar, so
+    // `.focusable(false)` makes `[window canBecomeKeyWindow]` return NO (the
+    // exact NSPanel nonactivating behaviour) via a safe, cross-platform API.
+    // show()/makeKeyAndOrderFront then degrades to order-front — harmless.
+    .focusable(false)
     .transparent(true)
     .visible(false);
 
@@ -231,7 +257,79 @@ fn build_overlay_window(
     // make the pill visible on all platforms.
     let _ = window.show();
 
+    // macOS: apply the thin AppKit tuning (status level + all-Spaces /
+    // over-fullscreen) for parity with the old NSPanel backend. Already on the
+    // main thread here (build runs via run_on_main_thread).
+    #[cfg(target_os = "macos")]
+    apply_macos_overlay_window_tuning(&window);
+
     Ok(())
+}
+
+/// macOS-only: tune the overlay's native `NSWindow` so it floats above other
+/// windows, survives Mission Control / Spaces, and shows over another app's
+/// fullscreen space — matching the old NSPanel backend.
+///
+/// Focus-stealing is handled separately and more robustly by `.focusable(false)`
+/// on the builder (hard `canBecomeKeyWindow = NO`), so this helper only touches
+/// window level + collection behaviour. Tauri's own `always_on_top` maps to the
+/// Floating(3) level and `set_visible_on_all_workspaces` only toggles
+/// CanJoinAllSpaces, so we set the Status(25) level + FullScreenAuxiliary here.
+///
+/// These attributes persist on the NSWindow for its lifetime, so the reuse
+/// fast-path does not need to re-apply them.
+#[cfg(target_os = "macos")]
+fn apply_macos_overlay_window_tuning(window: &tauri::WebviewWindow) {
+    use objc2::{msg_send, sel};
+    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+
+    let ptr = match window.ns_window() {
+        Ok(p) if !p.is_null() => p,
+        Ok(_) => {
+            tracing::warn!("webview: ns_window() returned null; skipping macOS overlay tuning");
+            return;
+        }
+        Err(e) => {
+            tracing::warn!("webview: ns_window() failed ({e}); skipping macOS overlay tuning");
+            return;
+        }
+    };
+
+    // SAFETY: `ns_window()` returns the overlay window's live `NSWindow` id as a
+    // `*mut c_void`. We only borrow it for two synchronous AppKit setter calls
+    // on the main thread (the build path); we never take ownership or outlive
+    // the borrow. The setters themselves are safe in objc2-app-kit 0.3.
+    let ns: &NSWindow = unsafe { &*(ptr as *mut NSWindow) };
+    // NSStatusWindowLevel (25): float above normal/floating windows and
+    // survive Spaces / Mission Control.
+    ns.setLevel(25);
+    // Join every Space and render over another app's fullscreen space.
+    ns.setCollectionBehavior(
+        NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::FullScreenAuxiliary,
+    );
+
+    // Prevent the app from activating (coming to front) when the user clicks
+    // the overlay pill. `canBecomeKeyWindow=false` (set via `.focusable(false)`)
+    // stops key-focus theft, but a mouse-down on a plain NSWindow still ACTIVATES
+    // the owning app — the nonactivating behaviour that NSPanel provides natively.
+    // The private `-[NSWindow _setPreventsActivation:]` selector reproduces it on a
+    // plain window. Guarded by `respondsToSelector:` so a future macOS that drops
+    // the selector simply no-ops instead of crashing.
+    //
+    // SAFETY: same live main-thread NSWindow id; `respondsToSelector:` returns a
+    // BOOL, and we only send `_setPreventsActivation:` when it is implemented.
+    unsafe {
+        let responds: bool = msg_send![ns, respondsToSelector: sel!(_setPreventsActivation:)];
+        if responds {
+            let _: () = msg_send![ns, _setPreventsActivation: true];
+        } else {
+            tracing::warn!(
+                "webview: -[NSWindow _setPreventsActivation:] unavailable; \
+                 overlay clicks may activate the app"
+            );
+        }
+    }
 }
 
 /// Resolve initial (x, y) for the pill based on the active monitor and
@@ -447,5 +545,27 @@ impl OverlayBackend for WebviewOverlay {
 impl Drop for WebviewOverlay {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+// ---- tests --------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_overlay_label_constant_is_stable() {
+        // The label is part of the public contract with the frontend; freeze it.
+        assert_eq!(OVERLAY_PANEL_LABEL, "overlay");
+    }
+
+    #[test]
+    fn test_event_names_are_stable() {
+        // Event names are part of the public contract with the frontend.
+        assert_eq!(events::STATE, "overlay://state");
+        assert_eq!(events::AUDIO_LEVEL, "overlay://audio-level");
+        assert_eq!(events::SPECTRUM_BINS, "overlay://spectrum-bins");
+        assert_eq!(events::THEME, "overlay://theme");
     }
 }

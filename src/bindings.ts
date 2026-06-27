@@ -567,7 +567,7 @@ async getThemeManifest(themeId: string) : Promise<ThemeManifest | null> {
 /**
  * Diagnostic command — lets the overlay webview log a marker to the Rust
  * tracing stream. Used during E2E development to verify that the React
- * app inside the NSPanel actually runs and receives state events.
+ * app inside the overlay webview actually runs and receives state events.
  */
 async debugLogOverlay(message: string) : Promise<void> {
     await TAURI_INVOKE("debug_log_overlay", { message });
@@ -999,8 +999,9 @@ audio_boost?: number;
  */
 theme?: string; 
 /**
- * Overlay backend: `"auto"` (default, picks best), `"native"`, `"subprocess"`,
- * `"nspanel"` (macOS only, opt-in), or `"none"`.
+ * Overlay backend: `"auto"` (default, picks best), `"webview"`, or `"none"`.
+ * Legacy values (`"native"`, `"subprocess"`, `"nspanel"`) fall back to the
+ * webview overlay for back-compat.
  */
 backend?: string }
 /**
