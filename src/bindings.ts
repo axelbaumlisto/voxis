@@ -1023,8 +1023,15 @@ export type PendingSuggestion = { id: number; source: string; replacement: strin
 export type PermissionInfo = { name: string; status: string; description: string }
 /**
  * Result of reprocessing history through LLM.
+ * 
+ * `suggestions_found` is the honest total of actionable outcomes
+ * (`recorded + promoted`); the three buckets break that down so the UI can
+ * explain what happened (new pending suggestions vs. auto-added to dictionary
+ * vs. skipped duplicates/rejections). The bucket fields are `#[serde(default)]`
+ * so older payloads carrying only `processed`/`suggestions_found` still
+ * deserialize.
  */
-export type ReprocessResult = { processed: number; suggestions_found: number }
+export type ReprocessResult = { processed: number; suggestions_found: number; recorded?: number; promoted?: number; skipped?: number }
 /**
  * What the orchestrator should do when this binding fires.
  * 
