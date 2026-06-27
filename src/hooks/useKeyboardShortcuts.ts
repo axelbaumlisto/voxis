@@ -17,7 +17,7 @@ export function useKeyboardShortcuts(lastTranscription: string | null): void {
     () => ({
       navigate,
       lastTranscription,
-      closeWindow: () => getCurrentWindow().close(),
+      hideWindow: () => getCurrentWindow().hide(),
     }),
     [navigate, lastTranscription]
   );

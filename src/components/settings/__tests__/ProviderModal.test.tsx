@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import ProviderModal from "../ProviderModal";
 import type { LlmProvider } from "../../../lib/commands";
+import { handleShortcut, type ShortcutContext } from "../../../lib/keyboardShortcuts";
 
 describe("ProviderModal", () => {
   const mockOnClose = vi.fn();
@@ -96,6 +97,42 @@ describe("ProviderModal", () => {
       expect(globalHandler).not.toHaveBeenCalled();
 
       window.removeEventListener("keydown", globalHandler);
+    });
+
+    it("Esc with the modal open closes the modal and does NOT hide the window", () => {
+      // Wire the REAL global Esc shortcut (P7: Esc hides the window) to a window
+      // keydown listener, exactly like useKeyboardShortcuts does.
+      const hideWindow = vi.fn();
+      const context: ShortcutContext = {
+        navigate: vi.fn(),
+        lastTranscription: null,
+        hideWindow,
+      };
+      const globalKeydown = (e: KeyboardEvent) => handleShortcut(e, context);
+      window.addEventListener("keydown", globalKeydown);
+
+      render(
+        <ProviderModal
+          mode="add"
+          onClose={mockOnClose}
+          onSave={mockOnSave}
+          existingIds={existingIds}
+        />
+      );
+
+      const dialog = screen.getByRole("dialog");
+      const event = new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+      });
+      dialog.dispatchEvent(event);
+
+      // Modal closes...
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
+      // ...but the window is NOT hidden (stopPropagation guard works).
+      expect(hideWindow).not.toHaveBeenCalled();
+
+      window.removeEventListener("keydown", globalKeydown);
     });
   });
 
