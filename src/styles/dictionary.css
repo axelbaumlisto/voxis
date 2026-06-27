@@ -183,6 +183,22 @@
   border-bottom: 1px solid var(--border);
 }
 
+.pending-status {
+  font-size: var(--font-sm);
+  color: var(--success);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.pending-hint {
+  font-size: var(--font-xs);
+  color: var(--fg-muted);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+
 .pending-list {
   max-height: 300px;
   overflow-y: auto;

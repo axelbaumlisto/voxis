@@ -60,7 +60,7 @@ test.describe("Permissions", () => {
                 },
                 dictionary: {
                   path: "",
-                  learning_mode: "off",
+                  learning_mode: "disabled",
                   learning_threshold: 3,
                 },
               };
@@ -254,7 +254,7 @@ test.describe("Input Monitoring Permission", () => {
                 },
                 dictionary: {
                   path: "",
-                  learning_mode: "off",
+                  learning_mode: "disabled",
                   learning_threshold: 3,
                 },
               };

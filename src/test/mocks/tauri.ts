@@ -46,7 +46,7 @@ export const mockConfig: AppConfig = {
   },
   dictionary: {
     path: "",
-    learning_mode: "off",
+    learning_mode: "disabled",
     learning_threshold: 3,
   },
 };
@@ -164,7 +164,7 @@ export function setupDefaultMocks() {
       case "reject_suggestion_by_source":
         return undefined;
       case "reprocess_history_for_suggestions":
-        return { processed: 0, suggestions_found: 0 };
+        return { processed: 0, suggestions_found: 0, recorded: 0, promoted: 0, skipped: 0 };
       // Debug commands
       case "get_debug_entries":
         return [];

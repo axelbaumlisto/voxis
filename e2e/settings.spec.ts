@@ -52,7 +52,7 @@ test.describe("Settings Page", () => {
                 },
                 dictionary: {
                   path: "",
-                  learning_mode: "off",
+                  learning_mode: "disabled",
                   learning_threshold: 3,
                 },
               };

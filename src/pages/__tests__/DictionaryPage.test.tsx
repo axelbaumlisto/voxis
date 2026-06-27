@@ -244,6 +244,52 @@ describe("DictionaryPage", () => {
     });
   });
 
+  it("shows the always-on hint that approved suggestions go to the dictionary", async () => {
+    render(<DictionaryPage />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText("Approved suggestions are added to the dictionary below.")
+    ).toBeInTheDocument();
+  });
+
+  it("shows a status message after generating from history", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_dictionary") return mockDictionaryEntries;
+      if (cmd === "get_config") return mockConfig;
+      if (cmd === "get_pending_suggestions") return [];
+      if (cmd === "reprocess_history_for_suggestions") {
+        return {
+          processed: 12,
+          suggestions_found: 4,
+          recorded: 4,
+          promoted: 1,
+          skipped: 7,
+        };
+      }
+      return undefined;
+    });
+
+    render(<DictionaryPage />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate from History" }));
+
+    await waitFor(() => {
+      const status = screen.getByTestId("pending-status");
+      expect(status).toHaveTextContent(/Scanned 12 entries/);
+      expect(status).toHaveTextContent(/4 new suggestions/);
+      expect(status).toHaveTextContent(/1 added to dictionary/);
+      expect(status).toHaveTextContent(/7 skipped/);
+    });
+  });
+
   it("cancels edit mode when cancel is clicked", async () => {
     render(<DictionaryPage />);
 

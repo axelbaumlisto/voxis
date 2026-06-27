@@ -82,7 +82,7 @@ test.describe("Dictionary Page", () => {
                   vad: { enabled: false, threshold: 0.5 },
                   overlay: { enabled: true, position: "bottom_right", size: "medium", margin: 30 },
                   llm: { enabled: false, provider: "groq", api_url: "", api_key: "", model: "", prompt: "" },
-                  dictionary: { path: "", learning_mode: "off", learning_threshold: 3 },
+                  dictionary: { path: "", learning_mode: "disabled", learning_threshold: 3 },
                 };
               // Pending suggestions - used by DictionaryPage
               case "get_pending_suggestions":
@@ -267,7 +267,7 @@ test.describe("Dictionary Page - Empty State", () => {
                 vad: { enabled: false, threshold: 0.5 },
                 overlay: { enabled: true, position: "bottom_right", size: "medium", margin: 30 },
                 llm: { enabled: false, provider: "groq", api_url: "", api_key: "", model: "", prompt: "" },
-                dictionary: { path: "", learning_mode: "off", learning_threshold: 3 },
+                dictionary: { path: "", learning_mode: "disabled", learning_threshold: 3 },
               };
             case "get_pending_suggestions":
               return [];

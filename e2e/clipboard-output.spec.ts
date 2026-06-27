@@ -52,7 +52,7 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
     },
     dictionary: {
       path: "",
-      learning_mode: "off",
+      learning_mode: "disabled",
       learning_threshold: 3,
     },
     ...overrides,

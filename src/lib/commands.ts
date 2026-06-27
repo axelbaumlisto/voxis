@@ -231,6 +231,9 @@ export async function rejectSuggestionBySource(
 export interface ReprocessResult {
   processed: number;
   suggestions_found: number;
+  recorded: number;
+  promoted: number;
+  skipped: number;
 }
 
 export async function reprocessHistoryForSuggestions(
