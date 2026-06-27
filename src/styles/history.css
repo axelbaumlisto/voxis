@@ -135,10 +135,6 @@
   margin: var(--spacing-xs) 0;
 }
 
-.history-empty-hint {
-  font-size: 12px;
-}
-
 /* Toast notification */
 .copied-toast {
   position: fixed;

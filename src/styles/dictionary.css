@@ -144,10 +144,6 @@
   margin: var(--spacing-xs) 0;
 }
 
-.dictionary-empty-hint {
-  font-size: 12px;
-}
-
 /* Pending Suggestions Section */
 .pending-section {
   background: var(--bg-surface);

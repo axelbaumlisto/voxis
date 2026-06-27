@@ -11,7 +11,7 @@ function HistoryList({ entries, onCopy }: HistoryListProps) {
     return (
       <div className="history-empty">
         <p>No transcriptions yet.</p>
-        <p className="history-empty-hint">
+        <p className="empty-hint">
           Start recording to see your transcriptions here.
         </p>
       </div>
