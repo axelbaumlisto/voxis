@@ -6,7 +6,7 @@
  *   3. Recording overlay renders bars + cancel — light pixel count grows
  *      significantly versus idle.
  *
- * macOS-only — NSPanel is AppKit specific.
+ * macOS-only — overlay window tuning is AppKit specific.
  */
 import { test, expect } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
@@ -22,15 +22,15 @@ import { ensureQuartzAvailable, pressAltGr } from "./helpers/keyboard";
 import { readFileSync } from "node:fs";
 
 // eslint-disable-next-line playwright/no-skipped-test
-test.skip(process.platform !== "darwin", "NSPanel is macOS-only");
+test.skip(process.platform !== "darwin", "Overlay tuning is macOS-only");
 
-const SHOTS_DIR = "test-results/nspanel-pill";
+const SHOTS_DIR = "test-results/overlay-pill";
 
 // Mark as serial AND request 2 retries: AltGr injection via Quartz can be
 // swallowed by macOS when other tests are also using accessibility APIs.
 test.describe.configure({ mode: "serial", retries: 2 });
 
-test.describe("NSPanel overlay (ThemeHost) -- pixel-level axioms", () => {
+test.describe("Overlay window (ThemeHost) -- pixel-level axioms", () => {
   let pid: string;
 
   test.beforeAll(async () => {
@@ -50,7 +50,7 @@ test.describe("NSPanel overlay (ThemeHost) -- pixel-level axioms", () => {
 
   test("pill window is present and positioned", async () => {
     // The overlay is intentionally transparent in idle (only the small
-    // icon is rendered by the theme module). NSPanel + WebKit
+    // icon is rendered by the theme module). Overlay window + WebKit
     // compositing on macOS doesn't always push transparent webview
     // pixels into the global screen framebuffer in a way `screencapture`
     // can sample, so we only assert the window exists at the right

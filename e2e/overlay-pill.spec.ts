@@ -1,17 +1,17 @@
 /**
- * Live E2E for the NSPanel overlay (ThemeHost), macOS only.
+ * Live E2E for the overlay window (ThemeHost), macOS only.
  *
  * This test triggers AltGr via CGEventPost (Python+Quartz \u2014 needs Accessibility
  * permission on Terminal/runner) and asserts the orchestrator log shows the
- * full recording flow, plus that the NSPanel window exists at the configured
+ * full recording flow, plus that the overlay window exists at the configured
  * coordinates.
  *
- * What we DON'T test here: pixel-level capture of the NSPanel's webview
- * content. macOS `screencapture` of transparent NSPanels (especially with
- * `nonactivating_panel` style + tauri-nspanel) returns a fully-transparent
- * PNG even when the panel is on-screen and visible to the user. Use the
+ * What we DON'T test here: pixel-level capture of the overlay's webview
+ * content. macOS `screencapture` of transparent borderless windows returns a
+ * fully-transparent PNG even when the window is on-screen and visible to the
+ * user. Use the
  * Playwright `webview content` describe-block to verify React rendering;
- * the OS-level pixels of the live NSPanel are out of scope.
+ * the OS-level pixels of the live overlay are out of scope.
  */
 import { test, expect } from "@playwright/test";
 import { execFile } from "node:child_process";
@@ -45,11 +45,11 @@ test.describe("Overlay (ThemeHost) -- webview content (dev URL)", () => {
   });
 });
 
-test.describe("NSPanel overlay (ThemeHost) -- live OS integration", () => {
+test.describe("Overlay window (ThemeHost) -- live OS integration", () => {
   // eslint-disable-next-line playwright/no-skipped-test
   test.skip(
     process.platform !== "darwin",
-    "NSPanel is macOS-only (AppKit + tauri-nspanel)",
+    "Overlay window tuning is macOS-only (AppKit)",
   );
 
   async function getVoicePid(): Promise<string | null> {
@@ -122,7 +122,7 @@ test.describe("NSPanel overlay (ThemeHost) -- live OS integration", () => {
     return path && existsSync(path) ? path : null;
   }
 
-  test("voice process is running with an NSPanel at PILL_WIDTH x PILL_HEIGHT", async () => {
+  test("voice process is running with an overlay window at PILL_WIDTH x PILL_HEIGHT", async () => {
     const pid = await getVoicePid();
     expect(
       pid,
@@ -131,13 +131,13 @@ test.describe("NSPanel overlay (ThemeHost) -- live OS integration", () => {
     const win = await findPillWindow(pid!);
     expect(
       win,
-      "expected 'Recording Overlay' NSPanel for the voice process",
+      "expected 'Recording Overlay' window for the voice process",
     ).not.toBeNull();
     expect([172, 344]).toContain(win!.width);
     expect([36, 72]).toContain(win!.height);
   });
 
-  test("NSPanel position is on-screen (non-zero, within a real monitor)", async () => {
+  test("overlay position is on-screen (non-zero, within a real monitor)", async () => {
     const pid = await getVoicePid();
     expect(pid).not.toBeNull();
     const win = await findPillWindow(pid!);
