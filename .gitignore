@@ -43,3 +43,9 @@ scripts/*.py
 
 # Standalone embeddable visualizer package (own git repo at github.com/axelbaumlisto/metaballs-viz)
 /metaballs-viz/
+
+# Local-only artifacts (media exports, capture specs, screenshots, scratch notes)
+docs/media/
+e2e/_bz-didinium-capture.spec.ts
+e2e/screenshots/
+progress.md
