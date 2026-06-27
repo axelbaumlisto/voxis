@@ -33,20 +33,20 @@ interface TauriOsPluginInternals {
 }
 
 export const LANGUAGE_OPTIONS: SelectOption[] = [
-  { label: "Auto-detect", value: "auto" },
-  { label: "Russian", value: "ru" },
-  { label: "English", value: "en" },
-  { label: "German", value: "de" },
-  { label: "French", value: "fr" },
-  { label: "Spanish", value: "es" },
-  { label: "Chinese", value: "zh" },
-  { label: "Japanese", value: "ja" },
-  { label: "Korean", value: "ko" },
-  { label: "Portuguese", value: "pt" },
-  { label: "Italian", value: "it" },
-  { label: "Dutch", value: "nl" },
-  { label: "Polish", value: "pl" },
-  { label: "Ukrainian", value: "uk" },
+  { label: "Auto-detect", labelKey: "settings.options.languageAuto", value: "auto" },
+  { label: "Russian", labelKey: "settings.options.languageRu", value: "ru" },
+  { label: "English", labelKey: "settings.options.languageEn", value: "en" },
+  { label: "German", labelKey: "settings.options.languageDe", value: "de" },
+  { label: "French", labelKey: "settings.options.languageFr", value: "fr" },
+  { label: "Spanish", labelKey: "settings.options.languageEs", value: "es" },
+  { label: "Chinese", labelKey: "settings.options.languageZh", value: "zh" },
+  { label: "Japanese", labelKey: "settings.options.languageJa", value: "ja" },
+  { label: "Korean", labelKey: "settings.options.languageKo", value: "ko" },
+  { label: "Portuguese", labelKey: "settings.options.languagePt", value: "pt" },
+  { label: "Italian", labelKey: "settings.options.languageIt", value: "it" },
+  { label: "Dutch", labelKey: "settings.options.languageNl", value: "nl" },
+  { label: "Polish", labelKey: "settings.options.languagePl", value: "pl" },
+  { label: "Ukrainian", labelKey: "settings.options.languageUk", value: "uk" },
 ];
 
 // =============================================================================
@@ -66,21 +66,21 @@ export const BACKEND_OPTIONS: SelectOption[] = [
 // =============================================================================
 
 export const OVERLAY_POSITION_OPTIONS: SelectOption[] = [
-  { label: "Bottom Left", value: "bottom_left" },
-  { label: "Bottom Right", value: "bottom_right" },
-  { label: "Bottom Center", value: "bottom_center" },
-  { label: "Top Left", value: "top_left" },
-  { label: "Top Right", value: "top_right" },
-  { label: "Top Center", value: "top_center" },
-  { label: "Center", value: "center" },
-  { label: "Left Center", value: "left_center" },
-  { label: "Right Center", value: "right_center" },
+  { label: "Bottom Left", labelKey: "settings.options.posBottomLeft", value: "bottom_left" },
+  { label: "Bottom Right", labelKey: "settings.options.posBottomRight", value: "bottom_right" },
+  { label: "Bottom Center", labelKey: "settings.options.posBottomCenter", value: "bottom_center" },
+  { label: "Top Left", labelKey: "settings.options.posTopLeft", value: "top_left" },
+  { label: "Top Right", labelKey: "settings.options.posTopRight", value: "top_right" },
+  { label: "Top Center", labelKey: "settings.options.posTopCenter", value: "top_center" },
+  { label: "Center", labelKey: "settings.options.posCenter", value: "center" },
+  { label: "Left Center", labelKey: "settings.options.posLeftCenter", value: "left_center" },
+  { label: "Right Center", labelKey: "settings.options.posRightCenter", value: "right_center" },
 ];
 
 export const OVERLAY_SIZE_OPTIONS: SelectOption[] = [
-  { label: "Small", value: "small" },
-  { label: "Medium", value: "medium" },
-  { label: "Large", value: "large" },
+  { label: "Small", labelKey: "settings.options.sizeSmall", value: "small" },
+  { label: "Medium", labelKey: "settings.options.sizeMedium", value: "medium" },
+  { label: "Large", labelKey: "settings.options.sizeLarge", value: "large" },
 ];
 
 // =============================================================================
@@ -103,17 +103,18 @@ export const OVERLAY_SIZE_OPTIONS: SelectOption[] = [
 // =============================================================================
 
 export const VAD_BACKEND_OPTIONS: SelectOption[] = [
-  { label: "Off (no filtering)", value: "none" },
-  { label: "Threshold (simple RMS)", value: "threshold" },
-  { label: "Silero (ML model)", value: "silero" },
+  { label: "Off (no filtering)", labelKey: "settings.options.vadOff", value: "none" },
+  { label: "Threshold (simple RMS)", labelKey: "settings.options.vadThreshold", value: "threshold" },
+  // "Silero" is a proper noun (ML model name); only the descriptive suffix is translated.
+  { label: "Silero (ML model)", labelKey: "settings.options.vadSilero", value: "silero" },
 ];
 
 export const AUDIO_BOOST_OPTIONS: SelectOption[] = [
-  { label: "Low (400)", value: "400" },
-  { label: "Medium (800)", value: "800" },
-  { label: "High (1200)", value: "1200" },
-  { label: "Very High (1600)", value: "1600" },
-  { label: "Maximum (2000)", value: "2000" },
+  { label: "Low (400)", labelKey: "settings.options.boostLow", value: "400" },
+  { label: "Medium (800)", labelKey: "settings.options.boostMedium", value: "800" },
+  { label: "High (1200)", labelKey: "settings.options.boostHigh", value: "1200" },
+  { label: "Very High (1600)", labelKey: "settings.options.boostVeryHigh", value: "1600" },
+  { label: "Maximum (2000)", labelKey: "settings.options.boostMaximum", value: "2000" },
 ];
 
 export const OVERLAY_THEME_OPTIONS: SelectOption[] = [

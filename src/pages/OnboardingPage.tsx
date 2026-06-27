@@ -14,17 +14,27 @@
  */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Trans, useTranslation } from "react-i18next";
 import { commands } from "../bindings";
 import { unwrapResult } from "../lib/commandResult";
 
 type Step = 0 | 1 | 2;
 
+// Step label keys — the `{i+1}.` number is interpolated separately, so only the
+// label text is translated. Reused for the per-step heading ("Step N · <label>").
+const STEP_LABEL_KEYS = [
+  "onboarding.stepMicrophone",
+  "onboarding.stepHotkey",
+  "onboarding.stepTryIt",
+] as const;
+
 function StepNav({ step }: { step: Step }) {
+  const { t } = useTranslation();
   return (
     <ol style={{ display: "flex", gap: 16, listStyle: "none", padding: 0 }}>
-      {(["Microphone", "Hotkey", "Try it"] as const).map((label, i) => (
+      {STEP_LABEL_KEYS.map((labelKey, i) => (
         <li
-          key={label}
+          key={labelKey}
           data-testid={`onboarding-step-indicator-${i}`}
           style={{
             opacity: i === step ? 1 : 0.5,
@@ -33,7 +43,7 @@ function StepNav({ step }: { step: Step }) {
             paddingBottom: 4,
           }}
         >
-          {i + 1}. {label}
+          {i + 1}. {t(labelKey)}
         </li>
       ))}
     </ol>
@@ -41,6 +51,7 @@ function StepNav({ step }: { step: Step }) {
 }
 
 export default function OnboardingPage() {
+  const { t } = useTranslation();
   const [step, setStep] = useState<Step>(0);
   const [micStatus, setMicStatus] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -51,11 +62,12 @@ export default function OnboardingPage() {
       // If the OS denies mic permission, this throws.
       // The full live waveform test is a stretch goal.
       await commands.listAudioDevices();
-      setMicStatus("✅ Microphone access granted");
+      setMicStatus(t("onboarding.micGranted"));
     } catch (e) {
       setMicStatus(
-        `⚠ Mic access failed: ${e instanceof Error ? e.message : String(e)}. ` +
-          `Open System Settings → Privacy → Microphone and enable this app.`,
+        t("onboarding.micFailed", {
+          error: e instanceof Error ? e.message : String(e),
+        }),
       );
     }
   };
@@ -84,22 +96,24 @@ export default function OnboardingPage() {
         gap: 24,
       }}
     >
-      <h1>Welcome to SoupaWhisper</h1>
+      <h1>{t("onboarding.welcome")}</h1>
       <StepNav step={step} />
 
       {step === 0 && (
         <section data-testid="onboarding-step-mic">
-          <h2>Step 1 · Microphone</h2>
-          <p>
-            We need permission to read your microphone. Click below and your
-            OS will prompt you if it hasn't already.
-          </p>
+          <h2>
+            {t("onboarding.stepHeading", {
+              number: 1,
+              label: t("onboarding.stepMicrophone"),
+            })}
+          </h2>
+          <p>{t("onboarding.micBody")}</p>
           <button
             type="button"
             data-testid="onboarding-test-mic"
             onClick={() => void onTestMic()}
           >
-            Test microphone
+            {t("onboarding.testMicrophone")}
           </button>
           {micStatus && (
             <p data-testid="onboarding-mic-status" style={{ marginTop: 12 }}>
@@ -112,7 +126,7 @@ export default function OnboardingPage() {
               data-testid="onboarding-next-0"
               onClick={() => setStep(1)}
             >
-              Next →
+              {t("onboarding.next")}
             </button>
           </div>
         </section>
@@ -120,29 +134,30 @@ export default function OnboardingPage() {
 
       {step === 1 && (
         <section data-testid="onboarding-step-hotkey">
-          <h2>Step 2 · Hotkey</h2>
+          <h2>
+            {t("onboarding.stepHeading", {
+              number: 2,
+              label: t("onboarding.stepHotkey"),
+            })}
+          </h2>
           <p>
-            By default you hold <code>AltGr</code> (right Alt) to record. The
-            pill overlay shows recording state. Release to transcribe and paste.
+            <Trans i18nKey="onboarding.hotkeyBody" components={{ code: <code /> }} />
           </p>
-          <p>
-            You can change the key or add per-prompt shortcuts later in
-            Settings → Recording.
-          </p>
+          <p>{t("onboarding.hotkeyBodySettings")}</p>
           <div style={{ display: "flex", gap: 8, marginTop: 24 }}>
             <button
               type="button"
               data-testid="onboarding-back-1"
               onClick={() => setStep(0)}
             >
-              ← Back
+              {t("onboarding.back")}
             </button>
             <button
               type="button"
               data-testid="onboarding-next-1"
               onClick={() => setStep(2)}
             >
-              Next →
+              {t("onboarding.next")}
             </button>
           </div>
         </section>
@@ -150,26 +165,30 @@ export default function OnboardingPage() {
 
       {step === 2 && (
         <section data-testid="onboarding-step-try">
-          <h2>Step 3 · Try it</h2>
+          <h2>
+            {t("onboarding.stepHeading", {
+              number: 3,
+              label: t("onboarding.stepTryIt"),
+            })}
+          </h2>
           <p>
-            Hold <code>AltGr</code> in any text field and say something. The
-            transcription will be pasted automatically when you release.
+            <Trans i18nKey="onboarding.tryBody" components={{ code: <code /> }} />
           </p>
-          <p>You'll see the pill overlay glow while recording.</p>
+          <p>{t("onboarding.tryBodyGlow")}</p>
           <div style={{ display: "flex", gap: 8, marginTop: 24 }}>
             <button
               type="button"
               data-testid="onboarding-back-2"
               onClick={() => setStep(1)}
             >
-              ← Back
+              {t("onboarding.back")}
             </button>
             <button
               type="button"
               data-testid="onboarding-done"
               onClick={() => void onDone()}
             >
-              Done — take me to the app
+              {t("onboarding.done")}
             </button>
           </div>
         </section>
