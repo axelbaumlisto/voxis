@@ -206,12 +206,28 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_plugin_macos_permissions::init());
 
-    builder
+    let app = builder
         .setup(setup::configure_app)
         .on_window_event(setup::handle_window_event)
         .invoke_handler(setup::command_handler())
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|_app_handle, _event| {
+        // Esc hides the main window (removes it from the Dock/taskbar). Without a
+        // Reopen handler, clicking the Dock icon afterwards does nothing — the
+        // window only came back via the tray "Show". On macOS a Dock-icon click
+        // on a hidden app sends RunEvent::Reopen; re-show + focus the main window
+        // (same logic as the tray Show menu item) so the Dock icon works too.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = _event {
+            use tauri::Manager;
+            if let Some(window) = _app_handle.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+    });
 }
 
 #[cfg(test)]
