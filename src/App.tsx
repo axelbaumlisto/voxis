@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import Layout from "./components/Layout";
-import HomePage from "./pages/HomePage";
 import SettingsPage from "./pages/SettingsPage";
 import HistoryPage from "./pages/HistoryPage";
 import DictionaryPage from "./pages/DictionaryPage";
@@ -48,7 +47,9 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
-        <Route index element={<HomePage />} />
+        {/* History is the home page. `/history` is kept as a mandatory
+            alias because several e2e specs navigate to it directly. */}
+        <Route index element={<HistoryPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="history" element={<HistoryPage />} />
         <Route path="dictionary" element={<DictionaryPage />} />

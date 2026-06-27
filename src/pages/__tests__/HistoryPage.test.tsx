@@ -154,6 +154,7 @@ describe("HistoryPage", () => {
   it("disables clear button when history is empty", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "get_history") return [];
+      if (cmd === "get_failed_transcriptions") return [];
       return undefined;
     });
 
@@ -170,6 +171,7 @@ describe("HistoryPage", () => {
   it("shows empty state when no history", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "get_history") return [];
+      if (cmd === "get_failed_transcriptions") return [];
       return undefined;
     });
 

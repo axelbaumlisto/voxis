@@ -12,10 +12,6 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 // Mock page components to simplify tests
-vi.mock("../pages/HomePage", () => ({
-  default: () => <div data-testid="home-page">Home Page</div>,
-}));
-
 vi.mock("../pages/SettingsPage", () => ({
   default: () => <div data-testid="settings-page">Settings Page</div>,
 }));
@@ -157,9 +153,9 @@ describe("App", () => {
       </MemoryRouter>
     );
 
-    // Default route shows home page
+    // Default route renders History (History IS the home page).
     await waitFor(() => {
-      expect(getByTestId("home-page")).toBeInTheDocument();
+      expect(getByTestId("history-page")).toBeInTheDocument();
     });
   });
 

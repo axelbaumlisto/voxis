@@ -1,10 +1,10 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Navigation", () => {
-  test("shows home page by default", async ({ page }) => {
+  test("shows history page by default", async ({ page }) => {
     await page.goto("/");
-    // Home page redirects to /history
-    await expect(page).toHaveURL("/history");
+    // History IS the home page — `/` renders History directly (no redirect).
+    await expect(page).toHaveURL("/");
     await expect(page.locator("h1")).toContainText("History");
   });
 
@@ -47,7 +47,7 @@ test.describe("Navigation", () => {
   test("navigates back to history from settings", async ({ page }) => {
     await page.goto("/settings");
 
-    // Click history link (home redirects to history in this app)
+    // Click history link (History is also the home page in this app)
     await page.click('a[href="/history"]');
 
     await expect(page).toHaveURL("/history");

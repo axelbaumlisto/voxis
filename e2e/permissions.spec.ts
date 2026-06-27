@@ -104,8 +104,9 @@ test.describe("Permissions", () => {
     page,
   }) => {
     await page.goto("/");
-    // Home page redirects to /history
-    await expect(page).toHaveURL("/history");
+    // History IS the home page — `/` renders History directly (no redirect).
+    await expect(page).toHaveURL("/");
+    await expect(page.locator("h1")).toContainText("History");
     // Should not show any crash/error page
     await expect(page.locator("body")).not.toContainText("crashed");
   });
