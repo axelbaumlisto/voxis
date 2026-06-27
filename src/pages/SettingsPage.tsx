@@ -60,7 +60,7 @@ function SettingsPage() {
           <h1 className="page-title">{t("settings.title")}</h1>
         </header>
         <div className="card">
-          <p style={{ color: "var(--text-secondary)" }}>{t("common.loading")}</p>
+          <p style={{ color: "var(--fg-muted)" }}>{t("common.loading")}</p>
         </div>
       </div>
     );

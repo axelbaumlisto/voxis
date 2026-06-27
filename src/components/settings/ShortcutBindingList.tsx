@@ -71,7 +71,7 @@ export default function ShortcutBindingList() {
     <div data-testid="shortcut-binding-list" className="shortcut-binding-list">
       {loading && <p>Loading shortcuts…</p>}
       {error && (
-        <div role="alert" style={{ color: "#c33" }}>
+        <div role="alert" style={{ color: "var(--error)" }}>
           {error}
         </div>
       )}

@@ -177,7 +177,7 @@
 
 .pending-error {
   font-size: 12px;
-  color: #ff6b6b;
+  color: var(--error);
   padding: var(--spacing-xs) var(--spacing-sm);
   margin: 0;
   border-bottom: 1px solid var(--border);
@@ -240,7 +240,7 @@
   padding: 2px 6px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius);
   flex-shrink: 0;
 }
 
@@ -274,12 +274,3 @@
   opacity: 0.9;
 }
 
-.pending-item-actions button.secondary {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--fg);
-}
-
-.pending-item-actions button.secondary:hover {
-  background: var(--bg-panel);
-}

@@ -29,7 +29,7 @@ function StepNav({ step }: { step: Step }) {
           style={{
             opacity: i === step ? 1 : 0.5,
             fontWeight: i === step ? 600 : 400,
-            borderBottom: i === step ? "2px solid var(--accent-color, #1e88e5)" : "none",
+            borderBottom: i === step ? "2px solid var(--accent)" : "none",
             paddingBottom: 4,
           }}
         >
