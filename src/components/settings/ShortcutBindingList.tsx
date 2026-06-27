@@ -88,6 +88,7 @@ export default function ShortcutBindingList() {
             <tr key={b.id} data-testid={`binding-row-${b.id}`}>
               <td style={{ padding: "4px 8px", verticalAlign: "top" }}>
                 <strong>{b.name}</strong>
+                {/* em: parent-relative secondary hint; no px token (keeps computed size) */}
                 <div style={{ fontSize: "0.85em", opacity: 0.8 }}>
                   {b.description}
                 </div>
@@ -101,6 +102,7 @@ export default function ShortcutBindingList() {
                   placeholder={b.default_binding}
                   style={{ width: "180px", fontFamily: "monospace" }}
                 />
+                {/* em: nested hint ≈10.5px; no px token — do NOT snap to 11px (would enlarge) */}
                 <div style={{ fontSize: "0.75em", opacity: 0.7 }}>
                   Default: <code>{b.default_binding}</code>
                 </div>

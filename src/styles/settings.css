@@ -19,7 +19,7 @@
 
 .settings-error {
   color: var(--error);
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 /* Settings Grid */
@@ -36,7 +36,7 @@
 }
 
 .settings-section-title {
-  font-size: 14px;
+  font-size: var(--font-md);
   font-weight: bold;
   padding: var(--spacing-xs) var(--spacing-sm);
   background: var(--bg-panel);
@@ -70,12 +70,12 @@
 }
 
 .settings-field-label {
-  font-size: 14px;
+  font-size: var(--font-md);
   color: var(--fg);
 }
 
 .settings-field-description {
-  font-size: 11px;
+  font-size: var(--font-xs);
   color: var(--fg-muted);
 }
 
@@ -92,7 +92,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--font-sm);
   color: var(--fg);
   cursor: pointer;
 }
@@ -109,7 +109,7 @@
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--font-md);
 }
 
 .settings-field-input:focus {
@@ -180,7 +180,7 @@
   border: 1px solid var(--border);
   color: var(--fg-muted);
   padding: var(--spacing-xs) var(--spacing-sm);
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .password-toggle:hover {
@@ -195,7 +195,7 @@
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--font-md);
   cursor: pointer;
 }
 
@@ -220,7 +220,7 @@
   color: var(--fg);
   width: 28px;
   height: 28px;
-  font-size: 16px;
+  font-size: var(--font-lg);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -246,7 +246,7 @@
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--font-sm);
   padding: 4px 8px;
   cursor: pointer;
 }
@@ -295,7 +295,7 @@
 
 .modal-header h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--font-md);
   font-weight: bold;
 }
 
@@ -303,7 +303,7 @@
   background: none;
   border: none;
   color: var(--fg-muted);
-  font-size: 16px;
+  font-size: var(--font-lg);
   cursor: pointer;
   padding: 0 4px;
 }
@@ -329,7 +329,7 @@
 
 .modal-error {
   color: var(--error);
-  font-size: 12px;
+  font-size: var(--font-sm);
   padding: var(--spacing-xs);
   background: rgba(255, 0, 0, 0.1);
   border: 1px solid var(--error);
@@ -349,6 +349,6 @@
   border-radius: var(--radius);
   background: var(--bg);
   color: var(--fg);
-  font-size: 0.85rem;
+  font-size: var(--font-md);
   cursor: pointer;
 }

@@ -13,7 +13,7 @@
 }
 
 .dictionary-add-title {
-  font-size: 14px;
+  font-size: var(--font-md);
   font-weight: bold;
   padding: var(--spacing-xs) var(--spacing-sm);
   background: var(--bg-panel);
@@ -34,7 +34,7 @@
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--font-md);
 }
 
 .add-entry-input:focus {
@@ -47,7 +47,7 @@
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--font-md);
 }
 
 .add-entry-form button:hover {
@@ -81,18 +81,18 @@
 
 .dictionary-source {
   flex: 1;
-  font-size: 14px;
+  font-size: var(--font-md);
 }
 
 .dictionary-arrow {
   color: var(--fg-muted);
-  font-size: 14px;
+  font-size: var(--font-md);
   flex-shrink: 0;
 }
 
 .dictionary-replacement {
   flex: 1;
-  font-size: 14px;
+  font-size: var(--font-md);
   color: var(--accent);
 }
 
@@ -102,7 +102,7 @@
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--font-md);
 }
 
 .dictionary-input:focus {
@@ -116,7 +116,7 @@
 }
 
 .dictionary-entry-actions button {
-  font-size: 12px;
+  font-size: var(--font-sm);
   padding: 2px var(--spacing-sm);
   background: var(--bg);
   border: 1px solid var(--border);
@@ -161,14 +161,14 @@
 }
 
 .pending-title {
-  font-size: 14px;
+  font-size: var(--font-md);
   font-weight: bold;
   color: var(--accent);
   margin: 0;
 }
 
 .pending-description {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--fg-muted);
   padding: var(--spacing-xs) var(--spacing-sm);
   margin: 0;
@@ -176,7 +176,7 @@
 }
 
 .pending-error {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--error);
   padding: var(--spacing-xs) var(--spacing-sm);
   margin: 0;
@@ -218,24 +218,24 @@
 }
 
 .pending-source {
-  font-size: 14px;
+  font-size: var(--font-md);
   flex: 1;
 }
 
 .pending-arrow {
   color: var(--fg-muted);
-  font-size: 14px;
+  font-size: var(--font-md);
   flex-shrink: 0;
 }
 
 .pending-replacement {
-  font-size: 14px;
+  font-size: var(--font-md);
   color: var(--accent);
   flex: 1;
 }
 
 .pending-count {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--fg-muted);
   padding: 2px 6px;
   background: var(--bg);
@@ -260,7 +260,7 @@
 }
 
 .pending-item-actions button {
-  font-size: 12px;
+  font-size: var(--font-sm);
   padding: 2px var(--spacing-sm);
 }
 
