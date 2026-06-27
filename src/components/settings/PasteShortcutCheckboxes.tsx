@@ -34,9 +34,9 @@ export default function PasteShortcutCheckboxes({
   };
 
   return (
-    <div className="setting-field">
-      <label className="setting-label">{label}</label>
-      {description && <p className="setting-description">{description}</p>}
+    <div className="settings-field">
+      <label className="settings-field-label">{label}</label>
+      {description && <p className="settings-field-description">{description}</p>}
       <div className="checkbox-group">
         {PASTE_SHORTCUT_OPTIONS.map((option) => (
           <label key={option.value} className="checkbox-label">
