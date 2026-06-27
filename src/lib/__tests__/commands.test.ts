@@ -394,6 +394,9 @@ describe("commands.ts", () => {
         });
         expect(result).toHaveProperty("processed");
         expect(result).toHaveProperty("suggestions_found");
+        expect(result).toHaveProperty("recorded");
+        expect(result).toHaveProperty("promoted");
+        expect(result).toHaveProperty("skipped");
       });
 
       it("calls invoke with limit", async () => {

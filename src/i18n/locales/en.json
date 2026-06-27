@@ -220,7 +220,9 @@
     "ignoreSuggestion": "Ignore this suggestion",
     "confirmDelete": "Delete \"{{source}}\" → \"{{replacement}}\"?",
     "seenCount": "Seen {{count}} time(s)",
-    "progressPercent": "{{percent}}% to auto-add"
+    "progressPercent": "{{percent}}% to auto-add",
+    "generateResult": "Scanned {{processed}} entries · {{recorded}} new suggestions, {{promoted}} added to dictionary, {{skipped}} skipped",
+    "approvedGoBelow": "Approved suggestions are added to the dictionary below."
   },
   "permissions": {
     "openSettings": "[Open Settings]",

@@ -266,7 +266,7 @@ describe("usePendingSuggestions", () => {
           return [];
         }
         if (cmd === "reprocess_history_for_suggestions") {
-          return { processed: 10, suggestions_found: 3 };
+          return { processed: 10, suggestions_found: 3, recorded: 3, promoted: 0, skipped: 7 };
         }
         return undefined;
       });
@@ -282,7 +282,13 @@ describe("usePendingSuggestions", () => {
         reprocessResult = await result.current.generateFromHistory(50);
       });
 
-      expect(reprocessResult).toEqual({ processed: 10, suggestions_found: 3 });
+      expect(reprocessResult).toEqual({
+        processed: 10,
+        suggestions_found: 3,
+        recorded: 3,
+        promoted: 0,
+        skipped: 7,
+      });
       expect(mockInvoke).toHaveBeenCalledWith("reprocess_history_for_suggestions", {
         limit: 50,
       });
@@ -319,7 +325,7 @@ describe("usePendingSuggestions", () => {
 
       // Resolve the promise
       await act(async () => {
-        resolvePromise!({ processed: 5, suggestions_found: 1 });
+        resolvePromise!({ processed: 5, suggestions_found: 1, recorded: 1, promoted: 0, skipped: 4 });
         await generatePromise;
       });
 
@@ -335,7 +341,7 @@ describe("usePendingSuggestions", () => {
           return callCount > 1 ? [...mockSuggestions] : [];
         }
         if (cmd === "reprocess_history_for_suggestions") {
-          return { processed: 5, suggestions_found: 2 };
+          return { processed: 5, suggestions_found: 2, recorded: 2, promoted: 0, skipped: 3 };
         }
         return undefined;
       });

@@ -22,6 +22,7 @@ function DictionaryPage() {
     generating,
   } = usePendingSuggestions();
   const [threshold, setThreshold] = useState(3);
+  const [generateStatus, setGenerateStatus] = useState<string | null>(null);
 
   // Load learning threshold from config
   useEffect(() => {
@@ -45,11 +46,18 @@ function DictionaryPage() {
     // generateFromHistory throws on failure (e.g. LLM API key not configured);
     // the hook stores the message in `pendingError`, which we surface below.
     // Swallow the rejection here so it isn't an unhandled promise error.
+    // Clear any prior status so it never stacks with a fresh run or an error.
+    setGenerateStatus(null);
     try {
-      await generateFromHistory();
-      await reload();
+      const { processed, recorded, promoted, skipped } =
+        await generateFromHistory();
+      setGenerateStatus(
+        t("dictionary.generateResult", { processed, recorded, promoted, skipped })
+      );
     } catch {
-      // error already captured in pendingError and shown in PendingSection
+      // error already captured in pendingError and shown in PendingSection;
+      // ensure status and error never coexist.
+      setGenerateStatus(null);
     }
   };
 
@@ -66,6 +74,7 @@ function DictionaryPage() {
         suggestions={pendingSuggestions}
         threshold={threshold}
         error={pendingError}
+        status={generateStatus}
         onApprove={handleApprove}
         onReject={reject}
         onApproveAll={handleApproveAll}

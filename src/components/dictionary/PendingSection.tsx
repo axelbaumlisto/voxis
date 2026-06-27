@@ -6,6 +6,7 @@ interface PendingSectionProps {
   suggestions: PendingSuggestion[];
   threshold: number;
   error?: string | null;
+  status?: string | null;
   onApprove: (id: number) => Promise<void>;
   onReject: (id: number) => Promise<void>;
   onApproveAll: () => Promise<void>;
@@ -17,6 +18,7 @@ function PendingSection({
   suggestions,
   threshold,
   error,
+  status,
   onApprove,
   onReject,
   onApproveAll,
@@ -52,6 +54,12 @@ function PendingSection({
           {error}
         </p>
       )}
+      {status && (
+        <p className="pending-status" role="status" data-testid="pending-status">
+          {status}
+        </p>
+      )}
+      <p className="pending-hint">{t("dictionary.approvedGoBelow")}</p>
       {suggestions.length > 0 ? (
         <p className="pending-description">
           {t("dictionary.pendingDescriptionActive")}
