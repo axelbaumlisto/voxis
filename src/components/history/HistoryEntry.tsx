@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { HistoryEntry as HistoryEntryType } from "../../lib/commands";
 
 interface HistoryEntryProps {
@@ -6,6 +7,7 @@ interface HistoryEntryProps {
 }
 
 function HistoryEntry({ entry, onCopy }: HistoryEntryProps) {
+  const { t } = useTranslation();
   const formatTimestamp = (ts: string) => {
     try {
       const date = new Date(ts.replace(" ", "T"));
@@ -35,7 +37,7 @@ function HistoryEntry({ entry, onCopy }: HistoryEntryProps) {
       <p className="history-entry-text">{entry.text}</p>
       <div className="history-entry-actions">
         <button className="secondary" onClick={() => onCopy(entry.text)}>
-          Copy
+          {t("common.copy")}
         </button>
       </div>
     </div>

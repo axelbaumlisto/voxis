@@ -1,11 +1,31 @@
 import { describe, it, expect } from "vitest";
 import {
   SETTINGS_REGISTRY,
+  SECTION_KEY_MAP,
   getSections,
   getSettingsBySection,
   SettingDefinition,
   WidgetType,
 } from "../settingsRegistry";
+import en from "../../i18n/locales/en.json";
+import ru from "../../i18n/locales/ru.json";
+
+// Resolve a dotted i18n key against a translation object; returns undefined if
+// the key path does not lead to a string (i.e. the key is missing/raw).
+function resolveI18nKey(
+  key: string,
+  translations: Record<string, unknown>
+): string | undefined {
+  let current: unknown = translations;
+  for (const part of key.split(".")) {
+    if (current && typeof current === "object" && part in current) {
+      current = (current as Record<string, unknown>)[part];
+    } else {
+      return undefined;
+    }
+  }
+  return typeof current === "string" ? current : undefined;
+}
 
 describe("settingsRegistry.ts", () => {
   // ===========================================================================
@@ -427,6 +447,68 @@ describe("settingsRegistry.ts", () => {
     it("WidgetType accepts all valid values", () => {
       const types: WidgetType[] = ["select", "switch", "input", "password", "hotkey", "custom"];
       expect(types.length).toBe(6);
+    });
+  });
+
+  // ===========================================================================
+  // i18n key <-> locale parity (S7). Every labelKey/descriptionKey/optionKey and
+  // every section key MUST resolve to a string in BOTH en.json and ru.json.
+  // ===========================================================================
+  describe("i18n key / locale parity", () => {
+    const locales: Array<[string, Record<string, unknown>]> = [
+      ["en", en as Record<string, unknown>],
+      ["ru", ru as Record<string, unknown>],
+    ];
+
+    it("every labelKey resolves in both locales", () => {
+      for (const setting of SETTINGS_REGISTRY) {
+        if (!setting.labelKey) continue;
+        for (const [name, table] of locales) {
+          expect(
+            resolveI18nKey(setting.labelKey, table),
+            `${name}: missing ${setting.labelKey}`
+          ).toBeTruthy();
+        }
+      }
+    });
+
+    it("every descriptionKey resolves in both locales", () => {
+      for (const setting of SETTINGS_REGISTRY) {
+        if (!setting.descriptionKey) continue;
+        for (const [name, table] of locales) {
+          expect(
+            resolveI18nKey(setting.descriptionKey, table),
+            `${name}: missing ${setting.descriptionKey}`
+          ).toBeTruthy();
+        }
+      }
+    });
+
+    it("every option labelKey resolves in both locales", () => {
+      for (const setting of SETTINGS_REGISTRY) {
+        for (const option of setting.options ?? []) {
+          if (!option.labelKey) continue;
+          for (const [name, table] of locales) {
+            expect(
+              resolveI18nKey(option.labelKey, table),
+              `${name}: missing ${option.labelKey}`
+            ).toBeTruthy();
+          }
+        }
+      }
+    });
+
+    it("every section key resolves in both locales", () => {
+      for (const section of getSections()) {
+        const key = SECTION_KEY_MAP[section];
+        expect(key, `no key mapping for section ${section}`).toBeTruthy();
+        for (const [name, table] of locales) {
+          expect(
+            resolveI18nKey(key, table),
+            `${name}: missing ${key}`
+          ).toBeTruthy();
+        }
+      }
     });
   });
 });

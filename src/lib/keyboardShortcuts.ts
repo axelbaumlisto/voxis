@@ -17,6 +17,8 @@ export interface ShortcutAction {
    * that don't report `code` (and for the lowercase-char matching path). */
   key: string;
   label: string;
+  /** i18n key for the footer label, resolved via t() at the render boundary. */
+  labelKey: string;
   /** Short key label for footer display */
   keyLabel: string;
   action: (context: ShortcutContext) => void;
@@ -37,6 +39,7 @@ export const SHORTCUTS: ShortcutAction[] = [
     code: "KeyH",
     key: "h",
     label: "History",
+    labelKey: "nav.history",
     keyLabel: "h",
     action: ({ navigate }) => navigate("/history"),
   },
@@ -44,6 +47,7 @@ export const SHORTCUTS: ShortcutAction[] = [
     code: "KeyW",
     key: "w",
     label: "Dictionary",
+    labelKey: "nav.dictionary",
     keyLabel: "w",
     action: ({ navigate }) => navigate("/dictionary"),
   },
@@ -51,6 +55,7 @@ export const SHORTCUTS: ShortcutAction[] = [
     code: "KeyS",
     key: "s",
     label: "Settings",
+    labelKey: "nav.settings",
     keyLabel: "s",
     action: ({ navigate }) => navigate("/settings"),
   },
@@ -58,6 +63,7 @@ export const SHORTCUTS: ShortcutAction[] = [
     code: "KeyC",
     key: "c",
     label: "Copy",
+    labelKey: "nav.copy",
     keyLabel: "c",
     action: ({ lastTranscription }) => {
       if (lastTranscription) {
@@ -69,6 +75,7 @@ export const SHORTCUTS: ShortcutAction[] = [
     code: "Escape",
     key: "escape",
     label: "Quit",
+    labelKey: "nav.quit",
     keyLabel: "Esc",
     action: ({ closeWindow }) => closeWindow(),
   },

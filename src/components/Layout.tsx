@@ -143,7 +143,7 @@ function Layout() {
       <footer className="footer">
         {footerShortcuts.map((shortcut) => (
           <span key={shortcut.key}>
-            <span className="footer-key">{shortcut.keyLabel}</span> {shortcut.label}
+            <span className="footer-key">{shortcut.keyLabel}</span> {t(shortcut.labelKey)}
           </span>
         ))}
       </footer>

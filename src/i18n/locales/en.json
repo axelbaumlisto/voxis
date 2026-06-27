@@ -23,7 +23,9 @@
     "previewing": "Previewing...",
     "approveAll": "Approve All",
     "appTitle": "SoupaWhisper 2",
-    "language": "Language"
+    "language": "Language",
+    "copy": "Copy",
+    "quit": "Quit"
   },
   "home": {
     "record": "[ Record ]",
@@ -80,15 +82,80 @@
     "addProviderBtn": "Add Provider",
     "saveChanges": "Save Changes",
     "preview": "Preview",
-    "unknownPreviewError": "Unknown preview error"
+    "unknownPreviewError": "Unknown preview error",
+    "hotkeyHoldMs": "Hold Threshold (ms)",
+    "hotkeyHoldMsDesc": "Minimum hold time before recording starts. Short presses are treated as key combinations (e.g. AltGr+R).",
+    "shortcutBindings": "Shortcut bindings",
+    "shortcutBindingsDesc": "Map keys to different actions (raw transcribe / transcribe + LLM post-process). The legacy single Hotkey above stays for back-compat.",
+    "hotkeyMode": "Activation mode",
+    "hotkeyModeDesc": "Hold: record while the key is held (legacy). Toggle: tap to start, tap again to stop — friendlier for long dictation.",
+    "alwaysOnMicrophone": "Always-on microphone",
+    "alwaysOnMicrophoneDesc": "Keep the audio capture stream alive between recordings to remove the cold-start delay on the first sample of each take.",
+    "appendTrailingSpace": "Append trailing space",
+    "appendTrailingSpaceDesc": "Add a single space after each dictation so consecutive recordings don't merge. No-op if the text already ends in whitespace.",
+    "translateToEnglish": "Translate to English",
+    "translateToEnglishDesc": "Ask Whisper to translate the audio to English instead of transcribing in the source language (Groq / OpenAI task=translate).",
+    "autoSubmitKey": "Auto-submit after typing",
+    "autoSubmitKeyDesc": "Press Enter (or Cmd/Super/Shift + Enter) after the transcription is typed so chat clients send the message without you touching the keyboard.",
+    "audioFeedback": "Audio feedback",
+    "audioFeedbackDesc": "Short beeps on recording start, stop, and failure so you know the hotkey registered without looking at the overlay.",
+    "overlayBackend": "Backend",
+    "overlayBackendDesc": "Overlay rendering backend (advanced)",
+    "vadBackend": "Voice Activity Detection",
+    "vadBackendDesc": "Filter silence from recordings before transcription",
+    "vadOnsetFrames": "Onset (frames)",
+    "vadOnsetFramesDesc": "Consecutive voice frames required to trigger speech start (default: 3)",
+    "vadHangoverFrames": "Hangover (frames)",
+    "vadHangoverFramesDesc": "Silence frames tolerated before ending speech (default: 5)",
+    "vadPrefillFrames": "Prefill (frames)",
+    "vadPrefillFramesDesc": "Past frames included when speech starts (default: 2)",
+    "llmProviderDesc": "Select LLM provider and model",
+    "llmApiKey": "LLM API Key",
+    "llmPrompts": "Prompt templates",
+    "llmPromptsDesc": "Multiple named prompts for the LLM post-processor. The selected template wins; if none is selected the legacy llm.prompt string is used (back-compat).",
+    "retentionPeriod": "History retention",
+    "retentionPeriodDesc": "Auto-delete old transcription history. 'Never' keeps everything; 'preserve_limit' keeps only the N most recent (see Recent Limit below).",
+    "retentionLimit": "Recent limit (preserve_limit policy)",
+    "retentionLimitDesc": "How many recent entries to keep when 'History retention' is set to 'Only the N most recent'.",
+    "textProcessing": "Text Processing",
+    "textProcessingDesc": "Apply dictionary replacements",
+    "debug": "Debug Mode",
+    "debugDesc": "Enable debug logging",
+    "backend": "Display Backend",
+    "backendDesc": "Windowing/display backend used for output injection",
+    "sections": {
+      "provider": "Provider",
+      "recording": "Recording",
+      "output": "Output",
+      "overlay": "Overlay",
+      "vad": "VAD",
+      "llm": "LLM",
+      "history": "History",
+      "advanced": "Advanced"
+    },
+    "options": {
+      "hotkeyModeHold": "Hold (legacy)",
+      "hotkeyModeToggle": "Toggle (tap to start/stop)",
+      "retentionNever": "Never (keep everything)",
+      "retentionLimitOnly": "Only the N most recent",
+      "retention3Days": "3 days",
+      "retention2Weeks": "2 weeks",
+      "retention3Months": "3 months",
+      "backendAuto": "Auto",
+      "backendX11": "X11",
+      "backendWayland": "Wayland",
+      "backendMacos": "macOS",
+      "backendWindows": "Windows",
+      "audioDeviceDefault": "Default"
+    }
   },
   "history": {
     "title": "History",
     "description": "View your past transcriptions ({{count}} entries)",
     "searchPlaceholder": "Search transcriptions...",
     "confirmClear": "Are you sure you want to clear all history?",
-    "empty": "No history entries yet.",
-    "emptyHint": "Your transcriptions will appear here."
+    "empty": "No transcriptions yet.",
+    "emptyHint": "Start recording to see your transcriptions here."
   },
   "dictionary": {
     "title": "Dictionary",
@@ -103,6 +170,7 @@
     "pendingDescriptionEmpty": "No pending suggestions. Click \"Generate from History\" to analyze your transcription history and find terms for your dictionary.",
     "addToDict": "Add to dictionary",
     "ignoreSuggestion": "Ignore this suggestion",
+    "confirmDelete": "Delete \"{{source}}\" → \"{{replacement}}\"?",
     "seenCount": "Seen {{count}} time(s)",
     "progressPercent": "{{percent}}% to auto-add"
   },
@@ -113,6 +181,8 @@
   "nav": {
     "history": "History",
     "dictionary": "Dictionary",
-    "settings": "Settings"
+    "settings": "Settings",
+    "copy": "Copy",
+    "quit": "Quit"
   }
 }

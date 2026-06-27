@@ -12,6 +12,8 @@
 export interface SelectOption {
   label: string;
   value: string;
+  /** Optional i18n key resolved at the render boundary; falls back to label. */
+  labelKey?: string;
 }
 
 type Platform = 'macos' | 'windows' | 'linux';
@@ -52,11 +54,11 @@ export const LANGUAGE_OPTIONS: SelectOption[] = [
 // =============================================================================
 
 export const BACKEND_OPTIONS: SelectOption[] = [
-  { label: "Auto", value: "auto" },
-  { label: "X11", value: "x11" },
-  { label: "Wayland", value: "wayland" },
-  { label: "macOS", value: "darwin" },
-  { label: "Windows", value: "windows" },
+  { label: "Auto", labelKey: "settings.options.backendAuto", value: "auto" },
+  { label: "X11", labelKey: "settings.options.backendX11", value: "x11" },
+  { label: "Wayland", labelKey: "settings.options.backendWayland", value: "wayland" },
+  { label: "macOS", labelKey: "settings.options.backendMacos", value: "darwin" },
+  { label: "Windows", labelKey: "settings.options.backendWindows", value: "windows" },
 ];
 
 // =============================================================================

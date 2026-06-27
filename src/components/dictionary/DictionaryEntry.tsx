@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { DictionaryEntry as DictionaryEntryType } from "../../lib/commands";
 import EntryDisplay from "./EntryDisplay";
 import EditDictionaryEntryForm from "./EditDictionaryEntryForm";
@@ -14,6 +15,7 @@ interface DictionaryEntryProps {
  * SRP: Uses EditDictionaryEntryForm for edit mode, EntryDisplay for view mode.
  */
 function DictionaryEntry({ entry, onUpdate, onDelete }: DictionaryEntryProps) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [source, setSource] = useState(entry.source);
   const [replacement, setReplacement] = useState(entry.replacement);
@@ -37,7 +39,14 @@ function DictionaryEntry({ entry, onUpdate, onDelete }: DictionaryEntryProps) {
   };
 
   const handleDelete = async () => {
-    if (window.confirm(`Delete "${entry.source}" → "${entry.replacement}"?`)) {
+    if (
+      window.confirm(
+        t("dictionary.confirmDelete", {
+          source: entry.source,
+          replacement: entry.replacement,
+        })
+      )
+    ) {
       await onDelete(entry.id);
     }
   };
@@ -61,10 +70,10 @@ function DictionaryEntry({ entry, onUpdate, onDelete }: DictionaryEntryProps) {
       <EntryDisplay source={entry.source} replacement={entry.replacement} />
       <div className="dictionary-entry-actions">
         <button className="secondary" onClick={() => setEditing(true)}>
-          Edit
+          {t("common.edit")}
         </button>
         <button className="secondary" onClick={handleDelete}>
-          Delete
+          {t("common.delete")}
         </button>
       </div>
     </div>

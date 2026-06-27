@@ -8,6 +8,7 @@ import {
   getSections,
   getSettingsBySection,
   SettingDefinition,
+  SettingOption,
 } from "../lib/settingsRegistry";
 import { renderField } from "../lib/fieldRegistry";
 import Section from "../components/settings/Section";
@@ -81,12 +82,26 @@ function SettingsPage() {
     );
   }
 
+  // Resolve an i18n key when present, otherwise fall back to the raw string.
+  const resolveLabel = (raw: string, key?: string) => (key ? t(key) : raw);
+  // Resolve option labels through t() when an option carries a labelKey.
+  const resolveOptions = (options: SettingOption[]): SettingOption[] =>
+    options.map((opt) =>
+      opt.labelKey ? { ...opt, label: t(opt.labelKey) } : opt
+    );
+
   const renderSettingField = (setting: SettingDefinition) => {
+    const label = resolveLabel(setting.label, setting.labelKey);
+    const description =
+      setting.description !== undefined || setting.descriptionKey !== undefined
+        ? resolveLabel(setting.description ?? "", setting.descriptionKey)
+        : undefined;
+
     // Handle custom widgets via registry (OCP)
     if (setting.widgetType === "custom" && setting.customComponent) {
       const rendered = renderCustomWidget(setting.customComponent, {
-        label: setting.label,
-        description: setting.description,
+        label,
+        description,
         config,
         settingKey: setting.key,
         onChange: (key, value) => updateNestedConfig(key as string, value),
@@ -107,11 +122,11 @@ function SettingsPage() {
     return (
       <div key={setting.key}>
         {renderField(setting.widgetType, {
-          label: setting.label,
-          description: setting.description,
+          label,
+          description,
           value,
           onChange: (v) => updateNestedConfig(setting.key, v),
-          options,
+          options: resolveOptions(options),
           placeholder: setting.placeholder,
         })}
       </div>
@@ -152,7 +167,7 @@ function SettingsPage() {
 
       <div className="settings-grid">
         {getSections().map((section) => (
-          <Section key={section} title={section}>
+          <Section key={section} sectionKey={section} title={section}>
             {getSettingsBySection(section).map(renderSettingField)}
           </Section>
         ))}
