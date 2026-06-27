@@ -14,6 +14,7 @@ function DictionaryPage() {
   const { entries, loading, error, add, remove, update, reload } = useDictionary();
   const {
     suggestions: pendingSuggestions,
+    error: pendingError,
     approve,
     reject,
     approveAll,
@@ -41,8 +42,15 @@ function DictionaryPage() {
   };
 
   const handleGenerateFromHistory = async () => {
-    await generateFromHistory();
-    await reload();
+    // generateFromHistory throws on failure (e.g. LLM API key not configured);
+    // the hook stores the message in `pendingError`, which we surface below.
+    // Swallow the rejection here so it isn't an unhandled promise error.
+    try {
+      await generateFromHistory();
+      await reload();
+    } catch {
+      // error already captured in pendingError and shown in PendingSection
+    }
   };
 
   return (
@@ -57,6 +65,7 @@ function DictionaryPage() {
       <PendingSection
         suggestions={pendingSuggestions}
         threshold={threshold}
+        error={pendingError}
         onApprove={handleApprove}
         onReject={reject}
         onApproveAll={handleApproveAll}

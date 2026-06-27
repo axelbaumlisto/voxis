@@ -9,6 +9,12 @@ import { NavigateFunction } from "react-router-dom";
 import { copyToClipboard } from "./clipboard";
 
 export interface ShortcutAction {
+  /** Layout-independent physical key code (KeyboardEvent.code), e.g. "KeyH".
+   * Matched FIRST so the shortcut fires regardless of keyboard layout
+   * (e.g. Russian layout where physical H emits the char "р"). */
+  code: string;
+  /** Character key (KeyboardEvent.key), kept as a fallback for environments
+   * that don't report `code` (and for the lowercase-char matching path). */
   key: string;
   label: string;
   /** Short key label for footer display */
@@ -28,24 +34,28 @@ export interface ShortcutContext {
  */
 export const SHORTCUTS: ShortcutAction[] = [
   {
+    code: "KeyH",
     key: "h",
     label: "History",
     keyLabel: "h",
     action: ({ navigate }) => navigate("/history"),
   },
   {
+    code: "KeyW",
     key: "w",
     label: "Dictionary",
     keyLabel: "w",
     action: ({ navigate }) => navigate("/dictionary"),
   },
   {
+    code: "KeyS",
     key: "s",
     label: "Settings",
     keyLabel: "s",
     action: ({ navigate }) => navigate("/settings"),
   },
   {
+    code: "KeyC",
     key: "c",
     label: "Copy",
     keyLabel: "c",
@@ -56,6 +66,7 @@ export const SHORTCUTS: ShortcutAction[] = [
     },
   },
   {
+    code: "Escape",
     key: "escape",
     label: "Quit",
     keyLabel: "Esc",
@@ -79,8 +90,14 @@ export function handleShortcut(
     return false;
   }
 
+  // Match by physical key code FIRST (layout-independent: works on Russian,
+  // Dvorak, etc.), falling back to the character key for environments that
+  // don't populate `code`.
+  const code = event.code;
   const key = event.key.toLowerCase();
-  const shortcut = SHORTCUTS.find((s) => s.key === key);
+  const shortcut = SHORTCUTS.find(
+    (s) => (code && s.code === code) || s.key === key
+  );
 
   if (shortcut) {
     shortcut.action(context);
