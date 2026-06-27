@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { listAudioDevices, AudioDevice } from "../lib/commands";
 import { SettingOption } from "../lib/settingsRegistry";
+import { getErrorMessage } from "../lib/errors";
 
 /**
  * Hook for loading and managing audio devices.
@@ -9,12 +10,14 @@ import { SettingOption } from "../lib/settingsRegistry";
 export function useAudioDevices(currentDevice: string | undefined) {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     listAudioDevices()
       .then((devs) => setDevices(devs ?? []))
       .catch((err) => {
         console.error("Failed to load audio devices:", err);
+        setError(getErrorMessage(err));
         // Graceful fallback - show only "Default" option when permission denied
         setDevices([]);
       })
@@ -41,5 +44,5 @@ export function useAudioDevices(currentDevice: string | undefined) {
     return opts;
   }, [devices, currentDevice]);
 
-  return { devices, options, loading };
+  return { devices, options, loading, error };
 }

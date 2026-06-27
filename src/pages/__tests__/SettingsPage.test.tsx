@@ -166,6 +166,26 @@ describe("SettingsPage", () => {
     });
   });
 
+  it("surfaces an error hint when audio device enumeration fails", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_config") return mockConfig;
+      if (cmd === "list_audio_devices") throw new Error("Permission denied");
+      if (cmd === "get_llm_providers") return [];
+      if (cmd === "get_visualization_themes") return [];
+      return undefined;
+    });
+
+    render(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    });
+
+    const alert = await screen.findByTestId("audio-device-error");
+    expect(alert).toHaveAttribute("role", "alert");
+    expect(alert).toHaveTextContent(/audio devices/i);
+  });
+
   it("updates nested config value (overlay.enabled)", async () => {
     render(<SettingsPage />);
 

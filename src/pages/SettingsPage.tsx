@@ -27,7 +27,8 @@ function SettingsPage() {
     hasChanges,
   } = useSettings();
 
-  const { options: audioDeviceOptions } = useAudioDevices(config?.audio_device);
+  const { options: audioDeviceOptions, error: audioDeviceError } =
+    useAudioDevices(config?.audio_device);
 
   // Handlers for ProviderSelect
   const handleProviderChange = useCallback(
@@ -129,6 +130,16 @@ function SettingsPage() {
           options: resolveOptions(options),
           placeholder: setting.placeholder,
         })}
+        {setting.key === "audio_device" && audioDeviceError && (
+          <p
+            className="settings-field-error"
+            role="alert"
+            data-testid="audio-device-error"
+            style={{ color: "var(--error)" }}
+          >
+            {t("settings.audioDevicesUnavailable")}
+          </p>
+        )}
       </div>
     );
   };

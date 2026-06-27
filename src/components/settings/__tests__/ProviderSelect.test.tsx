@@ -267,6 +267,35 @@ describe("ProviderSelect", () => {
         });
       });
     });
+
+    it("surfaces an error alert when remove fails", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "get_llm_providers") return [...mockLlmProviders];
+        if (cmd === "remove_llm_provider") throw new Error("Remove failed");
+        return undefined;
+      });
+
+      render(
+        <ProviderSelect
+          {...defaultProps}
+          providerId="custom-provider"
+          modelId="custom-model"
+          apiUrl="https://custom.api.com/v1"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTitle("Remove provider")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTitle("Remove provider"));
+
+      const alert = await screen.findByTestId("provider-error");
+      expect(alert).toHaveAttribute("role", "alert");
+
+      consoleSpy.mockRestore();
+    });
   });
 
   describe("Model auto-selection", () => {

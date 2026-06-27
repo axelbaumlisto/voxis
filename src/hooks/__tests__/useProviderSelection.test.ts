@@ -210,10 +210,8 @@ describe("useProviderSelection", () => {
         await result.current.handleRemoveProvider("custom-provider");
       });
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        "Failed to remove provider:",
-        expect.any(Error)
-      );
+      // Error is surfaced via state (not console-only) so the UI can render it
+      expect(result.current.error).toBe("Remove failed");
 
       consoleSpy.mockRestore();
     });

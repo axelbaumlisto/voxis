@@ -70,6 +70,8 @@
     "addProvider": "Добавить провайдер",
     "editProvider": "Редактировать провайдер",
     "removeProvider": "Удалить провайдер",
+    "audioDevicesUnavailable": "Не удалось получить список устройств. Проверьте разрешение на микрофон.",
+    "removeProviderFailed": "Не удалось удалить провайдер.",
     "addCustomProvider": "Добавить провайдер",
     "editProviderTitle": "Редактировать провайдер",
     "addProviderBtn": "Добавить",

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useLlmProviders } from "./useLlmProviders";
 import { LlmProvider } from "../lib/commands";
+import { getErrorMessage } from "../lib/errors";
 
 /**
  * Hook for provider and model selection logic.
@@ -13,6 +14,7 @@ export function useProviderSelection(
   onModelChange: (modelId: string) => void
 ) {
   const { providers, loading, remove, add, update, reload } = useLlmProviders();
+  const [error, setError] = useState<string | null>(null);
 
   const currentProvider = useMemo(
     () => providers.find((p) => p.id === providerId),
@@ -43,6 +45,7 @@ export function useProviderSelection(
 
   const handleRemoveProvider = useCallback(
     async (id: string) => {
+      setError(null);
       try {
         await remove(id);
         if (id === providerId && providers.length > 1) {
@@ -53,6 +56,7 @@ export function useProviderSelection(
         }
       } catch (err) {
         console.error("Failed to remove provider:", err);
+        setError(getErrorMessage(err));
       }
     },
     [remove, providerId, providers, handleProviderChange]
@@ -79,6 +83,7 @@ export function useProviderSelection(
   return {
     providers,
     loading,
+    error,
     currentProvider,
     models,
     handleProviderChange,
