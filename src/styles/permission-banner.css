@@ -15,7 +15,7 @@
   background: var(--error);
   border: 1px solid var(--error);
   color: #fff;
-  font-size: 14px;
+  font-size: var(--font-md);
   text-align: left;
 }
 

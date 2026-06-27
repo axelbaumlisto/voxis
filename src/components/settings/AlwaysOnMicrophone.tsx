@@ -35,6 +35,7 @@ export default function AlwaysOnMicrophone({
               border: "1px solid #b08300",
               borderRadius: 4,
               background: "rgba(255, 196, 0, 0.08)",
+              // em: parent-relative secondary hint; no px token (would change computed size)
               fontSize: "0.85em",
               lineHeight: 1.4,
             }}

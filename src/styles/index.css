@@ -21,6 +21,12 @@
   --spectrum-idle: #1e88e5;
   --border: #3c3c3c;
 
+  /* Type scale */
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-md: 14px;
+  --font-lg: 16px;
+
   /* Spacing */
   --spacing-xs: 4px;
   --spacing-sm: 8px;
@@ -33,7 +39,7 @@
 
   /* Monospace font */
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
-  font-size: 14px;
+  font-size: var(--font-md);
   line-height: 1.4;
 
   color-scheme: dark;
@@ -81,7 +87,7 @@ button {
   background: var(--bg-surface);
   color: var(--fg);
   padding: var(--spacing-xs) var(--spacing-md);
-  font-size: 14px;
+  font-size: var(--font-md);
   transition: background 0.1s;
 }
 
@@ -125,7 +131,7 @@ textarea {
   color: var(--fg);
   border: 1px solid var(--border);
   padding: var(--spacing-xs) var(--spacing-sm);
-  font-size: 14px;
+  font-size: var(--font-md);
 }
 
 input:focus,
@@ -169,16 +175,16 @@ textarea:focus-visible {
 }
 
 .header-title {
-  font-size: 14px;
+  font-size: var(--font-md);
 }
 
 .header-time {
-  font-size: 14px;
+  font-size: var(--font-md);
 }
 
 .header-error {
   color: var(--error);
-  font-size: 12px;
+  font-size: var(--font-sm);
   flex: 1;
   text-align: center;
   overflow: hidden;
@@ -291,7 +297,7 @@ textarea:focus-visible {
   background: var(--bg);
   border-top: 1px solid var(--border);
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-sm);
   flex-shrink: 0;
 }
 
@@ -341,7 +347,7 @@ textarea:focus-visible {
 
 .list-item-meta {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 /* Forms */
@@ -422,14 +428,14 @@ textarea:focus-visible {
 }
 
 .page-title {
-  font-size: 16px;
+  font-size: var(--font-lg);
   font-weight: bold;
   margin-bottom: var(--spacing-xs);
 }
 
 .page-description {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 /* Cards - box style */
@@ -469,6 +475,6 @@ textarea:focus-visible {
 
 /* Empty-list hint (shared by AsyncContent, History, Dictionary) */
 .empty-hint {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--fg-muted);
 }
