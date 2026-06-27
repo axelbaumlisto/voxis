@@ -4,8 +4,7 @@ import { LlmProvider } from "../../lib/commands";
 import { validateProviderUrl } from "../../lib/providerValidation";
 import ProviderModal from "./ProviderModal";
 import ProviderActions from "./ProviderActions";
-import ProviderDropdown from "./ProviderDropdown";
-import ModelDropdown from "./ModelDropdown";
+import OptionDropdown from "./OptionDropdown";
 
 interface ProviderSelectProps {
   providerId: string;
@@ -17,7 +16,7 @@ interface ProviderSelectProps {
 
 /**
  * Provider and model selection component.
- * SRP: Coordinates subcomponents (ProviderDropdown, ModelDropdown, ProviderActions).
+ * SRP: Coordinates subcomponents (OptionDropdown, ProviderActions).
  */
 function ProviderSelect({
   providerId,
@@ -68,10 +67,15 @@ function ProviderSelect({
           <label className="settings-field-label">LLM Provider</label>
         </div>
         <div className="provider-select-wrapper">
-          <ProviderDropdown
-            providers={providers}
+          <OptionDropdown
+            options={providers.map((p) => ({
+              id: p.id,
+              label: p.name,
+              suffix: p.builtin ? undefined : "(custom)",
+            }))}
             selectedId={providerId}
             onChange={handleProviderChange}
+            showMissingSelection={false}
           />
           <ProviderActions
             currentProvider={currentProvider}
@@ -87,8 +91,8 @@ function ProviderSelect({
         <div className="settings-field-header">
           <label className="settings-field-label">LLM Model</label>
         </div>
-        <ModelDropdown
-          models={models}
+        <OptionDropdown
+          options={models.map((m) => ({ id: m.id, label: m.name }))}
           selectedId={modelId}
           onChange={onModelChange}
         />

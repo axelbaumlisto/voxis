@@ -1,6 +1,5 @@
 /**
  * Generic dropdown component for selecting options.
- * DRY: Consolidates ModelDropdown and ProviderDropdown functionality.
  */
 
 export interface DropdownOption {
@@ -21,7 +20,6 @@ interface OptionDropdownProps {
 
 /**
  * Generic dropdown for selecting from a list of options.
- * DRY: Replaces ModelDropdown and ProviderDropdown.
  */
 function OptionDropdown({
   options,
