@@ -175,6 +175,14 @@
   border-bottom: 1px solid var(--border);
 }
 
+.pending-error {
+  font-size: 12px;
+  color: #ff6b6b;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+
 .pending-list {
   max-height: 300px;
   overflow-y: auto;

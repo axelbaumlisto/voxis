@@ -120,6 +120,25 @@ describe("keyboardShortcuts", () => {
       expect(result).toBe(true);
       expect(mockContext.navigate).toHaveBeenCalledWith("/history");
     });
+
+    it("matches by physical code under a non-Latin layout (Russian)", () => {
+      // Physical H key on a Russian layout emits the char "р", but code stays "KeyH".
+      const event = new KeyboardEvent("keydown", { key: "р", code: "KeyH" });
+      Object.defineProperty(event, "target", { value: document.body });
+
+      const result = handleShortcut(event, mockContext);
+      expect(result).toBe(true);
+      expect(mockContext.navigate).toHaveBeenCalledWith("/history");
+    });
+
+    it("matches Settings by code under Russian layout (s -> ы)", () => {
+      const event = new KeyboardEvent("keydown", { key: "ы", code: "KeyS" });
+      Object.defineProperty(event, "target", { value: document.body });
+
+      const result = handleShortcut(event, mockContext);
+      expect(result).toBe(true);
+      expect(mockContext.navigate).toHaveBeenCalledWith("/settings");
+    });
   });
 
   describe("getFooterShortcuts", () => {
@@ -153,6 +172,7 @@ describe("keyboardShortcuts", () => {
   describe("SHORTCUTS registry", () => {
     it("all shortcuts have required properties", () => {
       for (const shortcut of SHORTCUTS) {
+        expect(shortcut.code).toBeTruthy();
         expect(shortcut.key).toBeTruthy();
         expect(shortcut.label).toBeTruthy();
         expect(shortcut.keyLabel).toBeTruthy();
@@ -164,6 +184,11 @@ describe("keyboardShortcuts", () => {
       const keys = SHORTCUTS.map((s) => s.key);
       const uniqueKeys = new Set(keys);
       expect(uniqueKeys.size).toBe(keys.length);
+    });
+
+    it("shortcuts have unique physical codes", () => {
+      const codes = SHORTCUTS.map((s) => s.code);
+      expect(new Set(codes).size).toBe(codes.length);
     });
   });
 });

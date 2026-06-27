@@ -5,6 +5,7 @@ import EntryDisplay from "./EntryDisplay";
 interface PendingSectionProps {
   suggestions: PendingSuggestion[];
   threshold: number;
+  error?: string | null;
   onApprove: (id: number) => Promise<void>;
   onReject: (id: number) => Promise<void>;
   onApproveAll: () => Promise<void>;
@@ -15,6 +16,7 @@ interface PendingSectionProps {
 function PendingSection({
   suggestions,
   threshold,
+  error,
   onApprove,
   onReject,
   onApproveAll,
@@ -45,6 +47,11 @@ function PendingSection({
           )}
         </div>
       </div>
+      {error && (
+        <p className="pending-error" role="alert" data-testid="pending-error">
+          {error}
+        </p>
+      )}
       {suggestions.length > 0 ? (
         <p className="pending-description">
           {t("dictionary.pendingDescriptionActive")}
