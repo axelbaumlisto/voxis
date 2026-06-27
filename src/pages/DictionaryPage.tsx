@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDictionary } from "../hooks/useDictionary";
 import { usePendingSuggestions } from "../hooks/usePendingSuggestions";
-import { getConfig } from "../lib/commands";
+import { getConfig, saveConfig } from "../lib/commands";
 import AsyncContent from "../components/AsyncContent";
 import DictionaryEntry from "../components/dictionary/DictionaryEntry";
 import AddEntryForm from "../components/dictionary/AddEntryForm";
@@ -22,14 +22,32 @@ function DictionaryPage() {
     generating,
   } = usePendingSuggestions();
   const [threshold, setThreshold] = useState(3);
+  const [learningMode, setLearningMode] = useState("auto");
   const [generateStatus, setGenerateStatus] = useState<string | null>(null);
 
-  // Load learning threshold from config
+  // Load learning settings from config
   useEffect(() => {
     getConfig().then((config) => {
       setThreshold(config.dictionary.learning_threshold);
+      setLearningMode(config.dictionary.learning_mode);
     });
   }, []);
+
+  // Persist the learning mode. Optimistically updates local state, then writes
+  // the single nested field back through the full-config save command (the only
+  // way the backend persists config). Takes effect on the next tracker command.
+  const handleLearningModeChange = async (mode: string) => {
+    setLearningMode(mode);
+    try {
+      const config = await getConfig();
+      config.dictionary.learning_mode = mode;
+      await saveConfig(config);
+    } catch {
+      // Revert on failure so the control reflects the persisted value.
+      const config = await getConfig().catch(() => null);
+      if (config) setLearningMode(config.dictionary.learning_mode);
+    }
+  };
 
   // Reload dictionary after approving suggestions
   const handleApprove = async (id: number) => {
@@ -81,6 +99,24 @@ function DictionaryPage() {
         onGenerateFromHistory={handleGenerateFromHistory}
         generating={generating}
       />
+
+      <div className="card dictionary-learning-card">
+        <label className="dictionary-learning-label" htmlFor="learning-mode-select">
+          {t("dictionary.learningMode")}
+        </label>
+        <select
+          id="learning-mode-select"
+          className="dictionary-learning-select"
+          data-testid="learning-mode-select"
+          value={learningMode}
+          onChange={(e) => handleLearningModeChange(e.target.value)}
+        >
+          <option value="auto">{t("dictionary.learningModeAuto")}</option>
+          <option value="pending">{t("dictionary.learningModePending")}</option>
+          <option value="disabled">{t("dictionary.learningModeDisabled")}</option>
+        </select>
+        <p className="dictionary-learning-hint">{t("dictionary.learningModeHint")}</p>
+      </div>
 
       <div className="card dictionary-add-card">
         <h3 className="dictionary-add-title">{t("dictionary.addNewEntry")}</h3>

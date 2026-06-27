@@ -12,6 +12,36 @@
   margin-bottom: var(--spacing-md);
 }
 
+/* Learning mode control */
+.dictionary-learning-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.dictionary-learning-label {
+  font-size: var(--font-md);
+  font-weight: bold;
+}
+
+.dictionary-learning-select {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: var(--font-md);
+}
+
+.dictionary-learning-hint {
+  font-size: var(--font-xs);
+  color: var(--fg-muted);
+  margin: 0;
+}
+
 .dictionary-add-title {
   font-size: var(--font-md);
   font-weight: bold;

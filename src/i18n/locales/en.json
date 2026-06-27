@@ -222,7 +222,12 @@
     "seenCount": "Seen {{count}} time(s)",
     "progressPercent": "{{percent}}% to auto-add",
     "generateResult": "Scanned {{processed}} entries · {{recorded}} new suggestions, {{promoted}} added to dictionary, {{skipped}} skipped",
-    "approvedGoBelow": "Approved suggestions are added to the dictionary below."
+    "approvedGoBelow": "Approved suggestions are added to the dictionary below.",
+    "learningMode": "Learning mode",
+    "learningModeAuto": "Automatic",
+    "learningModePending": "Review first (I approve)",
+    "learningModeDisabled": "Off",
+    "learningModeHint": "Automatic adds a word once it's been seen enough times. Review first keeps suggestions in the list until you approve them."
   },
   "permissions": {
     "openSettings": "[Open Settings]",

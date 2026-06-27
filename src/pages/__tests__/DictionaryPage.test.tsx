@@ -290,6 +290,48 @@ describe("DictionaryPage", () => {
     });
   });
 
+  it("renders the learning-mode select with all three options", async () => {
+    render(<DictionaryPage />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    });
+
+    const select = screen.getByTestId("learning-mode-select");
+    const options = Array.from(select.querySelectorAll("option")).map(
+      (o) => o.getAttribute("value")
+    );
+    expect(options).toEqual(["auto", "pending", "disabled"]);
+  });
+
+  it("reflects the configured learning mode on load", async () => {
+    // mockConfig.dictionary.learning_mode is "disabled"
+    render(<DictionaryPage />);
+
+    await waitFor(() => {
+      const select = screen.getByTestId("learning-mode-select") as HTMLSelectElement;
+      expect(select.value).toBe("disabled");
+    });
+  });
+
+  it("persists the learning mode on change via saveConfig", async () => {
+    render(<DictionaryPage />);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    });
+
+    const select = screen.getByTestId("learning-mode-select");
+    fireEvent.change(select, { target: { value: "pending" } });
+
+    await waitFor(() => {
+      const saveCall = mockInvoke.mock.calls.find((c) => c[0] === "save_config");
+      expect(saveCall).toBeDefined();
+      expect(saveCall![1].config.dictionary.learning_mode).toBe("pending");
+    });
+    expect((select as HTMLSelectElement).value).toBe("pending");
+  });
+
   it("cancels edit mode when cancel is clicked", async () => {
     render(<DictionaryPage />);
 
