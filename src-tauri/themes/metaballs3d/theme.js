@@ -132,6 +132,12 @@ vec4 render(vec2 fragCoord) {
   // as "alive" (capped at +25% so it never blows out to white). RGB only, alpha
   // stays 1.0; the miss path above already returns a fully transparent pixel.
   outc *= (1.0 + 0.25 * uLevel);
+  // Reinhard tonemap: the 3-light additive sum drives lit well above 1.0, so a
+  // hard clamp blew the lit core out to a flat milky white. Roll highlights off
+  // smoothly instead so the spherical form + color survive even when loud.
+  // exposure pre-scale keeps midtones close to the old look before compression.
+  outc *= 1.6;
+  outc = outc / (1.0 + outc);
   // gamma-2.2 encode for cleaner gradients
   outc = pow(clamp(outc, 0.0, 1.0), vec3(1.0/2.2));
   return vec4(outc, 1.0);
