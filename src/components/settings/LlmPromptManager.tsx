@@ -152,7 +152,7 @@ export default function LlmPromptManager({
       </div>
 
       {error && (
-        <div role="alert" style={{ color: "#c33" }}>
+        <div role="alert" style={{ color: "var(--error)" }}>
           {error}
         </div>
       )}
@@ -168,7 +168,7 @@ export default function LlmPromptManager({
               gap: 8,
               alignItems: "flex-start",
               padding: "6px 0",
-              borderTop: "1px solid var(--border-color, #333)",
+              borderTop: "1px solid var(--border)",
             }}
           >
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>

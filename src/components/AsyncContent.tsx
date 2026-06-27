@@ -61,7 +61,7 @@ function AsyncContent({
   if (loading) {
     return (
       <div className={containerClassName}>
-        <p style={{ color: "var(--text-secondary)" }}>{loadingText}</p>
+        <p style={{ color: "var(--fg-muted)" }}>{loadingText}</p>
       </div>
     );
   }

@@ -7,6 +7,7 @@
   --fg: #e0e0e0;
   --fg-muted: #808080;
   --accent: #1e90ff;  /* dodger_blue2 */
+  --accent-rgb: 30, 144, 255;  /* matches --accent #1e90ff */
   --recording: #ff8c00;  /* dark_orange */
   --success: #00ff00;  /* green1 */
   --error: #ff0000;  /* red1 */
@@ -96,6 +97,18 @@ button.primary {
 
 button.primary:hover:not(:disabled) {
   filter: brightness(1.1);
+}
+
+button.secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: var(--bg-panel);
+  border-color: var(--accent);
+  color: var(--fg);
 }
 
 button:disabled {

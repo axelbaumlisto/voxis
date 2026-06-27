@@ -134,7 +134,7 @@
 
 .spectrum-bar {
   background: var(--accent);
-  border-radius: 1px;
+  border-radius: var(--radius);
   transition: height 0.05s ease-out;
   min-height: 2px;
 }
