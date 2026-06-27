@@ -7,7 +7,7 @@
  * between recordings has real privacy and battery implications, so the
  * user MUST see them at the point of decision (privacy-by-design).
  */
-import FieldWrapper from "./FieldWrapper";
+import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
 
 export interface AlwaysOnMicrophoneProps {
   label: string;
@@ -25,15 +25,7 @@ export default function AlwaysOnMicrophone({
   return (
     <FieldWrapper label={label} description={description}>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="checkbox"
-            checked={!!value}
-            data-testid="always-on-microphone-toggle"
-            onChange={(e) => onChange(e.target.checked)}
-          />
-          <span>Keep microphone capture warm between recordings</span>
-        </label>
+        <AlwaysOnMicCheckbox label={label} value={value} onChange={onChange} />
         {value && (
           <div
             data-testid="always-on-microphone-warning"
@@ -56,5 +48,31 @@ export default function AlwaysOnMicrophone({
         )}
       </div>
     </FieldWrapper>
+  );
+}
+
+/** Inner control: consumes the FieldWrapper id so the label resolves to it. */
+function AlwaysOnMicCheckbox({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  const controlId = useFieldControlId();
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <input
+        id={controlId}
+        type="checkbox"
+        checked={!!value}
+        data-testid="always-on-microphone-toggle"
+        aria-label={label}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>Keep microphone capture warm between recordings</span>
+    </label>
   );
 }

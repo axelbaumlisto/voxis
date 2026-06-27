@@ -11,6 +11,16 @@ describe("SwitchField", () => {
     expect(screen.getByText("Enable Feature")).toBeInTheDocument();
   });
 
+  it("checkbox has an accessible name (a11y)", () => {
+    render(
+      <SwitchField label="Enable Feature" checked={false} onChange={() => {}} />
+    );
+
+    expect(
+      screen.getByRole("checkbox", { name: "Enable Feature" })
+    ).toBeInTheDocument();
+  });
+
   it("shows checked state correctly", () => {
     render(
       <SwitchField label="Enable Feature" checked={true} onChange={() => {}} />

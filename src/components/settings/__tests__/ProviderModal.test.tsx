@@ -13,6 +13,92 @@ describe("ProviderModal", () => {
     mockOnSave.mockResolvedValue(undefined);
   });
 
+  describe("Accessibility (a11y)", () => {
+    it("renders a dialog with role=dialog and aria-modal", () => {
+      render(
+        <ProviderModal
+          mode="add"
+          onClose={mockOnClose}
+          onSave={mockOnSave}
+          existingIds={existingIds}
+        />
+      );
+
+      const dialog = screen.getByRole("dialog");
+      expect(dialog).toBeInTheDocument();
+      expect(dialog).toHaveAttribute("aria-modal", "true");
+    });
+
+    it("close button has an accessible name", () => {
+      render(
+        <ProviderModal
+          mode="add"
+          onClose={mockOnClose}
+          onSave={mockOnSave}
+          existingIds={existingIds}
+        />
+      );
+
+      expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+    });
+
+    it("focuses the first form field on open", () => {
+      render(
+        <ProviderModal
+          mode="add"
+          onClose={mockOnClose}
+          onSave={mockOnSave}
+          existingIds={existingIds}
+        />
+      );
+
+      const nameInput = screen.getByPlaceholderText("e.g., My Provider");
+      expect(document.activeElement).toBe(nameInput);
+    });
+
+    it("Esc closes the modal", () => {
+      render(
+        <ProviderModal
+          mode="add"
+          onClose={mockOnClose}
+          onSave={mockOnSave}
+          existingIds={existingIds}
+        />
+      );
+
+      const dialog = screen.getByRole("dialog");
+      fireEvent.keyDown(dialog, { key: "Escape" });
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("Esc stops propagation so it does not reach the global handler", () => {
+      const globalHandler = vi.fn();
+      window.addEventListener("keydown", globalHandler);
+
+      render(
+        <ProviderModal
+          mode="add"
+          onClose={mockOnClose}
+          onSave={mockOnSave}
+          existingIds={existingIds}
+        />
+      );
+
+      const dialog = screen.getByRole("dialog");
+      // Dispatch a real bubbling event so stopPropagation is observable.
+      const event = new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+      });
+      dialog.dispatchEvent(event);
+
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
+      expect(globalHandler).not.toHaveBeenCalled();
+
+      window.removeEventListener("keydown", globalHandler);
+    });
+  });
+
   describe("Add Mode", () => {
     it("renders add mode title", () => {
       render(

@@ -11,7 +11,7 @@
  * - DRY: reuses `FieldWrapper` for label + description layout.
  */
 import { useRef } from "react";
-import FieldWrapper from "./FieldWrapper";
+import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
 
 interface OverlayBackendSelectorProps {
   label: string;
@@ -38,15 +38,7 @@ function OverlayBackendSelector({
       description={description}
       className="settings-field-switch"
     >
-      <label className="switch">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => onChange(e.target.checked ? "webview" : "none")}
-          aria-label={label}
-        />
-        <span className="switch-slider" />
-      </label>
+      <OverlayCheckbox label={label} enabled={enabled} onChange={onChange} />
       {showRestartNotice && (
         <p
           className="settings-field-description"
@@ -57,6 +49,31 @@ function OverlayBackendSelector({
         </p>
       )}
     </FieldWrapper>
+  );
+}
+
+/** Inner control: consumes the FieldWrapper id so the label resolves to it. */
+function OverlayCheckbox({
+  label,
+  enabled,
+  onChange,
+}: {
+  label: string;
+  enabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const controlId = useFieldControlId();
+  return (
+    <label className="switch">
+      <input
+        id={controlId}
+        type="checkbox"
+        checked={enabled}
+        onChange={(e) => onChange(e.target.checked ? "webview" : "none")}
+        aria-label={label}
+      />
+      <span className="switch-slider" />
+    </label>
   );
 }
 

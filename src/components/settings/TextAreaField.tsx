@@ -1,4 +1,4 @@
-import FieldWrapper from "./FieldWrapper";
+import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
 
 interface TextAreaFieldProps {
   label: string;
@@ -7,6 +7,25 @@ interface TextAreaFieldProps {
   description?: string;
   rows?: number;
   placeholder?: string;
+}
+
+function TextAreaControl({
+  value,
+  onChange,
+  rows,
+  placeholder,
+}: Pick<TextAreaFieldProps, "value" | "onChange" | "rows" | "placeholder">) {
+  const id = useFieldControlId();
+  return (
+    <textarea
+      id={id}
+      className="settings-field-input settings-textarea"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      rows={rows}
+      placeholder={placeholder}
+    />
+  );
 }
 
 function TextAreaField({
@@ -19,10 +38,9 @@ function TextAreaField({
 }: TextAreaFieldProps) {
   return (
     <FieldWrapper label={label} description={description}>
-      <textarea
-        className="settings-field-input settings-textarea"
+      <TextAreaControl
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
         rows={rows}
         placeholder={placeholder}
       />

@@ -69,4 +69,16 @@ describe("ThemeSelect (dropdown)", () => {
     expect(getByText("settings.preview")).toBeInTheDocument();
     expect(getByText("Reload + Preview")).toBeInTheDocument();
   });
+
+  it("FieldWrapper label resolves to the select (no dangling htmlFor)", () => {
+    const { container } = render(
+      <ThemeSelect label="Theme" value="neon" onChange={() => {}} />,
+    );
+    const label = container.querySelector("label.settings-field-label[for]");
+    const forId = label?.getAttribute("for");
+    expect(forId).toBeTruthy();
+    const target = container.querySelector(`#${CSS.escape(forId!)}`);
+    expect(target).not.toBeNull();
+    expect(target?.tagName).toBe("SELECT");
+  });
 });

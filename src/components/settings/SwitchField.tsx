@@ -1,4 +1,4 @@
-import FieldWrapper from "./FieldWrapper";
+import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
 
 interface SwitchFieldProps {
   label: string;
@@ -19,15 +19,28 @@ function SwitchField({
       description={description}
       className="settings-field-switch"
     >
-      <label className="switch">
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={(e) => onChange(e.target.checked)}
-        />
-        <span className="switch-slider" />
-      </label>
+      <SwitchControl label={label} checked={checked} onChange={onChange} />
     </FieldWrapper>
+  );
+}
+
+function SwitchControl({
+  label,
+  checked,
+  onChange,
+}: Pick<SwitchFieldProps, "label" | "checked" | "onChange">) {
+  const id = useFieldControlId();
+  return (
+    <label className="switch">
+      <input
+        id={id}
+        type="checkbox"
+        aria-label={label}
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span className="switch-slider" />
+    </label>
   );
 }
 

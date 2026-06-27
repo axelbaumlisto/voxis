@@ -95,6 +95,29 @@ describe("ProviderSelect", () => {
         expect(urlInput).toHaveAttribute("readonly");
       });
     });
+
+    it("gives provider + model selects an accessible name and no dangling label", async () => {
+      const { container } = render(<ProviderSelect {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("OpenAI")).toBeInTheDocument();
+      });
+
+      // Both selects must be reachable by accessible name (a11y blocker fix).
+      const providerSelect = screen.getByRole("combobox", { name: "LLM Provider" });
+      const modelSelect = screen.getByRole("combobox", { name: "LLM Model" });
+      expect(providerSelect).toBeInTheDocument();
+      expect(modelSelect).toBeInTheDocument();
+
+      // No FieldWrapper label should point at a missing id (no dangling htmlFor).
+      const labels = container.querySelectorAll("label.settings-field-label[for]");
+      expect(labels.length).toBeGreaterThan(0);
+      labels.forEach((label) => {
+        const forId = label.getAttribute("for");
+        expect(forId).toBeTruthy();
+        expect(container.querySelector(`#${CSS.escape(forId!)}`)).not.toBeNull();
+      });
+    });
   });
 
   describe("Provider selection", () => {

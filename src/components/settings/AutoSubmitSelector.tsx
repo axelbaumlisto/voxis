@@ -10,7 +10,7 @@
  * KISS: stateless wrapper over the standard {label, description, value,
  * onChange} contract used by the rest of the custom widgets.
  */
-import FieldWrapper from "./FieldWrapper";
+import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
 
 export interface AutoSubmitSelectorProps {
   label: string;
@@ -42,18 +42,42 @@ export default function AutoSubmitSelector({
 
   return (
     <FieldWrapper label={label} description={description}>
-      <select
-        className="settings-field-input"
-        value={safeValue}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label={label}
-        data-testid="auto-submit-select"
-      >
-        <option value="off">Off (don't submit)</option>
-        <option value="enter">Enter</option>
-        <option value="cmd_enter">{metaLabel}</option>
-        <option value="shift_enter">Shift+Enter</option>
-      </select>
+      <AutoSubmitControl
+        label={label}
+        safeValue={safeValue}
+        metaLabel={metaLabel}
+        onChange={onChange}
+      />
     </FieldWrapper>
+  );
+}
+
+/** Inner control: consumes the FieldWrapper id so the label resolves to it. */
+function AutoSubmitControl({
+  label,
+  safeValue,
+  metaLabel,
+  onChange,
+}: {
+  label: string;
+  safeValue: Value;
+  metaLabel: string;
+  onChange: (value: string) => void;
+}) {
+  const controlId = useFieldControlId();
+  return (
+    <select
+      id={controlId}
+      className="settings-field-input"
+      value={safeValue}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={label}
+      data-testid="auto-submit-select"
+    >
+      <option value="off">Off (don't submit)</option>
+      <option value="enter">Enter</option>
+      <option value="cmd_enter">{metaLabel}</option>
+      <option value="shift_enter">Shift+Enter</option>
+    </select>
   );
 }

@@ -10,6 +10,19 @@ describe("InputField", () => {
     expect(screen.getByRole("textbox")).toBeInTheDocument();
   });
 
+  it("associates the FieldWrapper label with its input (htmlFor === id)", () => {
+    const { container } = render(
+      <InputField label="Username" value="" onChange={() => {}} />
+    );
+
+    const label = container.querySelector(".settings-field-label");
+    const input = screen.getByRole("textbox");
+    const htmlFor = label?.getAttribute("for");
+
+    expect(htmlFor).toBeTruthy();
+    expect(input.getAttribute("id")).toBe(htmlFor);
+  });
+
   it("shows current value", () => {
     render(<InputField label="Username" value="john_doe" onChange={() => {}} />);
 

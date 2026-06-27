@@ -25,6 +25,7 @@ function ProviderActions({
         className="provider-action-btn"
         onClick={onAdd}
         title={t("settings.addProvider")}
+        aria-label={t("settings.addProvider")}
       >
         +
       </button>
@@ -34,6 +35,7 @@ function ProviderActions({
             className="provider-action-btn provider-edit-btn"
             onClick={onEdit}
             title={t("settings.editProvider")}
+            aria-label={t("settings.editProvider")}
           >
             &#9998;
           </button>
@@ -41,6 +43,7 @@ function ProviderActions({
             className="provider-action-btn provider-delete-btn"
             onClick={onRemove}
             title={t("settings.removeProvider")}
+            aria-label={t("settings.removeProvider")}
           >
             x
           </button>
