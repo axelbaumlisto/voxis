@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { HistoryEntry as HistoryEntryType } from "../../lib/commands";
 import HistoryEntry from "./HistoryEntry";
 
@@ -7,13 +8,12 @@ interface HistoryListProps {
 }
 
 function HistoryList({ entries, onCopy }: HistoryListProps) {
+  const { t } = useTranslation();
   if (entries.length === 0) {
     return (
       <div className="history-empty">
-        <p>No transcriptions yet.</p>
-        <p className="empty-hint">
-          Start recording to see your transcriptions here.
-        </p>
+        <p>{t("history.empty")}</p>
+        <p className="empty-hint">{t("history.emptyHint")}</p>
       </div>
     );
   }
