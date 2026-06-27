@@ -1,11 +1,11 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { addDictionaryEntry, deleteDictionaryEntry, getDictionary, updateDictionaryEntry } from "../lib/commands";
 import { useAsyncAction } from "./useAsyncAction";
 import { useResource } from "./useResource";
 
 export function useDictionary() {
   const { data, loading, error, setError, reload } = useResource(getDictionary);
-  const entries = data ?? [];
+  const entries = useMemo(() => data ?? [], [data]);
   const add = useAsyncAction(async (source: string, replacement: string) => addDictionaryEntry(source, replacement), { reload, setError });
   const remove = useAsyncAction(async (id: number) => deleteDictionaryEntry(id), { reload, setError });
   const update = useAsyncAction(async (id: number, source: string, replacement: string) => updateDictionaryEntry(id, source, replacement), { reload, setError });

@@ -1,11 +1,11 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { addLlmProvider, getLlmProviders, removeLlmProvider, updateLlmProvider, type LlmProvider } from "../lib/commands";
 import { useAsyncAction } from "./useAsyncAction";
 import { useResource } from "./useResource";
 
 export function useLlmProviders() {
   const { data, loading, error, setError, reload } = useResource(getLlmProviders);
-  const providers = data ?? [];
+  const providers = useMemo(() => data ?? [], [data]);
   const add = useAsyncAction(async (provider: Omit<LlmProvider, "builtin">) => addLlmProvider(provider), { reload, setError });
   const update = useAsyncAction(async (provider: Omit<LlmProvider, "builtin">) => updateLlmProvider({ ...provider, builtin: false }), { reload, setError });
   const remove = useAsyncAction(async (id: string) => removeLlmProvider(id), { reload, setError });
