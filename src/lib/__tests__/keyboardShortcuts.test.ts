@@ -13,7 +13,7 @@ describe("keyboardShortcuts", () => {
     mockContext = {
       navigate: vi.fn(),
       lastTranscription: null,
-      closeWindow: vi.fn(),
+      hideWindow: vi.fn(),
     };
   });
 
@@ -38,13 +38,13 @@ describe("keyboardShortcuts", () => {
       expect(mockContext.navigate).not.toHaveBeenCalled();
     });
 
-    it("handles Escape key to close window", () => {
+    it("handles Escape key to hide window", () => {
       const event = new KeyboardEvent("keydown", { key: "Escape" });
       Object.defineProperty(event, "target", { value: document.body });
 
       const result = handleShortcut(event, mockContext);
       expect(result).toBe(true);
-      expect(mockContext.closeWindow).toHaveBeenCalled();
+      expect(mockContext.hideWindow).toHaveBeenCalled();
     });
 
     it("handles h key to navigate to history", () => {

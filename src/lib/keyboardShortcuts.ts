@@ -27,7 +27,7 @@ export interface ShortcutAction {
 export interface ShortcutContext {
   navigate: NavigateFunction;
   lastTranscription: string | null;
-  closeWindow: () => void;
+  hideWindow: () => void;
 }
 
 /**
@@ -74,10 +74,10 @@ export const SHORTCUTS: ShortcutAction[] = [
   {
     code: "Escape",
     key: "escape",
-    label: "Quit",
-    labelKey: "nav.quit",
+    label: "Hide",
+    labelKey: "nav.hide",
     keyLabel: "Esc",
-    action: ({ closeWindow }) => closeWindow(),
+    action: ({ hideWindow }) => hideWindow(),
   },
 ];
 

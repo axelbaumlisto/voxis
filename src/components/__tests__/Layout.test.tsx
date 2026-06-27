@@ -36,6 +36,7 @@ vi.mock("../../contexts/RecordingContext", () => ({
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     close: vi.fn(),
+    hide: vi.fn(),
   }),
 }));
 

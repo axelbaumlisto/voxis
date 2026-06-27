@@ -9,10 +9,10 @@ vi.mock("react-router-dom", () => ({
 }));
 
 // Mock tauri window
-const mockClose = vi.fn();
+const mockHide = vi.fn();
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
-    close: mockClose,
+    hide: mockHide,
   }),
 }));
 
@@ -106,14 +106,14 @@ describe("useKeyboardShortcuts", () => {
     expect(mockCopyToClipboard).not.toHaveBeenCalled();
   });
 
-  it("closes window for Escape key", () => {
+  it("hides window for Escape key", () => {
     renderHook(() => useKeyboardShortcuts(null));
     expect(keydownHandler).not.toBeNull();
 
     const event = new KeyboardEvent("keydown", { key: "Escape" });
     keydownHandler!(event);
 
-    expect(mockClose).toHaveBeenCalled();
+    expect(mockHide).toHaveBeenCalled();
   });
 
   it("ignores keypresses from input elements", () => {
@@ -148,7 +148,7 @@ describe("useKeyboardShortcuts", () => {
     keydownHandler!(event);
 
     expect(mockNavigate).not.toHaveBeenCalled();
-    expect(mockClose).not.toHaveBeenCalled();
+    expect(mockHide).not.toHaveBeenCalled();
     expect(mockCopyToClipboard).not.toHaveBeenCalled();
   });
 
