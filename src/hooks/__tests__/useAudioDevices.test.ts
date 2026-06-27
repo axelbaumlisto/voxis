@@ -157,10 +157,8 @@ describe("useAudioDevices", () => {
       // Should still have default option
       expect(result.current.options).toEqual([{ label: "Default", value: "default" }]);
       expect(result.current.devices).toEqual([]);
-      expect(consoleSpy).toHaveBeenCalledWith(
-        "Failed to load audio devices:",
-        expect.any(Error)
-      );
+      // Error is surfaced via state (not console-only) so the UI can render it
+      expect(result.current.error).toBe("Failed to list devices");
 
       consoleSpy.mockRestore();
     });

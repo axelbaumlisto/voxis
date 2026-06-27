@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useProviderSelection } from "../../hooks/useProviderSelection";
 import { LlmProvider } from "../../lib/commands";
 import { validateProviderUrl } from "../../lib/providerValidation";
@@ -27,12 +28,14 @@ function ProviderSelect({
   onProviderChange,
   onModelChange,
 }: ProviderSelectProps) {
+  const { t } = useTranslation();
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingProvider, setEditingProvider] = useState<LlmProvider | null>(null);
 
   const {
     providers,
     loading,
+    error,
     currentProvider,
     models,
     handleProviderChange,
@@ -83,6 +86,16 @@ function ProviderSelect({
             onRemove={() => currentProvider && handleRemoveProvider(currentProvider.id)}
           />
         </div>
+        {error && (
+          <p
+            className="settings-field-error"
+            role="alert"
+            data-testid="provider-error"
+            style={{ color: "var(--error)" }}
+          >
+            {t("settings.removeProviderFailed")}
+          </p>
+        )}
       </FieldWrapper>
 
       {/* Model Select */}

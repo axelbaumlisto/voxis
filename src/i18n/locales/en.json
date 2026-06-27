@@ -70,6 +70,8 @@
     "addProvider": "Add custom provider",
     "editProvider": "Edit provider",
     "removeProvider": "Remove provider",
+    "audioDevicesUnavailable": "Could not list audio devices. Check microphone permission.",
+    "removeProviderFailed": "Failed to remove provider.",
     "addCustomProvider": "Add Custom Provider",
     "editProviderTitle": "Edit Provider",
     "addProviderBtn": "Add Provider",
