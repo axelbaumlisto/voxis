@@ -87,17 +87,34 @@ fn execute_suggestion_action(
 /// batch reprocessing is an explicit user action and uses Groq-specific
 /// endpoint/model regardless of the post-process toggle.
 ///
-/// Returns `None` when the API key is missing or blank.
+/// Returns `None` when no usable API key is available.
+///
+/// Key resolution: prefer the dedicated `llm.api_key`, but fall back to the
+/// top-level transcription `api_key`. Both target the same Groq account
+/// (batch always hits `GROQ_CHAT_URL`), so a user who configured only the
+/// transcription key can still generate suggestions without re-entering it.
 fn build_batch_provider(config: &crate::config::AppConfig) -> Option<Box<dyn LlmProvider>> {
-    if config.llm.api_key.trim().is_empty() {
-        return None;
-    }
+    let api_key = batch_api_key(config)?;
     Some(Box::new(HttpLlmProvider::new(
         format!("{}-batch", config.llm.provider),
         crate::config::GROQ_CHAT_URL.to_string(),
-        config.llm.api_key.clone(),
+        api_key,
         "llama-3.3-70b-versatile".to_string(),
     )))
+}
+
+/// The API key batch reprocessing should use: dedicated LLM key first, else
+/// the top-level transcription key (same Groq account). `None` if both blank.
+fn batch_api_key(config: &crate::config::AppConfig) -> Option<String> {
+    let llm_key = config.llm.api_key.trim();
+    if !llm_key.is_empty() {
+        return Some(llm_key.to_string());
+    }
+    let top_key = config.api_key.trim();
+    if !top_key.is_empty() {
+        return Some(top_key.to_string());
+    }
+    None
 }
 
 /// Send `batch_input` through `provider` with `batch_prompt` and parse the
@@ -250,8 +267,10 @@ pub async fn reprocess_history_for_suggestions(
     let factory = get_factory(&paths);
     let config = factory.config().load().unwrap_or_default();
 
-    if config.llm.api_key.is_empty() {
-        return Err("LLM API key not configured".to_string());
+    if batch_api_key(&config).is_none() {
+        return Err(
+            "No Groq API key configured. Add your API key in Settings.".to_string(),
+        );
     }
 
     let entries = factory.history().load(limit).cmd_err()?;
@@ -426,7 +445,9 @@ mod tests {
 
     #[test]
     fn test_build_batch_provider_returns_none_with_empty_key() {
+        // Both llm.api_key AND top-level api_key blank → no provider.
         let config = crate::config::AppConfig {
+            api_key: String::new(),
             llm: crate::config::LlmConfig {
                 api_key: String::new(),
                 ..crate::config::LlmConfig::default()
@@ -437,8 +458,46 @@ mod tests {
     }
 
     #[test]
-    fn test_build_batch_provider_returns_none_with_whitespace_key() {
+    fn test_build_batch_provider_falls_back_to_transcription_key() {
+        // llm.api_key empty but the top-level transcription key is set: batch
+        // reprocessing should reuse it (same Groq account).
         let config = crate::config::AppConfig {
+            api_key: "gsk_transcription_key".to_string(),
+            llm: crate::config::LlmConfig {
+                api_key: String::new(),
+                ..crate::config::LlmConfig::default()
+            },
+            ..crate::config::AppConfig::default()
+        };
+        assert_eq!(
+            batch_api_key(&config).as_deref(),
+            Some("gsk_transcription_key")
+        );
+        assert!(build_batch_provider(&config).is_some());
+    }
+
+    #[test]
+    fn test_build_batch_provider_prefers_dedicated_llm_key() {
+        // When both are set, the dedicated llm.api_key wins.
+        let config = crate::config::AppConfig {
+            api_key: "gsk_transcription_key".to_string(),
+            llm: crate::config::LlmConfig {
+                api_key: "gsk_dedicated_llm_key".to_string(),
+                ..crate::config::LlmConfig::default()
+            },
+            ..crate::config::AppConfig::default()
+        };
+        assert_eq!(
+            batch_api_key(&config).as_deref(),
+            Some("gsk_dedicated_llm_key")
+        );
+    }
+
+    #[test]
+    fn test_build_batch_provider_returns_none_with_whitespace_key() {
+        // Whitespace-only in BOTH fields → no provider.
+        let config = crate::config::AppConfig {
+            api_key: "   ".to_string(),
             llm: crate::config::LlmConfig {
                 api_key: "   \t  ".to_string(),
                 ..crate::config::LlmConfig::default()
