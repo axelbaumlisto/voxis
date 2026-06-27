@@ -35,6 +35,9 @@
 
 /* Recording state - gradient mode (class added by React) */
 /* Gradient is fixed to container height so color depends on bar height */
+/* P6 EXEMPTION (decision a): opt-in useGradient viz keeps the blue->light height ramp
+   as an intentional palette. NOT recolored to recording-red on purpose — the solid
+   recording bar (.spectrum.recording .spectrum-bar) carries the RED recording signal. */
 .spectrum.recording.gradient .spectrum-bar {
   background: linear-gradient(
     to top,

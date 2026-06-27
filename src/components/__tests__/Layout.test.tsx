@@ -299,12 +299,12 @@ describe("Layout", () => {
       const cssPath = path.resolve(__dirname, "../../styles/index.css");
       const css = fs.readFileSync(cssPath, "utf-8");
 
-      expect(css).toContain("--spectrum-bottom: #1e88e5;");
+      expect(css).toContain("--spectrum-bottom: var(--accent);");
       expect(css).toContain("--spectrum-middle: #42a5f5;");
       expect(css).toContain("--spectrum-top: #64b5f6;");
-      expect(css).toContain("--spectrum-recording: #1e88e5;");
+      expect(css).toContain("--spectrum-recording: var(--error);");
       expect(css).toContain("--spectrum-transcribing: #4caf50;");
-      expect(css).toContain("--spectrum-idle: #1e88e5;");
+      expect(css).toContain("--spectrum-idle: var(--accent);");
     });
   });
 

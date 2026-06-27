@@ -5,20 +5,20 @@
   --bg-surface: #1c1c1c;
   --bg-panel: #252525;
   --fg: #e0e0e0;
-  --fg-muted: #808080;
+  --fg-muted: #9a9a9a;
   --accent: #1e90ff;  /* dodger_blue2 */
   --accent-rgb: 30, 144, 255;  /* matches --accent #1e90ff */
   --recording: #ff8c00;  /* dark_orange */
-  --success: #00ff00;  /* green1 */
+  --success: #4caf50;  /* P6: softened green (was #00ff00 harsh); collapsed with --spectrum-transcribing */
   --error: #ff0000;  /* red1 */
   --warning: #ffa500;
   /* Default theme spectrum vars (static accent — decoupled from overlay themes) */
-  --spectrum-bottom: #1e88e5;
+  --spectrum-bottom: var(--accent); /* P6: two-blues unified to --accent (non-recording solid/gradient-bottom) */
   --spectrum-middle: #42a5f5;
   --spectrum-top: #64b5f6;
-  --spectrum-recording: #1e88e5;
+  --spectrum-recording: var(--error); /* P6: recording = RED (was #1e88e5 blue) */
   --spectrum-transcribing: #4caf50;
-  --spectrum-idle: #1e88e5;
+  --spectrum-idle: var(--accent); /* P6: DEAD token (.spectrum.idle uses --border); set to --accent for consistency */
   --border: #3c3c3c;
 
   /* Type scale */
@@ -277,7 +277,7 @@ textarea:focus-visible {
 }
 
 .waveform.recording .waveform-bar {
-  background: var(--accent);
+  background: var(--error); /* P6: recording = RED (was --accent blue) */
 }
 
 .waveform.silence .waveform-bar {
