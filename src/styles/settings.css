@@ -79,6 +79,30 @@
   color: var(--fg-muted);
 }
 
+/* Paste-shortcut checkboxes: lay each option on its own row with a gap so the
+   checkbox and its label don't run into the next option. */
+.checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-xs);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  margin: 0;
+  flex: none;
+  cursor: pointer;
+}
+
 .settings-field-input {
   width: 100%;
   padding: var(--spacing-xs) var(--spacing-sm);
