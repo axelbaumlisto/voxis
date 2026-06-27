@@ -5,6 +5,8 @@ import { validateProviderUrl } from "../../lib/providerValidation";
 import ProviderModal from "./ProviderModal";
 import ProviderActions from "./ProviderActions";
 import OptionDropdown from "./OptionDropdown";
+import FieldWrapper from "./FieldWrapper";
+import InputField from "./InputField";
 
 interface ProviderSelectProps {
   providerId: string;
@@ -62,10 +64,7 @@ function ProviderSelect({
   return (
     <>
       {/* Provider Select */}
-      <div className="settings-field">
-        <div className="settings-field-header">
-          <label className="settings-field-label">LLM Provider</label>
-        </div>
+      <FieldWrapper label="LLM Provider">
         <div className="provider-select-wrapper">
           <OptionDropdown
             options={providers.map((p) => ({
@@ -84,37 +83,26 @@ function ProviderSelect({
             onRemove={() => currentProvider && handleRemoveProvider(currentProvider.id)}
           />
         </div>
-      </div>
+      </FieldWrapper>
 
       {/* Model Select */}
-      <div className="settings-field">
-        <div className="settings-field-header">
-          <label className="settings-field-label">LLM Model</label>
-        </div>
+      <FieldWrapper label="LLM Model">
         <OptionDropdown
           options={models.map((m) => ({ id: m.id, label: m.name }))}
           selectedId={modelId}
           onChange={onModelChange}
         />
-      </div>
+      </FieldWrapper>
 
       {/* API URL (readonly display) */}
-      <div className="settings-field">
-        <div className="settings-field-header">
-          <label className="settings-field-label">API URL</label>
-          <span className="settings-field-description">
-            Automatically set by provider
-          </span>
-        </div>
-        <input
-          type="text"
-          className="settings-field-input"
-          value={apiUrl}
-          readOnly
-          aria-invalid={!apiUrlIsValid}
-          style={{ opacity: 0.7, cursor: "default" }}
-        />
-      </div>
+      <InputField
+        label="API URL"
+        description="Automatically set by provider"
+        value={apiUrl}
+        onChange={() => {}}
+        readonly
+        ariaInvalid={!apiUrlIsValid}
+      />
 
       {/* Modals */}
       {showAddModal && (

@@ -7,6 +7,8 @@ interface InputFieldProps {
   placeholder?: string;
   description?: string;
   type?: "text" | "number";
+  readonly?: boolean;
+  ariaInvalid?: boolean;
 }
 
 function InputField({
@@ -16,6 +18,8 @@ function InputField({
   placeholder,
   description,
   type = "text",
+  readonly = false,
+  ariaInvalid,
 }: InputFieldProps) {
   return (
     <FieldWrapper label={label} description={description}>
@@ -25,6 +29,9 @@ function InputField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        readOnly={readonly}
+        aria-invalid={ariaInvalid}
+        style={readonly ? { opacity: 0.7, cursor: "default" } : undefined}
       />
     </FieldWrapper>
   );

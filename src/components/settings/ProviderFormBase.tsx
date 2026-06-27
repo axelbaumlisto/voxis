@@ -1,4 +1,7 @@
 import type { ProviderFormMode } from "../../hooks/useProviderForm";
+import InputField from "./InputField";
+import SelectField from "./SelectField";
+import TextAreaField from "./TextAreaField";
 
 interface ProviderModelOption {
   id: string;
@@ -37,73 +40,45 @@ function ProviderFormBase({
 }: ProviderFormBaseProps) {
   return (
     <>
-      <div className="settings-field">
-        <label className="settings-field-label">Name</label>
-        <input
-          type="text"
-          className="settings-field-input"
-          value={name}
-          onChange={(e) => onNameChange(e.target.value)}
-          placeholder="e.g., My Provider"
-        />
-      </div>
+      <InputField
+        label="Name"
+        value={name}
+        onChange={onNameChange}
+        placeholder="e.g., My Provider"
+      />
 
       {mode === "edit" && (
-        <div className="settings-field">
-          <label className="settings-field-label">ID</label>
-          <input
-            type="text"
-            className="settings-field-input"
-            value={providerId ?? ""}
-            readOnly
-            style={{ opacity: 0.7, cursor: "default" }}
-          />
-        </div>
+        <InputField
+          label="ID"
+          value={providerId ?? ""}
+          onChange={() => {}}
+          readonly
+        />
       )}
 
-      <div className="settings-field">
-        <label className="settings-field-label">API URL</label>
-        <input
-          type="text"
-          className="settings-field-input"
-          value={apiUrl}
-          onChange={(e) => onApiUrlChange(e.target.value)}
-          placeholder="https://api.example.com/v1/chat/completions"
-        />
-      </div>
+      <InputField
+        label="API URL"
+        value={apiUrl}
+        onChange={onApiUrlChange}
+        placeholder="https://api.example.com/v1/chat/completions"
+      />
 
-      <div className="settings-field">
-        <div className="settings-field-header">
-          <label className="settings-field-label">Models</label>
-          <span className="settings-field-description">
-            One per line: model-id:Display Name
-          </span>
-        </div>
-        <textarea
-          className="settings-field-input settings-textarea"
-          value={modelsText}
-          onChange={(e) => onModelsTextChange(e.target.value)}
-          placeholder="gpt-4:GPT-4
-gpt-3.5-turbo:GPT-3.5 Turbo"
-          rows={4}
-        />
-      </div>
+      <TextAreaField
+        label="Models"
+        description="One per line: model-id:Display Name"
+        value={modelsText}
+        onChange={onModelsTextChange}
+        placeholder={"gpt-4:GPT-4\ngpt-3.5-turbo:GPT-3.5 Turbo"}
+        rows={4}
+      />
 
       {models.length > 0 && (
-        <div className="settings-field">
-          <label className="settings-field-label">Default Model</label>
-          <select
-            className="settings-field-input"
-            value={defaultModel || models[0]?.id}
-            onChange={(e) => onDefaultModelChange(e.target.value)}
-          >
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SelectField
+          label="Default Model"
+          value={defaultModel || models[0]?.id}
+          onChange={onDefaultModelChange}
+          options={models.map((m) => ({ value: m.id, label: m.name }))}
+        />
       )}
     </>
   );
