@@ -97,6 +97,7 @@
     "audioFeedbackDesc": "Short beeps on recording start, stop, and failure so you know the hotkey registered without looking at the overlay.",
     "overlayBackend": "Overlay",
     "overlayBackendDesc": "Show the on-screen indicator (the animated pill) while recording",
+    "overlayBackendRestart": "Requires restart to take effect.",
     "vadBackend": "Voice Activity Detection",
     "vadBackendDesc": "Filter silence from recordings before transcription",
     "vadOnsetFrames": "Onset (frames)",
