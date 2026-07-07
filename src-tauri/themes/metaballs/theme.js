@@ -41,7 +41,7 @@ function mount(container, api) {
   const cfg = api.params && typeof api.params === "object" ? api.params : {};
   const W = api.size.width;
   const H = api.size.height;
-  const dpr = Math.min(2, Math.max(1, Math.round(globalThis.devicePixelRatio || 1)));
+  const dpr = 2;
   const CW = W * dpr;
   const CH = H * dpr;
   const DEFAULT_PALETTE = ["#ff6a3d", "#ff2d77", "#8a4bff", "#1fb6ff", "#19f0b0"];

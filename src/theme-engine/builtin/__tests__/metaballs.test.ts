@@ -73,8 +73,10 @@ describe("metaballs theme", () => {
     const inst = theme.mount(container, fakeApi());
     const canvas = container.querySelector("canvas") as HTMLCanvasElement;
     expect(canvas).toBeTruthy();
-    expect(canvas.width).toBe(172);
-    expect(canvas.height).toBe(36);
+    // Backing store is always 2x the CSS size (fixed supersampling so the
+    // compositor's 2:1 bilinear downscale acts as an exact box filter).
+    expect(canvas.width).toBe(344);
+    expect(canvas.height).toBe(72);
     inst.unmount();
     expect(container.innerHTML).toBe("");
   });
