@@ -115,12 +115,16 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   const W = api.size.width;
   const H = api.size.height;
 
-  // Render the backing store at the device pixel ratio so a Retina compositor
-  // doesn't bilinearly upscale (the soft/low-res look). Cap at 2, round to int,
-  // guard → 1 when devicePixelRatio is undefined (jsdom). The whole simulation
-  // runs in device pixels: every pixel-space constant below scales by `dpr`. At
-  // dpr=1 every `*dpr` is a multiply-by-1.0 (IEEE identity) → byte-identical.
-  const dpr = Math.min(2, Math.max(1, Math.round((globalThis.devicePixelRatio || 1))));
+  // Render the backing store at EXACTLY 2x the CSS size, regardless of
+  // devicePixelRatio. On non-HiDPI displays (dpr=1) this supersamples: the
+  // compositor's bilinear downscale at exactly 2:1 with aligned grids
+  // degenerates into an exact box filter (every source pixel contributes
+  // once), turning the analytic 1-render-px coverage feather into true 2x2
+  // SSAA at the silhouette. On Retina (dpr=2) it is the native 1:1 backing
+  // store as before. NEVER use odd factors (3x): bilinear skips 5 of every 9
+  // source pixels and the staircase survives. The whole simulation runs in
+  // render pixels: every pixel-space constant below scales by `dpr`.
+  const dpr = 2;
   const CW = W * dpr;
   const CH = H * dpr;
 
