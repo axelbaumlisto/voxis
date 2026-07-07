@@ -285,11 +285,17 @@ function compile(gl: WebGLRenderingContext, type: number, src: string): WebGLSha
 export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   const W = api.size.width;
   const H = api.size.height;
-  const dpr = Math.min(2, Math.max(1, Math.round(globalThis.devicePixelRatio || 1)));
+  // Supersample at a fixed 2x regardless of devicePixelRatio. On non-HiDPI
+  // displays (dpr=1, e.g. a 4K monitor in 1:1 mode) the pill canvas is only
+  // ~320x108 — the in-shader MSAA feather is ~1px and the silhouette shows a
+  // visible pixel staircase. Rendering 2x and letting the compositor downscale
+  // gives real edge anti-aliasing; the canvas is tiny so the cost is trivial.
+  // On Retina (dpr=2) this is the same resolution as before.
+  const renderScale = 2;
 
   const canvas = document.createElement("canvas");
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = W * renderScale;
+  canvas.height = H * renderScale;
   canvas.style.width = "100%";
   canvas.style.height = "100%";
   canvas.style.display = "block";

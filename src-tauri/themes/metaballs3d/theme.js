@@ -262,10 +262,10 @@ function compile(gl, type, src) {
 function mount(container, api) {
   const W = api.size.width;
   const H = api.size.height;
-  const dpr = Math.min(2, Math.max(1, Math.round(globalThis.devicePixelRatio || 1)));
+  const renderScale = 2;
   const canvas = document.createElement("canvas");
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = W * renderScale;
+  canvas.height = H * renderScale;
   canvas.style.width = "100%";
   canvas.style.height = "100%";
   canvas.style.display = "block";
