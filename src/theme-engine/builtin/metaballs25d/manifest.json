@@ -1,0 +1,15 @@
+{
+  "manifest_version": 2,
+  "id": "metaballs25d",
+  "name": "Metaballs 2.5D",
+  "description": "The 3D metaballs look on the 2D field engine — per-lobe colors, gooey fusion, analytic pixel-perfect edges (no WebGL).",
+  "api_version": 1,
+  "overlay_width": 120,
+  "overlay_height": 120,
+  "entry": "theme.js",
+  "params": {
+    "blobCount": 4,
+    "colors": ["#e63333", "#1a1ae6", "#33e633", "#e6e60d"],
+    "threshold": 1.0
+  }
+}
