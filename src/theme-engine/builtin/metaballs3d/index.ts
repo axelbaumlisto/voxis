@@ -131,7 +131,9 @@ vec4 render(vec2 fragCoord) {
   // the feather stays ~1.5 screen pixels at any size.
   float edgeAlpha = 1.0;
   if (!hit) {
-    float edgeW = length(minPos) * uZoom * 1.5 / uResolution.y;
+    // 3.0 render-px feather: at renderScale=3 the compositor downscale turns
+    // this into ~1 screen pixel — soft edge without looking blurry.
+    float edgeW = length(minPos) * uZoom * 3.0 / uResolution.y;
     if (minD > edgeW) return vec4(0.0, 0.0, 0.0, 0.0); // truly outside
     edgeAlpha = 1.0 - smoothstep(0.0, edgeW, minD);
     // Project the closest-approach point ONTO the surface along the field
@@ -291,7 +293,7 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   // visible pixel staircase. Rendering 2x and letting the compositor downscale
   // gives real edge anti-aliasing; the canvas is tiny so the cost is trivial.
   // On Retina (dpr=2) this is the same resolution as before.
-  const renderScale = 2;
+  const renderScale = 3;
 
   const canvas = document.createElement("canvas");
   canvas.width = W * renderScale;
