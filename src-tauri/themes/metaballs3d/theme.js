@@ -36,6 +36,16 @@ float smin(float a, float b, float blendRadius) {
   return mix(b, a, c) - blendRadius * c * (1.0 - c);
 }
 
+// combined gooey field — single source of truth for the surface (marching loop,
+// rim gradient and rim projection all sample this same function)
+float fieldAt(vec3 p, float rad, vec3 c1, vec3 c2, vec3 c3, vec3 c4) {
+  return smin(smin(smin(
+      sphereImplicit(p, rad, c1),
+      sphereImplicit(p, rad, c2), 1.3),
+      sphereImplicit(p, rad, c3), 1.2),
+      sphereImplicit(p, rad, c4), 1.25);
+}
+
 // Renders one ray for a given pixel coordinate. Returns straight-alpha RGBA:
 // vec4(0) outside the silhouette (transparent), vec4(rgb,1) on a surface hit.
 // Called 4x by main() with jittered offsets for edge anti-aliasing (MSAA).
@@ -68,13 +78,16 @@ vec4 render(vec2 fragCoord) {
   vec3 color  = vec3(0.0);
   vec3 normal = vec3(0.0, 1.0, 0.0);
   bool hit = false;
+  // Track the closest approach to the surface. Near-misses get a partial,
+  // continuous coverage alpha instead of a binary miss — this kills the
+  // frame-to-frame edge flicker (rays at grazing angles used to pop between
+  // hit and miss) and feathers the silhouette naturally.
+  float minD = 1e9;
+  vec3  minPos = iterPos;
 
   for (int i = 0; i < MAX_ITERS; i++) {
-    float d = smin(smin(smin(
-                  sphereImplicit(iterPos, rad, c1),
-                  sphereImplicit(iterPos, rad, c2), 1.3),
-                  sphereImplicit(iterPos, rad, c3), 1.2),
-                  sphereImplicit(iterPos, rad, c4), 1.25);
+    float d = fieldAt(iterPos, rad, c1, c2, c3, c4);
+    if (d < minD) { minD = d; minPos = iterPos; }
     if (d < EPSILON) {
       // field-weighted blend of per-sphere normals + colors (gooey surface)
       float d1 = abs(1.0/(EPSILON + sphereImplicit(iterPos, rad, c1)));
@@ -97,7 +110,37 @@ vec4 render(vec2 fragCoord) {
     iterPos += d * rayDir;
   }
 
-  if (!hit) return vec4(0.0, 0.0, 0.0, 0.0); // transparent bg
+  // Soft silhouette: a near-miss within ~1.5px of the surface contributes a
+  // feathered, continuous alpha (shaded at the closest-approach point) instead
+  // of a hard transparent cutoff. edgeW scales with distance and resolution so
+  // the feather stays ~1.5 screen pixels at any size.
+  float edgeAlpha = 1.0;
+  if (!hit) {
+    float edgeW = length(minPos) * uZoom * 1.5 / uResolution.y;
+    if (minD > edgeW) return vec4(0.0, 0.0, 0.0, 0.0); // truly outside
+    edgeAlpha = 1.0 - smoothstep(0.0, edgeW, minD);
+    // Project the closest-approach point ONTO the surface along the field
+    // gradient and shade THERE. Shading at raw minPos (off-surface) made the
+    // rim color weights jump frame-to-frame (перелив дёргался): minPos slides
+    // along the ray as the lobes move. The projected surface point matches the
+    // color an adjacent hitting ray produces, so the rim blends seamlessly.
+    vec2 e = vec2(0.02, -0.02);
+    vec3 grad = normalize(
+        e.xyy * fieldAt(minPos + e.xyy, rad, c1, c2, c3, c4) +
+        e.yyx * fieldAt(minPos + e.yyx, rad, c1, c2, c3, c4) +
+        e.yxy * fieldAt(minPos + e.yxy, rad, c1, c2, c3, c4) +
+        e.xxx * fieldAt(minPos + e.xxx, rad, c1, c2, c3, c4));
+    iterPos = minPos - grad * minD;
+    float d1 = abs(1.0/(EPSILON + sphereImplicit(iterPos, rad, c1)));
+    float d2 = abs(1.0/(EPSILON + sphereImplicit(iterPos, rad, c2)));
+    float d3 = abs(1.0/(EPSILON + sphereImplicit(iterPos, rad, c3)));
+    float d4 = abs(1.0/(EPSILON + sphereImplicit(iterPos, rad, c4)));
+    float s = d1 + d2 + d3 + d4;
+    float i1 = d1/s, i2 = d2/s, i3 = d3/s, i4 = d4/s;
+    normal = normalize(i1*normalize(iterPos - c1) + i2*normalize(iterPos - c2)
+                     + i3*normalize(iterPos - c3) + i4*normalize(iterPos - c4));
+    color  = i1*uCol1 + i2*uCol2 + i3*uCol3 + i4*uCol4;
+  }
 
   // error mode -> saturated red surface
   if (uColorMode > 0.5) color = vec3(0.9, 0.08, 0.08);
@@ -116,8 +159,11 @@ vec4 render(vec2 fragCoord) {
   vec3 h3 = normalize(l3 + v);
   float spec = (8.0 * uShine) / (8.0 * 3.14159265);
 
-  // diffuse clamped (no negative light leaking) + Blinn specular per light
-  vec3 lit = lightCol * (
+  // diffuse clamped (no negative light leaking) + Blinn specular per light.
+  // The 0.30 ambient floor keeps grazing-angle pixels colored — without it the
+  // silhouette rim went almost black (diffuse ~ 0 at the edge), reading as an
+  // unnatural dark outline around the blob.
+  vec3 lit = vec3(0.30) + lightCol * (
       max(dot(normal, l1), 0.0) + uSpecW*spec*pow(max(dot(normal, h1), 0.0), uShine) +
       max(dot(normal, l2), 0.0) + uSpecW*spec*pow(max(dot(normal, h2), 0.0), uShine) +
       max(dot(normal, l3), 0.0) + uSpecW*spec*pow(max(dot(normal, h3), 0.0), uShine)
@@ -147,23 +193,25 @@ vec4 render(vec2 fragCoord) {
   outc = clamp(lum2 + (outc - lum2) * 1.25, 0.0, 1.0);
   // gamma-2.2 encode for cleaner gradients
   outc = pow(clamp(outc, 0.0, 1.0), vec3(1.0/2.2));
-  return vec4(outc, 1.0);
+  return vec4(outc, edgeAlpha);
 }
 
 void main() {
   // 4x MSAA: average straight-alpha RGBA over a rotated-grid of sub-pixel rays.
   // This anti-aliases both the outer silhouette (alpha feathers over ~1px) and
   // the color at the rim. Interior stays alpha=1, well-outside stays alpha=0.
-  vec4 acc = vec4(0.0);
-  acc += render(gl_FragCoord.xy + vec2(-0.125, -0.375));
-  acc += render(gl_FragCoord.xy + vec2( 0.375, -0.125));
-  acc += render(gl_FragCoord.xy + vec2(-0.375,  0.125));
-  acc += render(gl_FragCoord.xy + vec2( 0.125,  0.375));
-  acc *= 0.25;
-  // un-premultiply: averaged rgb is coverage-weighted, but the context is
-  // premultipliedAlpha:false, so divide back out to straight alpha.
-  if (acc.a > 0.0) acc.rgb /= acc.a;
-  gl_FragColor = acc;
+  // Accumulate PREMULTIPLIED (rgb*a) then divide by total alpha. Averaging
+  // straight-alpha rgb and dividing by mean alpha over-brightens partial-alpha
+  // rim samples (rgb/0.5 = 2x brightness -> white halo around the silhouette).
+  vec3  rgbAcc = vec3(0.0);
+  float aAcc   = 0.0;
+  vec4 s;
+  s = render(gl_FragCoord.xy + vec2(-0.125, -0.375)); rgbAcc += s.rgb * s.a; aAcc += s.a;
+  s = render(gl_FragCoord.xy + vec2( 0.375, -0.125)); rgbAcc += s.rgb * s.a; aAcc += s.a;
+  s = render(gl_FragCoord.xy + vec2(-0.375,  0.125)); rgbAcc += s.rgb * s.a; aAcc += s.a;
+  s = render(gl_FragCoord.xy + vec2( 0.125,  0.375)); rgbAcc += s.rgb * s.a; aAcc += s.a;
+  vec3 outRgb = (aAcc > 0.0) ? rgbAcc / aAcc : vec3(0.0);
+  gl_FragColor = vec4(outRgb, aAcc * 0.25);
 }
 `;
 var DEFAULT_COLORS = [
