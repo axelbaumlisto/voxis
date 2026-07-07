@@ -11,6 +11,7 @@
  * - DRY: reuses `FieldWrapper` for label + description layout.
  */
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
 
 interface OverlayBackendSelectorProps {
@@ -26,6 +27,7 @@ function OverlayBackendSelector({
   value,
   onChange,
 }: OverlayBackendSelectorProps) {
+  const { t } = useTranslation();
   // Capture the value the field mounted with so we can show "requires restart"
   // only when the user actually diverges from it.
   const initialValueRef = useRef(value);
@@ -45,7 +47,7 @@ function OverlayBackendSelector({
           data-testid="overlay-backend-restart-notice"
           role="status"
         >
-          Requires restart to take effect.
+          {t("settings.overlayBackendRestart")}
         </p>
       )}
     </FieldWrapper>
