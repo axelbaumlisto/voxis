@@ -131,9 +131,9 @@ vec4 render(vec2 fragCoord) {
   // the feather stays ~1.5 screen pixels at any size.
   float edgeAlpha = 1.0;
   if (!hit) {
-    // 3.0 render-px feather: at renderScale=3 the compositor downscale turns
-    // this into ~1 screen pixel — soft edge without looking blurry.
-    float edgeW = length(minPos) * uZoom * 3.0 / uResolution.y;
+    // 2.0 render-px feather: at renderScale=2 the compositor's exact box
+    // downscale turns this into ~1 screen pixel — soft edge, not blurry.
+    float edgeW = length(minPos) * uZoom * 2.0 / uResolution.y;
     if (minD > edgeW) return vec4(0.0, 0.0, 0.0, 0.0); // truly outside
     edgeAlpha = 1.0 - smoothstep(0.0, edgeW, minD);
     // Project the closest-approach point ONTO the surface along the field
@@ -217,9 +217,10 @@ void main() {
   // 4x MSAA: average straight-alpha RGBA over a rotated-grid of sub-pixel rays.
   // This anti-aliases both the outer silhouette (alpha feathers over ~1px) and
   // the color at the rim. Interior stays alpha=1, well-outside stays alpha=0.
-  // Accumulate PREMULTIPLIED (rgb*a) then divide by total alpha. Averaging
-  // straight-alpha rgb and dividing by mean alpha over-brightens partial-alpha
-  // rim samples (rgb/0.5 = 2x brightness -> white halo around the silhouette).
+  // Accumulate PREMULTIPLIED (rgb*a) and OUTPUT premultiplied: the context is
+  // created with premultipliedAlpha:true, so the compositor filters/blends
+  // this buffer correctly (straight alpha fringes at edges — RGB would be
+  // interpolated independently of A during the layer downscale).
   vec3  rgbAcc = vec3(0.0);
   float aAcc   = 0.0;
   vec4 s;
@@ -227,8 +228,7 @@ void main() {
   s = render(gl_FragCoord.xy + vec2( 0.375, -0.125)); rgbAcc += s.rgb * s.a; aAcc += s.a;
   s = render(gl_FragCoord.xy + vec2(-0.375,  0.125)); rgbAcc += s.rgb * s.a; aAcc += s.a;
   s = render(gl_FragCoord.xy + vec2( 0.125,  0.375)); rgbAcc += s.rgb * s.a; aAcc += s.a;
-  vec3 outRgb = (aAcc > 0.0) ? rgbAcc / aAcc : vec3(0.0);
-  gl_FragColor = vec4(outRgb, aAcc * 0.25);
+  gl_FragColor = vec4(rgbAcc * 0.25, aAcc * 0.25);
 }
 `;
 
@@ -293,7 +293,12 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   // visible pixel staircase. Rendering 2x and letting the compositor downscale
   // gives real edge anti-aliasing; the canvas is tiny so the cost is trivial.
   // On Retina (dpr=2) this is the same resolution as before.
-  const renderScale = 3;
+  // EXACTLY 2x: the compositor downscales the canvas layer with plain bilinear
+  // (2x2 taps). At 2:1 with aligned grids bilinear degenerates into an exact
+  // box filter (every source pixel contributes once) — clean AA. At 3:1 it
+  // SKIPS 5 of every 9 supersampled pixels and the staircase survives.
+  // Ref: bartwronski.com bilinear down/upsampling; KhronosGroup/WebGL#3360.
+  const renderScale = 2;
 
   const canvas = document.createElement("canvas");
   canvas.width = W * renderScale;
@@ -312,7 +317,11 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     return { unmount() {} };
   }
 
-  const gl = canvas.getContext("webgl", { premultipliedAlpha: false, alpha: true }) as
+  // premultipliedAlpha:true + shader outputs premultiplied rgb: filtering and
+  // compositing only commute under premultiplied alpha (IQ “premultiplied
+  // alpha” article) — straight alpha gets RGB interpolated independently of A
+  // during the compositor's downscale/blend, fringing the silhouette.
+  const gl = canvas.getContext("webgl", { premultipliedAlpha: true, alpha: true }) as
     | WebGLRenderingContext
     | null;
   if (!gl) {
