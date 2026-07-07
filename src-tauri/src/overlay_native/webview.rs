@@ -383,7 +383,23 @@ pub(crate) fn compute_position_for(
     let mh = (phys_size.height as f64 / scale) as i32;
     let (local_x, local_y) =
         position.calculate(mw, mh, w as i32, h as i32, margin);
-    (mx + local_x as f64, my + local_y as f64)
+
+    // Clamp to the FULL monitor bounds (not the work area): a negative margin
+    // deliberately pushes the overlay past the work area (over the Dock /
+    // taskbar zone), which is fine — but it must never slide off the physical
+    // screen. With margin=-30 and BottomCenter the pill bottom lands exactly
+    // on the screen's bottom edge instead of 30px below it (clipped).
+    let full_pos = monitor.position();
+    let full_size = monitor.size();
+    let fx = full_pos.x as f64 / scale;
+    let fy = full_pos.y as f64 / scale;
+    let fw = (full_size.width as f64 / scale) as i32;
+    let fh = (full_size.height as f64 / scale) as i32;
+    let x = (mx + local_x as f64)
+        .clamp(fx, fx + (fw - w as i32).max(0) as f64);
+    let y = (my + local_y as f64)
+        .clamp(fy, fy + (fh - h as i32).max(0) as f64);
+    (x, y)
 }
 
 /// Apply a theme-declared overlay size to the OS window, bottom-anchored.
