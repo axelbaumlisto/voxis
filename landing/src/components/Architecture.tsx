@@ -5,6 +5,7 @@ import { motion, useScroll, useTransform, useMotionValueEvent, AnimatePresence }
 import { Mic, Zap, Brain, Keyboard, Terminal, Cpu } from "lucide-react";
 import type { Step, IconKey } from "../data/architecture";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import SectionHeading from "./ui/SectionHeading";
 
 interface ArchitectureProps {
   steps: Step[];
@@ -160,10 +161,20 @@ function BoardLayer({
   );
 }
 
-export default function Architecture({ steps }: ArchitectureProps) {
-  const containerRef = useRef(null);
+/**
+ * Desktop-only fly-through. Mounted only when the viewport is >= 768px, so its
+ * Framer Motion hooks (useScroll / useMotionValueEvent / per-layer useTransform)
+ * never run on mobile. Receives the SAME containerRef the parent puts on the
+ * <section>, so the useScroll math is identical to the previous inline version.
+ */
+function ArchitectureDesktop({
+  containerRef,
+  steps,
+}: {
+  containerRef: React.RefObject<HTMLElement | null>;
+  steps: Step[];
+}) {
   const [active, setActive] = useState(0);
-  const isDesktop = useMediaQuery("(min-width: 768px)");
 
   const { scrollYProgress } = useScroll({
     target: containerRef,
@@ -178,13 +189,107 @@ export default function Architecture({ steps }: ArchitectureProps) {
   });
 
   return (
+    <div className="hidden md:flex sticky top-0 h-screen w-full flex-row items-center justify-center overflow-hidden px-10 lg:px-20 bg-gradient-to-b from-[var(--color-surface-2)] to-[var(--color-surface)]">
+      {/* Bridge heading — links the centered hero to the left-anchored layers */}
+      <SectionHeading
+        eyebrow="// SYSTEM ARCHITECTURE"
+        eyebrowColor="var(--color-muted)"
+        title="Under the hood"
+        size="sm"
+        gradient
+        className="absolute top-[max(6vh,var(--space-2xl))] left-1/2 -translate-x-1/2 z-40 text-center pointer-events-none [&>div:first-child]:mb-2 lg:[&>h2]:text-4xl"
+      />
+
+      {/* Left Side: Info Glass */}
+      <div className="w-1/2 flex items-center justify-center z-30 h-full">
+        <div className="w-full max-w-[var(--container-card)] relative">
+          <AnimatePresence mode="wait">
+            {steps.map(
+              (step, i) =>
+                i === active && (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, x: -30, filter: "blur(10px)" }}
+                    animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
+                    exit={{ opacity: 0, x: -30, filter: "blur(10px)" }}
+                    transition={{ duration: 0.3 }}
+                    className={`glass-card glass-card-max ${step.glow.replace("shadow-", "shadow-2xl shadow-")}`}
+                  >
+                    <div className="p-10 relative">
+                      <div className="absolute inset-0 pcb-grid opacity-5"></div>
+                      <div className="relative z-10">
+                        <div className="flex items-center gap-4 mb-6">
+                          <div className={`glass-tile p-4 ${step.iconColor}`}>
+                            {IconMap[step.iconName] &&
+                              (() => {
+                                const I = IconMap[step.iconName];
+                                return <I className="w-8 h-8" />;
+                              })()}
+                          </div>
+                          <div>
+                            <div className="pill mb-1" style={{ color: step.hex }}>
+                              {step.subtitle}
+                            </div>
+                            <h3 className="text-4xl font-extrabold text-white">{step.title}</h3>
+                          </div>
+                        </div>
+
+                        <p className="text-[var(--color-foreground)] text-lg leading-relaxed font-light mb-6">
+                          {step.desc}
+                        </p>
+
+                        <div className={`w-full pill-code ${step.iconColor}`} style={{ fontFamily: "var(--font-mono)" }}>
+                          <span>{step.className}</span>
+                          <span className="text-zinc-600 text-xs">{step.filePath}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      {/* Right Side: The Exploding 3D Chip Stack (pure depth-sorted, no z-index) */}
+      <div className="w-1/2 h-full flex items-center justify-center perspective-[2500px] z-10">
+        <motion.div
+          className="relative w-[500px] h-[500px]"
+          style={{
+            transform: "rotateX(60deg) rotateZ(-45deg)",
+            transformStyle: "preserve-3d",
+          }}
+        >
+          {steps.map((step, i) => (
+            <BoardLayer
+              key={i}
+              step={step}
+              index={i}
+              scrollYProgress={scrollYProgress}
+              active={active}
+              stepCount={steps.length}
+            />
+          ))}
+        </motion.div>
+      </div>
+    </div>
+  );
+}
+
+export default function Architecture({ steps }: ArchitectureProps) {
+  const containerRef = useRef<HTMLElement>(null);
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+
+  return (
     <section id="architecture" ref={containerRef} className="section-pinned relative bg-black md:h-[600vh]">
       {/* --- MOBILE VIEW: Bento Stack --- */}
       <div className="md:hidden flex flex-col items-center justify-center px-[var(--space-md)] py-[var(--space-2xl)] gap-[var(--space-lg)]">
-        <div className="text-center mb-[var(--space-lg)]">
-          <h2 className="text-4xl font-extrabold text-white">System Layers</h2>
-          <p className="text-[var(--color-muted)] mt-2">SOLID Rust Architecture</p>
-        </div>
+        <SectionHeading
+          title="System Layers"
+          description="SOLID Rust Architecture"
+          size="md"
+          className="mb-[var(--space-lg)] [&>p]:mt-2 [&>p]:font-normal"
+        />
         {steps.map((step, i) => {
           const Icon = IconMap[step.iconName];
           return (
@@ -215,88 +320,7 @@ export default function Architecture({ steps }: ArchitectureProps) {
       </div>
 
       {/* --- DESKTOP VIEW: Exploding Multi-Layer Chip Fly-Through --- */}
-      {isDesktop && (
-        <div className="hidden md:flex sticky top-0 h-screen w-full flex-row items-center justify-center overflow-hidden px-10 lg:px-20 bg-gradient-to-b from-[var(--color-surface-2)] to-[var(--color-surface)]">
-        {/* Bridge heading — links the centered hero to the left-anchored layers */}
-        <div className="absolute top-[max(6vh,var(--space-2xl))] left-1/2 -translate-x-1/2 z-40 text-center pointer-events-none">
-          <div className="pill text-[var(--color-muted)] mb-2">{"// SYSTEM ARCHITECTURE"}</div>
-          <h2 className="text-3xl lg:text-4xl font-extrabold text-gradient">Under the hood</h2>
-        </div>
-
-        {/* Left Side: Info Glass */}
-        <div className="w-1/2 flex items-center justify-center z-30 h-full">
-          <div className="w-full max-w-[var(--container-card)] relative">
-            <AnimatePresence mode="wait">
-              {steps.map(
-                (step, i) =>
-                  i === active && (
-                    <motion.div
-                      key={i}
-                      initial={{ opacity: 0, x: -30, filter: "blur(10px)" }}
-                      animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
-                      exit={{ opacity: 0, x: -30, filter: "blur(10px)" }}
-                      transition={{ duration: 0.3 }}
-                      className={`glass-card glass-card-max ${step.glow.replace("shadow-", "shadow-2xl shadow-")}`}
-                    >
-                      <div className="p-10 relative">
-                        <div className="absolute inset-0 pcb-grid opacity-5"></div>
-                        <div className="relative z-10">
-                          <div className="flex items-center gap-4 mb-6">
-                            <div className={`glass-tile p-4 ${step.iconColor}`}>
-                              {IconMap[step.iconName] &&
-                                (() => {
-                                  const I = IconMap[step.iconName];
-                                  return <I className="w-8 h-8" />;
-                                })()}
-                            </div>
-                            <div>
-                              <div className="pill mb-1" style={{ color: step.hex }}>
-                                {step.subtitle}
-                              </div>
-                              <h3 className="text-4xl font-extrabold text-white">{step.title}</h3>
-                            </div>
-                          </div>
-
-                          <p className="text-[var(--color-foreground)] text-lg leading-relaxed font-light mb-6">
-                            {step.desc}
-                          </p>
-
-                          <div className={`w-full pill-code ${step.iconColor}`} style={{ fontFamily: "var(--font-mono)" }}>
-                            <span>{step.className}</span>
-                            <span className="text-zinc-600 text-xs">{step.filePath}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
-
-        {/* Right Side: The Exploding 3D Chip Stack (pure depth-sorted, no z-index) */}
-        <div className="w-1/2 h-full flex items-center justify-center perspective-[2500px] z-10">
-          <motion.div
-            className="relative w-[500px] h-[500px]"
-            style={{
-              transform: "rotateX(60deg) rotateZ(-45deg)",
-              transformStyle: "preserve-3d",
-            }}
-          >
-            {steps.map((step, i) => (
-              <BoardLayer
-                key={i}
-                step={step}
-                index={i}
-                scrollYProgress={scrollYProgress}
-                active={active}
-                stepCount={steps.length}
-              />
-            ))}
-          </motion.div>
-        </div>
-      </div>
-      )}
+      {isDesktop && <ArchitectureDesktop containerRef={containerRef} steps={steps} />}
     </section>
   );
 }
