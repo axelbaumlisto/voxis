@@ -75,6 +75,8 @@ test.describe("FFT Spectrum Analyzer", () => {
               return [
                 { id: "winamp_classic", name: "Winamp Classic", description: "Fire spectrum" },
               ];
+            case "is_first_run":
+              return false;
             default:
               return null;
           }

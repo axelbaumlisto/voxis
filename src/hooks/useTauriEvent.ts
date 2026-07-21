@@ -34,6 +34,9 @@ export function useTauriEvent<T>(
     let unlisten: UnlistenFn | null = null;
 
     const setupListener = async () => {
+      if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.transformCallback !== "function") {
+        return; // Safely skip in mocked E2E environments
+      }
       unlisten = await listen<T>(eventName, (event) => {
         handlerRef.current(event.payload);
       });
@@ -73,6 +76,9 @@ export function useTauriEvents<T extends unknown[]>(
     const unlisteners: Promise<UnlistenFn>[] = [];
 
     for (const [eventName, handler] of events) {
+      if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.transformCallback !== "function") {
+        continue; // Safely skip in mocked E2E environments
+      }
       unlisteners.push(listen(eventName, (event) => handler(event.payload)));
     }
 

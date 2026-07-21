@@ -16,9 +16,25 @@ src-tauri/target/
 .DS_Store
 Thumbs.db
 
-# Environment
+# Environment / credentials
 *.env
 .env.*
+.env
+
+# Local runtime data (never commit user secrets/history)
+*.db
+*.db-shm
+*.db-wal
+providers.json
+config.ini
+dictionary.txt
+history.md
+corrections_stats.json
+failed_audio/
+/themes/
+*.log
+logs/
+debug/
 
 # Test artifacts
 *.tsbuildinfo
@@ -28,8 +44,13 @@ src-tauri/tests/screenshots/
 
 # Claude / local agent tooling
 .claude/
-.pi/
 .superpowers/
+.pi-subagents/
+.pi/
+
+# Local tool caches
+.pytest_cache/
+.ruff_cache/
 
 # Python version (legacy, kept locally)
 .python-version
@@ -46,6 +67,7 @@ scripts/*.py
 
 # Local-only artifacts (media exports, capture specs, screenshots, scratch notes)
 docs/media/
+docs/archive/root-notes/
 e2e/_bz-didinium-capture.spec.ts
 e2e/screenshots/
 progress.md

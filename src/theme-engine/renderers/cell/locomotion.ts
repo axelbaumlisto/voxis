@@ -7,7 +7,7 @@ import type { CellParams } from "./types";
  * speed is proportional to the ciliary beat, which we drive by activity `a`
  * (U_norm = a). There is NO inertia — silence (a→0) means the cell stops in the
  * SAME frame (memoryless; no coasting). Returns px/sec. (plan G2; low-Re:
- * research-fluid-medium-motion.md, research-ciliate-propulsion-coupling.md.)
+ * hydrodynamic coupling design notes now summarized in docs/CELL_MATH.md.)
  */
 export function swimSpeed(
   activity: number,

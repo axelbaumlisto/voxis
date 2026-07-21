@@ -67,6 +67,8 @@ test.describe("Visualization Themes", () => {
         { id: "default", name: "Default", description: "Blue, green, orange colors" },
         { id: "winamp_classic", name: "Winamp Classic", description: "Classic Winamp fire spectrum (red → yellow → green)" },
         { id: "neon", name: "Neon", description: "Bright neon colors" },
+        { id: "drifting_contour", name: "Drifting Contour", description: "Biophysical model" },
+        { id: "living_reed", name: "Living Reed", description: "Cilia math model" },
       ];
 
       const callbacks = new Map<number, (data: any) => void>();
@@ -124,6 +126,8 @@ test.describe("Visualization Themes", () => {
               callbacks.delete(args.id);
               call.result = null;
               break;
+            case "is_first_run":
+              return false;
             default:
               call.result = undefined;
           }
@@ -155,6 +159,8 @@ test.describe("Visualization Themes", () => {
       "default",
       "winamp_classic",
       "neon",
+      "drifting_contour",
+      "living_reed",
     ]);
 
     // Verify each theme has required fields
@@ -280,6 +286,8 @@ test.describe("Visualization Themes", () => {
               { id: "default", name: "Custom Default", description: "Custom Default (custom)" },
               { id: "winamp_classic", name: "Winamp Classic", description: "Classic Winamp fire spectrum" },
               { id: "neon", name: "Neon", description: "Bright neon colors" },
+              { id: "drifting_contour", name: "Drifting Contour", description: "Biophysical model" },
+              { id: "living_reed", name: "Living Reed", description: "Cilia math model" },
               { id: "my_custom", name: "My Custom Theme", description: "Custom theme" },
             ];
           }

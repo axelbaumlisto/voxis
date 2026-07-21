@@ -97,6 +97,8 @@ test.describe("System Tray Menu", () => {
               ];
             case "get_audio_level":
               return 0;
+            case "is_first_run":
+              return false;
             default:
               return undefined;
           }

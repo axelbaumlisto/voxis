@@ -37,6 +37,8 @@ test.describe("History Page", () => {
               case "clear_history":
                 entries.length = 0;
                 return undefined;
+              case "is_first_run":
+                return false;
               default:
                 return undefined;
             }
@@ -116,6 +118,8 @@ test.describe("History Page - Empty State", () => {
           switch (cmd) {
             case "get_history":
               return [];
+            case "is_first_run":
+              return false;
             default:
               return undefined;
           }

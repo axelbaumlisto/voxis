@@ -684,7 +684,7 @@ describe("Commit 4: pipeline gates + frozen pre-B/C baseline", () => {
 // ---------------------------------------------------------------------------
 // The map is M = R(+phi) . diag(k, 1/k) . R(-phi) about centre (cx,cy).
 // det M = 1 exactly, so shoelace area is invariant for ANY contour shape
-// (research-math-verify-v2.md item 1). These tests exercise the gate ON to
+// (see docs/CELL_MATH.md deformation notes). These tests exercise the gate ON to
 // prove the math; CELL_DEFAULTS keeps enableAffine=false so the live render
 // (Commit-4 frozen baseline) is untouched.
 describe("Commit 5: C2 affine squeeze (area-preserving, det=1)", () => {
@@ -761,7 +761,7 @@ describe("Commit 5: C2 affine squeeze (area-preserving, det=1)", () => {
 // bounded |g| < Dmax. With saturation alone (motion/areaNorm off, k_max=1,
 // |c|_max=0) the radius budget baseR*(1+Dmax) <= maxRadius=min(w,h)*0.46 holds,
 // so the step-9 clamp is provably a no-op for the drifting_contour overlay.
-// (research-membrane-areacons.md 4a; research-math-verify-v2.md item 5.)
+// (see docs/CELL_MATH.md area-preservation and deformation notes.)
 describe("Commit 6: B1 soft-saturation (tanh)", () => {
   const SAT: CellParams = { ...CELL_DEFAULTS, enableSaturation: true };
   const OFF: CellParams = { ...CELL_DEFAULTS, enableSaturation: false };
@@ -876,8 +876,8 @@ describe("Commit 6: B1 soft-saturation (tanh)", () => {
 // opposite side) and is the start of the C1 baseline. baseRadiusPx is bumped
 // 16->17: C1 mainly holds DRIVEN-speech area (pre-C1 mean(e^2)~1.34 at a=1,
 // +34%); resting is ~unchanged, so 17 keeps a comfortable resting size while
-// the budget still holds (see review note, /tmp/ado_review_commit7.md).
-// (.pi/plans/cell-bio-accuracy-plan.md C1, F9, M14; research-membrane-areacons.md.)
+// the budget still holds.
+// (see docs/CELL_MATH.md render-pipeline and area-preservation notes.)
 describe("Commit 7: C1 area normalization + baseR re-tune", () => {
   const W = 160, H = 160, baseR = 17;
   const C1: CellParams = { ...CELL_DEFAULTS, baseRadiusPx: baseR };

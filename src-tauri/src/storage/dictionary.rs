@@ -546,44 +546,15 @@ chat gpt = ChatGPT
         assert!(result.is_ok());
     }
 
-    /// E2E test with real user dictionary file.
-    /// Tests that apply() works with actual dictionary.txt content.
     #[test]
-    fn test_apply_real_dictionary() {
-        let real_dict = PathBuf::from(env!("HOME")).join(".config/soupawhisper/dictionary.txt");
+    fn test_apply_fixture_dictionary() {
+        let file = NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "cli=CLI\nдокер=Docker\n").unwrap();
+        let storage = DictionaryStorage::new(file.path().to_path_buf());
 
-        if real_dict.exists() {
-            let storage = DictionaryStorage::new(real_dict);
+        let result = storage.apply("использую cli и докер").unwrap();
 
-            // Load and print entries for debugging
-            let entries = storage.load().unwrap();
-            println!("Real dictionary has {} entries:", entries.len());
-            for (i, (source, replacement)) in entries.iter().enumerate() {
-                println!("  {}: {} -> {}", i + 1, source, replacement);
-            }
-
-            // Test that apply works
-            if entries.iter().any(|(s, _)| s.to_lowercase() == "cli") {
-                let result = storage.apply("использую cli для работы").unwrap();
-                assert!(result.contains("CLI"), "Expected CLI in: {}", result);
-                println!("✓ cli -> CLI works");
-            }
-
-            if entries
-                .iter()
-                .any(|(s, _)| s.to_lowercase().contains("докер"))
-            {
-                let result = storage.apply("запускаю в докере").unwrap();
-                assert!(result.contains("Docker"), "Expected Docker in: {}", result);
-                println!("✓ докере -> Docker works");
-            }
-
-            println!("✓ Real dictionary apply() test passed");
-        } else {
-            println!(
-                "Skipping real dictionary test: {:?} does not exist",
-                real_dict
-            );
-        }
+        assert!(result.contains("CLI"), "Expected CLI in: {}", result);
+        assert!(result.contains("Docker"), "Expected Docker in: {}", result);
     }
 }

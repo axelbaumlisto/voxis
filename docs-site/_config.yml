@@ -1,0 +1,16 @@
+title: SoupaWhisper Docs
+description: Voice dictation app built with Tauri, React, and Rust
+markdown: kramdown
+theme: minima
+plugins: []
+header_pages:
+  - installation.md
+  - usage.md
+  - settings.md
+  - themes.md
+  - development.md
+  - security.md
+  - troubleshooting.md
+
+exclude:
+  - ru/

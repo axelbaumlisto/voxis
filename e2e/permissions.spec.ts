@@ -86,6 +86,8 @@ test.describe("Permissions", () => {
               return undefined;
             case "request_accessibility_permission":
               return undefined;
+            case "is_first_run":
+              return false;
             default:
               console.log("Unhandled invoke:", cmd);
               return undefined;
@@ -277,6 +279,8 @@ test.describe("Input Monitoring Permission", () => {
               return undefined;
             case "request_accessibility_permission":
               return undefined;
+            case "is_first_run":
+              return false;
             default:
               console.log("Unhandled invoke:", cmd);
               return undefined;

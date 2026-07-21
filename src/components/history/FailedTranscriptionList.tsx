@@ -12,7 +12,7 @@ function FailedTranscriptionList() {
   const { t } = useTranslation();
   const { items, retry, dismiss, retrying, error } = useFailedTranscriptions();
 
-  if (items.length === 0 && !error) {
+  if (!items || (items.length === 0 && !error)) {
     return null;
   }
 

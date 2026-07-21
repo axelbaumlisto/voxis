@@ -1,13 +1,18 @@
 # The Living Cell — Motion & Math Reference
 
-How the `cell` renderer (`drifting_contour` theme, and the family using
-`renderers/cell.ts`) turns a stream of `ThemeState` (mode + audioLevel +
-spectrum) into an organism that looks **alive**: a wobbling membrane, a
-roaming body, a drifting nucleus, and a crown of beating cilia.
+How the `cell` renderer family (`drifting_contour`, `duo_aquarium`,
+`euglena_drift`, `didinium_drift`, and related themes) turns a stream of
+`ThemeState` (mode + audioLevel + spectrum) into an organism that looks
+**alive**: a wobbling membrane, a roaming body, a drifting nucleus, and a crown
+of beating cilia.
 
-This is the plain-language companion to the code. Every formula below maps to
-an exported, unit-tested pure function in `src/theme-engine/renderers/cell.ts`
-(tests in `renderers/__tests__/cell.test.ts`).
+This is the plain-language companion to the code. The public compatibility
+barrel is `src/theme-engine/renderers/cell.ts`, which re-exports the split
+implementation under `src/theme-engine/renderers/cell/`. The formulas below map
+to exported, unit-tested pure functions; tests live in files such as
+`src/theme-engine/renderers/__tests__/cell-cilia.test.ts`,
+`cell-contour.test.ts`, `cell-interior.test.ts`, `cell-organelles.test.ts`, and
+`cell-public-api.test.ts`.
 
 > **Design rule:** all visual functions are PURE and DETERMINISTIC given their
 > inputs (time `t`, audio, params). No `Math.random()`, no `Date.now()` inside

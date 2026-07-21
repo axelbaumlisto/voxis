@@ -109,6 +109,8 @@ test.describe("Settings Save", () => {
               ];
             case "get_theme_colors":
               return { use_gradient: true, gradient_bottom: "#299400", gradient_middle: "#d6b521", gradient_top: "#ef3110", recording: "#ef3110", transcribing: "#69f0ae", idle: "#299400" };
+            case "is_first_run":
+              return false;
             default:
               return undefined;
           }
