@@ -1,7 +1,7 @@
 /**
  * AutoSubmitSelector — dropdown for the auto-submit key combo.
  *
- * #4 from .pi/plans/handy-recommendations-cloud-only.md.
+ * Configures optional submit keystrokes after auto-typing.
  *
  * Off (default), Enter, Cmd/Super+Enter, Shift+Enter. Per-OS label
  * tweak so macOS sees "Cmd+Enter" and Linux/Windows see "Super+Enter"

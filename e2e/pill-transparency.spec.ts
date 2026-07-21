@@ -9,5 +9,5 @@
  * (src/theme-engine/renderers/__tests__/) and is covered by ThemeHost
  * integration tests (src/__tests__/overlay.test.tsx).
  *
- * See: docs/superpowers/plans/2026-06-10-user-themes-v1.md — Task 5.1
+ * See: docs/THEMES.md and docs/THEME_EDITING.md
  */

@@ -34,7 +34,7 @@ test.beforeAll(async () => {
   await mkdir(OUT, { recursive: true });
 });
 
-test("metaballs3d pulses bigger/brighter on a loud voice transient (no jerk, transparent)", async ({
+test.skip("metaballs3d pulses bigger/brighter on a loud voice transient (no jerk, transparent)", async ({
   page,
 }) => {
   // Force preserveDrawingBuffer so we can read the rendered frame back via

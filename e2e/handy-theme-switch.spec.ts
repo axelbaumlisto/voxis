@@ -12,5 +12,5 @@
  *   - src/theme-engine/renderers/__tests__/ (per-renderer pixels)
  *   - src/__tests__/overlay.test.tsx (ThemeHost integration)
  *
- * See: docs/superpowers/plans/2026-06-10-user-themes-v1.md — Task 5.1
+ * See: docs/THEMES.md and docs/THEME_EDITING.md
  */

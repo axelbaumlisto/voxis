@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-TALRI is a voice dictation app built with Tauri v2, React 18, and Rust. It records audio via hotkey, transcribes via Groq/OpenAI Whisper API, and outputs text via clipboard or auto-typing.
+TALRI is a voice dictation app built with Tauri v2, React 18, and Rust. It records audio via hotkey, transcribes through the app's Whisper-compatible HTTP client (default Groq endpoint), and outputs text via clipboard or auto-typing.
 
 ## Development Commands
 
@@ -48,7 +48,7 @@ cd src-tauri && cargo test test_name
 
 ### Frontend (src/)
 - **React 18 + TypeScript + Vite** with React Router
-- **Pages**: `src/pages/` - HomePage, SettingsPage, HistoryPage, DictionaryPage
+- **Pages**: `src/pages/` - SettingsPage, HistoryPage, DictionaryPage, OnboardingPage
 - **Hooks**: `src/hooks/` - Custom hooks for async data, recording state, settings, etc.
 - **Commands**: `src/lib/commands.ts` - Type-safe wrappers for all Tauri invoke calls
 - **Components**: Domain-organized under `src/components/{dictionary,history,settings}/`
@@ -62,12 +62,12 @@ cd src-tauri && cargo test test_name
 Key modules:
 - `orchestrator/` - Workflow coordination: hotkey → recording → transcription → output. Uses a queue for buffered concurrent recordings.
 - `audio/` - Recording via cpal, WAV encoding
-- `transcription/` - Whisper API client (Groq/OpenAI)
+- `transcription/` - Groq-compatible Whisper HTTP client; custom endpoints are only available through `api_url_override`
 - `output/` - Clipboard (arboard) and auto-typing
 - `hotkey/` - Low-level keyboard input via rdev
 - `storage/` - SQLite + file-based storage (config, history, dictionary, providers)
 - `theme_engine/` - Manifest v2 + theme script loader — Rust knows nothing about theme visuals
-- `overlay_native/` - Overlay window backends (NSPanel on macOS, Tauri webview cross-platform), plus Noop fallback
+- `overlay_native/` - Overlay window backends: the cross-platform Tauri webview backend, with macOS `NSWindow` tuning and a Noop fallback
 - `llm/` - Post-processing transcriptions via LLM
 - `learning/` - Dictionary learning/suggestion system
 - `commands/` - Tauri commands exposed to frontend
@@ -85,7 +85,11 @@ All stored in platform-specific config directory:
 - `history.db` - Transcription history
 - `dictionary.txt` - Word replacement mappings
 - `corrections.db` - Learning suggestions tracking
-- `providers.json` - Custom LLM provider definitions
+- `providers.db` - Custom and builtin LLM provider definitions
+- `prompts.db` - Multi-prompt LLM templates
+- `failed_audio/` - Up to three failed transcription retry WAV/JSON entries
+- `debug/` - Debug audio and JSONL logs when debug mode is enabled
+- `logs/` - Rotating app logs
 
 ## Testing
 
@@ -99,4 +103,4 @@ All stored in platform-specific config directory:
 - **Frontend/backend communication**: All via `invoke()` calls defined in `src/lib/commands.ts`
 - **Async hooks**: `useAsyncData` and `useAsyncAction` patterns for loading/mutation states
 - **Recording context**: React context (`RecordingContext`) shares recording state across components
-- **Themes**: Each theme is a directory with `theme.json` (manifest v2) + `theme.js` ES module exporting `mount(container, themeApi)`. Builtin themes are bundled from `src/theme-engine/builtin/` to `src-tauri/themes/` and seeded to `<config>/themes` at startup. User themes follow the same format — edit `theme.js` and reload. **Editing themes does NOT require a rebuild** — see `docs/THEME_EDITING.md` for the full workflow (two file locations, the seed-skip gotcha, the visual harness at `bun run harness` → `/harness.html`, E2E screenshots, and deploy-without-rebuild). Author reference (manifest/contract/ThemeApi) is in `docs/THEMES.md`.
+- **Themes**: Each theme is a directory with `theme.json` (manifest v2) + `theme.js` ES module exporting `mount(container, themeApi)`. Manifests can optionally declare `overlay_width` / `overlay_height`; otherwise the native overlay uses its standard size. Builtin themes are bundled from `src/theme-engine/builtin/` to `src-tauri/themes/` and seeded to `<config>/themes` at startup. User themes follow the same format — edit `theme.js` and reload. **Editing themes does NOT require a full app rebuild** — see `docs/THEME_EDITING.md` for the workflow (two file locations, the seed-skip gotcha, the visual harness at `bun run harness` → `/harness.html`, E2E screenshots, and deploy-without-rebuild). Author reference (manifest/contract/ThemeApi) is in `docs/THEMES.md`.

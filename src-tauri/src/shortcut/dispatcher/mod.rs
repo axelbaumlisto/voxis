@@ -1,6 +1,6 @@
 //! Pure action dispatcher for shortcut bindings.
 //!
-//! T-B2.3 from `.pi/plans/handy-cloud-features-execution.md`.
+//! Resolves shortcut bindings into executable transcription actions.
 //!
 //! Translates a binding_id (from the hotkey listener) into a
 //! `ResolvedAction` that the orchestrator can execute. Kept as a pure

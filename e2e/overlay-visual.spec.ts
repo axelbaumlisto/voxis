@@ -132,6 +132,8 @@ test.describe("Overlay Visual Verification", () => {
               return null;
             case "plugin:event|emit":
               return null;
+            case "is_first_run":
+              return false;
             default:
               return null;
           }

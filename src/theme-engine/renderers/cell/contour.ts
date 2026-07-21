@@ -167,7 +167,7 @@ export function sampleBinLevel(bins: number[], normalized: number): number {
  * @returns Array of `sampleCount` deformation fractions.
  */
 // ---------------------------------------------------------------------------
-// Deformation pipeline (see .pi/plans/cell-bio-accuracy-plan.md RENDER PIPELINE)
+// Deformation pipeline (see docs/CELL_MATH.md for the public rationale).
 // ---------------------------------------------------------------------------
 // The membrane radius at vertex i is `baseR * (1 + deform[i])`. The plan lays
 // out a fixed 9-step order so each stage preserves the next stage's invariant:
@@ -225,7 +225,7 @@ export function saturateTargetDeform(target: number[], params: CellParams): numb
  *
  * Anti-balloon: today's pseudopod/bin terms are outward-only, so resting/driven
  * area over-inflates; C1 makes a one-sided bulge BORROW from the opposite side
- * instead of growing the whole cell. (research-membrane-areacons.md; plan C1.)
+ * instead of growing the whole cell (see docs/CELL_MATH.md area-preservation notes).
  */
 export function normalizeAreaDeform(integrated: number[], params: CellParams): number[] {
   if (!params.enableAreaNorm) return integrated;
@@ -299,7 +299,7 @@ export function integrateDeformPipeline(
  * rotate back by `+phi`. Because `det M = det R(phi) . det diag(k,1/k) . det R(-phi)
  * = 1 . (k . 1/k) . 1 = 1`, the shoelace area is preserved EXACTLY for ANY
  * contour shape (change-of-variables: `Area(M(Omega)) = |det M| . Area(Omega)`).
- * See research-math-verify-v2.md item 1. This is why we use the point-squeeze and
+ * See docs/CELL_MATH.md deformation notes. This is why we use the point-squeeze and
  * NOT a fixed-angle polar/radial multiply, which inflates a circle's area by
  * `(k^2 + 1/k^2)/2` and is exact only for a circle.
  *

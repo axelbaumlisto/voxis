@@ -5,5 +5,5 @@
  * `?mode=recording`, `?theme=handy`). The `?mode=` URL hook is dead; DOM
  * structure is now governed by theme modules loaded at runtime.
  *
- * See: docs/superpowers/plans/2026-06-10-user-themes-v1.md — Task 5.1
+ * See: docs/THEMES.md and docs/THEME_EDITING.md
  */

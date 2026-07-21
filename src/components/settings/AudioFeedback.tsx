@@ -1,7 +1,7 @@
 /**
  * AudioFeedback — Settings widget for the start/stop/error beeps.
  *
- * #6 from .pi/plans/handy-recommendations-cloud-only.md.
+ * Configures short feedback sounds for recording lifecycle events.
  *
  * Two-row card: master toggle + volume slider. Slider is disabled
  * while the master toggle is off (cosmetic clarity).

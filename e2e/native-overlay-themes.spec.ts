@@ -45,7 +45,7 @@ test.describe("Native overlay organic themes", () => {
     expect(result.fileSize).toBeGreaterThan(5000);
   });
 
-  // Bug fixes landed: see .pi/plans/native-overlay-organic-fixes.md
+  // Regression coverage for native overlay organic theme fixes.
   // - theme.rs::organic_template + 3 distinct builtins (different shape + colors)
   // - bundled themes/<id>/theme.json updated to match
   // - convert_theme_file now parses file.organic_ring (was always None → blank)

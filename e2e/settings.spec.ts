@@ -89,6 +89,8 @@ test.describe("Settings Page", () => {
               return Math.floor(Math.random() * 1000000);
             case "plugin:event|unlisten":
               return null;
+            case "is_first_run":
+              return false;
             default:
               console.log("Unhandled invoke:", cmd);
               return undefined;

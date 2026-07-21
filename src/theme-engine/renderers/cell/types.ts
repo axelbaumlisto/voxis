@@ -190,7 +190,7 @@ export interface CellParams {
    * about 3 seconds at 60 fps. */
   driftActivationRate?: number;
 
-  // --- Pipeline gates (see .pi/plans/cell-bio-accuracy-plan.md RENDER PIPELINE).
+  // --- Pipeline gates for the documented render pipeline (see docs/CELL_MATH.md).
   // Each gate dark-launches a later-commit stage. ALL DEFAULT FALSE: with every
   // gate off the deformation pipeline is byte-identical to the pre-pipeline
   // behavior. The actual stage math lands in the noted commits; until then each

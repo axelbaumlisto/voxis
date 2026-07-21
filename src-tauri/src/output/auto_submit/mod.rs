@@ -1,6 +1,6 @@
 //! Auto-submit: emit Enter / Cmd+Enter / Shift+Enter after typing.
 //!
-//! Closes #4 from `.pi/plans/handy-recommendations-cloud-only.md`.
+//! Handles optional submit keystrokes after auto-typing.
 //!
 //! After a transcription is typed or pasted, the user usually has to
 //! reach for the keyboard to send the message (chat clients, Slack,

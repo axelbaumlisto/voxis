@@ -1,6 +1,6 @@
 //! Multi-prompt LLM template registry.
 //!
-//! Closes #1 from `.pi/plans/handy-recommendations-cloud-only.md`.
+//! Builtin prompt templates for LLM post-processing.
 //!
 //! Until now the LLM post-processor read a single `llm.prompt` string
 //! from config — to switch from "fix grammar" to "bullet list" the user

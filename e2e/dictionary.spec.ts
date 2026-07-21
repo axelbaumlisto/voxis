@@ -89,6 +89,8 @@ test.describe("Dictionary Page", () => {
                 return [];
               case "get_pending_count":
                 return 0;
+              case "is_first_run":
+                return false;
               default:
                 return undefined;
             }
@@ -273,6 +275,8 @@ test.describe("Dictionary Page - Empty State", () => {
               return [];
             case "get_pending_count":
               return 0;
+            case "is_first_run":
+              return false;
             default:
               return undefined;
           }

@@ -1,6 +1,6 @@
 /**
  * LlmPromptManager — UI for the multi-prompt LLM template registry
- * (#1 from .pi/plans/handy-recommendations-cloud-only.md).
+ * Manages multiple local LLM prompt templates for post-processing.
  *
  * Mounts under Settings → Output → Post-processing. Lets the user:
  *   - pick the active prompt template (dropdown)

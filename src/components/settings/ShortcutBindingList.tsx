@@ -1,6 +1,6 @@
 /**
  * ShortcutBindingList — UI for multi-binding shortcut configuration
- * (#2 from .pi/plans/handy-recommendations-cloud-only.md).
+ * Lets users configure shortcut bindings for transcription actions.
  *
  * Renders one row per binding with:
  *   - name + description

@@ -1,6 +1,6 @@
 //! Audio feedback: short beeps on recording start / stop / error.
 //!
-//! Closes #6 from `.pi/plans/handy-recommendations-cloud-only.md`.
+//! Short feedback sounds for recording lifecycle events.
 //!
 //! Plays a tiny .wav clip when the orchestrator changes state so the
 //! user gets immediate auditory confirmation that the hotkey

@@ -1,6 +1,6 @@
 /**
  * AlwaysOnMicrophone — Settings toggle with inline privacy warning
- * (#8 from .pi/plans/handy-recommendations-cloud-only.md).
+ * Keeps capture warm where supported to reduce recording startup latency.
  *
  * The toggle itself is a single boolean. The interesting part is the
  * warning copy directly under it: keeping a capture stream warm

@@ -1,7 +1,7 @@
 //! SQLite storage for `LlmPrompt` (multi-prompt LLM templates).
 //!
 //! Closes the storage layer of #1 from
-//! `.pi/plans/handy-recommendations-cloud-only.md`. The schema is small
+//! local prompt-template storage. The schema is small
 //! (one table, six columns) but DRY-shared with `ConfigSqliteStorage`
 //! through `sqlite_base::open_with_schema`.
 //!

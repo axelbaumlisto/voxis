@@ -1,6 +1,6 @@
 //! Multi-binding shortcut schema.
 //!
-//! Closes #2 from `.pi/plans/handy-recommendations-cloud-only.md`.
+//! Shortcut binding definitions for transcription actions.
 //!
 //! Pre-Phase-B/2 we had ONE global hotkey (`AppConfig.hotkey`) that
 //! always triggered the same action: record + transcribe + paste. This

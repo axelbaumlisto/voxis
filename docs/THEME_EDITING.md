@@ -17,11 +17,14 @@ Rust knows **nothing** about theme visuals. A theme is just two files:
 
 | File         | Purpose                                                            |
 |--------------|-------------------------------------------------------------------|
-| `theme.json` | Manifest v2 — id, name, `api_version`, optional `overlay_width/height`, `entry`. |
+| `theme.json` | Manifest v2 — id, name, `api_version`, `entry`, optional `params` and `overlay_width/height`. |
 | `theme.js`   | Self-contained ESM exporting `mount(container, themeApi)`.        |
 
 The overlay loads `theme.js` from the filesystem and mounts it. So shipping a
 theme change = updating those files. That's it.
+
+`theme.js` is executable JavaScript trusted by the app webview. Do not install
+or copy themes from untrusted sources without reviewing the code first.
 
 ---
 
@@ -31,11 +34,15 @@ There are two copies, and the distinction matters:
 
 1. **User themes dir** — *this is what actually loads at runtime*:
    ```
-   ~/Library/Application Support/soupawhisper/themes/<id>/
+   Linux:   ~/.config/soupawhisper/themes/<id>/
+   macOS:   ~/Library/Application Support/soupawhisper/themes/<id>/
+   Windows: %APPDATA%/soupawhisper/themes/<id>/
    ```
-2. **Bundle dir** — seeds the user dir on first run / fresh installs:
+2. **Bundle dir** — seeds the user dir on first run / fresh installs. Common examples:
    ```
-   /Applications/SoupaWhisper.app/Contents/Resources/themes/<id>/
+   macOS app bundle: /Applications/SoupaWhisper.app/Contents/Resources/themes/<id>/
+   local release:    src-tauri/target/release/themes/<id>/
+   source bundle:    src-tauri/themes/<id>/
    ```
 
 ### ⚠️ The seeding gotcha
@@ -44,8 +51,11 @@ At startup the app runs `seed_from_bundle` (see
 `src-tauri/src/theme_engine/loader.rs`). Its rule:
 
 - user dir missing → copy the whole bundled theme in;
-- user theme is **legacy v1** → overwrite with the bundled v2;
+- bundled theme's existing user copy is **legacy/non-v2** → overwrite with the bundled v2;
 - user theme is already **v2** → **SKIP** (preserve user edits).
+
+This applies while seeding known bundled themes. Arbitrary invalid/non-v2 custom
+folders are skipped by the theme scanner rather than migrated.
 
 **Consequence:** once a v2 theme exists in the user dir, copying new files into
 the `.app` bundle alone does **nothing** — the bundle copy is ignored. You must
@@ -99,7 +109,7 @@ Playwright can screenshot it:
 | `theme`  | theme id                             | `drifting_contour`   |
 | `mode`   | idle / recording / transcribing / error | `recording`      |
 | `level`  | audio level 0..1                     | `0.9`                |
-| `w`,`h`  | canvas size (organic themes need 160×160) | `160`,`160`     |
+| `w`,`h`  | preview canvas size | `160`,`160`     |
 | `scale`  | preview zoom                         | `3`                  |
 | `params` | URL-encoded JSON for `api.params`    | `%7B...%7D`          |
 
@@ -109,9 +119,9 @@ http://localhost:5173/harness.html?theme=drifting_contour&mode=recording&level=0
 ```
 
 > Organic themes (`cell`/`ring`/`radiolarian` renderers) fix `canvas.width/height`
-> at mount and need a **square 160×160** canvas. The pill default (172×36) squashes
-> them. Set `w=160&h=160` in the harness, and `overlay_width/height: 160` in the
-> manifest for the real overlay.
+> at mount and usually need a larger/square canvas. Set `w`/`h` in the harness,
+> and set matching `overlay_width` / `overlay_height` in the manifest for the
+> real overlay.
 
 ---
 
@@ -135,16 +145,16 @@ This is the no-Tauri way to visually verify a theme change.
 # 1. Rebuild the bundled JS from source
 bun run build:themes
 
-# 2. Copy into BOTH locations (user dir is the one that loads)
+# 2. Copy into the user theme directory (this is what the running app loads)
+THEME_DIR="$HOME/.config/soupawhisper/themes"        # Linux
+# THEME_DIR="$HOME/Library/Application Support/soupawhisper/themes"  # macOS
 for t in drifting_contour living_reed quiet_reed radiolarian; do
-  cp src-tauri/themes/$t/theme.{js,json} \
-     "$HOME/Library/Application Support/soupawhisper/themes/$t/"
-  cp src-tauri/themes/$t/theme.{js,json} \
-     /Applications/SoupaWhisper.app/Contents/Resources/themes/$t/
+  mkdir -p "$THEME_DIR/$t"
+  cp src-tauri/themes/$t/theme.{js,json} "$THEME_DIR/$t/"
 done
 
-# 3. Restart the app (or just re-select the theme in Settings)
-pkill -f SoupaWhisper; open -a SoupaWhisper
+# 3. Restart the app, reload themes, or re-select the theme in Settings
+pkill -f 'SoupaWhisper|/voice$' || true
 ```
 
 When do you actually need `tauri build`? Only when you change **Rust** code
@@ -161,9 +171,10 @@ If a theme needs a non-pill window size, declare it in the manifest:
 ```
 
 The Rust side (`OverlayManager::theme_overlay_size`) reads this and resizes the
-OS window (validated to 16..=4096). Absent → falls back to pill 172×36.
-`ThemeHost` remounts the canvas whenever width/height change, so the renderer
-rebuilds at the new size (it does **not** CSS-stretch the old canvas).
+webview overlay OS window (validated to 16..=4096). Absent → falls back to the
+standard overlay window size. `ThemeHost` remounts the canvas whenever
+width/height change, so the renderer rebuilds at the new size (it does **not**
+CSS-stretch the old canvas).
 
 ---
 
