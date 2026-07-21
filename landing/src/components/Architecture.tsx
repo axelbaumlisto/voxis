@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { motion, useScroll, useTransform, useMotionValueEvent, AnimatePresence } from "framer-motion";
 import { Mic, Zap, Brain, Keyboard, Terminal, Cpu } from "lucide-react";
 import type { Step, IconKey } from "../data/architecture";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 
 interface ArchitectureProps {
   steps: Step[];
@@ -162,6 +163,7 @@ function BoardLayer({
 export default function Architecture({ steps }: ArchitectureProps) {
   const containerRef = useRef(null);
   const [active, setActive] = useState(0);
+  const isDesktop = useMediaQuery("(min-width: 768px)");
 
   const { scrollYProgress } = useScroll({
     target: containerRef,
@@ -213,7 +215,8 @@ export default function Architecture({ steps }: ArchitectureProps) {
       </div>
 
       {/* --- DESKTOP VIEW: Exploding Multi-Layer Chip Fly-Through --- */}
-      <div className="hidden md:flex sticky top-0 h-screen w-full flex-row items-center justify-center overflow-hidden px-10 lg:px-20 bg-gradient-to-b from-[var(--color-surface-2)] to-[var(--color-surface)]">
+      {isDesktop && (
+        <div className="hidden md:flex sticky top-0 h-screen w-full flex-row items-center justify-center overflow-hidden px-10 lg:px-20 bg-gradient-to-b from-[var(--color-surface-2)] to-[var(--color-surface)]">
         {/* Bridge heading — links the centered hero to the left-anchored layers */}
         <div className="absolute top-[max(6vh,var(--space-2xl))] left-1/2 -translate-x-1/2 z-40 text-center pointer-events-none">
           <div className="pill text-[var(--color-muted)] mb-2">{"// SYSTEM ARCHITECTURE"}</div>
@@ -293,6 +296,7 @@ export default function Architecture({ steps }: ArchitectureProps) {
           </motion.div>
         </div>
       </div>
+      )}
     </section>
   );
 }
