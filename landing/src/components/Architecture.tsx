@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { motion, useScroll, useMotionValueEvent, AnimatePresence } from "framer-motion";
+import { motion, useScroll, useTransform, useMotionValueEvent, AnimatePresence } from "framer-motion";
 import { Mic, Zap, Brain, Keyboard, Terminal, Cpu } from "lucide-react";
 
 interface Step {
@@ -10,7 +10,6 @@ interface Step {
   className: string;
   subtitle: string;
   desc: string;
-  code: string;
   glow: string;
   iconColor: string;
   bgLit: string;
@@ -30,20 +29,6 @@ const IconMap: Record<string, any> = {
   keyboard: Keyboard,
 };
 
-// Функция подсветки синтаксиса Rust (простая)
-const highlightCode = (code: string, colorClass: string) => {
-  return code.split('\n').map((line, idx) => {
-    const highlighted = line
-      .replace(/pub struct|pub fn|impl|async fn|move/g, '<span class="text-pink-400">$&</span>')
-      .replace(/self|mut|String|Result|Arc|Mutex|Sender|Vec|u8/g, '<span class="text-blue-400">$&</span>')
-      .replace(/Listener|Orchestrator|Recorder|GroqClient|AutoType|Stage/g, `<span class="${colorClass}">$&</span>`)
-      .replace(/\/\/.*/g, '<span class="text-zinc-500 italic">$&</span>');
-    return (
-      <div key={idx} dangerouslySetInnerHTML={{__html: highlighted}} />
-    );
-  });
-};
-
 export default function Architecture({ steps }: ArchitectureProps) {
   const containerRef = useRef(null);
   const [active, setActive] = useState(0);
@@ -54,37 +39,38 @@ export default function Architecture({ steps }: ArchitectureProps) {
   });
 
   useMotionValueEvent(scrollYProgress, "change", (latest) => {
-    // 5 states now
-    if (latest < 0.20) setActive(0);
-    else if (latest < 0.40) setActive(1);
-    else if (latest < 0.60) setActive(2);
-    else if (latest < 0.80) setActive(3);
-    else setActive(4);
+    // 5 states now. The fly-through math:
+    // 0 -> 0.1: Unpacking
+    // 0.1 -> 1.0: Flying through 5 layers
+    let f = 0;
+    if (latest >= 0.1) {
+      f = ((latest - 0.1) / 0.9) * 4.99; // 0 to almost 5
+    }
+    setActive(Math.min(steps.length - 1, Math.max(0, Math.floor(f))));
   });
 
   return (
-    <section id="architecture" ref={containerRef} className="relative w-full bg-black md:h-[500vh]">
+    <section id="architecture" ref={containerRef} className="relative w-full bg-black md:h-[600vh]">
       
       {/* --- MOBILE VIEW: Bento Stack --- */}
       <div className="md:hidden flex flex-col items-center justify-center px-4 py-20 gap-8">
         <div className="text-center mb-8">
-           <h2 className="text-4xl font-extrabold text-white">The Stack</h2>
-           <p className="text-zinc-400 mt-2">Diving through the SOLID layers</p>
+           <h2 className="text-4xl font-extrabold text-white">System Layers</h2>
+           <p className="text-zinc-400 mt-2">SOLID Rust Architecture</p>
         </div>
         {steps.map((step, i) => {
           const Icon = IconMap[step.iconName];
           return (
             <div key={i} className={`w-full max-w-lg bg-black/60 backdrop-blur-xl rounded-3xl border border-white/10 shadow-2xl relative overflow-hidden ${step.glow}`}>
               <div className="absolute inset-0 pcb-grid opacity-10"></div>
-              
-              <div className="relative z-10 p-6 flex flex-col items-start text-left border-b border-white/5">
+              <div className="relative z-10 p-6 flex flex-col items-start text-left border-white/5">
                 <div className="flex items-center gap-4 mb-4">
                   <div className={`p-3 rounded-xl bg-black/50 border border-white/10 ${step.iconColor}`}>
                     {Icon && <Icon className="w-6 h-6" />}
                   </div>
                   <div>
                     <div className="text-[10px] font-mono font-bold tracking-widest uppercase" style={{ color: step.hex }}>
-                      {step.subtitle}
+                      {step.className}
                     </div>
                     <h3 className="text-xl font-extrabold text-white">
                       {step.title}
@@ -95,25 +81,17 @@ export default function Architecture({ steps }: ArchitectureProps) {
                   {step.desc}
                 </p>
               </div>
-
-              {/* Code Snippet on Mobile */}
-              <div className="relative z-10 p-4 bg-[#0d1117]/80">
-                <div className="text-xs font-mono text-zinc-500 mb-2">{step.className}</div>
-                <pre className="text-[11px] font-mono leading-relaxed overflow-x-auto text-zinc-300">
-                  <code>{highlightCode(step.code, step.iconColor)}</code>
-                </pre>
-              </div>
             </div>
           );
         })}
       </div>
 
-      {/* --- DESKTOP VIEW: Isometric Deep Dive --- */}
-      <div className="hidden md:flex sticky top-0 h-screen w-full flex-row items-center justify-center overflow-hidden px-10 lg:px-20">
+      {/* --- DESKTOP VIEW: Exploding Multi-Layer Chip Fly-Through --- */}
+      <div className="hidden md:flex sticky top-0 h-screen w-full flex-row items-center justify-center overflow-hidden px-10 lg:px-20 bg-gradient-to-b from-[#050505] to-[#0a0a0a]">
         
-        {/* Left Side: Info & Code */}
-        <div className="w-1/2 flex items-center justify-center z-20 h-full">
-          <div className="w-full max-w-xl relative">
+        {/* Left Side: Info Glass */}
+        <div className="w-1/2 flex items-center justify-center z-30 h-full">
+          <div className="w-full max-w-lg relative">
             <AnimatePresence mode="wait">
               {steps.map((step, i) => (
                 i === active && (
@@ -123,18 +101,17 @@ export default function Architecture({ steps }: ArchitectureProps) {
                     animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
                     exit={{ opacity: 0, x: -30, filter: "blur(10px)" }}
                     transition={{ duration: 0.3 }}
-                    className={`bg-black/60 backdrop-blur-2xl rounded-[32px] border ${step.glow.replace('shadow-', 'hover:shadow-')} shadow-2xl overflow-hidden`}
+                    className={`bg-black/40 backdrop-blur-3xl rounded-[32px] border border-white/10 ${step.glow.replace('shadow-', 'shadow-2xl shadow-')} overflow-hidden`}
                   >
-                    {/* Header Info */}
-                    <div className="p-8 lg:p-10 relative">
-                       <div className="absolute inset-0 pcb-grid opacity-10"></div>
+                    <div className="p-10 relative">
+                       <div className="absolute inset-0 pcb-grid opacity-5"></div>
                        <div className="relative z-10">
                          <div className="flex items-center gap-4 mb-6">
-                            <div className={`p-4 rounded-2xl bg-black/50 border border-white/10 ${step.iconColor}`}>
+                            <div className={`p-4 rounded-2xl bg-black/80 border border-white/10 shadow-inner ${step.iconColor}`}>
                               {IconMap[step.iconName] && (() => { const I = IconMap[step.iconName]; return <I className="w-8 h-8" /> })()}
                             </div>
                             <div>
-                              <div className="text-xs font-mono font-bold tracking-widest uppercase" style={{ color: step.hex }}>
+                              <div className="text-xs font-mono font-bold tracking-widest uppercase mb-1" style={{ color: step.hex }}>
                                 {step.subtitle}
                               </div>
                               <h3 className="text-4xl font-extrabold text-white">
@@ -142,25 +119,16 @@ export default function Architecture({ steps }: ArchitectureProps) {
                               </h3>
                             </div>
                          </div>
-                         <p className="text-zinc-300 text-lg leading-relaxed font-light">
+                         
+                         <p className="text-zinc-300 text-lg leading-relaxed font-light mb-6">
                            {step.desc}
                          </p>
+                         
+                         <div className={`w-full p-4 rounded-xl bg-[#0d1117]/80 border border-white/5 font-mono text-sm shadow-inner ${step.iconColor} flex items-center justify-between`}>
+                           <span>{step.className}</span>
+                           <span className="text-zinc-600 text-xs">.rs</span>
+                         </div>
                        </div>
-                    </div>
-
-                    {/* Code Snippet Dark Theme */}
-                    <div className="bg-[#0d1117] border-t border-white/5 p-8 relative">
-                      {/* Fake mac window buttons */}
-                      <div className="absolute top-4 left-4 flex gap-1.5 opacity-50">
-                        <div className="w-3 h-3 rounded-full bg-rose-500"></div>
-                        <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-                        <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-                      </div>
-                      <div className="text-center text-xs font-mono text-zinc-500 mb-4 tracking-widest">{step.className}.rs</div>
-                      
-                      <pre className="text-sm font-mono leading-loose overflow-x-auto text-zinc-300">
-                        <code>{highlightCode(step.code, step.iconColor)}</code>
-                      </pre>
                     </div>
                   </motion.div>
                 )
@@ -169,72 +137,124 @@ export default function Architecture({ steps }: ArchitectureProps) {
           </div>
         </div>
 
-        {/* Right Side: 5-Layer PCB Stack */}
-        <div className="w-1/2 h-[80vh] md:h-full flex items-center justify-center perspective-[2000px] z-10">
+        {/* Right Side: The Exploding 3D Chip Stack */}
+        <div className="w-1/2 h-[80vh] md:h-full flex items-center justify-center perspective-[2500px] z-10">
           <motion.div 
-            className="relative w-[400px] h-[400px]"
+            className="relative w-[500px] h-[500px]"
             style={{ 
               transform: "rotateX(60deg) rotateZ(-45deg)", 
               transformStyle: "preserve-3d" 
             }}
           >
-            {steps.map((step, i) => {
-              const isActive = i === active;
-              const isPast = i < active;
-              
-              // Z calculation: Top layer is i=0.
-              // When active, the layer raises up slightly.
-              // Past layers drop deep down.
-              const baseZ = (4 - i) * 120; 
-              let activeZ = baseZ;
-              let opacity = 0.2;
-              
-              if (isActive) {
-                activeZ = baseZ + 80;
-                opacity = 1;
-              } else if (isPast) {
-                activeZ = baseZ - 400; // Drop through the floor
-                opacity = 0;
-              }
-
+            {/* 
+              Z-Index Fix: We must render the elements in reverse order so that 
+              top layers (i=0) appear visually above bottom layers (i=4) when 
+              stacking contexts collapse, preventing lower layers from bleeding through.
+            */}
+            {[...steps].reverse().map((step, revI) => {
+              const i = steps.length - 1 - revI;
               const Icon = IconMap[step.iconName];
               
+              const currentZ = useTransform(scrollYProgress, (p) => {
+                let spread = 60;
+                let fly = 0;
+                if (p < 0.1) {
+                  spread = 60 + (p / 0.1) * 740; 
+                } else {
+                  spread = 800;
+                  fly = ((p - 0.1) / 0.9) * 4.99; 
+                }
+                return (i - fly) * -spread;
+              });
+
+              // Dynamic Z-index: The active layer gets 50. 
+              // Layers in the distance get lower z-indexes.
+              // Layers behind the camera get 0.
+              const dynamicZIndex = useTransform(currentZ, (zVal) => {
+                if (zVal > 100) return 0; // Behind camera
+                if (zVal > -100 && zVal <= 100) return 50; // Active layer is king
+                // Distance layers: the further they are (more negative), the lower the z-index
+                return Math.max(1, 40 + Math.round(zVal / 100)); 
+              });
+
+              const opacity = useTransform(currentZ, (zVal) => {
+                // If the layer is behind the camera (popped off the stack)
+                if (zVal > 400) return 0;
+                if (zVal > 100) return 0.2; // Keep it dimly visible when passed
+                
+                // Active or incoming distance
+                if (zVal < -3000) return 0.05; // Deep in the well
+                if (zVal < -1000) return 0.3;  // Approaching
+                return 1; // Active
+              });
+              
+              const isActive = i === active;
+
               return (
                 <motion.div
                   key={i}
-                  animate={{
-                    translateZ: activeZ,
+                  style={{ 
+                    translateZ: currentZ, 
                     opacity: opacity,
-                    scale: isActive ? 1.05 : 1,
+                    zIndex: dynamicZIndex,
                   }}
-                  transition={{ duration: 0.7, type: "spring", bounce: 0.15 }}
-                  className={`absolute inset-0 rounded-[50px] border flex items-center justify-center
-                    ${isActive ? step.glow + " " + step.bgLit : 'border-white/10 bg-zinc-950 backdrop-blur-md'}
+                  className={`absolute inset-0 rounded-[40px] border flex items-center justify-center
+                    ${isActive ? step.glow + " bg-black/95 shadow-2xl" : 'border-white/10 bg-zinc-950/95 shadow-[0_10px_30px_rgba(0,0,0,0.8)]'}
                   `}
-                  style={{ transformStyle: "preserve-3d" }}
                 >
-                  <div className="absolute inset-0 pcb-grid opacity-40 rounded-[50px]"></div>
-                  
-                  <div className={`absolute inset-0 opacity-30 ${isActive ? 'animate-pulse' : ''}`}>
-                    <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M 60 60 L 120 60 L 180 120 L 300 120" fill="transparent" stroke={step.hex} strokeWidth="5" />
-                      <path d="M 300 240 L 180 240 L 120 300 L 60 300" fill="transparent" stroke={step.hex} strokeWidth="5" />
-                      <path d="M 200 60 L 250 60 L 300 110" fill="transparent" stroke={step.hex} strokeWidth="2" strokeDasharray="5,5" />
-                      <circle cx="60" cy="60" r="6" fill={step.hex} />
-                      <circle cx="300" cy="120" r="6" fill={step.hex} />
-                      <circle cx="60" cy="300" r="6" fill={step.hex} />
-                    </svg>
-                  </div>
+                  <div className="absolute inset-0 pcb-grid opacity-20 rounded-[40px]"></div>
 
-                  {isActive && (
-                     <div className="absolute top-6 left-6 w-3 h-3 rounded-full bg-white animate-ping shadow-[0_0_15px_#fff]"></div>
-                  )}
+                  {/* SVG Block Diagram Traces */}
+                  <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-60" viewBox="0 0 500 500">
+                    <defs>
+                      <marker id={`arrow-${i}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                        <path d="M 0 0 L 10 5 L 0 10 z" fill={step.hex} />
+                      </marker>
+                    </defs>
+                    <path d="M 250 100 L 250 170" stroke={step.hex} strokeWidth="3" strokeDasharray="6 6" markerEnd={`url(#arrow-${i})`} />
+                    <path d="M 250 330 L 250 400" stroke={step.hex} strokeWidth="3" strokeDasharray="6 6" markerEnd={`url(#arrow-${i})`} />
+                    <path d="M 100 250 L 140 250" stroke={step.hex} strokeWidth="2" opacity="0.5" />
+                    <path d="M 360 250 L 400 250" stroke={step.hex} strokeWidth="2" opacity="0.5" />
+                    <circle cx="250" cy="100" r="4" fill={step.hex} />
+                    <circle cx="250" cy="400" r="4" fill={step.hex} />
+                  </svg>
 
-                  <div 
-                    className={`relative z-10 p-8 rounded-3xl bg-black/60 backdrop-blur-xl border border-white/10 shadow-2xl ${isActive ? step.iconColor : 'text-zinc-600'}`}
-                    style={{ transform: "translateZ(40px)" }}
-                  >
-                    {Icon && <Icon className="w-16 h-16" />}
+                  {/* Block Diagram Components */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    
+                    {/* Top Data Port */}
+                    <div className="w-32 h-8 bg-white/5 border border-white/10 rounded-md flex items-center justify-center text-[10px] font-mono text-zinc-500 mb-8 shadow-inner">
+                      Input I/O
+                    </div>
+
+                    <div className="flex items-center gap-8 relative z-10">
+                      {/* Left Helper Node */}
+                      <div className="w-12 h-32 bg-white/5 border border-white/10 rounded-md shadow-inner"></div>
+
+                      {/* Main Class Chip */}
+                      <div className={`w-56 h-56 border-2 ${isActive ? step.glow : 'border-white/10 shadow-[0_0_15px_rgba(0,0,0,0.5)]'} bg-[#050505] rounded-3xl flex flex-col items-center justify-center relative transition-all duration-300`}>
+                        <div className="absolute top-3 left-3 w-2 h-2 rounded-full bg-zinc-800"></div>
+                        <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-zinc-800"></div>
+                        <div className="absolute bottom-3 left-3 w-2 h-2 rounded-full bg-zinc-800"></div>
+                        <div className="absolute bottom-3 right-3 w-2 h-2 rounded-full bg-zinc-800"></div>
+                        
+                        <div className={`p-4 rounded-2xl bg-black border border-white/10 mb-4 shadow-inner ${step.iconColor}`}>
+                          {Icon && <Icon className="w-12 h-12" />}
+                        </div>
+                        <div className="text-xs font-mono text-white tracking-widest text-center px-4">
+                          {step.className}
+                        </div>
+                      </div>
+
+                      {/* Right Helper Node */}
+                      <div className="w-12 h-32 bg-white/5 border border-white/10 rounded-md shadow-inner"></div>
+                    </div>
+
+                    {/* Bottom Data Port */}
+                    <div className="w-32 h-8 bg-white/5 border border-white/10 rounded-md flex items-center justify-center text-[10px] font-mono text-zinc-500 mt-8 shadow-inner">
+                      Output I/O
+                    </div>
+
                   </div>
                 </motion.div>
               );
