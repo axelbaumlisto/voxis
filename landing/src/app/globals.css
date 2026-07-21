@@ -121,6 +121,7 @@ body {
   background-size: 50px 50px;
   background-image: linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  -webkit-mask-image: radial-gradient(circle at center, black 30%, transparent 90%);
   mask-image: radial-gradient(circle at center, black 30%, transparent 90%);
 }
 

@@ -1,5 +1,3 @@
-import { Mic, Zap, Brain, Keyboard, Terminal, Cpu } from "lucide-react";
-
 export type IconKey = "terminal" | "cpu" | "mic" | "brain" | "keyboard" | "zap";
 
 export interface Step {
@@ -11,7 +9,6 @@ export interface Step {
   desc: string;
   glow: string;
   iconColor: string;
-  bgLit: string;
   hex: string;
 }
 
@@ -23,7 +20,6 @@ const layers = [
     filePath: "src-tauri/src/hotkey/mod.rs",
     glow: "shadow-[0_0_40px_rgba(34,211,238,0.4)] border-cyan-400",
     iconColor: "text-cyan-400",
-    bgLit: "bg-cyan-950/80",
     hex: "#22d3ee"
   },
   {
@@ -32,7 +28,6 @@ const layers = [
     filePath: "src-tauri/src/orchestrator/coordinator.rs",
     glow: "shadow-[0_0_40px_rgba(59,130,246,0.4)] border-blue-500",
     iconColor: "text-blue-500",
-    bgLit: "bg-blue-950/80",
     hex: "#3b82f6"
   },
   {
@@ -41,7 +36,6 @@ const layers = [
     filePath: "src-tauri/src/audio/stream.rs",
     glow: "shadow-[0_0_40px_rgba(234,179,8,0.4)] border-yellow-500",
     iconColor: "text-yellow-500",
-    bgLit: "bg-yellow-950/80",
     hex: "#eab308"
   },
   {
@@ -50,7 +44,6 @@ const layers = [
     filePath: "src-tauri/src/transcription/mod.rs",
     glow: "shadow-[0_0_40px_rgba(168,85,247,0.4)] border-purple-500",
     iconColor: "text-purple-500",
-    bgLit: "bg-purple-950/80",
     hex: "#a855f7"
   },
   {
@@ -59,7 +52,6 @@ const layers = [
     filePath: "src-tauri/src/output/mod.rs",
     glow: "shadow-[0_0_40px_rgba(52,211,153,0.4)] border-emerald-400",
     iconColor: "text-emerald-400",
-    bgLit: "bg-emerald-950/80",
     hex: "#34d399"
   }
 ];

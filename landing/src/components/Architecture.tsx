@@ -21,6 +21,19 @@ const IconMap: Record<IconKey, React.ComponentType<{ className?: string }>> = {
 const SPREAD = 620;
 const FOCUS_POP = 120;
 const EPSILON = 0.5;
+const UNPACK_END = 0.1; // scroll fraction spent "unpacking" the stack
+
+/**
+ * Shared fly-through progression. `fly` ranges from 0 to (stepCount - 1) + a hair,
+ * so every layer (including the last) becomes the focused one. Data-driven, not hard-coded to 5.
+ */
+function flyProgress(p: number, stepCount: number): { spread: number; fly: number } {
+  const maxFly = Math.max(stepCount - 1, 0) + 0.499;
+  if (p < UNPACK_END) {
+    return { spread: 60 + (p / UNPACK_END) * (SPREAD - 60), fly: 0 };
+  }
+  return { spread: SPREAD, fly: ((p - UNPACK_END) / (1 - UNPACK_END)) * maxFly };
+}
 
 /** A single depth-sorted PCB layer. Occlusion is pure geometry (no z-index). */
 function BoardLayer({
@@ -28,28 +41,22 @@ function BoardLayer({
   index,
   scrollYProgress,
   active,
+  stepCount,
 }: {
   step: Step;
   index: number;
   scrollYProgress: ReturnType<typeof useScroll>["scrollYProgress"];
   active: number;
+  stepCount: number;
 }) {
   const i = index;
   const Icon = IconMap[step.iconName];
   const isActive = i === active;
 
   const currentZ = useTransform(scrollYProgress, (p) => {
-    let spread = 620;
-    let fly = 0;
-    if (p < 0.1) {
-      spread = 60 + (p / 0.1) * 560;
-    } else {
-      fly = ((p - 0.1) / 0.9) * 4.99;
-    }
-
+    const { spread, fly } = flyProgress(p, stepCount);
     const distance = i - fly;
     const baseDepth = distance * -spread;
-
     const pop = Math.abs(distance) < EPSILON ? FOCUS_POP * (1 - Math.abs(distance) / EPSILON) : 0;
     return baseDepth + pop;
   });
@@ -162,11 +169,10 @@ export default function Architecture({ steps }: ArchitectureProps) {
   });
 
   useMotionValueEvent(scrollYProgress, "change", (latest) => {
-    let f = 0;
-    if (latest >= 0.1) {
-      f = ((latest - 0.1) / 0.9) * 4.99;
-    }
-    setActive(Math.min(steps.length - 1, Math.max(0, Math.round(f))));
+    const { fly } = flyProgress(latest, steps.length);
+    const next = Math.min(steps.length - 1, Math.max(0, Math.round(fly)));
+    // Only update when the rounded index actually changes (avoids per-tick re-renders).
+    setActive((prev) => (prev === next ? prev : next));
   });
 
   return (
@@ -210,7 +216,7 @@ export default function Architecture({ steps }: ArchitectureProps) {
       <div className="hidden md:flex sticky top-0 h-screen w-full flex-row items-center justify-center overflow-hidden px-10 lg:px-20 bg-gradient-to-b from-[var(--color-surface-2)] to-[var(--color-surface)]">
         {/* Bridge heading — links the centered hero to the left-anchored layers */}
         <div className="absolute top-[max(6vh,var(--space-2xl))] left-1/2 -translate-x-1/2 z-40 text-center pointer-events-none">
-          <div className="pill text-[var(--color-muted)] mb-2">// SYSTEM ARCHITECTURE</div>
+          <div className="pill text-[var(--color-muted)] mb-2">{"// SYSTEM ARCHITECTURE"}</div>
           <h2 className="text-3xl lg:text-4xl font-extrabold text-gradient">Under the hood</h2>
         </div>
 
@@ -254,7 +260,7 @@ export default function Architecture({ steps }: ArchitectureProps) {
 
                           <div className={`w-full pill-code ${step.iconColor}`} style={{ fontFamily: "var(--font-mono)" }}>
                             <span>{step.className}</span>
-                            <span className="text-zinc-600 text-xs">module</span>
+                            <span className="text-zinc-600 text-xs">{step.filePath}</span>
                           </div>
                         </div>
                       </div>
@@ -281,6 +287,7 @@ export default function Architecture({ steps }: ArchitectureProps) {
                 index={i}
                 scrollYProgress={scrollYProgress}
                 active={active}
+                stepCount={steps.length}
               />
             ))}
           </motion.div>
