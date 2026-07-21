@@ -63,8 +63,8 @@ function BoardLayer({
 
   const blur = useTransform(
     currentZ,
-    [-3200, -900, 0, 200],
-    ["blur(6px)", "blur(2px)", "blur(0px)", "blur(4px)"],
+    [-3200, -1500, -600, 0, 200],
+    ["blur(14px)", "blur(8px)", "blur(3px)", "blur(0px)", "blur(8px)"],
     { clamp: true }
   );
 
@@ -208,6 +208,12 @@ export default function Architecture({ steps }: ArchitectureProps) {
 
       {/* --- DESKTOP VIEW: Exploding Multi-Layer Chip Fly-Through --- */}
       <div className="hidden md:flex sticky top-0 h-screen w-full flex-row items-center justify-center overflow-hidden px-10 lg:px-20 bg-gradient-to-b from-[var(--color-surface-2)] to-[var(--color-surface)]">
+        {/* Bridge heading — links the centered hero to the left-anchored layers */}
+        <div className="absolute top-[max(6vh,var(--space-2xl))] left-1/2 -translate-x-1/2 z-40 text-center pointer-events-none">
+          <div className="pill text-[var(--color-muted)] mb-2">// SYSTEM ARCHITECTURE</div>
+          <h2 className="text-3xl lg:text-4xl font-extrabold text-gradient">Under the hood</h2>
+        </div>
+
         {/* Left Side: Info Glass */}
         <div className="w-1/2 flex items-center justify-center z-30 h-full">
           <div className="w-full max-w-[var(--container-card)] relative">
