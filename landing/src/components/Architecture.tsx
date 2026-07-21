@@ -20,9 +20,9 @@ const IconMap: Record<IconKey, React.ComponentType<{ className?: string }>> = {
   keyboard: Keyboard,
 };
 
-const SPREAD = 620;
-const FOCUS_POP = 120;
-const EPSILON = 0.5;
+const SPREAD = 440;
+const FOCUS_POP = 90;
+const EPSILON = 0.6;
 const UNPACK_END = 0.1; // scroll fraction spent "unpacking" the stack
 
 /**
@@ -63,21 +63,23 @@ function BoardLayer({
     return baseDepth + pop;
   });
 
+  // Peak brightness spans 0..FOCUS_POP so the popped active layer is the brightest,
+  // and far layers keep a visible floor (~0.15) so 3-4 planes always read as a stack.
   const opacity = useTransform(
     currentZ,
-    [-3200, -1600, -700, 0, 180, 420],
-    [0.04, 0.22, 0.6, 1, 0.12, 0],
+    [-2400, -1300, -500, 0, 120, 340, 560],
+    [0.15, 0.4, 0.85, 1, 1, 0.45, 0],
     { clamp: true }
   );
 
   const blur = useTransform(
     currentZ,
-    [-3200, -1500, -600, 0, 200],
-    ["blur(14px)", "blur(8px)", "blur(3px)", "blur(0px)", "blur(8px)"],
+    [-2400, -1200, -450, 0, 120, 380],
+    ["blur(11px)", "blur(6px)", "blur(2px)", "blur(0px)", "blur(0px)", "blur(7px)"],
     { clamp: true }
   );
 
-  const scale = useTransform(currentZ, [-200, 0, 200], [0.98, 1.04, 0.98], { clamp: true });
+  const scale = useTransform(currentZ, [-200, 0, 120, 320], [0.96, 1.03, 1.08, 0.98], { clamp: true });
 
   return (
     <motion.div
@@ -89,16 +91,16 @@ function BoardLayer({
         transformStyle: "preserve-3d",
       }}
       className={`absolute inset-0 rounded-[40px] border flex items-center justify-center
-        ${isActive ? step.glow + " bg-black/95 shadow-2xl" : "border-white/5 bg-zinc-950/85 shadow-[0_10px_30px_rgba(0,0,0,0.5)]"}
+        ${isActive ? step.glow + " bg-black/95 shadow-2xl" : "border-white/10 bg-zinc-900/80 shadow-[0_10px_30px_rgba(0,0,0,0.5)]"}
       `}
     >
-      <div className={`absolute inset-0 pcb-grid rounded-[40px] ${isActive ? "opacity-30" : "opacity-20"}`}></div>
+      <div className={`absolute inset-0 pcb-grid rounded-[40px] ${isActive ? "opacity-40" : "opacity-30"}`}></div>
 
       {/* SVG Block Diagram Traces */}
       <svg
         className="absolute inset-0 w-full h-full pointer-events-none"
         viewBox="0 0 500 500"
-        style={isActive ? { filter: `drop-shadow(0 0 4px ${step.hex})`, opacity: 1 } : { opacity: 0.25 }}
+        style={isActive ? { filter: `drop-shadow(0 0 6px ${step.hex})`, opacity: 1 } : { opacity: 0.45 }}
       >
         <defs>
           <marker id={`arrow-${i}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
@@ -239,8 +241,8 @@ function ArchitectureDesktop({
                         </p>
 
                         <div className={`w-full pill-code ${step.iconColor}`} style={{ fontFamily: "var(--font-mono)" }}>
-                          <span>{step.className}</span>
-                          <span className="text-zinc-600 text-xs">{step.filePath}</span>
+                          <span className="pill-code__type">{step.className}</span>
+                          <span className="pill-code__path">{step.filePath}</span>
                         </div>
                       </div>
                     </div>
@@ -252,11 +254,11 @@ function ArchitectureDesktop({
       </div>
 
       {/* Right Side: The Exploding 3D Chip Stack (pure depth-sorted, no z-index) */}
-      <div className="w-1/2 h-full flex items-center justify-center perspective-[2500px] z-10">
+      <div className="w-1/2 h-full flex items-center justify-center perspective-[2200px] z-10">
         <motion.div
-          className="relative w-[500px] h-[500px]"
+          className="relative w-[620px] h-[620px] lg:w-[720px] lg:h-[720px]"
           style={{
-            transform: "rotateX(60deg) rotateZ(-45deg)",
+            transform: "rotateX(58deg) rotateZ(-45deg) translateY(-4%)",
             transformStyle: "preserve-3d",
           }}
         >
@@ -311,7 +313,8 @@ export default function Architecture({ steps }: ArchitectureProps) {
                   {step.desc}
                 </p>
                 <div className={`w-full pill-code text-xs ${step.iconColor}`} style={{ fontFamily: "var(--font-mono)" }}>
-                  {step.className}
+                  <span className="pill-code__type">{step.className}</span>
+                  <span className="pill-code__path">{step.filePath}</span>
                 </div>
               </div>
             </div>
