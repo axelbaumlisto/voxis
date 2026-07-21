@@ -29,6 +29,7 @@ export default function Hero({ badge, title, description, downloadText, docsText
           {badge}
         </motion.div>
 
+        {/* SectionHeading exception: hero keeps separate motion.h1/motion.p so gradient text and staggered entrance stay unchanged. */}
         <motion.h1
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}

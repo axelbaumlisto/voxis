@@ -1,5 +1,6 @@
 import { Globe, Cpu } from "lucide-react";
 import Link from "next/link";
+import Container from "./ui/Container";
 
 interface NavbarProps {
   lang: "en" | "ru";
@@ -8,7 +9,7 @@ interface NavbarProps {
 
 export default function Navbar({ lang, links }: NavbarProps) {
   return (
-    <nav className="w-full max-w-[var(--container-page)] mx-auto px-[var(--space-md)] lg:px-[var(--space-2xl)] py-[var(--space-md)] flex justify-between items-center absolute top-0 left-1/2 -translate-x-1/2 z-50 backdrop-blur-sm bg-transparent border-b border-[var(--color-border-subtle)]">
+    <Container as="nav" width="page" className="py-[var(--space-md)] flex justify-between items-center absolute top-0 left-1/2 -translate-x-1/2 z-50 backdrop-blur-sm bg-transparent border-b border-[var(--color-border-subtle)]">
       <div className="text-2xl font-black tracking-tighter text-white drop-shadow-lg flex items-center gap-2">
         <Cpu className="w-6 h-6 text-[var(--color-accent)]" /> VOXIS
       </div>
@@ -34,6 +35,6 @@ export default function Navbar({ lang, links }: NavbarProps) {
           )}
         </div>
       </div>
-    </nav>
+    </Container>
   );
 }

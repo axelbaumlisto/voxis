@@ -1,36 +1,38 @@
-import { useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
+/**
+ * SSR-safe media query hook.
+ *
+ * Uses `useSyncExternalStore` so that:
+ * - The server snapshot (and the first client render used for hydration) is
+ *   always `false`, matching the server markup exactly (no hydration mismatch).
+ * - After hydration React switches to the client snapshot and subscribes to
+ *   `MediaQueryList` change events.
+ */
 export function useMediaQuery(query: string): boolean {
-  // Инициализируем стейт сразу из window, чтобы избежать setState в effect (или false для SSR)
-  const [matches, setMatches] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      return window.matchMedia(query).matches;
-    }
-    return false;
-  });
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      if (typeof window === "undefined") return () => {};
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    
-    const mediaQuery = window.matchMedia(query);
-    const handler = (event: MediaQueryListEvent) => {
-      setMatches(event.matches);
-    };
+      const mediaQuery = window.matchMedia(query);
 
-    if (mediaQuery.addEventListener) {
-      mediaQuery.addEventListener("change", handler);
-    } else {
-      mediaQuery.addListener(handler);
-    }
-
-    return () => {
-      if (mediaQuery.removeEventListener) {
-        mediaQuery.removeEventListener("change", handler);
-      } else {
-        mediaQuery.removeListener(handler);
+      if (mediaQuery.addEventListener) {
+        mediaQuery.addEventListener("change", onStoreChange);
+        return () => mediaQuery.removeEventListener("change", onStoreChange);
       }
-    };
+
+      mediaQuery.addListener(onStoreChange);
+      return () => mediaQuery.removeListener(onStoreChange);
+    },
+    [query]
+  );
+
+  const getSnapshot = useCallback(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia(query).matches;
   }, [query]);
 
-  return matches;
+  const getServerSnapshot = () => false;
+
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
