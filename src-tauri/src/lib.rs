@@ -166,7 +166,11 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
 
 /// Initialize and run the Tauri application.
 pub fn run() {
-    // Initialize X11 thread safety BEFORE anything else (Linux only)
+    // Migrate user data before logging creates the new config directory.
+    storage::paths::migrate_legacy_config_dir()
+        .expect("failed to migrate legacy application data");
+
+    // Initialize X11 thread safety before any X11/GTK operations (Linux only).
     #[cfg(target_os = "linux")]
     setup::init_x11_threads();
 

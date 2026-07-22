@@ -171,7 +171,7 @@ export function setupDefaultMocks() {
       case "clear_debug":
         return undefined;
       case "get_debug_dir":
-        return "/home/user/.config/soupawhisper/debug";
+        return "/home/user/.config/voxis/debug";
       // Recording commands
       case "list_audio_devices":
         return [...mockAudioDevices];

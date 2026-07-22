@@ -23,7 +23,7 @@
     "generating": "Генерация...",
     "previewing": "Предпросмотр...",
     "approveAll": "Принять все",
-    "appTitle": "SoupaWhisper 2",
+    "appTitle": "Voxis",
     "language": "Язык",
     "copy": "Копировать",
     "quit": "Выход"
@@ -181,7 +181,7 @@
     }
   },
   "onboarding": {
-    "welcome": "Добро пожаловать в SoupaWhisper",
+    "welcome": "Добро пожаловать в Voxis",
     "stepMicrophone": "Микрофон",
     "stepHotkey": "Горячая клавиша",
     "stepTryIt": "Попробуйте",

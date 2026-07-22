@@ -738,10 +738,10 @@ describe("commands.ts", () => {
 
     describe("getDebugDir", () => {
       it("returns debug directory path", async () => {
-        mockInvoke.mockResolvedValueOnce("/home/user/.config/soupawhisper/debug");
+        mockInvoke.mockResolvedValueOnce("/home/user/.config/voxis/debug");
         const result = await getDebugDir();
         expect(mockInvoke).toHaveBeenCalledWith("get_debug_dir");
-        expect(result).toBe("/home/user/.config/soupawhisper/debug");
+        expect(result).toBe("/home/user/.config/voxis/debug");
       });
 
       it("handles errors", async () => {

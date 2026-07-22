@@ -484,34 +484,37 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires an explicit VOXIS_TEST_REAL_HISTORY_DB path"]
     fn test_load_real_db() {
-        // Test loading from actual soupawhisper history.db
-        let real_db = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
-            .join(".config/soupawhisper/history.db");
+        let Some(real_db) = std::env::var_os("VOXIS_TEST_REAL_HISTORY_DB") else {
+            println!("Skipping: VOXIS_TEST_REAL_HISTORY_DB is not set");
+            return;
+        };
+        let real_db = std::path::PathBuf::from(real_db);
+        assert!(
+            real_db.is_file(),
+            "VOXIS_TEST_REAL_HISTORY_DB must point to an existing database"
+        );
 
-        if real_db.exists() {
-            let storage = HistorySqliteStorage::new(real_db);
-            let count = storage.count().unwrap();
-            println!("Real history.db has {} entries", count);
+        let storage = HistorySqliteStorage::new(real_db);
+        let count = storage.count().unwrap();
+        println!("Real history.db has {} entries", count);
 
-            let entries = storage.load(Some(5)).unwrap();
-            println!("Loaded {} entries:", entries.len());
-            for e in &entries {
-                println!(
-                    "  [{}] {} - {}",
-                    e.id,
-                    e.timestamp,
-                    e.text.chars().take(50).collect::<String>()
-                );
-            }
-
-            assert!(count > 0, "Real history.db should have entries");
-            assert!(
-                !entries.is_empty(),
-                "Should load entries from real history.db"
+        let entries = storage.load(Some(5)).unwrap();
+        println!("Loaded {} entries:", entries.len());
+        for e in &entries {
+            println!(
+                "  [{}] {} - {}",
+                e.id,
+                e.timestamp,
+                e.text.chars().take(50).collect::<String>()
             );
-        } else {
-            println!("Skipping: ~/.config/soupawhisper/history.db not found");
         }
+
+        assert!(count > 0, "Real history.db should have entries");
+        assert!(
+            !entries.is_empty(),
+            "Should load entries from real history.db"
+        );
     }
 }

@@ -76,10 +76,7 @@ pub(super) fn create_app_state(
     let recorder = Arc::new(AudioRecorder::new());
     let output = Arc::new(OutputHandler::default());
 
-    let themes_dir = dirs::config_dir()
-        .unwrap_or_default()
-        .join("soupawhisper")
-        .join("themes");
+    let themes_dir = app.state::<storage::AppPaths>().themes_dir();
 
     // --- Theme engine v2: seed bundled themes BEFORE legacy seeder runs ---
     //

@@ -2,8 +2,124 @@
 //!
 //! Uses XDG on Linux, standard locations on macOS/Windows.
 
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::fs;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 use tauri::AppHandle;
+
+/// Name of the application data directory within the OS config directory.
+pub const APP_CONFIG_DIR: &str = "voxis";
+/// Legacy application data directory used for one-time migration.
+pub const LEGACY_CONFIG_DIR: &str = "soupawhisper";
+
+/// Resolve the canonical application data directory.
+///
+/// Storage, logging, themes, and the debug socket must all use this resolver
+/// rather than Tauri's identifier-derived `app_config_dir()`.
+pub fn app_config_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join(APP_CONFIG_DIR))
+}
+
+/// Migrate the legacy application data directory to the canonical location.
+///
+/// `config.db` is the completion marker. A destination containing only logs or
+/// other partial data is merged with the legacy directory. The legacy data is
+/// removed only after a rename or complete recursive copy succeeds.
+pub fn migrate_legacy_config_dir() -> std::io::Result<()> {
+    let Some(base_dir) = dirs::config_dir() else {
+        return Ok(());
+    };
+    let legacy_dir = base_dir.join(LEGACY_CONFIG_DIR);
+    let legacy_existed = legacy_dir.exists();
+    let result = migrate_legacy_config_dir_in(&base_dir);
+    if result.is_ok() && legacy_existed && !legacy_dir.exists() {
+        eprintln!("Migrated application data from {LEGACY_CONFIG_DIR} to {APP_CONFIG_DIR}");
+    }
+    result
+}
+
+fn migrate_legacy_config_dir_in(base_dir: &Path) -> std::io::Result<()> {
+    let new_dir = base_dir.join(APP_CONFIG_DIR);
+    let old_dir = base_dir.join(LEGACY_CONFIG_DIR);
+
+    if !old_dir.exists() || new_dir.join("config.db").exists() {
+        return Ok(());
+    }
+
+    match fs::rename(&old_dir, &new_dir) {
+        Ok(()) => Ok(()),
+        Err(error) if error.raw_os_error() == Some(libc::EXDEV) => {
+            copy_dir_then_swap(&old_dir, &new_dir)
+        }
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => merge_dirs(&old_dir, &new_dir),
+        // Some platforms report a non-empty destination using an error kind
+        // other than AlreadyExists. It is still the logs-only merge case as
+        // long as the destination appeared and has no completion marker.
+        Err(_) if new_dir.exists() && !new_dir.join("config.db").exists() => {
+            merge_dirs(&old_dir, &new_dir)
+        }
+        // Another process may have completed the migration after our guards.
+        Err(_) if !old_dir.exists() && new_dir.join("config.db").exists() => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn copy_dir_then_swap(old_dir: &Path, new_dir: &Path) -> std::io::Result<()> {
+    let parent = new_dir
+        .parent()
+        .ok_or_else(|| std::io::Error::other("config directory has no parent"))?;
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temp_dir = parent.join(format!(
+        ".{APP_CONFIG_DIR}.migration-{}-{unique}",
+        std::process::id()
+    ));
+
+    let copied = (|| {
+        copy_dir_recursive(old_dir, &temp_dir)?;
+        match fs::rename(&temp_dir, new_dir) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists || new_dir.exists() => {
+                copy_dir_recursive(&temp_dir, new_dir)?;
+                fs::remove_dir_all(&temp_dir)
+            }
+            Err(error) => Err(error),
+        }
+    })();
+
+    if copied.is_err() {
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+    copied?;
+    fs::remove_dir_all(old_dir)
+}
+
+fn merge_dirs(old_dir: &Path, new_dir: &Path) -> std::io::Result<()> {
+    copy_dir_recursive(old_dir, new_dir)?;
+    fs::remove_dir_all(old_dir)
+}
+
+fn copy_dir_recursive(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(destination)?;
+    let mut entries = fs::read_dir(source)?.collect::<Result<Vec<_>, _>>()?;
+    // Copy the completion marker last so concurrent starts never treat a
+    // partially copied directory as fully migrated.
+    entries.sort_by_key(|entry| entry.file_name() == OsStr::new("config.db"));
+
+    for entry in entries {
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&source_path, &destination_path)?;
+        } else {
+            fs::copy(source_path, destination_path)?;
+        }
+    }
+    Ok(())
+}
 
 /// App paths for config, history, dictionary files.
 #[derive(Debug, Clone)]
@@ -20,10 +136,8 @@ impl AppPaths {
 
     /// Create AppPaths from Tauri AppHandle.
     pub fn new(_app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
-        // Use standard config directory
-        let config_dir = dirs::config_dir()
-            .ok_or("Cannot find config directory")?
-            .join("soupawhisper");
+        // Use the canonical application data directory.
+        let config_dir = app_config_dir().ok_or("Cannot find config directory")?;
 
         // Ensure directory exists
         std::fs::create_dir_all(&config_dir)?;
@@ -157,5 +271,81 @@ mod tests {
         let paths = AppPaths::from_config_dir(temp.path().to_path_buf());
         let debug_dir = paths.ensure_debug_dir().unwrap();
         assert!(debug_dir.exists());
+    }
+
+    #[test]
+    fn migrate_legacy_config_dir_happy_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy = temp.path().join(LEGACY_CONFIG_DIR);
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("config.db"), b"legacy config").unwrap();
+
+        migrate_legacy_config_dir_in(temp.path()).unwrap();
+
+        assert!(!legacy.exists());
+        assert_eq!(
+            fs::read(temp.path().join(APP_CONFIG_DIR).join("config.db")).unwrap(),
+            b"legacy config"
+        );
+    }
+
+    #[test]
+    fn migrate_legacy_config_dir_merges_into_logs_only_destination() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy = temp.path().join(LEGACY_CONFIG_DIR);
+        let destination = temp.path().join(APP_CONFIG_DIR);
+        fs::create_dir_all(legacy.join("logs")).unwrap();
+        fs::create_dir_all(destination.join("logs")).unwrap();
+        fs::write(legacy.join("config.db"), b"legacy config").unwrap();
+        fs::write(legacy.join("logs/legacy.log"), b"legacy log").unwrap();
+        fs::write(destination.join("logs/current.log"), b"current log").unwrap();
+
+        migrate_legacy_config_dir_in(temp.path()).unwrap();
+
+        assert!(!legacy.exists());
+        assert_eq!(
+            fs::read(destination.join("config.db")).unwrap(),
+            b"legacy config"
+        );
+        assert!(destination.join("logs/legacy.log").exists());
+        assert!(destination.join("logs/current.log").exists());
+    }
+
+    #[test]
+    fn migrate_legacy_config_dir_keeps_legacy_when_both_have_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy = temp.path().join(LEGACY_CONFIG_DIR);
+        let destination = temp.path().join(APP_CONFIG_DIR);
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        fs::write(legacy.join("config.db"), b"legacy config").unwrap();
+        fs::write(destination.join("config.db"), b"current config").unwrap();
+
+        migrate_legacy_config_dir_in(temp.path()).unwrap();
+
+        assert_eq!(
+            fs::read(legacy.join("config.db")).unwrap(),
+            b"legacy config"
+        );
+        assert_eq!(
+            fs::read(destination.join("config.db")).unwrap(),
+            b"current config"
+        );
+    }
+
+    #[test]
+    fn migrate_legacy_config_dir_is_idempotent() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy = temp.path().join(LEGACY_CONFIG_DIR);
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("config.db"), b"legacy config").unwrap();
+
+        migrate_legacy_config_dir_in(temp.path()).unwrap();
+        migrate_legacy_config_dir_in(temp.path()).unwrap();
+
+        assert_eq!(
+            fs::read(temp.path().join(APP_CONFIG_DIR).join("config.db")).unwrap(),
+            b"legacy config"
+        );
     }
 }

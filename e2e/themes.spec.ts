@@ -99,11 +99,11 @@ test.describe("Visualization Themes", () => {
               call.result = { valid: true, warnings: [], errors: [] };
               break;
             case "get_themes_dir":
-              call.result = "/home/user/.config/soupawhisper/themes";
+              call.result = "/home/user/.config/voxis/themes";
               break;
             case "export_builtin_theme":
               // Return path to exported file
-              call.result = `/home/user/.config/soupawhisper/themes/${args?.themeId}_custom.json`;
+              call.result = `/home/user/.config/voxis/themes/${args?.themeId}_custom.json`;
               break;
             case "reload_visualization_themes":
               call.result = undefined;
@@ -243,7 +243,7 @@ test.describe("Visualization Themes", () => {
       return await (window as any).__TAURI_INTERNALS__.invoke("get_themes_dir");
     });
 
-    expect(themesDir).toContain("soupawhisper");
+    expect(themesDir).toContain("voxis");
     expect(themesDir).toContain("themes");
   });
 

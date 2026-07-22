@@ -5906,6 +5906,7 @@ dependencies = [
  "enigo",
  "gtk",
  "hound",
+ "libc",
  "mockito",
  "objc2",
  "objc2-app-kit",

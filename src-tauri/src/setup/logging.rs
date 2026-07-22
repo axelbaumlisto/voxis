@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::storage::paths;
+
 /// Initialize X11 thread support (must be called before any X11/GTK operations).
 /// Required for rdev hotkey listener to work safely alongside GTK.
 #[cfg(target_os = "linux")]
@@ -14,14 +16,13 @@ pub fn init_x11_threads() {
 pub fn init_x11_threads() {}
 
 /// Initialize the logging subsystem with tracing.
-/// Logs to both stderr and rotating file in ~/.config/soupawhisper/logs/
+/// Logs to both stderr and rotating file in the canonical application config directory.
 pub fn init_logging() {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    let log_dir = dirs::config_dir()
+    let log_dir = paths::app_config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("soupawhisper")
         .join("logs");
 
     let _ = std::fs::create_dir_all(&log_dir);

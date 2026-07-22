@@ -1,7 +1,7 @@
-# SoupaWhisper Visualization Theme Template
+# Voxis Visualization Theme Template
 #
 # This file describes the format for custom visualization themes.
-# Copy this file to ~/.config/soupawhisper/themes/my_theme.toml
+# Copy this file to ~/.config/voxis/themes/my_theme.toml
 # and customize the values.
 #
 # Colors are in hexadecimal RGB format: "#RRGGBB"

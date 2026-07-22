@@ -412,14 +412,14 @@ mod tests {
         let suggestion = PendingSuggestion {
             id: 42,
             source: "souprawhisper".into(),
-            replacement: "SoupaWhisper".into(),
+            replacement: "Voxis".into(),
             count: 10,
             first_seen: "2024-06-01".into(),
             last_seen: "2024-06-15".into(),
         };
         assert_eq!(suggestion.id, 42);
         assert_eq!(suggestion.source, "souprawhisper");
-        assert_eq!(suggestion.replacement, "SoupaWhisper");
+        assert_eq!(suggestion.replacement, "Voxis");
         assert_eq!(suggestion.count, 10);
         assert_eq!(suggestion.first_seen, "2024-06-01");
         assert_eq!(suggestion.last_seen, "2024-06-15");

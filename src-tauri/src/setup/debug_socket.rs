@@ -1,7 +1,7 @@
 //! Unix-socket debug RPC for e2e screenshot suites.
 //!
-//! Listens on `~/.config/soupawhisper/debug.sock` (Linux) or
-//! `~/Library/Application Support/soupawhisper/debug.sock` (macOS) when
+//! Listens on `~/.config/voxis/debug.sock` (Linux) or
+//! `~/Library/Application Support/voxis/debug.sock` (macOS) when
 //! the binary was built with `debug_assertions`. Accepts newline-delimited
 //! JSON-RPC-ish messages:
 //!
@@ -121,12 +121,8 @@ fn handle_request(app: &AppHandle, req: Request) -> Response {
     }
 }
 
-fn socket_path(app: &AppHandle) -> Option<PathBuf> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .ok()
-        .or_else(|| dirs::config_dir().map(|d| d.join("soupawhisper")))?;
+fn socket_path(_app: &AppHandle) -> Option<PathBuf> {
+    let dir = crate::storage::paths::app_config_dir()?;
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir.join(SOCKET_BASENAME))
 }

@@ -206,7 +206,7 @@ pub fn show_permission_dialog(missing: &[Permission]) -> bool {
     let permission_list = permission_names.join(" and ");
 
     let script = format!(
-        r#"display dialog "SoupaWhisper needs {} permission to function properly.
+        r#"display dialog "Voxis needs {} permission to function properly.
 
 Please grant permission in System Preferences, then restart the app." buttons {{"Quit", "Open Settings"}} default button "Open Settings" with icon caution with title "Permission Required""#,
         permission_list
@@ -272,7 +272,7 @@ pub fn show_single_permission_dialog(permission: Permission) -> bool {
     let description = permission.description();
 
     let script = format!(
-        r#"display dialog "SoupaWhisper needs {name} permission.
+        r#"display dialog "Voxis needs {name} permission.
 
 {description}
 

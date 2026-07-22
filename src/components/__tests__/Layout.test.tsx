@@ -82,7 +82,7 @@ describe("Layout", () => {
     it("renders header with title", async () => {
       renderLayout();
       await waitFor(() => {
-        expect(screen.getByText("SoupaWhisper 2")).toBeInTheDocument();
+        expect(screen.getByText("Voxis")).toBeInTheDocument();
       });
     });
 
@@ -180,7 +180,7 @@ describe("Layout", () => {
       mockRecordingContext.lastTranscription = "Test transcription";
       renderLayout();
       await waitFor(() => {
-        expect(screen.getByText("SoupaWhisper 2")).toBeInTheDocument();
+        expect(screen.getByText("Voxis")).toBeInTheDocument();
       });
       fireEvent.keyDown(window, { key: "c" });
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith("Test transcription");
@@ -313,7 +313,7 @@ describe("Layout", () => {
     it("does not show permission banner when all permissions granted", async () => {
       renderLayout();
       await waitFor(() => {
-        expect(screen.getByText("SoupaWhisper 2")).toBeInTheDocument();
+        expect(screen.getByText("Voxis")).toBeInTheDocument();
       });
       // PermissionBanner renders null when all permissions are granted
       expect(document.querySelector(".permission-banners")).not.toBeInTheDocument();

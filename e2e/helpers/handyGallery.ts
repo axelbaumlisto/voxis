@@ -3,7 +3,7 @@
  *
  * Three driver categories:
  *  1) Socket-based command driver (sends JSON-RPC to the running voice
- *     process via $APP_CONFIG/com.soupawhisper.voice/debug.sock).
+ *     process via $APP_CONFIG/voxis/debug.sock; the app identifier is top.voxis.app).
  *  2) Frame capture + animation utilities (uses `screencapture` and
  *     Python+PIL through `execFile` — no extra npm deps).
  *  3) Palette-aware pixel counters + HTML gallery builder.
@@ -31,7 +31,7 @@ const execFileAsync = promisify(execFile);
 
 /**
  * Resolve the path to `debug.sock` for the current platform. Matches the
- * Tauri `app_config_dir()` resolution in `setup/debug_socket.rs`.
+ * canonical resolver in `storage/paths.rs` used by `setup/debug_socket.rs`.
  */
 export function debugSocketPath(): string {
   const home = homedir();
@@ -40,12 +40,12 @@ export function debugSocketPath(): string {
       home,
       "Library",
       "Application Support",
-      "com.soupawhisper.voice",
+      "voxis",
       "debug.sock",
     );
   }
   // Linux / others
-  return join(home, ".config", "soupawhisper", "debug.sock");
+  return join(home, ".config", "voxis", "debug.sock");
 }
 
 /**
