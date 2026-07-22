@@ -72,5 +72,3 @@ e2e/_bz-didinium-capture.spec.ts
 e2e/screenshots/
 progress.md
 
-# Landing page is its own repository (github.com/axelbaumlisto/voxis-landing)
-landing/
