@@ -7,13 +7,14 @@ if [ -z "$TAG" ]; then
   exit 2
 fi
 VERSION="${TAG#v}"
-TARBALL="dist/voxis-macos-universal.tar.gz"
+# Local build artifacts live in artifacts/ (dist/ is vite's frontend outDir).
+TARBALL="artifacts/voxis-macos-universal.tar.gz"
 if [ ! -f "$TARBALL" ]; then
-  if [ ! -f dist/voxis-macos-universal ]; then
-    echo "WARNING: dist/voxis-macos-universal missing; cannot update Homebrew formula"
+  if [ ! -f artifacts/voxis-macos-universal ]; then
+    echo "WARNING: artifacts/voxis-macos-universal missing; cannot update Homebrew formula"
     exit 0
   fi
-  tar -C dist -czf "$TARBALL" voxis-macos-universal
+  tar -C artifacts -czf "$TARBALL" voxis-macos-universal
 fi
 SHA=$(sha256sum "$TARBALL" | awk '{print $1}')
 FORMULA="homebrew-tap/Formula/voxis.rb"
