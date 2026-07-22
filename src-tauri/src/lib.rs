@@ -19,7 +19,6 @@ pub mod commands;
 pub mod config;
 pub mod error;
 pub mod hotkey;
-pub mod shortcut;
 pub mod learning;
 pub mod llm;
 pub mod orchestrator;
@@ -28,6 +27,7 @@ pub mod overlay;
 pub mod overlay_native;
 pub mod permissions;
 pub mod setup;
+pub mod shortcut;
 pub mod storage;
 pub mod theme_engine;
 pub mod transcription;
@@ -167,8 +167,18 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
 /// Initialize and run the Tauri application.
 pub fn run() {
     // Migrate user data before logging creates the new config directory.
-    storage::paths::migrate_legacy_config_dir()
-        .expect("failed to migrate legacy application data");
+    // Fail closed (per rename plan): never start with empty defaults while
+    // legacy data exists. Logging is not up yet, so surface a detailed reason
+    // on stderr including both paths and the OS error.
+    if let Err(error) = storage::paths::migrate_legacy_config_dir() {
+        let base = dirs::config_dir().unwrap_or_default();
+        eprintln!(
+            "failed to migrate legacy application data from {} to {}: {error}",
+            base.join(storage::paths::LEGACY_CONFIG_DIR).display(),
+            base.join(storage::paths::APP_CONFIG_DIR).display(),
+        );
+        std::process::exit(1);
+    }
 
     // Initialize X11 thread safety before any X11/GTK operations (Linux only).
     #[cfg(target_os = "linux")]

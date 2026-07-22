@@ -5,7 +5,7 @@
 //! - Logs transcription results with timestamps
 //! - Logs LLM prompts and responses
 //!
-//! Files are stored in ~/.config/soupawhisper/debug/
+//! Files are stored in the canonical config dir (see storage::paths), e.g. ~/.config/voxis/debug/
 
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};

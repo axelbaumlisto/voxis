@@ -5,7 +5,7 @@
 //! - WAV audio file (NNN.wav)
 //! - JSON metadata (NNN.json)
 //!
-//! Files are stored in ~/.config/soupawhisper/failed_audio/
+//! Files are stored in the canonical config dir (see storage::paths), e.g. ~/.config/voxis/failed_audio/
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
