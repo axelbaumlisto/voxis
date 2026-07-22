@@ -1,6 +1,6 @@
 # Theme Author Guide
 
-TALRI themes are self-contained ES modules that render the recording overlay.
+Voxis themes are self-contained ES modules that render the recording overlay.
 Each theme is a folder with `theme.json` (manifest v2) and a `theme.js` entry
 module. This guide covers everything you need to write one.
 
@@ -14,9 +14,9 @@ A theme is a directory inside the user themes folder:
 
 | OS      | Path                                     |
 |---------|------------------------------------------|
-| Linux   | `~/.config/soupawhisper/themes/`         |
-| macOS   | `~/Library/Application Support/soupawhisper/themes/` |
-| Windows | `%APPDATA%/soupawhisper/themes/`          |
+| Linux   | `~/.config/voxis/themes/`                |
+| macOS   | `~/Library/Application Support/voxis/themes/` |
+| Windows | `%APPDATA%/voxis/themes/`                 |
 
 Each subdirectory is one theme. A minimal theme contains these two files:
 

@@ -1,11 +1,11 @@
 ---
-title: SoupaWhisper Documentation
+title: Voxis Documentation
 layout: default
 ---
 
-# SoupaWhisper
+# Voxis
 
-SoupaWhisper is a blazing fast desktop voice dictation app built with Tauri v2, React 18, TypeScript, and Rust.
+Voxis is a blazing fast desktop voice dictation app built with Tauri v2, React 18, TypeScript, and Rust.
 
 The app records audio from a selected input device, transcribes it through a cloud Whisper-compatible client (default Groq endpoint), optionally applies dictionary and LLM post-processing, and outputs the final text by auto-typing or clipboard paste.
 

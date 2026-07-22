@@ -1,6 +1,6 @@
 # Editing Themes — Practical Workflow
 
-> **TL;DR — you do NOT need to rebuild SoupaWhisper to change a theme.**
+> **TL;DR — you do NOT need to rebuild Voxis to change a theme.**
 > Themes are plain `theme.js` + `theme.json` files loaded from disk at runtime.
 > Edit source → `bun run build:themes` → copy the two files into the user themes
 > dir → restart (or re-select the theme). No `cargo`, no `tauri build`.
@@ -34,13 +34,13 @@ There are two copies, and the distinction matters:
 
 1. **User themes dir** — *this is what actually loads at runtime*:
    ```
-   Linux:   ~/.config/soupawhisper/themes/<id>/
-   macOS:   ~/Library/Application Support/soupawhisper/themes/<id>/
-   Windows: %APPDATA%/soupawhisper/themes/<id>/
+   Linux:   ~/.config/voxis/themes/<id>/
+   macOS:   ~/Library/Application Support/voxis/themes/<id>/
+   Windows: %APPDATA%/voxis/themes/<id>/
    ```
 2. **Bundle dir** — seeds the user dir on first run / fresh installs. Common examples:
    ```
-   macOS app bundle: /Applications/SoupaWhisper.app/Contents/Resources/themes/<id>/
+   macOS app bundle: /Applications/Voxis.app/Contents/Resources/themes/<id>/
    local release:    src-tauri/target/release/themes/<id>/
    source bundle:    src-tauri/themes/<id>/
    ```
@@ -146,15 +146,15 @@ This is the no-Tauri way to visually verify a theme change.
 bun run build:themes
 
 # 2. Copy into the user theme directory (this is what the running app loads)
-THEME_DIR="$HOME/.config/soupawhisper/themes"        # Linux
-# THEME_DIR="$HOME/Library/Application Support/soupawhisper/themes"  # macOS
+THEME_DIR="$HOME/.config/voxis/themes"        # Linux
+# THEME_DIR="$HOME/Library/Application Support/voxis/themes"  # macOS
 for t in drifting_contour living_reed quiet_reed radiolarian; do
   mkdir -p "$THEME_DIR/$t"
   cp src-tauri/themes/$t/theme.{js,json} "$THEME_DIR/$t/"
 done
 
 # 3. Restart the app, reload themes, or re-select the theme in Settings
-pkill -f 'SoupaWhisper|/voice$' || true
+pkill -f 'Voxis|/voice$' || true
 ```
 
 When do you actually need `tauri build`? Only when you change **Rust** code

@@ -43,7 +43,7 @@ bun run tauri build
 
 ## API-ключи
 
-По умолчанию SoupaWhisper использует облачную транскрипцию. Для стандартного endpoint Groq:
+По умолчанию Voxis использует облачную транскрипцию. Для стандартного endpoint Groq:
 
 1. Создайте аккаунт и войдите на [console.groq.com](https://console.groq.com/).
 2. Откройте **API Keys** в консоли Groq.

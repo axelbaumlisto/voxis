@@ -5,7 +5,7 @@ layout: default
 
 # Theme Author Guide
 
-SoupaWhisper themes are self-contained ES modules loaded from the user themes directory.
+Voxis themes are self-contained ES modules loaded from the user themes directory.
 
 > **Security:** theme modules are executable JavaScript trusted by the app. They are not a sandbox for untrusted code. Only use third-party themes after reviewing their `theme.js`.
 

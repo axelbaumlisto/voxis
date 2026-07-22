@@ -8,7 +8,7 @@ layout: default
 ## Recording flow
 
 1. Press the configured hotkey. The default is Right Ctrl (`ctrl_r`) with a 300 ms hold threshold.
-2. SoupaWhisper starts recording from the selected audio input device (`Default` unless changed).
+2. Voxis starts recording from the selected audio input device (`Default` unless changed).
 3. In hold mode, release the hotkey to stop. In toggle mode, tap once to start and tap again to stop.
 4. The captured audio is filtered by VAD if a VAD backend is selected, then queued for transcription.
 5. Recordings shorter than the minimum captured-audio duration are dropped before calling the API. The current default is 300 ms after VAD.
@@ -43,4 +43,4 @@ _Dictionary page with mock replacement entries._
 
 ## Runtime data locations
 
-Runtime data is stored under the platform config directory in a `soupawhisper` folder, for example `~/.config/soupawhisper/` on Linux. Important files/directories include `config.db`, `history.db`, `dictionary.txt`, `corrections.db`, `providers.db`, `prompts.db`, `failed_audio/`, `debug/`, `logs/`, and `themes/`.
+Runtime data is stored under the platform config directory in a `voxis` folder, for example `~/.config/voxis/` on Linux. Important files/directories include `config.db`, `history.db`, `dictionary.txt`, `corrections.db`, `providers.db`, `prompts.db`, `failed_audio/`, `debug/`, `logs/`, and `themes/`.
