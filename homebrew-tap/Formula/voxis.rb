@@ -1,12 +1,13 @@
 class Voxis < Formula
   desc "Private voice dictation engine (Tauri + Rust)"
   homepage "https://voxis.top"
-  url "https://voxis.top/dist/voxis-macos-universal.tar.gz"
+  url "https://voxis.top/dist/voxis-macos-arm64.tar.gz"
   version "0.1.0"
   sha256 "TODO"
+  depends_on arch: :arm64
 
   def install
-    bin.install "voxis-macos-universal" => "voxis"
+    bin.install "voxis-macos-arm64" => "voxis"
   end
 
   test do

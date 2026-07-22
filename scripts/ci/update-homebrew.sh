@@ -8,13 +8,14 @@ if [ -z "$TAG" ]; then
 fi
 VERSION="${TAG#v}"
 # Local build artifacts live in artifacts/ (dist/ is vite's frontend outDir).
-TARBALL="artifacts/voxis-macos-universal.tar.gz"
+# macOS is arm64-only (Apple Silicon); ort has no x86_64-darwin prebuilt.
+TARBALL="artifacts/voxis-macos-arm64.tar.gz"
 if [ ! -f "$TARBALL" ]; then
-  if [ ! -f artifacts/voxis-macos-universal ]; then
-    echo "WARNING: artifacts/voxis-macos-universal missing; cannot update Homebrew formula"
+  if [ ! -f artifacts/voxis-macos-arm64 ]; then
+    echo "WARNING: artifacts/voxis-macos-arm64 missing; cannot update Homebrew formula"
     exit 0
   fi
-  tar -C artifacts -czf "$TARBALL" voxis-macos-universal
+  tar -C artifacts -czf "$TARBALL" voxis-macos-arm64
 fi
 SHA=$(sha256sum "$TARBALL" | awk '{print $1}')
 FORMULA="homebrew-tap/Formula/voxis.rb"
@@ -23,7 +24,7 @@ from pathlib import Path
 import re, sys
 path=Path(sys.argv[1]); version=sys.argv[2]; sha=sys.argv[3]
 text=path.read_text()
-text=re.sub(r'url "[^"]+"', f'url "https://voxis.top/dist/voxis-macos-universal.tar.gz"', text)
+text=re.sub(r'url "[^"]+"', f'url "https://voxis.top/dist/voxis-macos-arm64.tar.gz"', text)
 text=re.sub(r'version "[^"]+"', f'version "{version}"', text)
 text=re.sub(r'sha256 "[^"]+"', f'sha256 "{sha}"', text)
 path.write_text(text)

@@ -13,18 +13,21 @@ VNC_HOST_PORT="${VNC_HOST_PORT:-5998}"
 SSH_HOST_PORT="${SSH_HOST_PORT:-50923}"
 VM_USER="${VM_USER:-user}"
 VM_PASS="${VM_PASS:-alpine}"
-SHORTNAME="${SHORTNAME:-sonoma}"
-PLIST='https://raw.githubusercontent.com/sickcodes/osx-serial-generator/master/config-custom-sonoma.plist'
+SHORTNAME="${SHORTNAME:-sonoma}"  # used by cmd_install (fresh macOS setup) only
+PLIST='https://raw.githubusercontent.com/sickcodes/osx-serial-generator/master/config-custom-sonoma.plist'  # cmd_install only
 
+# NOTE: GENERATE_UNIQUE is intentionally NOT set here. It makes Docker-OSX
+# regenerate the OpenCore boot disk with fresh serials on every launch, which
+# does not match the OpenCore the prepared image was installed with → the VM
+# hangs forever at ~100% CPU on a black screen (SSH never comes up; verified
+# 2026-07-23). Booting the prepared image must reuse its existing OpenCore, so
+# no GENERATE_UNIQUE / MASTER_PLIST_URL / SHORTNAME here.
 common_args=(
   --device /dev/kvm
   -p "${SSH_HOST_PORT}:10022"
   -p "${VNC_HOST_PORT}:5901"
-  -e GENERATE_UNIQUE=true
   -e CPU='Haswell-noTSX'
   -e CPUID_FLAGS='kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on'
-  -e "MASTER_PLIST_URL=${PLIST}"
-  -e "SHORTNAME=${SHORTNAME}"
   -e "RAM=${RAM:-8}"
   -e "CORES=${CORES:-4}"
   -e EXTRA='-display none -vnc 0.0.0.0:1'
@@ -68,9 +71,13 @@ cmd_install() {
     docker cp "$cid:/home/arch/OSX-KVM/BaseSystem.img" "$BASESYSTEM" 2>/dev/null || true
     docker rm "$cid" >/dev/null
   fi
+  # Fresh install DOES need serial generation + plist (unlike naked boot).
   docker run -d --name "$NAME" --restart unless-stopped \
     -v "$DISK:/home/arch/OSX-KVM/mac_hdd_ng.img" \
     ${BASESYSTEM:+-v "$BASESYSTEM:/home/arch/OSX-KVM/BaseSystem.img"} \
+    -e GENERATE_UNIQUE=true \
+    -e "MASTER_PLIST_URL=${PLIST}" \
+    -e "SHORTNAME=${SHORTNAME}" \
     "${common_args[@]}" "$IMAGE"
   wait_for_vnc
   echo "Install macOS, enable SSH for ${VM_USER}, then run: $0 save"
@@ -106,18 +113,20 @@ cmd_build() {
   sshpass -p "$VM_PASS" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -P "$SSH_HOST_PORT" /tmp/voxis-src.tar.gz "$VM_USER@localhost:/tmp/"
   ssh_vm 'rm -rf ~/voxis && mkdir -p ~/voxis && tar xzf /tmp/voxis-src.tar.gz -C ~/voxis'
-  ssh_vm 'source ~/.cargo/env 2>/dev/null || true; cd ~/voxis && bun install --frozen-lockfile && bun run build'
-  for tgt in aarch64-apple-darwin x86_64-apple-darwin; do
-    echo "Building $tgt ..."
-    ssh_vm "source ~/.cargo/env 2>/dev/null || true; cd ~/voxis/src-tauri && rustup target add $tgt >/dev/null 2>&1 || true; cargo build --release --target $tgt --bin voice"
-  done
-  echo "Creating universal binary + pulling artifacts ..."
-  ssh_vm 'cd ~/voxis && lipo -create -output /tmp/voxis-macos-universal src-tauri/target/aarch64-apple-darwin/release/voice src-tauri/target/x86_64-apple-darwin/release/voice'
+  # PATH: bun lives in ~/.bun/bin (not on the non-interactive SSH login PATH);
+  # ~/.cargo/bin holds rustup/cargo. `bun run build` (vite) does NOT need node
+  # in the VM — only vitest does, and we don't run tests here.
+  local vmenv='export PATH="$HOME/.bun/bin:$HOME/.cargo/bin:$PATH"; source ~/.cargo/env 2>/dev/null || true'
+  ssh_vm "$vmenv; cd ~/voxis && bun install --frozen-lockfile && bun run build"
+  # macOS is arm64-only (Apple Silicon). ort rc.12 ships no prebuilt ONNX
+  # Runtime for x86_64-apple-darwin (only aarch64), so an Intel-mac build would
+  # need ORT compiled from source. Apple Silicon covers all current Macs.
+  echo "Building aarch64-apple-darwin ..."
+  ssh_vm "$vmenv; cd ~/voxis/src-tauri && rustup target add aarch64-apple-darwin >/dev/null 2>&1 || true; cargo build --release --target aarch64-apple-darwin --bin voice"
+  echo "Pulling artifacts ..."
   local scp="sshpass -p $VM_PASS scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P $SSH_HOST_PORT"
   $scp "$VM_USER@localhost:/Users/$VM_USER/voxis/src-tauri/target/aarch64-apple-darwin/release/voice" "$proj_dir/artifacts/voxis-macos-arm64"
-  $scp "$VM_USER@localhost:/Users/$VM_USER/voxis/src-tauri/target/x86_64-apple-darwin/release/voice" "$proj_dir/artifacts/voxis-macos-x64"
-  $scp "$VM_USER@localhost:/tmp/voxis-macos-universal" "$proj_dir/artifacts/voxis-macos-universal"
-  chmod +x "$proj_dir"/artifacts/voxis-macos-*
+  chmod +x "$proj_dir"/artifacts/voxis-macos-* 2>/dev/null || true
   echo "macOS artifacts in artifacts/:"
   ls -lh "$proj_dir"/artifacts/voxis-macos-* 2>/dev/null
 }

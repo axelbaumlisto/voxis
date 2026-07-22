@@ -194,9 +194,9 @@ jobs:
             exit 0
           fi
           if bash scripts/macos-vm.sh build; then
-            echo "=== macOS artifacts ==="
+            echo "=== macOS artifacts (arm64-only; ort has no x86_64-darwin prebuilt) ==="
             ls -lh artifacts/voxis-macos-* 2>/dev/null
-            tar -C artifacts -czf artifacts/voxis-macos-universal.tar.gz voxis-macos-universal 2>/dev/null || true
+            tar -C artifacts -czf artifacts/voxis-macos-arm64.tar.gz voxis-macos-arm64 2>/dev/null || true
             echo "✅ macOS build succeeded"
           else
             echo "⚠️ macOS build failed (advisory — not blocking release)"
@@ -226,7 +226,7 @@ jobs:
             "artifacts/voxis-windows-x64-gui.exe"
             "artifacts/Voxis_${VERSION}_x64-setup.exe"
           )
-          for f in artifacts/voxis-macos-arm64 artifacts/voxis-macos-x64 artifacts/voxis-macos-universal artifacts/voxis-macos-universal.tar.gz; do
+          for f in artifacts/voxis-macos-arm64 artifacts/voxis-macos-arm64.tar.gz; do
             [ -f "$f" ] && artifacts+=("$f")
           done
           for f in "${artifacts[@]}"; do
@@ -271,7 +271,7 @@ jobs:
           for f in artifacts/voxis-linux-x64-gui artifacts/voxis-windows-x64-gui.exe "artifacts/Voxis_${VERSION}_x64-setup.exe"; do
             [ -f "$f" ] && cp -v "$f" "$DIST_DIR/$(basename "$f")"
           done
-          for f in artifacts/voxis-macos-arm64 artifacts/voxis-macos-x64 artifacts/voxis-macos-universal artifacts/voxis-macos-universal.tar.gz; do
+          for f in artifacts/voxis-macos-arm64 artifacts/voxis-macos-arm64.tar.gz; do
             [ -f "$f" ] && cp -v "$f" "$DIST_DIR/$(basename "$f")"
           done
           [ -f "$DIST_DIR/Voxis_${VERSION}_x64-setup.exe" ] && cp -v "$DIST_DIR/Voxis_${VERSION}_x64-setup.exe" "$DIST_DIR/Voxis_x64-setup.exe"
