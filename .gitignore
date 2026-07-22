@@ -72,3 +72,8 @@ e2e/_bz-didinium-capture.spec.ts
 e2e/screenshots/
 progress.md
 
+
+# ado/session junk
+*.pid
+.tmp-*
+.tmp-landing-shots/
