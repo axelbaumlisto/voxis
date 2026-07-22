@@ -36,6 +36,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Build frontend (required by tauri::generate_context!)
+        run: bun install && bun run build
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
