@@ -16,3 +16,16 @@ declare module "*.module.scss" {
   const classes: { readonly [key: string]: string };
   export default classes;
 }
+
+/**
+ * Tauri v2 injects `window.__TAURI_INTERNALS__` at runtime. The
+ * `useTauriEvent` hook probes it to safely skip listener setup in mocked
+ * E2E environments. Declared here so `tsc` (run via `bun run build`)
+ * recognizes the property.
+ */
+interface Window {
+  __TAURI_INTERNALS__?: {
+    transformCallback?: (...args: unknown[]) => unknown;
+    [key: string]: unknown;
+  };
+}
