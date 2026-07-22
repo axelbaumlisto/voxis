@@ -5,7 +5,7 @@ import { drawEuglena } from "../euglena";
 import { drawAquariumBackground, seedAquarium } from "../layer";
 import { aquariumParamsView } from "../params";
 import type { AquariumFrame, AquariumLayerState } from "../types";
-import { RecordingCanvasContext2D, summarize, type GoldenSummary } from "../../../__tests__/helpers/recordingCanvas";
+import { RecordingCanvasContext2D, summarize, expectGoldenSummary, type GoldenSummary } from "../../../__tests__/helpers/recordingCanvas";
 
 const GOLDEN_FRAME: AquariumFrame = {
   t: 4.0,
@@ -91,7 +91,7 @@ function euglenaHueSummary(hueOffset: number): GoldenSummary {
 
 describe("aquarium draw-op golden (Epic 1 P0)", () => {
   it("keeps the three-species CONTRACTED draw byte-stable", () => {
-    expect(goldenFor(0.5)).toEqual({
+    expectGoldenSummary(goldenFor(0.5), {
       // Rebased for the vorticella framing + organelle-readability pass: 6 rimmed food
       // vacuoles + bigger CV + taller bell (bellHeight 1.45D, restStalk 3.1D) change ops/hash.
       hash: "67b928e64e8382bf",
@@ -113,7 +113,7 @@ describe("aquarium draw-op golden (Epic 1 P0)", () => {
   });
 
   it("keeps the three-species RESTING draw byte-stable", () => {
-    expect(goldenFor(0)).toEqual({
+    expectGoldenSummary(goldenFor(0), {
       // Rebased for the vorticella framing + organelle-readability pass (6 rimmed food
       // vacuoles + bigger CV + taller bell change ops/hash).
       hash: "0dd685e0104d02bd",

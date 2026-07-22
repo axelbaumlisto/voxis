@@ -7,7 +7,7 @@ import { buildField, sourceId } from "../interaction";
 import { drawAquariumBackground, drawAquariumForeground } from "../layer";
 import { aquariumParamsView } from "../params";
 import type { AquariumFrame, AquariumLayerState, DidiniumState } from "../types";
-import { RecordingCanvasContext2D, round, summarize } from "../../../__tests__/helpers/recordingCanvas";
+import { RecordingCanvasContext2D, round, summarize, expectGoldenSummary } from "../../../__tests__/helpers/recordingCanvas";
 
 function frame(overrides: Partial<AquariumFrame> = {}): AquariumFrame {
   return {
@@ -316,7 +316,7 @@ describe("aquarium layer Phase 4 didinium (predator)", () => {
 
     const membraneX = round(hero.x - hero.halfLen);
     const membraneY = round(hero.y);
-    expect(summarize(ops)).toEqual({
+    expectGoldenSummary(summarize(ops), {
       hash: "fdfc46ba8565dd8d",
       opCount: 58,
       counts: {

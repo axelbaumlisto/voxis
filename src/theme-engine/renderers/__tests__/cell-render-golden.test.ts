@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CELL_DEFAULTS, createCellRenderer } from "../cell";
 import type { CellOptions, CellParams } from "../cell";
 import type { ThemeState } from "../../contract";
-import { installRecordingCanvas, summarize, type DrawOp, type GoldenSummary } from "./helpers/recordingCanvas";
+import { installRecordingCanvas, summarize, expectGoldenSummary, type DrawOp, type GoldenSummary } from "./helpers/recordingCanvas";
 
 type RafCallback = () => void;
 
@@ -271,6 +271,6 @@ describe("cell renderer draw-call golden", () => {
       },
     },
   ] as const)("keeps draw operations stable: $name", ({ options, state, expected }) => {
-    expect(renderFrame(options, state)).toEqual(expected);
+    expectGoldenSummary(renderFrame(options, state), expected);
   });
 });
