@@ -21,4 +21,29 @@ RUN curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.14" && \
 ENV PATH=/usr/local/cargo/bin:/usr/local/bin:$PATH
 
 RUN cargo install tauri-cli --version "^2.10" --locked
+
+# --- cargo-xwin case-sensitivity fix (cargo-xwin issue #130) ---
+# voxis links `ort` (ONNX Runtime rc.12, pulled by vad-rs), which on the
+# x86_64-pc-windows-msvc target links DirectML.lib + PathCch.lib. xwin splats
+# the Windows SDK libs into BOTH lowercase (directml.lib) and SCREAMING-case
+# (DIRECTML.lib), but lld-link requests the MIXED-case names DirectML.lib /
+# PathCch.lib — which match NEITHER on a case-sensitive Linux filesystem, so
+# the link fails with "could not open 'DirectML.lib'". We prime the xwin cache
+# (a throwaway crate build makes xwin download+splat the SDK) and bake the two
+# mixed-case symlinks into an image layer so the real app build links cleanly.
+# Do NOT remove: without this the Windows GUI release build cannot link.
+RUN set -eux; \
+    cd /tmp; \
+    cargo new --bin xwin-prime; \
+    cd xwin-prime; \
+    cargo xwin build --target x86_64-pc-windows-msvc; \
+    sdklib="$HOME/.cache/cargo-xwin/xwin/sdk/lib/um/x86_64"; \
+    test -d "$sdklib" || { echo "FATAL: xwin SDK lib dir not found at $sdklib" >&2; exit 1; }; \
+    test -f "$sdklib/directml.lib" || { echo "FATAL: directml.lib missing in $sdklib" >&2; exit 1; }; \
+    test -f "$sdklib/pathcch.lib" || { echo "FATAL: pathcch.lib missing in $sdklib" >&2; exit 1; }; \
+    ln -sf directml.lib "$sdklib/DirectML.lib"; \
+    ln -sf pathcch.lib "$sdklib/PathCch.lib"; \
+    ls -l "$sdklib/DirectML.lib" "$sdklib/PathCch.lib"; \
+    cd /; rm -rf /tmp/xwin-prime
+
 WORKDIR /app
