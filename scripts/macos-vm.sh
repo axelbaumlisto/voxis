@@ -97,7 +97,7 @@ cmd_naked() {
 cmd_build() {
   local proj_dir; proj_dir="$(cd "$(dirname "$0")/.." && pwd)"
   command -v sshpass >/dev/null || { echo "sshpass required"; exit 1; }
-  mkdir -p "$proj_dir/dist"
+  mkdir -p "$proj_dir/artifacts"
   ssh_vm 'echo ok' >/dev/null 2>&1 || cmd_naked
   echo "Syncing source into VM ..."
   ( cd "$proj_dir" && tar czf /tmp/voxis-src.tar.gz \
@@ -114,12 +114,12 @@ cmd_build() {
   echo "Creating universal binary + pulling artifacts ..."
   ssh_vm 'cd ~/voxis && lipo -create -output /tmp/voxis-macos-universal src-tauri/target/aarch64-apple-darwin/release/voice src-tauri/target/x86_64-apple-darwin/release/voice'
   local scp="sshpass -p $VM_PASS scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P $SSH_HOST_PORT"
-  $scp "$VM_USER@localhost:/Users/$VM_USER/voxis/src-tauri/target/aarch64-apple-darwin/release/voice" "$proj_dir/dist/voxis-macos-arm64"
-  $scp "$VM_USER@localhost:/Users/$VM_USER/voxis/src-tauri/target/x86_64-apple-darwin/release/voice" "$proj_dir/dist/voxis-macos-x64"
-  $scp "$VM_USER@localhost:/tmp/voxis-macos-universal" "$proj_dir/dist/voxis-macos-universal"
-  chmod +x "$proj_dir"/dist/voxis-macos-*
-  echo "macOS artifacts in dist/:"
-  ls -lh "$proj_dir"/dist/voxis-macos-* 2>/dev/null
+  $scp "$VM_USER@localhost:/Users/$VM_USER/voxis/src-tauri/target/aarch64-apple-darwin/release/voice" "$proj_dir/artifacts/voxis-macos-arm64"
+  $scp "$VM_USER@localhost:/Users/$VM_USER/voxis/src-tauri/target/x86_64-apple-darwin/release/voice" "$proj_dir/artifacts/voxis-macos-x64"
+  $scp "$VM_USER@localhost:/tmp/voxis-macos-universal" "$proj_dir/artifacts/voxis-macos-universal"
+  chmod +x "$proj_dir"/artifacts/voxis-macos-*
+  echo "macOS artifacts in artifacts/:"
+  ls -lh "$proj_dir"/artifacts/voxis-macos-* 2>/dev/null
 }
 
 cmd_status() {

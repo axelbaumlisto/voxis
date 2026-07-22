@@ -5,7 +5,11 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-OUTPUT_DIR="$PROJECT_DIR/dist"
+# Release artifacts go to artifacts/, NOT dist/. dist/ is vite's build outDir
+# (emptyOutDir wipes it on every `bun run build`); with parallel Linux+Windows
+# lanes both calling the frontend build, a vite build in one lane would delete
+# the release binary another lane already copied into dist/. Keep them separate.
+OUTPUT_DIR="$PROJECT_DIR/artifacts"
 PREPARED="${CLIPSHOT_MACOS_VM_DIR:-$HOME/clipshot-macos-vm}/mac_hdd_ng.prepared.img"
 VERSION=$(grep '^version' "$PROJECT_DIR/src-tauri/Cargo.toml" | head -1 | sed 's/.*"\(.*\)"/\1/')
 
