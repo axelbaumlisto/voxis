@@ -1,7 +1,7 @@
 # Linux GUI release artifacts for Voxis (Tauri + GTK/WebKit).
 # Build:
 #   DOCKER_BUILDKIT=0 docker build --network host -f Dockerfile.gui-linux -t voxis-linux-gui:latest .
-FROM rust:1.95-bookworm
+FROM rust:1.95-trixie
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev \

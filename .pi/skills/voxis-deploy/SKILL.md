@@ -71,8 +71,8 @@ Expected: runner `active`, Forgejo container present, prepared 31G macOS image, 
 
 ## CI image
 
-`voxis-ci:latest` is built from `Dockerfile.ci` (Rust 1.95, GTK/WebKit/AppIndicator,
-Bun, Docker CLI). Rebuild on spex after changing CI dependencies:
+`voxis-ci:latest` is built from `Dockerfile.ci` (Rust 1.95 on Debian trixie,
+GTK/WebKit/AppIndicator, Bun, Docker CLI). Rebuild on spex after changing CI dependencies:
 
 ```bash
 ssh spex 'cd ~/work/voxis && bash scripts/ci/build-ci-image.sh'

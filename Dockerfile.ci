@@ -1,5 +1,5 @@
 # voxis-ci: versioned CI/build image — ALL CI work runs INSIDE this image.
-FROM rust:1.95-bookworm
+FROM rust:1.95-trixie
 
 # System build deps for Tauri GUI (gtk/webkit/soup/appindicator) + E2E (git/curl)
 RUN apt-get update -q && \
@@ -16,7 +16,8 @@ RUN apt-get update -q && \
 RUN install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
     chmod a+r /etc/apt/keyrings/docker.asc && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
+    . /etc/os-release && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian ${VERSION_CODENAME} stable" \
       > /etc/apt/sources.list.d/docker.list && \
     apt-get update -q && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
