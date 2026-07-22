@@ -26,6 +26,17 @@ RUN install -m 0755 -d /etc/apt/keyrings && \
 
 RUN rustup component add clippy rustfmt
 
+# Node.js — REQUIRED even though the frontend toolchain is bun. vitest's CLI is
+# `#!/usr/bin/env node`; `bun run test:run` invokes it via that shebang, so the
+# test workers run under node. GH ubuntu-latest and local dev ship node, so the
+# suite is green there. Without node in this image vitest silently degrades to
+# the bun runtime, where `vi.mock(...)` factory hoisting is not applied the same
+# way — ~100 mock-dependent tests then see the REAL module and fail spuriously
+# (verified: adding node turns 102 failures back to 0). Pin to the v22 LTS line.
+RUN curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz -o /tmp/node.tar.xz && \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
+    rm /tmp/node.tar.xz && node --version && npm --version
+
 # bun pinned
 ENV BUN_INSTALL=/usr/local
 RUN curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.14" && \
@@ -33,4 +44,4 @@ RUN curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.14" && \
 
 ENV PATH=/usr/local/cargo/bin:/usr/local/bin:$PATH
 WORKDIR /w
-RUN cargo --version && bun --version && python3 --version && docker --version && docker compose version
+RUN cargo --version && node --version && bun --version && python3 --version && docker --version && docker compose version
