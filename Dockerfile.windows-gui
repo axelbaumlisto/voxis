@@ -1,0 +1,24 @@
+# Windows GUI (Tauri) cross-build from Linux via cargo-xwin/MSVC.
+# Produces:
+#   - voxis-windows-x64-gui.exe
+#   - Voxis_<ver>_x64-setup.exe (NSIS installer)
+FROM messense/cargo-xwin:latest
+
+RUN rustup toolchain install 1.95.0 --profile minimal && \
+    rustup default 1.95.0 && \
+    rustup target add x86_64-pc-windows-msvc
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        nsis \
+        libayatana-appindicator3-dev \
+        pkg-config \
+        curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV BUN_INSTALL=/usr/local
+RUN curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.14" && \
+    ln -sf /usr/local/bin/bun /usr/local/bin/bunx
+ENV PATH=/usr/local/cargo/bin:/usr/local/bin:$PATH
+
+RUN cargo install tauri-cli --version "^2.10" --locked
+WORKDIR /app

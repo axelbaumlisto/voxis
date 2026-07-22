@@ -1,0 +1,50 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  fast:
+    runs-on: host
+    timeout-minutes: 60
+    env:
+      GIT_PAGER: cat
+      PAGER: cat
+    steps:
+      - name: checkout (manual; Forgejo /git subpath breaks actions/checkout URL)
+        run: |
+          set -euo pipefail
+          base="${CI_GIT_BASE:-$GITHUB_SERVER_URL}"
+          git init -q .
+          git remote add origin "${base}/${GITHUB_REPOSITORY}.git"
+          git -c http.extraheader="Authorization: basic $(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 -w0)" \
+            -c protocol.version=2 fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+          git --no-pager log --oneline -1
+
+      - name: ci-required (frontend build + clippy + tdd + lib/bin tests) in voxis-ci image
+        run: |
+          set -euo pipefail
+          cache="$HOME/.cache/voxis-ci"
+          mkdir -p "$cache/cargo" "$cache/target" "$cache/home"
+          docker run --rm \
+            -v "$PWD":/w -w /w \
+            -v "$cache/cargo":/tmp/cargo-home \
+            -v "$cache/target":/tmp/ci-target \
+            -v "$cache/home":/tmp/cihome \
+            -e CARGO_HOME=/tmp/cargo-home \
+            -e CARGO_TARGET_DIR=/tmp/ci-target \
+            -e HOME=/tmp/cihome \
+            --user "$(id -u):$(id -g)" \
+            voxis-ci:latest \
+            bash -euo pipefail -c '
+              echo "=== frontend build (dist required by tauri) ===" &&
+              bun install --frozen-lockfile && bun run build &&
+              echo "=== [required] clippy ===" &&
+              cd src-tauri && cargo clippy --all-targets -- -D warnings && cd .. &&
+              echo "=== [required] rust lib tests (serial) ===" &&
+              cd src-tauri && cargo test --lib -- --test-threads=1 && cd .. &&
+              echo "=== [required] frontend tests ===" &&
+              bun run test:run
+            '
