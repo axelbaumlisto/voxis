@@ -5,7 +5,7 @@ layout: default
 
 # Разработка
 
-SoupaWhisper — это приложение на базе Tauri v2. Бэкенд написан на Rust, а фронтенд — на React 18, TypeScript и Vite.
+Voxis — это приложение на базе Tauri v2. Бэкенд написан на Rust, а фронтенд — на React 18, TypeScript и Vite.
 
 ## Архитектура
 

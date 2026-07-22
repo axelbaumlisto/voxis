@@ -5,7 +5,7 @@ layout: default
 
 # Themes
 
-SoupaWhisper overlay themes are folders containing a `theme.json` manifest and a self-contained `theme.js` ES module. They are loaded from disk at runtime by the overlay webview.
+Voxis overlay themes are folders containing a `theme.json` manifest and a self-contained `theme.js` ES module. They are loaded from disk at runtime by the overlay webview.
 
 > **Security:** `theme.js` is executable JavaScript trusted by the app. Do not install themes from untrusted sources, and review third-party theme code before using it.
 
@@ -15,9 +15,9 @@ _Theme visual harness showing Drifting Contour in recording mode._
 
 User themes live in the app config directory under `themes/`:
 
-- Linux: `~/.config/soupawhisper/themes/`
-- macOS: `~/Library/Application Support/soupawhisper/themes/`
-- Windows: `%APPDATA%/soupawhisper/themes/`
+- Linux: `~/.config/voxis/themes/`
+- macOS: `~/Library/Application Support/voxis/themes/`
+- Windows: `%APPDATA%/voxis/themes/`
 
 ## User workflow
 

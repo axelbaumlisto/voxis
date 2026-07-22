@@ -24,4 +24,4 @@ Important implementation areas:
 
 Tests are split across focused files such as `cell-cilia.test.ts`, `cell-contour.test.ts`, `cell-interior.test.ts`, `cell-organelles.test.ts`, `cell-render-golden.test.ts`, and aquarium-specific tests.
 
-For detailed formulas and historical design notes, see the source repository file [`docs/CELL_MATH.md`](https://github.com/axelbaumlisto/voice/blob/main/docs/CELL_MATH.md).
+For detailed formulas and historical design notes, see the source repository file [`docs/CELL_MATH.md`](https://github.com/axelbaumlisto/voxis/blob/main/docs/CELL_MATH.md).

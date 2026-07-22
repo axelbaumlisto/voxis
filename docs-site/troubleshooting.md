@@ -9,14 +9,14 @@ layout: default
 
 1. Verify that the app settings contain a transcription API key.
 2. Check that the selected audio input device actually produces sound.
-3. On Linux/PipeWire, try setting the working microphone as the system default input and select `Default` in SoupaWhisper.
+3. On Linux/PipeWire, try setting the working microphone as the system default input and select `Default` in Voxis.
 4. If VAD is enabled, switch the VAD backend to `Off (no filtering)` or tune onset/hangover/prefill so speech is not trimmed away.
 5. Remember that recordings shorter than the minimum captured-audio duration are dropped before API submission. The default is 300 ms after VAD.
 6. Check app logs in the platform config directory's `logs/` directory and debug files in `debug/` when debug mode is enabled.
 
 ## Wrong microphone on Linux
 
-The device names shown by ALSA/CPAL may differ from the names shown by KDE/PipeWire. A working PipeWire input can be selected as system default with `wpctl set-default <id>`, then SoupaWhisper can use `Default`.
+The device names shown by ALSA/CPAL may differ from the names shown by KDE/PipeWire. A working PipeWire input can be selected as system default with `wpctl set-default <id>`, then Voxis can use `Default`.
 
 Useful commands:
 

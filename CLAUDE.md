@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-TALRI is a voice dictation app built with Tauri v2, React 18, and Rust. It records audio via hotkey, transcribes through the app's Whisper-compatible HTTP client (default Groq endpoint), and outputs text via clipboard or auto-typing.
+Voxis is a voice dictation app built with Tauri v2, React 18, and Rust. It records audio via hotkey, transcribes through the app's Whisper-compatible HTTP client (default Groq endpoint), and outputs text via clipboard or auto-typing.
 
 ## Development Commands
 

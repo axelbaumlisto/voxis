@@ -22,14 +22,14 @@ A blazing fast, completely private desktop voice dictation engine built with **T
 
 ## Documentation
 
-Published docs: <https://axelbaumlisto.github.io/voice/>
+Published docs: <https://docs.voxis.top/>
 
-- [Installation](https://axelbaumlisto.github.io/voice/installation.html)
-- [Usage](https://axelbaumlisto.github.io/voice/usage.html)
-- [Settings](https://axelbaumlisto.github.io/voice/settings.html)
-- [Themes](https://axelbaumlisto.github.io/voice/themes.html)
-- [Security](https://axelbaumlisto.github.io/voice/security.html)
-- [Troubleshooting](https://axelbaumlisto.github.io/voice/troubleshooting.html)
+- [Installation](https://docs.voxis.top/installation.html)
+- [Usage](https://docs.voxis.top/usage.html)
+- [Settings](https://docs.voxis.top/settings.html)
+- [Themes](https://docs.voxis.top/themes.html)
+- [Security](https://docs.voxis.top/security.html)
+- [Troubleshooting](https://docs.voxis.top/troubleshooting.html)
 
 `CLAUDE.md` is optional contributor guidance for AI coding assistants; normal user and developer documentation starts with this README and the published docs above.
 
@@ -51,7 +51,7 @@ bun run lint                      # ESLint
 
 ## Configuration and credentials
 
-SoupaWhisper uses cloud transcription by default. For the default Groq endpoint,
+Voxis uses cloud transcription by default. For the default Groq endpoint,
 create a key in the [Groq Console](https://console.groq.com/) and paste the raw
 key into **Settings → Provider → API Key**. Groq keys usually look like
 `gsk_...`; paste only the key, without `Bearer`, quotes, or extra spaces. Check
@@ -65,7 +65,7 @@ with `sk-...`; that is only an OpenAI credential example, not the expected key
 for default Groq transcription. Optional LLM post-processing has separate
 provider/model/API-key settings.
 
-SoupaWhisper stores API keys as **local runtime configuration** and must not
+Voxis stores API keys as **local runtime configuration** and must not
 commit them to git. Configure the transcription API key and optional LLM key
 through the app settings UI; the application does not automatically load
 credentials from environment variables.

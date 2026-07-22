@@ -5,7 +5,7 @@ layout: default
 
 # Темы
 
-Темы оверлея SoupaWhisper — это папки, содержащие манифест `theme.json` и автономный ES-модуль `theme.js`. Они загружаются с диска во время выполнения оверлеем webview.
+Темы оверлея Voxis — это папки, содержащие манифест `theme.json` и автономный ES-модуль `theme.js`. Они загружаются с диска во время выполнения оверлеем webview.
 
 > **Безопасность:** `theme.js` — это исполняемый JavaScript-код, которому доверяет приложение. Не устанавливайте темы из ненадежных источников и проверяйте сторонний код перед использованием.
 
@@ -15,9 +15,9 @@ _Визуальная среда разработки тем, показываю
 
 Пользовательские темы находятся в каталоге конфигурации приложения в папке `themes/`:
 
-- Linux: `~/.config/soupawhisper/themes/`
-- macOS: `~/Library/Application Support/soupawhisper/themes/`
-- Windows: `%APPDATA%/soupawhisper/themes/`
+- Linux: `~/.config/voxis/themes/`
+- macOS: `~/Library/Application Support/voxis/themes/`
+- Windows: `%APPDATA%/voxis/themes/`
 
 ## Процесс работы для пользователя
 

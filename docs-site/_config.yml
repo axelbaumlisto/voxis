@@ -1,5 +1,6 @@
-title: SoupaWhisper Docs
-description: Voice dictation app built with Tauri, React, and Rust
+title: Voxis Docs
+description: Voxis — voice dictation app built with Tauri, React, and Rust
+url: https://docs.voxis.top
 markdown: kramdown
 theme: minima
 plugins: []

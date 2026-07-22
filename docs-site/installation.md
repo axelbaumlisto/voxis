@@ -43,7 +43,7 @@ The Tauri bundle config includes Debian and RPM targets. Build output depends on
 
 ## API keys
 
-SoupaWhisper uses cloud transcription by default. For the default Groq endpoint:
+Voxis uses cloud transcription by default. For the default Groq endpoint:
 
 1. Create/sign in to a Groq account at [console.groq.com](https://console.groq.com/).
 2. Open **API Keys** in the Groq Console.

@@ -25,7 +25,7 @@ Overlay themes are executable JavaScript modules loaded into the app webview. Th
 
 ## Local data
 
-SoupaWhisper stores runtime data in the platform config directory, for example:
+Voxis stores runtime data in the platform config directory, for example:
 
 - `config.db`
 - `history.db`

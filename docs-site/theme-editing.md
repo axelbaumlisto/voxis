@@ -34,9 +34,9 @@ src-tauri/themes/<id>/theme.json
 
 The running app loads user themes from the platform config directory:
 
-- Linux: `~/.config/soupawhisper/themes/<id>/`
-- macOS: `~/Library/Application Support/soupawhisper/themes/<id>/`
-- Windows: `%APPDATA%/soupawhisper/themes/<id>/`
+- Linux: `~/.config/voxis/themes/<id>/`
+- macOS: `~/Library/Application Support/voxis/themes/<id>/`
+- Windows: `%APPDATA%/voxis/themes/<id>/`
 
 At startup the app seeds bundled themes into the user directory. If a user theme already has `manifest_version: 2`, it is preserved. For bundled theme ids, an existing legacy/non-v2 user copy is overwritten with the bundled v2 copy; arbitrary custom invalid/non-v2 folders are skipped by the scanner.
 
@@ -45,8 +45,8 @@ At startup the app seeds bundled themes into the user directory. If a user theme
 ```bash
 bun run build:themes
 
-THEME_DIR="$HOME/.config/soupawhisper/themes"        # Linux
-# THEME_DIR="$HOME/Library/Application Support/soupawhisper/themes"  # macOS
+THEME_DIR="$HOME/.config/voxis/themes"        # Linux
+# THEME_DIR="$HOME/Library/Application Support/voxis/themes"  # macOS
 
 for t in drifting_contour living_reed quiet_reed radiolarian; do
   mkdir -p "$THEME_DIR/$t"
