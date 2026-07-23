@@ -1,0 +1,23 @@
+# voxis-docs: docs-agent runtime image. Extends voxis-ci (rust+node+bun+chromium
+# deps) with the pi CLI so the docs-screenshotter/-auditor agents run ENTIRELY
+# inside a `docker run --rm` container. Everything they spawn (pi, the Vite dev
+# server, the Playwright browser) lives and dies with the container — so a run
+# can NEVER leak processes onto the shared host or require host-side `kill`.
+FROM voxis-ci:latest
+
+# pin the pi CLI (matches the spex host version). Installed globally via npm so
+# `pi` is on PATH inside the container.
+RUN npm i -g @earendil-works/pi-coding-agent@0.81.1 && pi --version
+
+# Bake the Playwright chromium browser + its system deps into the image so the
+# agent does not re-download it every run. Version tracks the project's
+# playwright; --with-deps pulls the apt libs chromium needs.
+RUN npx --yes playwright@1.58.2 install --with-deps chromium && \
+    # keep the browser under a stable, world-readable path for any --user uid
+    cp -r /root/.cache/ms-playwright /opt/ms-playwright && \
+    chmod -R a+rX /opt/ms-playwright
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
+WORKDIR /w
+RUN pi --version && node --version && bun --version && \
+    ls /opt/ms-playwright >/dev/null && echo "voxis-docs ready"
