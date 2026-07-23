@@ -30,21 +30,21 @@
 
 ## Phase 0 — Подготовка (verify preconditions)
 
-- [ ] **Step 0.1: SSH + runner + KVM на spex**
+- [x] **Step 0.1: SSH + runner + KVM на spex**
 
 ```bash
 ssh spex 'echo spex-ok && systemctl --user is-active forgejo-runner && docker ps --format "{{.Names}}" | grep forgejo && ls -lh ~/clipshot-macos-vm/mac_hdd_ng.prepared.img'
 ```
 Ожидание: `spex-ok`, `active`, `forgejo`, путь к 31G образу.
 
-- [ ] **Step 0.2: Forgejo token на spex для API**
+- [x] **Step 0.2: Forgejo token на spex для API**
 
 ```bash
 ssh spex 'ls ~/.config/forgejo/token && echo token-ok'
 ```
 Если нет — создать через Forgejo web (`clipshot.cc/git` → User Settings → Applications, scope `repo`+`package`+`write:repository`).
 
-- [ ] **Step 0.3: Создать private repo `zverozabr/voxis` на spex**
+- [x] **Step 0.3: Создать private repo `zverozabr/voxis` на spex**
 
 ```bash
 TOKEN=$(ssh spex 'cat ~/.config/forgejo/token')
@@ -57,7 +57,7 @@ curl -s -X POST -H "Authorization: token $TOKEN" -H "Content-Type: application/j
 
 ## Phase 1 — CI-образ `voxis-ci` (по образцу clipshot-ci)
 
-- [ ] **Step 1.1: Создать `Dockerfile.ci` для voxis**
+- [x] **Step 1.1: Создать `Dockerfile.ci` для voxis**
 
 Файл: `~/work/voxis/Dockerfile.ci`. По образцу clipshot но под voxis (rust 1.95, не 1.96; gtk/webkit/appindicator для Tauri):
 
@@ -99,7 +99,7 @@ WORKDIR /w
 RUN cargo --version && bun --version && python3 --version && docker --version && docker compose version
 ```
 
-- [ ] **Step 1.2: Скрипт `scripts/ci/build-ci-image.sh`**
+- [x] **Step 1.2: Скрипт `scripts/ci/build-ci-image.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -114,7 +114,7 @@ echo "=== ${REF} ready ==="
 docker run --rm "${REF}" bash -c 'cargo --version; bun --version; docker --version; docker compose version'
 ```
 
-- [ ] **Step 1.3: Собрать образ на spex**
+- [x] **Step 1.3: Собрать образ на spex**
 
 ```bash
 rsync -avz ~/work/voxis/Dockerfile.ci ~/work/voxis/scripts/ci/build-ci-image.sh spex:~/work/voxis-tmp/
@@ -127,7 +127,7 @@ ssh spex 'cd ~/work/voxis-tmp && bash build-ci-image.sh'
 
 В voxis repo создать `.forgejo/workflows/`. По образцу clipshot `.forgejo/workflows/`.
 
-- [ ] **Step 2.1: `.forgejo/workflows/ci.yml`** (push→main / dispatch)
+- [x] **Step 2.1: `.forgejo/workflows/ci.yml`** (push→main / dispatch)
 
 ```yaml
 name: ci
@@ -179,7 +179,7 @@ jobs:
             '
 ```
 
-- [ ] **Step 2.2: `.forgejo/workflows/release.yml`** (push tag `v*` / dispatch with tag input)
+- [x] **Step 2.2: `.forgejo/workflows/release.yml`** (push tag `v*` / dispatch with tag input)
 
 Скопировать структуру clipshot `release.yml` (3 job'а: test → build → publish), но:
 - tag/version gate: `grep '^version' src-tauri/Cargo.toml` == `${tag#v}`
@@ -197,15 +197,15 @@ jobs:
 
 > **GUI-only scope:** headless-CLI lanes (musl Linux headless, Windows headless) **не делаем**. Только GUI на Linux (native Tauri), Windows (cargo-xwin MSVC), macOS (KVM). Бинарь `voice` — Tauri GUI app.
 
-- [ ] **Step 3.1: `Dockerfile.gui-linux` (Linux GUI native)**
+- [x] **Step 3.1: `Dockerfile.gui-linux` (Linux GUI native)**
 
 По образцу clipshot `Dockerfile.gui-linux` — native build + `cargo tauri build` (deb/rpm/appimage). Зависимости: gtk/webkit/soup/appindicator/rsvg/asound.
 
-- [ ] **Step 3.2: `Dockerfile.windows-gui` (Windows GUI через cargo-xwin)**
+- [x] **Step 3.2: `Dockerfile.windows-gui` (Windows GUI через cargo-xwin)**
 
 По образцу clipshot `Dockerfile.windows-gui` — cargo-xwin MSVC target + `cargo tauri build --bundles nsis`. Производит `voxis-windows-x64-gui.exe` + `Voxis_*_x64-setup.exe` (NSIS installer).
 
-- [ ] **Step 3.3: `scripts/build-all-platforms.sh` (voxis, GUI-only)**
+- [x] **Step 3.3: `scripts/build-all-platforms.sh` (voxis, GUI-only)**
 
 Скопировать clipshot `scripts/build-all-platforms.sh`, заменить:
 - `clipshot` → `voxis`
@@ -215,7 +215,7 @@ jobs:
 - `--macos` → `scripts/macos-vm.sh build` (использовать clipshot'овый образ `~/clipshot-macos-vm/mac_hdd_ng.prepared.img`)
 - Результат: 2-4 артефакта (linux-gui, windows-gui + NSIS, опционально macos-*)
 
-- [ ] **Step 3.4: macOS unsigned binaries через `scripts/macos-vm.sh`**
+- [x] **Step 3.4: macOS unsigned binaries через `scripts/macos-vm.sh`**
 
 Использовать готовый clipshot-скрипт + образ на spex. Производит `voxis-macos-arm64`, `voxis-macos-x64`, `voxis-macos-universal` (unsigned, без DMG). DMG signed+notarized — отдельная задача позже (нужен Apple Developer ключ).
 
@@ -223,7 +223,7 @@ jobs:
 
 ## Phase 4 — Agents (docs-auditor / docs-screenshotter)
 
-- [ ] **Step 4.1: Скопировать агенты из clipshot `.pi/agents/`**
+- [x] **Step 4.1: Скопировать агенты из clipshot `.pi/agents/`**
 
 В voxis repo `.pi/agents/`:
 - `docs-auditor.md` — уже есть у voxis (прошлая сессия). Скопировать в `.pi/agents/`.
@@ -231,7 +231,7 @@ jobs:
 
 По образцу clipshot: эти агенты запускаются через pi subagent на spex перед release.
 
-- [ ] **Step 4.2: Включить запуск агентов в release.yml как advisory job**
+- [x] **Step 4.2: Включить запуск агентов в release.yml как advisory job**
 
 В `.forgejo/workflows/release.yml` добавить advisory job (не блокирует):
 ```yaml
@@ -250,7 +250,7 @@ jobs:
 
 ## Phase 5 — Package publishing (Forgejo + GitHub + mirror + homebrew)
 
-- [ ] **Step 5.1: Forgejo release upload (в release.yml publish job)**
+- [x] **Step 5.1: Forgejo release upload (в release.yml publish job)**
 
 По образцу clipshot publish step — explicit artifacts, idempotent upload:
 ```bash
@@ -271,7 +271,7 @@ for f in dist/voxis-macos-arm64 dist/voxis-macos-x64 dist/voxis-macos-universal;
 done
 ```
 
-- [ ] **Step 5.2: GitHub release (public binaries, no source)**
+- [x] **Step 5.2: GitHub release (public binaries, no source)**
 
 ```bash
 VER="${TAG#v}"
@@ -279,14 +279,14 @@ gh release create "v$VER" --repo axelbaumlisto/voxis --title "v$VER" --notes-fil
 gh release upload "v$VER" dist/voxis-* dist/Voxis_* --repo axelbaumlisto/voxis --clobber
 ```
 
-- [ ] **Step 5.3: Mirror на `voxis.top/dist`**
+- [x] **Step 5.3: Mirror на `voxis.top/dist`**
 
 ```bash
 rsync -avz dist/voxis-* dist/Voxis_* spex:/home/spex/app/bundle/voxis-landing/landing/dist/
 ```
 Caddy route `/dist/*` → static mirror (настроить как у clipshot).
 
-- [ ] **Step 5.4: homebrew formula `voxis.rb` (macOS install)**
+- [x] **Step 5.4: homebrew formula `voxis.rb` (macOS install)**
 
 В voxis repo `homebrew-tap/Formula/voxis.rb` (по образцу clipshot):
 ```ruby
@@ -310,7 +310,7 @@ end
 
 ## Phase 6 — Deploy skill `.pi/skills/voxis-deploy/`
 
-- [ ] **Step 6.1: `SKILL.md` по образцу clipshot-deploy**
+- [x] **Step 6.1: `SKILL.md` по образцу clipshot-deploy**
 
 Скопировать clipshot `.pi/skills/clipshot-deploy/SKILL.md`, адаптировать:
 - `clipshot` → `voxis`
@@ -324,7 +324,7 @@ end
 
 ## Phase 7 — Wire-up + verify (end-to-end)
 
-- [ ] **Step 7.1: Push voxis source to spex Forgejo**
+- [x] **Step 7.1: Push voxis source to spex Forgejo**
 
 ```bash
 cd ~/work/voxis
@@ -333,7 +333,7 @@ TOKEN=$(ssh spex 'cat ~/.config/forgejo/token')
 git -c http.extraheader="Authorization: token $TOKEN" push forgejo main
 ```
 
-- [ ] **Step 7.2: Dispatch ci.yml, wait green**
+- [x] **Step 7.2: Dispatch ci.yml, wait green**
 
 ```bash
 TOKEN=$(ssh spex 'cat ~/.config/forgejo/token')
@@ -344,7 +344,7 @@ curl -s -X POST -H "Authorization: token $TOKEN" -H "Content-Type: application/j
 curl -s -H "Authorization: token $TOKEN" "$API/actions/tasks?limit=3"
 ```
 
-- [ ] **Step 7.3: Tag → release.yml → verify artifacts**
+- [x] **Step 7.3: Tag → release.yml → verify artifacts**
 
 ```bash
 git tag -a v0.1.0 -m "v0.1.0"
@@ -354,7 +354,7 @@ ssh spex 'ls -lh ~/work/voxis/dist/'
 ```
 Ожидание: `voxis-linux-x64`, `voxis-linux-x64-gui`, `voxis-windows-x64.exe`, `voxis-windows-x64-gui.exe`, опционально `voxis-macos-*`.
 
-- [ ] **Step 7.4: Verify package publication**
+- [x] **Step 7.4: Verify package publication**
 
 ```bash
 # Forgejo release

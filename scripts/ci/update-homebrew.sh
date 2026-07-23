@@ -19,12 +19,16 @@ if [ ! -f "$TARBALL" ]; then
 fi
 SHA=$(sha256sum "$TARBALL" | awk '{print $1}')
 FORMULA="homebrew-tap/Formula/voxis.rb"
-python3 - <<'PY' "$FORMULA" "$VERSION" "$SHA"
+# URL points at the GitHub release asset (canonical download channel).
+# voxis.top is a Vercel-hosted landing with no /dist mirror, so it can't serve
+# the tarball.
+URL="https://github.com/axelbaumlisto/voxis/releases/download/${TAG}/voxis-macos-arm64.tar.gz"
+python3 - <<'PY' "$FORMULA" "$VERSION" "$SHA" "$URL"
 from pathlib import Path
 import re, sys
-path=Path(sys.argv[1]); version=sys.argv[2]; sha=sys.argv[3]
+path=Path(sys.argv[1]); version=sys.argv[2]; sha=sys.argv[3]; url=sys.argv[4]
 text=path.read_text()
-text=re.sub(r'url "[^"]+"', f'url "https://voxis.top/dist/voxis-macos-arm64.tar.gz"', text)
+text=re.sub(r'url "[^"]+"', f'url "{url}"', text)
 text=re.sub(r'version "[^"]+"', f'version "{version}"', text)
 text=re.sub(r'sha256 "[^"]+"', f'sha256 "{sha}"', text)
 path.write_text(text)
