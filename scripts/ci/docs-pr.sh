@@ -53,6 +53,22 @@ cd "$WORKDIR"
 git config user.email "ci@voxis.top"
 git config user.name  "voxis-ci"
 
+# CRITICAL: the fresh clone has NO node_modules. The docs-screenshotter starts
+# Vite (`bun run dev`) + Playwright to capture app screenshots; without deps
+# Vite never comes up on :5173, so the screenshotter silently produces NO
+# images and only the docs-auditor's text edits land in the PR (observed: PR
+# had .md changes only, PNGs stayed stale). Install deps + the Playwright
+# browser before running the agents.
+export PATH="$HOME/.bun/bin:$HOME/.nvm/versions/node/v22.22.0/bin:$PATH"
+if ! timeout 300 bun install --frozen-lockfile >/tmp/docs-bun-install.log 2>&1; then
+  marker "FAILED — bun install failed in docs clone; screenshots would be skipped"
+  cat /tmp/docs-bun-install.log | tail -5
+  exit 0
+fi
+# Playwright chromium (screenshotter needs a browser); non-fatal if already present.
+timeout 300 bunx playwright install chromium >/tmp/docs-pw-install.log 2>&1 || \
+  marker "WARNING — playwright install returned non-zero (may already be present)"
+
 # Run the docs agents (screenshotter + auditor) — reuses the hardened runner
 # (pi -p invocation + setsid/PGID + port-5173 fuser reaping). Non-fatal.
 if [ -f "$SCRIPT_DIR/run-docs-agents.sh" ]; then
