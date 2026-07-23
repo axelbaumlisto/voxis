@@ -19,6 +19,6 @@ clipboard or auto-typing.
 ### Downloads
 - **Linux**: `voxis-linux-x64-gui` (binary), `Voxis_0.1.0_amd64.deb`, `Voxis-0.1.0-1.x86_64.rpm`
 - **Windows**: `voxis-windows-x64-gui.exe` (portable), `Voxis_0.1.0_x64-setup.exe` (NSIS installer)
-- **macOS**: unsigned universal binary (`voxis-macos-universal`) — DMG signing/notarization to follow
+- **macOS**: unsigned Apple Silicon binary (`voxis-macos-arm64`) — DMG signing/notarization to follow
 
 Binaries are unsigned in this release.
