@@ -17,7 +17,7 @@ The renderer maps `ThemeState` to organic motion:
 Important implementation areas:
 
 - `renderers/cell/activity.ts` — energy and activity mapping.
-- `renderers/cell/growth`, `startle`, and related helpers — speech response and decay.
+- `renderers/shared.ts` (`growthLevel`) and `renderers/cell/startle.ts` — speech response and decay.
 - `renderers/cell/cilia.ts` — cilia geometry and beat behavior.
 - `renderers/cell/aquarium/` — multi-organism scenes.
 - `renderers/cell/renderer.ts` — main draw/update path.

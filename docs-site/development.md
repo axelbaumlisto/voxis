@@ -29,6 +29,14 @@ Rust tests can also be run directly:
 cd src-tauri && cargo test
 ```
 
+## Product metadata (from source of truth)
+
+- npm/bun package name/version: `voxis` / see root `package.json`
+- Tauri product name / version / identifier: `Voxis` / value in `src-tauri/tauri.conf.json` (and matching `src-tauri/Cargo.toml`) / `top.voxis.app`
+- Bundle targets: `app`, `dmg`, `deb`, `rpm`
+
+Prefer the Tauri/Cargo version as the shipped app version when they differ from `package.json`.
+
 ## Architecture
 
 Frontend code lives in `src/` and uses React 18, TypeScript, Vite, React Router, and Tauri invoke wrappers. Public routes/pages are Settings, History, Dictionary, and Onboarding.

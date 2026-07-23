@@ -23,7 +23,7 @@ _Settings page with provider and recording controls._
 - Hotkey (`hotkey`): Right/Left Ctrl, Right/Left Alt, platform Super/Cmd/Win keys, or F8-F12 in the UI. Rust validation also accepts additional single keys and modifier combos.
 - Hold threshold (`hotkey_hold_ms`): default 300 ms.
 - Shortcut bindings (`shortcut_bindings`): custom multi-binding editor.
-- Activation mode (`hotkey_mode`): hold or toggle.
+- Activation mode (`hotkey_mode`): hold (default) or toggle.
 - Always-on microphone (`always_on_microphone`): stored in config; macOS already keeps the stream warm, Linux/Windows wiring is not implemented yet.
 - Audio Device (`audio_device`): `Default` or a listed device from `list_audio_devices`.
 
@@ -56,4 +56,4 @@ Dictionary entries and learning controls are on the Dictionary page. Learning mo
 
 ## History and advanced
 
-History settings include retention policy (`never`, `preserve_limit`, `days_3`, `weeks_2`, `months_3`) and preserve-limit count. Advanced settings include text processing, debug mode, and display backend (`auto`, `x11`, `wayland`, `darwin`, `windows`).
+History settings include retention policy (`never`, `preserve_limit`, `days_3`, `weeks_2`, `months_3`; default `never`) and preserve-limit count (default `100`). History saving itself defaults on via `history_enabled` in local config; that flag is not currently exposed in the Settings UI. Advanced settings include text processing, debug mode, and display backend (`auto`, `x11`, `wayland`, `darwin`, `windows`).

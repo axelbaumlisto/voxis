@@ -7,6 +7,14 @@ layout: default
 
 Voxis — это приложение на базе Tauri v2. Бэкенд написан на Rust, а фронтенд — на React 18, TypeScript и Vite.
 
+## Метаданные продукта (из исходников)
+
+- Имя/версия npm/bun-пакета: `voxis` / см. корневой `package.json`
+- Имя / версия / identifier продукта Tauri: `Voxis` / значение в `src-tauri/tauri.conf.json` (и соответствующий `src-tauri/Cargo.toml`) / `top.voxis.app`
+- Цели сборки: `app`, `dmg`, `deb`, `rpm`
+
+Если версии `package.json` и Tauri/Cargo расходятся, в качестве версии поставки приложения предпочитайте Tauri/Cargo.
+
 ## Архитектура
 
 ### Фронтенд (`src/`)
