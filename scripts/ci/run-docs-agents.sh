@@ -68,10 +68,25 @@ fi
 #   whole group via `kill -SIGNAL -PGID` (negative PID = process group).
 # - On normal exit we STILL kill the group, because pi may leave a detached
 #   dev server running after it returns.
+# Hard ceiling (backstop) and the idle-settle window. The common failure mode
+# is NOT that the agent gets stuck doing work — screenshots land in ~5min — but
+# that `pi -p` lingers after finishing (its RSS memory-guard, e.g. "Memory usage
+# at 153% (15345/10000)", prevents a clean exit), so a naive `wait` always
+# burned the full 900s and then group-killed. Instead we tail the agent's own
+# stdout: once it has emitted nothing for IDLE_SETTLE seconds (and we are past a
+# small floor), the work is done and we reap the group immediately. The 900s
+# cap remains as a backstop for a genuinely wedged run.
+MAX_RUNTIME="${VOXIS_DOCS_MAX_RUNTIME:-900}"
+IDLE_SETTLE="${VOXIS_DOCS_IDLE_SETTLE:-60}"
+MIN_RUNTIME="${VOXIS_DOCS_MIN_RUNTIME:-60}"
+
 run_agent() {
   local name="$1" prompt="$2"
   local agent_file=".pi/agents/${name}.md"
-  echo "--- $name (max 900s) ---"
+  echo "--- $name (max ${MAX_RUNTIME}s, idle-settle ${IDLE_SETTLE}s) ---"
+
+  local log="/tmp/voxis-docs-${name}.log"
+  : > "$log"
 
   # IMPORTANT: pi has NO `run` subcommand and no `--agent` flag (v0.81.x).
   # `pi run <name> <prompt>` just passes [run, name, prompt] as message args to
@@ -79,29 +94,46 @@ run_agent() {
   # (→ always hit the 900s timeout, even though the work finished in ~40s).
   # Correct non-interactive invocation: `pi -p` (process-and-exit) with the
   # agent definition injected as an appended system prompt. --no-session keeps
-  # the CI run ephemeral.
-  setsid pi -p --no-session \
-    --append-system-prompt "$(cat "$agent_file")" \
-    "$prompt Produce the required outputs, then STOP." &
+  # the CI run ephemeral. stdout is tee'd to $log so we can detect idle-settle.
+  setsid sh -c "pi -p --no-session \
+    --append-system-prompt \"\$(cat '$agent_file')\" \
+    '$prompt Produce the required outputs, then STOP.' 2>&1 | tee '$log'" &
   local pgid=$!   # setsid child is a group leader: PGID == its PID
 
   local waited=0 rc=0
   while kill -0 "$pgid" 2>/dev/null; do
-    if [ "$waited" -ge 900 ]; then
-      echo "WARNING: $name exceeded 900s — terminating process group"
+    if [ "$waited" -ge "$MAX_RUNTIME" ]; then
+      echo "WARNING: $name exceeded ${MAX_RUNTIME}s — terminating process group"
       kill -TERM "-$pgid" 2>/dev/null || true
       sleep 10
       kill -KILL "-$pgid" 2>/dev/null || true
       rc=124
       break
     fi
+    # Idle-settle: if the agent has produced output but stdout has been quiet
+    # for IDLE_SETTLE seconds (work finished, pi just not exiting), reap early.
+    if [ "$waited" -ge "$MIN_RUNTIME" ] && [ -s "$log" ]; then
+      local last_mtime now idle
+      last_mtime=$(stat -c %Y "$log" 2>/dev/null || echo 0)
+      now=$(date +%s)
+      idle=$((now - last_mtime))
+      if [ "$idle" -ge "$IDLE_SETTLE" ]; then
+        echo "$name: output idle ${idle}s after ${waited}s — work done, reaping early"
+        kill -TERM "-$pgid" 2>/dev/null || true
+        sleep 3
+        kill -KILL "-$pgid" 2>/dev/null || true
+        rc=0
+        break
+      fi
+    fi
     sleep 5
     waited=$((waited + 5))
   done
 
-  if [ "$rc" -eq 0 ]; then
+  if [ "$rc" -eq 0 ] && kill -0 "$pgid" 2>/dev/null; then
     wait "$pgid" 2>/dev/null || rc=$?
   fi
+  rm -f "$log" 2>/dev/null || true
 
   # Reap the whole group (pi + direct children)...
   kill -TERM "-$pgid" 2>/dev/null || true
