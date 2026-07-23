@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"Default capability set for the application","local":true,"windows":["main","overlay"],"permissions":["core:default","core:window:allow-hide","core:event:default","core:event:allow-listen","core:event:allow-emit","shell:allow-open","notification:default","notification:allow-is-permission-granted","store:default"]}}
