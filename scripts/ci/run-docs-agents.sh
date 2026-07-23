@@ -19,10 +19,13 @@
 #   worst case (a wedged run) is bounded by MAX_RUNTIME and still cleaned up by
 #   `docker rm -f`, touching nothing outside the container.
 #
-# The idle-settle early-reap is kept (pi -p often lingers ~minutes after the
-# screenshots are already written): once the container's stdout has been quiet
-# for IDLE_SETTLE seconds past a MIN_RUNTIME floor, we tear the container down
-# instead of waiting the full MAX_RUNTIME.
+# pi -p lingers even in-container (it does not always exit cleanly after the
+# work is done), and its stdout is heavily buffered when not a TTY (so stdout
+# silence is NOT a reliable progress signal). Instead we watch the agents' real
+# output: both write under docs-site/ (screenshotter -> images/*.png, auditor
+# -> *.md). Once the newest mtime anywhere under docs-site/ has stopped
+# advancing for IDLE_SETTLE seconds (past a MIN_RUNTIME floor), the work is
+# done and we tear the container down instead of waiting the full MAX_RUNTIME.
 set -uo pipefail
 TAG="${1:-}"
 echo "=== Voxis docs agents advisory run ${TAG:+for $TAG} (containerized) ==="
@@ -30,8 +33,9 @@ echo "=== Voxis docs agents advisory run ${TAG:+for $TAG} (containerized) ==="
 # --- config knobs -----------------------------------------------------------
 DOCS_IMAGE="${VOXIS_DOCS_IMAGE:-voxis-docs:latest}"
 MAX_RUNTIME="${VOXIS_DOCS_MAX_RUNTIME:-900}"   # hard wall-clock ceiling per agent
-IDLE_SETTLE="${VOXIS_DOCS_IDLE_SETTLE:-60}"    # quiet-stdout window => reap early
-MIN_RUNTIME="${VOXIS_DOCS_MIN_RUNTIME:-60}"    # don't reap before this floor
+IDLE_SETTLE="${VOXIS_DOCS_IDLE_SETTLE:-90}"    # docs-site quiet window => reap early
+MIN_RUNTIME="${VOXIS_DOCS_MIN_RUNTIME:-120}"   # don't reap before this floor
+WATCH_DIR="${VOXIS_DOCS_WATCH_DIR:-docs-site}" # agents' real output tree
 PI_AGENT_DIR="${VOXIS_PI_AGENT_DIR:-$HOME/.pi/agent}"  # pi auth/config (mounted read-only)
 
 # --- preflight ---------------------------------------------------------------
@@ -64,8 +68,6 @@ trap cleanup_containers EXIT
 run_agent() {
   local name="$1" prompt="$2"
   local cname="voxis-${RUN_TAG}-${name}"
-  local log="/tmp/${cname}.log"
-  : > "$log"
   echo "--- $name (image $DOCS_IMAGE, max ${MAX_RUNTIME}s, idle-settle ${IDLE_SETTLE}s) ---"
 
   docker rm -f "$cname" >/dev/null 2>&1 || true
@@ -96,24 +98,31 @@ run_agent() {
         "'"$prompt"' Produce the required outputs, then STOP."
     ' >/dev/null 2>&1 || { echo "WARNING: $name failed to start (advisory)"; return 0; }
 
-  # Stream container logs to $log in the background (drives idle-settle).
-  ( docker logs -f "$cname" >>"$log" 2>&1 ) &
-  local logpid=$!
+  # newest mtime (epoch secs) anywhere under WATCH_DIR; 0 if empty/missing.
+  newest_mtime() {
+    find "$WATCH_DIR" -type f -printf '%T@\n' 2>/dev/null \
+      | cut -d. -f1 | sort -n | tail -1
+  }
 
   local waited=0 rc=0
+  local last_out_mtime; last_out_mtime=$(newest_mtime)
+  local last_change_at; last_change_at=$(date +%s)
   while docker inspect -f '{{.State.Running}}' "$cname" 2>/dev/null | grep -q true; do
     if [ "$waited" -ge "$MAX_RUNTIME" ]; then
       echo "WARNING: $name exceeded ${MAX_RUNTIME}s — removing container"
       rc=124; break
     fi
-    # Idle-settle: container still up but stdout quiet for IDLE_SETTLE seconds
-    # (work done, pi just not exiting) => reap now.
-    if [ "$waited" -ge "$MIN_RUNTIME" ] && [ -s "$log" ]; then
-      local lm now idle
-      lm=$(stat -c %Y "$log" 2>/dev/null || echo 0)
-      now=$(date +%s); idle=$((now - lm))
+    # Idle-settle on the REAL output tree: if docs-site/ hasn't changed for
+    # IDLE_SETTLE seconds (past MIN_RUNTIME), the agent finished its writes and
+    # pi is just lingering => reap now.
+    local cur; cur=$(newest_mtime)
+    if [ -n "$cur" ] && [ "$cur" != "$last_out_mtime" ]; then
+      last_out_mtime="$cur"; last_change_at=$(date +%s)
+    fi
+    if [ "$waited" -ge "$MIN_RUNTIME" ]; then
+      local idle=$(( $(date +%s) - last_change_at ))
       if [ "$idle" -ge "$IDLE_SETTLE" ]; then
-        echo "$name: output idle ${idle}s after ${waited}s — work done, reaping container"
+        echo "$name: ${WATCH_DIR} idle ${idle}s after ${waited}s — work done, reaping container"
         break
       fi
     fi
@@ -129,10 +138,8 @@ run_agent() {
     fi
   fi
 
-  kill "$logpid" 2>/dev/null || true
   # Single, namespace-scoped teardown: kills pi + vite + chromium in one shot.
   docker rm -f "$cname" >/dev/null 2>&1 || true
-  rm -f "$log" 2>/dev/null || true
 
   if [ "$rc" -eq 0 ]; then echo "$name: ok"; else echo "WARNING: $name rc=$rc (advisory)"; fi
 }
