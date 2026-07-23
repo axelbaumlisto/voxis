@@ -92,8 +92,10 @@ ssh spex 'cd ~/work/voxis && bash scripts/ci/build-ci-image.sh'
   - macOS unsigned binaries are best-effort via `scripts/macos-vm.sh build` and the
     prepared image at `~/clipshot-macos-vm/mac_hdd_ng.prepared.img`.
   - Publish uploads to the Forgejo release and the GitHub release
-    (`axelbaumlisto/voxis`), and updates `homebrew-tap/Formula/voxis.rb` when
-    the macOS arm64 tarball exists. There is NO `voxis.top/dist` mirror step:
+    (`axelbaumlisto/voxis`), and pushes the regenerated formula to the tap repo
+    `axelbaumlisto/homebrew-voxis` (via `HOMEBREW_TAP_REPO`) when the macOS arm64
+    tarball exists AND its published bytes match the pinned sha256 (integrity
+    gate). There is NO `voxis.top/dist` mirror step:
     voxis.top is served by Vercel (the landing), not spex, so files copied
     under spex would be unreachable at voxis.top.
 
@@ -127,6 +129,11 @@ Signed/notarized DMG is out of scope until Apple Developer credentials are avail
 
 - Forgejo release: `https://clipshot.cc/git/zverozabr/voxis/releases/tag/vX.Y.Z`
 - GitHub release (binaries only, canonical public download): `axelbaumlisto/voxis`
-- Homebrew formula in this repo: `homebrew-tap/Formula/voxis.rb` (macOS arm64)
+- Homebrew tap: `axelbaumlisto/homebrew-voxis` (repo name `homebrew-voxis` so
+  `brew tap axelbaumlisto/voxis` resolves). Canonical formula source is in-tree
+  `homebrew-tap/Formula/voxis.rb`; CI replaces the tap copy on release. User install:
+  ```sh
+  brew install axelbaumlisto/voxis/voxis   # macOS arm64
+  ```
 
 Deployment is artifacts only. There is no Voxis daemon fleet deployment in this workflow.
