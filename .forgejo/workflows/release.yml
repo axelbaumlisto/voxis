@@ -325,6 +325,13 @@ jobs:
 
       - name: update Homebrew formula (advisory)
         continue-on-error: true
+        env:
+          # Push the regenerated formula into the tap repo so `brew tap
+          # axelbaumlisto/voxis` (-> github.com/axelbaumlisto/homebrew-voxis)
+          # resolves it. update-homebrew.sh builds an authenticated github.com
+          # URL from `gh auth token` (Forgejo GITHUB_TOKEN unset) and gates the
+          # push on a tarball integrity check.
+          HOMEBREW_TAP_REPO: https://github.com/axelbaumlisto/homebrew-voxis.git
         run: |
           set -euo pipefail
           cd /home/spex/work/voxis

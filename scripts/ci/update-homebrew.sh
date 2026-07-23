@@ -56,9 +56,26 @@ if [ -n "${HOMEBREW_TAP_REPO:-}" ]; then
       push_url=$(printf '%s' "$HOMEBREW_TAP_REPO" | sed -E "s#https://(github.com/)#https://x-access-token:${tok}@\1#")
     fi
   fi
+  # Integrity gate: verify the PUBLISHED tarball at $URL is reachable AND its
+  # bytes hash to the same sha we just pinned, BEFORE pushing the formula. The
+  # GitHub upload step is continue-on-error, so a partial/failed upload could
+  # leave $URL 404 or serving different bytes than the pinned sha256 -> a broken
+  # `brew install`. On mismatch we skip the push (the tap keeps its last valid
+  # formula) and emit an observable marker.
+  remote_sha=$(timeout 120 curl -fsSL "$URL" 2>/dev/null | sha256sum | awk '{print $1}')
+  if [ -z "$remote_sha" ]; then
+    echo "::homebrew:: FAILED — published tarball not reachable at $URL; skipping formula push (advisory)"
+    exit 0
+  fi
+  if [ "$remote_sha" != "$SHA" ]; then
+    echo "::homebrew:: FAILED — remote tarball sha ($remote_sha) != pinned ($SHA); skipping formula push (advisory)"
+    exit 0
+  fi
+  echo "integrity gate ok: remote tarball sha matches pinned $SHA"
+
   tmp=$(mktemp -d)
   if ! timeout 120 git clone --depth 1 "$push_url" "$tmp/tap" 2>/dev/null; then
-    echo "WARNING: could not clone tap repo ($HOMEBREW_TAP_REPO); skipping formula push (advisory)"
+    echo "::homebrew:: FAILED — could not clone tap repo ($HOMEBREW_TAP_REPO); skipping formula push (advisory)"
   else
     mkdir -p "$tmp/tap/Formula"
     cp "$FORMULA" "$tmp/tap/Formula/voxis.rb"
@@ -67,11 +84,17 @@ if [ -n "${HOMEBREW_TAP_REPO:-}" ]; then
       git config user.name  "voxis-ci"
       git add Formula/voxis.rb
       if git diff --cached --quiet; then
-        echo "formula unchanged; nothing to push"
+        echo "::homebrew:: OK — formula unchanged (${VERSION}); nothing to push"
       else
         git commit -m "formula: update voxis ${TAG}"
-        timeout 120 git push || echo "WARNING: formula push failed (advisory)"
+        if timeout 120 git push; then
+          echo "::homebrew:: OK — pushed formula voxis ${VERSION} to tap"
+        else
+          echo "::homebrew:: FAILED — formula push rejected (advisory)"
+        fi
       fi )
   fi
   rm -rf "$tmp"
+else
+  echo "::homebrew:: SKIPPED — HOMEBREW_TAP_REPO unset (no tap push configured)"
 fi
