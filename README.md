@@ -10,7 +10,7 @@ A blazing fast, completely private desktop voice dictation engine built with **T
 <div align="center">
   <img src="docs-site/images/landing-architecture.png" alt="Voxis Isometric Architecture" width="800"/>
   <br/>
-  <em>Zero-lag native hotkeys, Rust CPAL audio core, and Whisper LPU inference.</em>
+  <em>Zero-lag native hotkeys, Rust CPAL audio core, and a Whisper-compatible transcription client (Groq by default).</em>
 </div>
 
 ## Tech Stack
