@@ -40,6 +40,10 @@ debug/
 *.tsbuildinfo
 playwright-report/
 test-results/
+
+# Release build output (populated by scripts/build-all-platforms.sh; must never
+# be committed — a stray `git add -A` would otherwise sweep 100+MB of binaries)
+artifacts/
 src-tauri/tests/screenshots/
 
 # Claude / local agent tooling

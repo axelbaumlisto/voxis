@@ -8,6 +8,10 @@ on:
       tag:
         description: 'Tag to build/publish (e.g. v0.1.0)'
         required: true
+      allow_republish:
+        description: 'Overwrite an ALREADY-PUBLISHED release (breaks pinned homebrew sha — use only for a genuinely failed publish)'
+        required: false
+        default: 'false'
 
 concurrency:
   group: voxis-release-production
@@ -129,6 +133,29 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "tag: $tag"
+
+      - name: guard against republishing an already-published release
+        run: |
+          set -euo pipefail
+          tag="${{ steps.tag.outputs.tag }}"
+          # Re-publishing a shipped tag rebuilds artifacts with DIFFERENT bytes
+          # and clobbers them under the same URLs — which breaks the homebrew
+          # formula's pinned sha256 and any cached download. Refuse unless the
+          # operator explicitly opts in (only for a genuinely failed publish).
+          if [ "${{ inputs.allow_republish }}" = "true" ]; then
+            echo "allow_republish=true — proceeding to overwrite $tag (operator override)"
+            exit 0
+          fi
+          api="${GITHUB_SERVER_URL%/}/api/v1/repos/${GITHUB_REPOSITORY}"
+          assets=$(curl -fsSL -H "Authorization: token ${GITHUB_TOKEN}" "$api/releases/tags/$tag" 2>/dev/null | \
+            python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d.get("assets",[])))' 2>/dev/null || echo 0)
+          if [ "${assets:-0}" -gt 0 ]; then
+            echo "ERROR: release $tag already published with $assets assets."
+            echo "Re-publishing would swap bytes under pinned URLs (breaks homebrew sha)."
+            echo "Cut a new version (bump Cargo.toml + tauri.conf.json), or re-run with allow_republish=true."
+            exit 1
+          fi
+          echo "no existing published assets for $tag — safe to publish"
 
       - name: checkout release tag in persistent worktree
         run: |
@@ -359,8 +386,15 @@ jobs:
                 -q '.assets[].name' 2>/dev/null ) || gh_names=""
             echo "$gh_names" | sed 's/^/ - /'
             if [ -n "$gh_names" ]; then
-              echo "$gh_names" | grep -q '\.deb$' || echo "WARNING: GitHub release missing .deb"
-              echo "$gh_names" | grep -q '\.rpm$' || echo "WARNING: GitHub release missing .rpm"
+              # GitHub is the CANONICAL public download channel (landing buttons +
+              # homebrew tarball URL point here), so a missing package is a hard
+              # failure — same bar as Forgejo. Only assert when gh actually
+              # returned assets, so a gh-auth/network outage degrades to the
+              # "empty" branch below rather than a false failure.
+              echo "$gh_names" | grep -q '\.deb$' || { echo "ERROR: GitHub release missing .deb"; exit 1; }
+              echo "$gh_names" | grep -q '\.rpm$' || { echo "ERROR: GitHub release missing .rpm"; exit 1; }
+            else
+              echo "WARNING: gh returned no assets (auth/network?); could not verify GitHub release"
             fi
           else
             echo "gh CLI unavailable; skipping GitHub probe"
