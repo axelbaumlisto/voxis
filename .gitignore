@@ -82,5 +82,8 @@ progress.md
 .tmp-*
 .tmp-landing-shots/
 
+# docs-screenshotter scratch (regenerated each CI run)
+docs-site/_capture-screenshots.mjs
+
 # Tauri-generated schemas/ACL (regenerated from src-tauri/capabilities/ on build)
 src-tauri/gen/
