@@ -254,6 +254,12 @@ jobs:
             echo "WARNING: gh CLI missing; skipping GitHub release"
             exit 0
           fi
+          # CRITICAL: the Forgejo runner exports GITHUB_TOKEN (and sometimes
+          # GH_TOKEN) set to the FORGEJO token. gh CLI prefers those env vars
+          # over its keyring, so it would try to auth to github.com with a
+          # Forgejo token and fail. Unset them so gh uses ~/.config/gh auth
+          # (account axelbaumlisto).
+          unset GITHUB_TOKEN GH_TOKEN GITHUB_SERVER_URL
           gh release create "$tag" --repo axelbaumlisto/voxis --title "v$VER" --notes-file CHANGELOG.md || true
           files=(artifacts/voxis-* artifacts/Voxis_*)
           gh release upload "$tag" "${files[@]}" --repo axelbaumlisto/voxis --clobber
@@ -315,8 +321,10 @@ jobs:
           ls -lh /home/spex/work/voxis/artifacts/voxis-* /home/spex/work/voxis/artifacts/Voxis_* 2>/dev/null || true
           echo "=== GitHub release probe (canonical download channel) ==="
           if command -v gh >/dev/null 2>&1; then
-            gh release view "$tag" --repo axelbaumlisto/voxis --json assets \
-              -q '.assets[].name' 2>/dev/null | sed 's/^/ - /' || echo "(gh release view failed)"
+            # subshell unsets the Forgejo GITHUB_TOKEN so gh uses its own keyring
+            ( unset GITHUB_TOKEN GH_TOKEN GITHUB_SERVER_URL; \
+              gh release view "$tag" --repo axelbaumlisto/voxis --json assets \
+                -q '.assets[].name' 2>/dev/null | sed 's/^/ - /' ) || echo "(gh release view failed)"
           else
             echo "gh CLI unavailable; skipping GitHub probe"
           fi
