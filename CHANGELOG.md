@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.1
+
+CI/release-pipeline hardening (no user-facing app changes):
+- Release publishes deb/rpm to both Forgejo and GitHub with hard-fail asserts.
+- Homebrew tap `axelbaumlisto/homebrew-voxis` wired up with a tarball integrity
+  gate (`brew install axelbaumlisto/voxis/voxis`, macOS arm64).
+- Docs regeneration decoupled from release into a scheduled workflow that opens
+  a PR to main (deploys to docs.voxis.top via GitHub Pages).
+- Re-publish guard prevents overwriting an already-published tag.
+
 ## v0.1.0
 
 First public release of Voxis — a private, local-first voice dictation app
