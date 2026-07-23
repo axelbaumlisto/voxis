@@ -77,3 +77,6 @@ progress.md
 *.pid
 .tmp-*
 .tmp-landing-shots/
+
+# Tauri-generated schemas/ACL (regenerated from src-tauri/capabilities/ on build)
+src-tauri/gen/
