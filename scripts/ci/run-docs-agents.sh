@@ -10,5 +10,12 @@ if [ ! -f .pi/agents/docs-auditor.md ] || [ ! -f .pi/agents/docs-screenshotter.m
   echo "WARNING: docs agent definitions missing; skipping"
   exit 0
 fi
-pi run docs-screenshotter "Refresh Voxis docs screenshots ${TAG}" || echo "WARNING: docs-screenshotter failed (advisory)"
-pi run docs-auditor "Audit Voxis docs ${TAG}" || echo "WARNING: docs-auditor failed (advisory)"
+# Each agent is bounded so a hung pi run can't stall the release pipeline
+# (the job itself is continue-on-error + timeout, this is defense in depth).
+timeout 900 pi run docs-screenshotter "Refresh Voxis docs screenshots ${TAG}" \
+  || echo "WARNING: docs-screenshotter failed/timed out (advisory)"
+timeout 900 pi run docs-auditor "Audit Voxis docs ${TAG}" \
+  || echo "WARNING: docs-auditor failed/timed out (advisory)"
+
+# Advisory: never fail the release on docs.
+exit 0
