@@ -210,6 +210,7 @@ export default function HarnessApp() {
 
       {/* Theme preview */}
       <div
+        data-testid="theme-preview"
         style={{
           background: bg,
           padding: 16,
