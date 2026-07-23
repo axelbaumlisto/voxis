@@ -258,23 +258,11 @@ jobs:
           files=(artifacts/voxis-* artifacts/Voxis_*)
           gh release upload "$tag" "${files[@]}" --repo axelbaumlisto/voxis --clobber
 
-      - name: mirror to voxis.top/dist
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          cd /home/spex/work/voxis
-          tag="${{ steps.tag.outputs.tag }}"
-          VERSION="${tag#v}"
-          DIST_DIR="/home/spex/app/bundle/voxis-landing/landing/dist"
-          mkdir -p "$DIST_DIR"
-          rm -f "$DIST_DIR"/Voxis_*_x64-setup.exe
-          for f in artifacts/voxis-linux-x64-gui artifacts/voxis-windows-x64-gui.exe "artifacts/Voxis_${VERSION}_x64-setup.exe"; do
-            [ -f "$f" ] && cp -v "$f" "$DIST_DIR/$(basename "$f")"
-          done
-          for f in artifacts/voxis-macos-arm64 artifacts/voxis-macos-arm64.tar.gz; do
-            [ -f "$f" ] && cp -v "$f" "$DIST_DIR/$(basename "$f")"
-          done
-          [ -f "$DIST_DIR/Voxis_${VERSION}_x64-setup.exe" ] && cp -v "$DIST_DIR/Voxis_${VERSION}_x64-setup.exe" "$DIST_DIR/Voxis_x64-setup.exe"
+      # NOTE: no voxis.top/dist mirror step. voxis.top is served by Vercel (the
+      # landing site), not this spex host's Caddy, so files copied under spex
+      # would be unreachable at voxis.top. The landing's Download buttons point
+      # directly at github.com/axelbaumlisto/voxis/releases (the GitHub release
+      # published in the build job), which is the canonical download channel.
 
       - name: update Homebrew formula (advisory)
         continue-on-error: true
@@ -308,7 +296,10 @@ jobs:
 
   publish:
     runs-on: host
-    needs: [build, docs-audit]
+    # Only gate on build — docs-audit is advisory (continue-on-error). A failed
+    # or timed-out docs-audit must NOT skip final publication verification,
+    # since the actual publishing already happened in the build job.
+    needs: [build]
     timeout-minutes: 10
     steps:
       - name: verify package publication
@@ -322,6 +313,10 @@ jobs:
             python3 -c 'import sys,json; d=json.load(sys.stdin); print("assets:", len(d.get("assets", []))); [print(" -", a.get("name")) for a in d.get("assets", [])]'
           echo "=== local artifacts ==="
           ls -lh /home/spex/work/voxis/artifacts/voxis-* /home/spex/work/voxis/artifacts/Voxis_* 2>/dev/null || true
-          echo "=== mirror probes ==="
-          curl -sI https://voxis.top/dist/voxis-linux-x64-gui | head -1 || true
-          curl -sI "https://voxis.top/dist/Voxis_${VERSION}_x64-setup.exe" | head -1 || true
+          echo "=== GitHub release probe (canonical download channel) ==="
+          if command -v gh >/dev/null 2>&1; then
+            gh release view "$tag" --repo axelbaumlisto/voxis --json assets \
+              -q '.assets[].name' 2>/dev/null | sed 's/^/ - /' || echo "(gh release view failed)"
+          else
+            echo "gh CLI unavailable; skipping GitHub probe"
+          fi

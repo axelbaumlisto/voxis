@@ -16,10 +16,13 @@ CI/CD lives on **spex** behind Forgejo at `https://clipshot.cc/git/`. The privat
 Forgejo repo is `zverozabr/voxis`. The runner uses the `voxis-ci:latest` image,
 Docker, and `/dev/kvm` to produce GUI-only artifacts:
 
-- `dist/voxis-linux-x64-gui`
-- `dist/voxis-windows-x64-gui.exe`
-- `dist/Voxis_<version>_x64-setup.exe`
-- best-effort unsigned macOS: `dist/voxis-macos-arm64`, `dist/voxis-macos-x64`, `dist/voxis-macos-universal`
+Release binaries land in `artifacts/` (NOT `dist/`, which is vite's frontend
+build outDir and gets emptied on every `bun run build`):
+
+- `artifacts/voxis-linux-x64-gui` (+ `.deb` / `.rpm`)
+- `artifacts/voxis-windows-x64-gui.exe`
+- `artifacts/Voxis_<version>_x64-setup.exe` (NSIS)
+- best-effort unsigned macOS (arm64-only): `artifacts/voxis-macos-arm64` (+ `.tar.gz`)
 
 GitHub is **binary releases only**. Do not push private Voxis source to GitHub.
 
@@ -52,8 +55,7 @@ GitHub is **binary releases only**. Do not push private Voxis source to GitHub.
 6. Verify package publication:
    ```bash
    curl -sS -H "Authorization: token $TOKEN" "$API/releases/tags/vX.Y.Z"
-   curl -sI https://voxis.top/dist/voxis-linux-x64-gui | head -1
-   gh release view vX.Y.Z --repo axelbaumlisto/voxis
+   gh release view vX.Y.Z --repo axelbaumlisto/voxis   # canonical public channel
    ```
 
 ---
@@ -89,8 +91,11 @@ ssh spex 'cd ~/work/voxis && bash scripts/ci/build-ci-image.sh'
   - Linux GUI and Windows GUI/NSIS are built by `scripts/build-all-platforms.sh --no-macos`.
   - macOS unsigned binaries are best-effort via `scripts/macos-vm.sh build` and the
     prepared image at `~/clipshot-macos-vm/mac_hdd_ng.prepared.img`.
-  - Publish uploads to Forgejo release, mirrors binaries to GitHub release,
-    copies artifacts to `voxis.top/dist`, and updates `homebrew-tap/Formula/voxis.rb` when macOS tarball exists.
+  - Publish uploads to the Forgejo release and the GitHub release
+    (`axelbaumlisto/voxis`), and updates `homebrew-tap/Formula/voxis.rb` when
+    the macOS arm64 tarball exists. There is NO `voxis.top/dist` mirror step:
+    voxis.top is served by Vercel (the landing), not spex, so files copied
+    under spex would be unreachable at voxis.top.
 
 Host-executor gotchas:
 
@@ -109,8 +114,10 @@ ssh spex 'cd ~/work/voxis && ./scripts/macos-vm.sh build'
 ```
 
 It syncs the Voxis source into the VM, builds `voice` for
-`aarch64-apple-darwin` and `x86_64-apple-darwin`, creates a universal binary
-with `lipo`, and pulls unsigned binaries into `dist/`.
+`aarch64-apple-darwin`, and pulls the unsigned binary into `artifacts/`.
+macOS is arm64-only: `ort` rc.12 ships no prebuilt ONNX Runtime for
+`x86_64-apple-darwin`, so an Intel build fails at `ort-sys`. Apple Silicon
+covers all current Macs.
 
 Signed/notarized DMG is out of scope until Apple Developer credentials are available.
 
@@ -119,8 +126,7 @@ Signed/notarized DMG is out of scope until Apple Developer credentials are avail
 ## Publishing targets
 
 - Forgejo release: `https://clipshot.cc/git/zverozabr/voxis/releases/tag/vX.Y.Z`
-- GitHub release (binaries only): `axelbaumlisto/voxis`
-- Static mirror: `https://voxis.top/dist/`
-- Homebrew formula in this repo: `homebrew-tap/Formula/voxis.rb`
+- GitHub release (binaries only, canonical public download): `axelbaumlisto/voxis`
+- Homebrew formula in this repo: `homebrew-tap/Formula/voxis.rb` (macOS arm64)
 
 Deployment is artifacts only. There is no Voxis daemon fleet deployment in this workflow.
