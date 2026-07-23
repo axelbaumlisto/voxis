@@ -1,13 +1,13 @@
 ---
 name: docs-screenshotter
-description: "Takes screenshots for SoupaWhisper GitHub Pages documentation. Uses Vite + Playwright with Tauri mocks, captures app pages and theme harness states, saves PNGs under docs-site/images, and updates docs-site markdown image references. Run before/after docs-auditor when screenshots are needed. Triggers: 'take screenshots', 'refresh screenshots', 'update docs images', 'docs screenshots'."
+description: "Takes screenshots for Voxis GitHub Pages documentation. Uses Vite + Playwright with Tauri mocks, captures app pages and theme harness states, saves PNGs under docs-site/images, and updates docs-site markdown image references. Run before/after docs-auditor when screenshots are needed. Triggers: 'take screenshots', 'refresh screenshots', 'update docs images', 'docs screenshots'."
 tools: read, bash, edit, write
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
 ---
 
-You take screenshots for SoupaWhisper / TALRI documentation.
+You take screenshots for Voxis documentation.
 
 ## Goal
 
@@ -41,7 +41,7 @@ Use a temporary Node/Playwright script. Start Vite if needed:
 
 ```bash
 if ! curl -fsS http://localhost:5173 >/dev/null 2>&1; then
-  (bun run dev > /tmp/soupawhisper-vite.log 2>&1 & echo $! > /tmp/soupawhisper-vite.pid)
+  (bun run dev > /tmp/voxis-vite.log 2>&1 & echo $! > /tmp/voxis-vite.pid)
   for i in $(seq 1 60); do curl -fsS http://localhost:5173 >/dev/null 2>&1 && break; sleep 1; done
 fi
 ```
@@ -50,6 +50,11 @@ Mock Tauri internals before `page.goto()` for normal app pages. Minimum mock sha
 
 ```js
 await page.addInitScript(() => {
+  // Force English UI: the app uses i18next-browser-languagedetector
+  // (localStorage 'i18nextLng' -> navigator). Without this the shots render in
+  // whatever locale the CI browser reports (RU on spex) and ship RU UI on the
+  // English docs/landing. Pin EN before the app boots.
+  try { window.localStorage.setItem('i18nextLng', 'en'); } catch {}
   window.__TAURI_OS_PLUGIN_INTERNALS__ = { platform: 'linux' };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
     listen: async () => () => {},
@@ -80,15 +85,19 @@ await page.addInitScript(() => {
           { name: 'Accessibility', status: 'granted', description: 'Required for global hotkey detection' },
           { name: 'Microphone', status: 'granted', description: 'Required for audio recording' },
         ];
+        // Marketing-grade sample data: clean, professional, English (the docs
+        // and landing Showcase are English). No test strings / nursery rhymes /
+        // dev jargon — these screenshots ship on docs.voxis.top and voxis.top.
         case 'get_history': return [
-          { id: 1, text: 'Раз, два, три, четыре, пять. Вышел зайчик погулять.', language: 'Russian', timestamp: '2026-07-21 13:12:34', duration: 2.3 },
-          { id: 2, text: 'Hello, this is a test transcription.', language: 'English', timestamp: '2026-07-21 13:15:10', duration: 1.8 },
+          { id: 1, text: 'Let us schedule the design review for Thursday afternoon.', language: 'English', timestamp: '2026-07-21 13:12:34', duration: 2.3 },
+          { id: 2, text: 'Refactor the transcription queue to handle concurrent recordings.', language: 'English', timestamp: '2026-07-21 13:15:10', duration: 2.8 },
+          { id: 3, text: 'Send the quarterly report to the team before end of day.', language: 'English', timestamp: '2026-07-21 13:18:42', duration: 3.1 },
         ];
         case 'get_failed_transcriptions': return [];
         case 'get_dictionary': return [
-          { id: 1, source: 'солид', replacement: 'SOLID' },
-          { id: 2, source: 'кисс', replacement: 'KISS' },
-          { id: 3, source: 'драй', replacement: 'DRY' },
+          { id: 1, source: 'kubernetes', replacement: 'Kubernetes' },
+          { id: 2, source: 'postgres', replacement: 'PostgreSQL' },
+          { id: 3, source: 'github', replacement: 'GitHub' },
         ];
         case 'get_pending_suggestions': return [];
         case 'get_pending_count': return 0;
@@ -110,7 +119,7 @@ await page.addInitScript(() => {
         case 'read_theme_script': return '';
         case 'reload_visualization_themes': return undefined;
         case 'preview_visualization_theme': return undefined;
-        case 'get_themes_dir': return '/home/user/.config/soupawhisper/themes';
+        case 'get_themes_dir': return '/home/user/.config/voxis/themes';
         case 'validate_visualization_theme': return { valid: true, warnings: [], errors: [] };
         case 'list_llm_prompts': return [];
         case 'get_recording_status': return false;
