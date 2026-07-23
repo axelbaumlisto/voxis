@@ -1,6 +1,10 @@
 title: Voxis Docs
 description: Voxis — voice dictation app built with Tauri, React, and Rust
 url: https://docs.voxis.top
+# Served at a custom-domain ROOT (CNAME docs.voxis.top). Pin baseurl to empty:
+# actions/configure-pages auto-derives baseurl=/voxis from the repo name, which
+# would prefix every CSS/link/image with /voxis/* and 404 the whole site.
+baseurl: ""
 markdown: kramdown
 theme: minima
 plugins: []
@@ -13,5 +17,3 @@ header_pages:
   - security.md
   - troubleshooting.md
 
-exclude:
-  - ru/
