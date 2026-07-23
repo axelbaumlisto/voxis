@@ -345,26 +345,17 @@ jobs:
           git pull --ff-only origin main 2>/dev/null || true
           echo "repo restored to main"
 
-  docs-audit:
-    runs-on: host
-    needs: [build]
-    continue-on-error: true
-    timeout-minutes: 45
-    env:
-      GIT_PAGER: cat
-      PAGER: cat
-    steps:
-      - name: docs-auditor + screenshotter (advisory)
-        run: |
-          set -euo pipefail
-          cd /home/spex/work/voxis
-          bash scripts/ci/run-docs-agents.sh "${{ needs.build.outputs.tag }}"
+  # docs regeneration is DECOUPLED from release — see .forgejo/workflows/docs.yml
+  # (scheduled + workflow_dispatch). Releasing a binary has nothing to do with
+  # docs freshness, and the non-deterministic screenshot agents (Vite+Playwright)
+  # must not sit on the release critical path. The docs workflow runs the agents
+  # in an isolated clone and opens a PR to GitHub main, which triggers the
+  # existing GitHub Pages deploy (.github/workflows/pages.yml).
 
   publish:
     runs-on: host
-    # Only gate on build — docs-audit is advisory (continue-on-error). A failed
-    # or timed-out docs-audit must NOT skip final publication verification,
-    # since the actual publishing already happened in the build job.
+    # Gates on build only. Docs regeneration is a separate workflow (docs.yml),
+    # not part of the release, so publication verification never waits on it.
     needs: [build]
     timeout-minutes: 10
     steps:

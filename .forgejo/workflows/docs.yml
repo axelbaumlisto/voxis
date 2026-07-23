@@ -1,0 +1,44 @@
+name: docs
+# Decoupled from release. Regenerates docs-site (screenshots via the pi
+# docs-screenshotter + docs-auditor fixes) in an ISOLATED clone and opens a PR
+# to GitHub main. Merging the PR triggers the GitHub Pages deploy
+# (.github/workflows/pages.yml). Never touches the release checkout.
+on:
+  schedule:
+    # Weekly, Monday 04:00 UTC. Docs freshness is not release-coupled.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  # Never overlap docs runs (isolated clone + pi agents + Vite dev server).
+  group: voxis-docs
+  cancel-in-progress: false
+
+jobs:
+  regen:
+    runs-on: host
+    timeout-minutes: 45
+    env:
+      GIT_PAGER: cat
+      PAGER: cat
+    steps:
+      - name: checkout (manual; Forgejo /git subpath breaks actions/checkout URL)
+        run: |
+          set -euo pipefail
+          base="${CI_GIT_BASE:-$GITHUB_SERVER_URL}"
+          git init -q .
+          git remote add origin "${base}/${GITHUB_REPOSITORY}.git"
+          git -c http.extraheader="Authorization: basic $(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 -w0)" \
+            -c protocol.version=2 fetch --depth=1 origin "${GITHUB_SHA:-refs/heads/main}"
+          git checkout -q FETCH_HEAD
+          git --no-pager log --oneline -1
+
+      - name: regenerate docs + open PR to GitHub main (advisory)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # Run against the persistent spex checkout's script copy, but the
+          # script itself clones github main into an ISOLATED WORKDIR
+          # (/home/spex/work/voxis-docs) — it never mutates this checkout.
+          cd /home/spex/work/voxis 2>/dev/null || cd "$PWD"
+          bash scripts/ci/docs-pr.sh "scheduled-$(date +%Y%m%d)"
