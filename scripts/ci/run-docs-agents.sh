@@ -21,14 +21,33 @@ set -uo pipefail
 TAG="${1:-}"
 echo "=== Voxis docs agents advisory run ${TAG:+for $TAG} ==="
 
-# Best-effort cleanup of tmp files the docs agents write. Process reaping is
-# handled per-agent via the process group (see run_agent), which is robust to
-# however the dev server was launched.
+# Kill whatever holds the Vite dev-server port. This is the ONE stable
+# identifier: pi's bash tool runs the agent's commands under its own setsid, so
+# a `bun run dev` the screenshotter backgrounds lands in a SEPARATE session
+# (PPID=1, distinct PGID) that the agent's process-group kill can't reach. But
+# the dev server always binds Vite's port, so port-based reaping catches it no
+# matter how it was launched (`bun run dev`, `bunx vite --host ...`, etc.).
+DEV_PORT="${VOXIS_DOCS_VITE_PORT:-5173}"
+kill_dev_server() {
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -k -TERM "${DEV_PORT}/tcp" 2>/dev/null || true
+    sleep 2
+    fuser -k -KILL "${DEV_PORT}/tcp" 2>/dev/null || true
+  elif command -v lsof >/dev/null 2>&1; then
+    local pids
+    pids=$(lsof -t -i "TCP:${DEV_PORT}" -sTCP:LISTEN 2>/dev/null || true)
+    [ -n "$pids" ] && kill -TERM $pids 2>/dev/null
+    sleep 2
+    pids=$(lsof -t -i "TCP:${DEV_PORT}" -sTCP:LISTEN 2>/dev/null || true)
+    [ -n "$pids" ] && kill -KILL $pids 2>/dev/null || true
+  fi
+}
 cleanup_tmp() {
   rm -f /tmp/soupawhisper-vite.pid /tmp/soupawhisper-vite.log \
         /tmp/voxis-vite.pid /tmp/voxis-vite.log 2>/dev/null || true
 }
-trap cleanup_tmp EXIT
+cleanup_all() { kill_dev_server; cleanup_tmp; }
+trap cleanup_all EXIT
 
 if ! command -v pi >/dev/null 2>&1; then
   echo "WARNING: pi CLI not found on PATH; skipping docs agents"
