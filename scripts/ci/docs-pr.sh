@@ -86,6 +86,10 @@ if ! timeout 120 git push -u origin "$BR" 2>/dev/null; then
   exit 0
 fi
 
+# Ensure the `docs` label exists (gh pr create --label fails hard if absent).
+( unset GITHUB_TOKEN GH_TOKEN GITHUB_SERVER_URL
+  gh label create docs --repo "$REPO_SLUG" --color 0075ca --description "Documentation" 2>/dev/null || true )
+
 pr_url=$(unset GITHUB_TOKEN GH_TOKEN GITHUB_SERVER_URL
   gh pr create --repo "$REPO_SLUG" --base main --head "$BR" \
     --title "docs: scheduled regeneration $(date +%Y-%m-%d)" \
