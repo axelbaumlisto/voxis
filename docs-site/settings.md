@@ -56,4 +56,4 @@ Dictionary entries and learning controls are on the Dictionary page. Learning mo
 
 ## History and advanced
 
-History settings include retention policy (`never`, `preserve_limit`, `days_3`, `weeks_2`, `months_3`) and preserve-limit count. Advanced settings include text processing, debug mode, and display backend (`auto`, `x11`, `wayland`, `darwin`, `windows`).
+History settings in the UI include retention policy (`never`, `preserve_limit`, `days_3`, `weeks_2`, `months_3`; default `never`) and preserve-limit count (default `100`). The older `history_enabled` / `history_days` config fields still exist in storage defaults (`true` / `30`) but are not Settings-page controls. Advanced settings include text processing, debug mode, and display backend (`auto`, `x11`, `wayland`, `darwin`, `windows`).

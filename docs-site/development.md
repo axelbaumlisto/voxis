@@ -31,7 +31,7 @@ cd src-tauri && cargo test
 
 ## Architecture
 
-Frontend code lives in `src/` and uses React 18, TypeScript, Vite, React Router, and Tauri invoke wrappers. Public routes/pages are Settings, History, Dictionary, and Onboarding.
+Frontend code lives in `src/` and uses React 18, TypeScript, Vite, React Router, and Tauri invoke wrappers. Public routes/pages are Settings (`/settings`), History (`/` and `/history`), Dictionary (`/dictionary`), and Onboarding (`/onboarding`).
 
 Important frontend areas:
 
@@ -39,18 +39,29 @@ Important frontend areas:
 - `src/lib/settingsRegistry.ts` and `src/lib/constants.ts` — settings UI registry and option lists.
 - `src/hooks/` — async data, settings, audio devices, recording, overlay state, provider, and theme hooks.
 - `src/components/` — layout plus dictionary, history, settings, and spectrum components.
-- `src/theme-engine/` — ThemeHost, contract, builtin sources, and renderers.
+- `src/theme-engine/` — ThemeHost, contract (`apiVersion` 1), builtin sources, and renderers.
 - `src/overlay.tsx` — overlay webview entry point and pointer recording wiring.
 
-Backend code lives in `src-tauri/` and uses Rust with Tauri v2. Important modules include:
+Backend code lives in `src-tauri/` and uses Rust with Tauri v2. There are two binaries: `voice` (main app) and `typing_bench` (auto-type latency benchmark).
+
+Important modules include:
 
 - `audio/` — recording via CPAL, audio levels, VAD, and WAV encoding.
 - `orchestrator/` — hotkey-to-transcription workflow, queueing, overlay updates, post-processing, and output.
-- `transcription/` — Whisper-compatible HTTP client.
+- `transcription/` — Whisper-compatible HTTP client (default Groq transcription URL; custom endpoints only via `api_url_override`).
 - `output/` — clipboard, paste shortcuts, auto-typing, and auto-submit.
-- `storage/` — config, history, dictionary, corrections, provider/prompt, failed-audio, theme, and debug storage.
-- `theme_engine/` and `overlay_native/` — manifest/script loading and overlay window handling.
+- `hotkey/` — low-level keyboard input via rdev.
+- `storage/` — config, history, dictionary, corrections, provider/prompt, failed-audio, theme, and debug storage under the platform `voxis` config directory.
+- `theme_engine/` and `overlay_native/` — manifest/script loading and overlay window handling (cross-platform webview backend; standard size 172×36 logical px unless a theme sets valid `overlay_width`/`overlay_height`).
+- `llm/` and `learning/` — optional LLM post-processing and dictionary learning suggestions.
 - `commands/` — Tauri commands exposed to the frontend.
+
+### Data flow
+
+1. Hotkey press → `hotkey::HotkeyListener` → `Orchestrator::on_hotkey_pressed()` starts `AudioRecorder`.
+2. Hotkey release (hold mode) or second tap (toggle mode) queues audio in `TranscriptionQueue`.
+3. Queue worker: transcribe → dictionary → optional LLM → clipboard/auto-type output.
+4. Frontend receives `state-changed` and `error` events from the backend.
 
 ## GitHub Pages docs
 

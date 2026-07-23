@@ -95,3 +95,4 @@ The Theme API version is `1` and includes:
 - Existing manifest-v2 user themes are preserved on startup and are not overwritten by bundled copies.
 - During bundled-theme seeding, existing user copies of bundled themes that are legacy/non-v2 are overwritten with bundled v2 copies; arbitrary custom invalid/non-v2 themes are skipped by the scanner.
 - If a theme fails to load or mount, the overlay falls back to the builtin default theme.
+- Without `overlay_width` / `overlay_height` (both required, each in 16..=4096), the overlay uses the standard **172×36** logical-pixel window.

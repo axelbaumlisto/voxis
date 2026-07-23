@@ -29,7 +29,7 @@ Layout shortcuts are `h` for History, `w` for Dictionary, `s` for Settings, `c` 
 
 ## History, dictionary, and failed audio
 
-When history is enabled, transcriptions are saved to local history storage. Failed transcriptions are stored in `failed_audio/` with WAV audio and JSON metadata; the storage keeps up to three entries and the History page can retry or dismiss them.
+Transcription history defaults to enabled in config (`history_enabled`, not exposed as a Settings toggle). Saved entries go to local `history.db`. History retention is controlled in Settings (`retention_period` / `retention_limit`). Failed transcriptions are stored in `failed_audio/` with WAV audio and JSON metadata; the storage keeps up to three entries (FIFO) and the History page can retry or dismiss them.
 
 ![History page with mock transcription entries](images/history.png)
 
