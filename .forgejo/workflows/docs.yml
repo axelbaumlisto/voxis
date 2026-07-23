@@ -33,6 +33,15 @@ jobs:
           git checkout -q FETCH_HEAD
           git --no-pager log --oneline -1
 
+      - name: build voxis-docs image (docs agents run INSIDE it, not on host)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd /home/spex/work/voxis 2>/dev/null || cd "$PWD"
+          # The docs agents (pi + Vite + Playwright) run inside this image via
+          # docker run, so nothing they spawn can leak onto the shared host.
+          bash scripts/ci/build-docs-image.sh
+
       - name: regenerate docs + open PR to GitHub main (advisory)
         continue-on-error: true
         run: |
