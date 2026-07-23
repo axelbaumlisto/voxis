@@ -42,7 +42,7 @@ Theme state is:
 }
 ```
 
-Manifests use `manifest_version: 2`, `api_version: 1`, an `entry` filename such as `theme.js`, and can optionally declare `overlay_width` and `overlay_height`. Both dimensions must be present and within 16..=4096 logical pixels to be used by the webview overlay; otherwise the standard overlay window size is used.
+Manifests use `manifest_version: 2`, `api_version: 1`, an `entry` filename such as `theme.js`, and can optionally declare `overlay_width` and `overlay_height`. Both dimensions must be present and within 16..=4096 logical pixels to be used by the webview overlay; otherwise the standard overlay window size is **172×36** logical pixels (`ThemeHost` / webview defaults).
 
 Theme ids and entry filenames must be safe path components: no empty value, `/`, `\\`, `..`, `.`, or `:`. When scanning themes, the folder name is the authoritative id if it differs from the manifest id.
 
@@ -56,7 +56,7 @@ bun run build:themes
 
 The app seeds bundled themes into the user themes directory at startup. Missing bundled themes are copied; existing user copies of bundled themes that are legacy/non-v2 are overwritten with the bundled v2 version; existing manifest-v2 user themes are preserved, even if temporarily invalid. Arbitrary custom invalid/non-v2 theme folders are skipped by the scanner rather than migrated. If edits do not appear, copy the updated `theme.js` and `theme.json` into the user theme directory and reload/reselect the theme.
 
-Builtin themes currently bundled by `bun run build:themes` include Default, Winamp Classic, Neon, Handy Pill, Metaballs, Metaballs 2.5D/3D, Lava Lamp, Living/Quiet Reed, Radiolarian, Paramecium Solo, Vorticella Bloom, and aquarium drift themes.
+Builtin themes currently bundled by `bun run build:themes` are: `default`, `winamp_classic`, `neon`, `handy_pill`, `metaballs`, `metaballs25d`, `metaballs3d`, `lavalamp`, `living_reed`, `quiet_reed`, `radiolarian`, `paramecium_solo`, `vorticella_bloom`, `drifting_contour`, `didinium_drift`, `euglena_drift`, `duo_aquarium`, and `all_aquarium`.
 
 ## Author references
 

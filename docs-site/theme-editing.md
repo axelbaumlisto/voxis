@@ -75,4 +75,4 @@ If a theme needs a custom window size, set both dimensions in `theme.json`:
 { "overlay_width": 160, "overlay_height": 160 }
 ```
 
-The native overlay validates sizes and resizes the OS window. If no custom size is declared, the standard overlay size is used.
+The native overlay validates sizes (both dimensions required, each in 16..=4096) and resizes the OS window. If no custom size is declared, the standard overlay size is **172×36** logical pixels.
