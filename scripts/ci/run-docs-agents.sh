@@ -2,8 +2,14 @@
 # Advisory docs agents (screenshotter + auditor). This step must NEVER stall or
 # fail the release pipeline, and must NOT leak background processes.
 #
-# Why the hardening below: docs-screenshotter starts a Vite dev server (as
-# `bun run dev` -> `node .../vite` -> esbuild) and a Playwright browser as
+# Two things were wrong originally: (a) the invocation `pi run <agent> <prompt>`
+# is not valid — pi has no `run` subcommand, so it launched INTERACTIVE pi that
+# blocked on the TTY forever after doing the work (always timed out at 900s);
+# fixed by using `pi -p --append-system-prompt "$(cat agent.md)"` (see run_agent,
+# now completes in ~40s). (b) process leakage, handled below.
+#
+# Why the process-group hardening: docs-screenshotter starts a Vite dev server
+# (as `bun run dev` -> `node .../vite` -> esbuild) and a Playwright browser as
 # BACKGROUND children. A plain `timeout 900 pi ...` only signals `pi` on expiry
 # — its backgrounded dev-server/browser get orphaned (reparented to init) and
 # survive forever (observed: a hung run left `bun run dev` + vite + esbuild
@@ -45,9 +51,19 @@ fi
 #   dev server running after it returns.
 run_agent() {
   local name="$1" prompt="$2"
+  local agent_file=".pi/agents/${name}.md"
   echo "--- $name (max 900s) ---"
 
-  setsid pi run "$name" "$prompt" &
+  # IMPORTANT: pi has NO `run` subcommand and no `--agent` flag (v0.81.x).
+  # `pi run <name> <prompt>` just passes [run, name, prompt] as message args to
+  # an INTERACTIVE pi, which processes them once then blocks on the TTY forever
+  # (→ always hit the 900s timeout, even though the work finished in ~40s).
+  # Correct non-interactive invocation: `pi -p` (process-and-exit) with the
+  # agent definition injected as an appended system prompt. --no-session keeps
+  # the CI run ephemeral.
+  setsid pi -p --no-session \
+    --append-system-prompt "$(cat "$agent_file")" \
+    "$prompt Produce the required outputs, then STOP." &
   local pgid=$!   # setsid child is a group leader: PGID == its PID
 
   local waited=0 rc=0
