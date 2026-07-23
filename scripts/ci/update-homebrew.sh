@@ -34,10 +34,44 @@ text=re.sub(r'sha256 "[^"]+"', f'sha256 "{sha}"', text)
 path.write_text(text)
 PY
 echo "Updated $FORMULA to $VERSION $SHA"
+
+# Optional: push the updated formula into a separate tap repo. Guarded so a
+# misconfigured push can never HANG the (up-to-180-min) release build job:
+#  - GIT_TERMINAL_PROMPT=0: never block on an interactive credential prompt.
+#  - timeout on every network git op.
+#  - explicit git identity (commits fail in CI without user.name/email).
+#  - token trap: the Forgejo runner exports GITHUB_TOKEN=<forgejo token>; git
+#    doesn't read it, but gh does. Build an authenticated github.com URL from
+#    `gh auth token` (with the Forgejo env vars unset) so the push uses the
+#    correct github.com credentials, not a Forgejo token context.
+#  - idempotent commit: `git diff --cached --quiet || commit` avoids a spurious
+#    non-zero "nothing to commit" on a no-change re-run.
 if [ -n "${HOMEBREW_TAP_REPO:-}" ]; then
+  export GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never
+  push_url="$HOMEBREW_TAP_REPO"
+  if command -v gh >/dev/null 2>&1; then
+    tok=$(unset GITHUB_TOKEN GH_TOKEN GITHUB_SERVER_URL; gh auth token 2>/dev/null || true)
+    if [ -n "$tok" ]; then
+      # rewrite https://github.com/... -> https://x-access-token:TOK@github.com/...
+      push_url=$(printf '%s' "$HOMEBREW_TAP_REPO" | sed -E "s#https://(github.com/)#https://x-access-token:${tok}@\1#")
+    fi
+  fi
   tmp=$(mktemp -d)
-  git clone "$HOMEBREW_TAP_REPO" "$tmp/homebrew-tap"
-  mkdir -p "$tmp/homebrew-tap/Formula"
-  cp "$FORMULA" "$tmp/homebrew-tap/Formula/voxis.rb"
-  (cd "$tmp/homebrew-tap" && git add Formula/voxis.rb && git commit -m "formula: update voxis ${TAG}" && git push)
+  if ! timeout 120 git clone --depth 1 "$push_url" "$tmp/tap" 2>/dev/null; then
+    echo "WARNING: could not clone tap repo ($HOMEBREW_TAP_REPO); skipping formula push (advisory)"
+  else
+    mkdir -p "$tmp/tap/Formula"
+    cp "$FORMULA" "$tmp/tap/Formula/voxis.rb"
+    ( cd "$tmp/tap"
+      git config user.email "ci@voxis.top"
+      git config user.name  "voxis-ci"
+      git add Formula/voxis.rb
+      if git diff --cached --quiet; then
+        echo "formula unchanged; nothing to push"
+      else
+        git commit -m "formula: update voxis ${TAG}"
+        timeout 120 git push || echo "WARNING: formula push failed (advisory)"
+      fi )
+  fi
+  rm -rf "$tmp"
 fi

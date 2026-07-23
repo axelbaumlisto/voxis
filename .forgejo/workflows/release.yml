@@ -221,14 +221,26 @@ jobs:
               python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
           fi
           echo "release id: $rid"
+          # Explicit required set + best-effort extras. Do NOT rely on a single
+          # glob: the rpm is named `Voxis-<ver>-1.x86_64.rpm` (capital V, HYPHEN)
+          # and the deb `Voxis_<ver>_amd64.deb` (underscore) — a `voxis-*`/`Voxis_*`
+          # glob silently drops the rpm. List deb/rpm via their own explicit globs.
           artifacts=(
             "artifacts/voxis-linux-x64-gui"
             "artifacts/voxis-windows-x64-gui.exe"
             "artifacts/Voxis_${VERSION}_x64-setup.exe"
           )
-          for f in artifacts/voxis-macos-arm64 artifacts/voxis-macos-arm64.tar.gz; do
-            [ -f "$f" ] && artifacts+=("$f")
+          shopt -s nullglob
+          for f in artifacts/*.deb artifacts/*.rpm \
+                   artifacts/voxis-macos-arm64 artifacts/voxis-macos-arm64.tar.gz; do
+            artifacts+=("$f")
           done
+          shopt -u nullglob
+          # Fail loudly if the Linux packages didn't build (they are required,
+          # not best-effort) so a naming/build regression can't silently ship a
+          # release without deb+rpm.
+          ls artifacts/*.deb >/dev/null 2>&1 || { echo "ERROR: no .deb in artifacts/"; exit 1; }
+          ls artifacts/*.rpm >/dev/null 2>&1 || { echo "ERROR: no .rpm in artifacts/"; exit 1; }
           for f in "${artifacts[@]}"; do
             [ -f "$f" ] || { echo "skip missing $f"; continue; }
             name="$(basename "$f")"
@@ -261,7 +273,21 @@ jobs:
           # (account axelbaumlisto).
           unset GITHUB_TOKEN GH_TOKEN GITHUB_SERVER_URL
           gh release create "$tag" --repo axelbaumlisto/voxis --title "v$VER" --notes-file CHANGELOG.md || true
-          files=(artifacts/voxis-* artifacts/Voxis_*)
+          # Explicit globs per artifact class. A single `voxis-*`/`Voxis_*` glob
+          # silently drops the rpm (`Voxis-<ver>-1.x86_64.rpm`: capital V, hyphen).
+          shopt -s nullglob
+          files=(
+            artifacts/voxis-linux-x64-gui
+            artifacts/voxis-windows-x64-gui.exe
+            artifacts/Voxis_*_x64-setup.exe
+            artifacts/*.deb
+            artifacts/*.rpm
+            artifacts/voxis-macos-arm64
+            artifacts/voxis-macos-arm64.tar.gz
+          )
+          shopt -u nullglob
+          ls artifacts/*.deb >/dev/null 2>&1 || { echo "ERROR: no .deb for GitHub release"; exit 1; }
+          ls artifacts/*.rpm >/dev/null 2>&1 || { echo "ERROR: no .rpm for GitHub release"; exit 1; }
           gh release upload "$tag" "${files[@]}" --repo axelbaumlisto/voxis --clobber
 
       # NOTE: no voxis.top/dist mirror step. voxis.top is served by Vercel (the
@@ -315,16 +341,27 @@ jobs:
           VERSION="${tag#v}"
           API="${GITHUB_SERVER_URL%/}/api/v1/repos/${GITHUB_REPOSITORY}"
           echo "=== Forgejo release assets ==="
-          curl -fsSL -H "Authorization: token ${GITHUB_TOKEN}" "$API/releases/tags/$tag" | \
-            python3 -c 'import sys,json; d=json.load(sys.stdin); print("assets:", len(d.get("assets", []))); [print(" -", a.get("name")) for a in d.get("assets", [])]'
-          echo "=== local artifacts ==="
-          ls -lh /home/spex/work/voxis/artifacts/voxis-* /home/spex/work/voxis/artifacts/Voxis_* 2>/dev/null || true
+          fg_names=$(curl -fsSL -H "Authorization: token ${GITHUB_TOKEN}" "$API/releases/tags/$tag" | \
+            python3 -c 'import sys,json; d=json.load(sys.stdin); [print(a.get("name")) for a in d.get("assets", [])]')
+          echo "$fg_names" | sed 's/^/ - /'
+          echo "Forgejo asset count: $(echo "$fg_names" | grep -c .)"
+          # Assert deb + rpm actually made it (the rpm's Voxis-…rpm name previously
+          # slipped through globs and shipped to neither forge).
+          echo "$fg_names" | grep -q '\.deb$' || { echo "ERROR: Forgejo release missing .deb"; exit 1; }
+          echo "$fg_names" | grep -q '\.rpm$' || { echo "ERROR: Forgejo release missing .rpm"; exit 1; }
+          echo "=== local artifacts (bare ls — no globs that could hide a mis-named file) ==="
+          ls -la /home/spex/work/voxis/artifacts/ 2>/dev/null || true
           echo "=== GitHub release probe (canonical download channel) ==="
           if command -v gh >/dev/null 2>&1; then
             # subshell unsets the Forgejo GITHUB_TOKEN so gh uses its own keyring
-            ( unset GITHUB_TOKEN GH_TOKEN GITHUB_SERVER_URL; \
+            gh_names=$( unset GITHUB_TOKEN GH_TOKEN GITHUB_SERVER_URL; \
               gh release view "$tag" --repo axelbaumlisto/voxis --json assets \
-                -q '.assets[].name' 2>/dev/null | sed 's/^/ - /' ) || echo "(gh release view failed)"
+                -q '.assets[].name' 2>/dev/null ) || gh_names=""
+            echo "$gh_names" | sed 's/^/ - /'
+            if [ -n "$gh_names" ]; then
+              echo "$gh_names" | grep -q '\.deb$' || echo "WARNING: GitHub release missing .deb"
+              echo "$gh_names" | grep -q '\.rpm$' || echo "WARNING: GitHub release missing .rpm"
+            fi
           else
             echo "gh CLI unavailable; skipping GitHub probe"
           fi
