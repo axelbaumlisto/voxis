@@ -84,11 +84,13 @@ run_agent() {
     wait "$pgid" 2>/dev/null || rc=$?
   fi
 
-  # Always reap the whole group: pi may leave a detached dev server behind even
-  # on a clean exit. Harmless if the group is already gone.
+  # Reap the whole group (pi + direct children)...
   kill -TERM "-$pgid" 2>/dev/null || true
   sleep 2
   kill -KILL "-$pgid" 2>/dev/null || true
+  # ...and the dev server, which pi's setsid may have detached into its own
+  # session (PPID=1) beyond the reach of the group kill above.
+  kill_dev_server
 
   if [ "$rc" -eq 0 ]; then
     echo "$name: ok"
