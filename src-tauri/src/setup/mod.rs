@@ -139,6 +139,7 @@ pub fn command_handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 
         commands::debug::debug_emit_spectrum,
         commands::debug::debug_emit_silence,
         commands::diagnostics::export_diagnostics,
+        commands::update_check::check_for_update,
         commands::providers::get_llm_providers,
         commands::providers::add_llm_provider,
         commands::providers::remove_llm_provider,

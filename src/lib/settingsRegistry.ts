@@ -468,6 +468,17 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     descriptionKey: "settings.exportDiagnosticsDesc",
     customComponent: "export-diagnostics",
   },
+  {
+    key: "check_for_update",
+    label: "Check for Updates",
+    labelKey: "settings.checkForUpdate",
+    widgetType: "custom",
+    section: "Advanced",
+    description:
+      "Check GitHub for a newer Voxis release. Runs only when you click — no automatic background checks.",
+    descriptionKey: "settings.checkForUpdateDesc",
+    customComponent: "check-for-update",
+  },
 ];
 
 /**

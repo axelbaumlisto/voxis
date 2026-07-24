@@ -232,6 +232,20 @@ async exportDiagnostics() : Promise<Result<string, string>> {
 }
 },
 /**
+ * Manual-trigger command: check whether a newer Voxis release is available.
+ * 
+ * Reads the running app's own version via `app.package_info().version` (Tauri
+ * v2), then does a single GET to the public GitHub releases API.
+ */
+async checkForUpdate() : Promise<Result<UpdateCheckResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("check_for_update") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get all failed transcriptions.
  */
 async getFailedTranscriptions() : Promise<Result<FailedTranscription[], string>> {
@@ -1054,6 +1068,26 @@ export type TranscriptionLog = { provider: string; model: string; language: stri
  * Transcription result from API.
  */
 export type TranscriptionResult = { text: string; language?: string | null; duration?: number | null }
+/**
+ * Result of a manual update check, returned to the frontend.
+ */
+export type UpdateCheckResult = { 
+/**
+ * The running app's own version (e.g. "0.1.1").
+ */
+current_version: string; 
+/**
+ * The latest published release version, tag normalised (leading 'v' stripped).
+ */
+latest_version: string; 
+/**
+ * True when `latest_version` is strictly newer than `current_version`.
+ */
+update_available: boolean; 
+/**
+ * URL of the latest release page (GitHub `html_url`).
+ */
+release_url: string }
 /**
  * Voice Activity Detection settings.
  */

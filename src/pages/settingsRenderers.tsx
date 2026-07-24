@@ -7,6 +7,7 @@ import AlwaysOnMicrophone from "../components/settings/AlwaysOnMicrophone";
 import AudioFeedback from "../components/settings/AudioFeedback";
 import AutoSubmitSelector from "../components/settings/AutoSubmitSelector";
 import ExportDiagnostics from "../components/settings/ExportDiagnostics";
+import UpdateNotice from "../components/settings/UpdateNotice";
 import LlmPromptManager from "../components/settings/LlmPromptManager";
 import ShortcutBindingList from "../components/settings/ShortcutBindingList";
 import OverlayBackendSelector from "../components/settings/OverlayBackendSelector";
@@ -196,6 +197,8 @@ export function renderCustomWidget(
       return <ShortcutBindingList />;
     case "export-diagnostics":
       return <ExportDiagnostics label={label} description={description} />;
+    case "check-for-update":
+      return <UpdateNotice label={label} description={description} />;
     case "always-on-microphone":
       return (
         <AlwaysOnMicrophone

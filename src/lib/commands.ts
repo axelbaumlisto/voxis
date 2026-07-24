@@ -430,6 +430,28 @@ export async function exportDiagnostics(): Promise<string> {
 }
 
 // =============================================================================
+// Update Check Command
+// =============================================================================
+
+/**
+ * Result of a manual update check against the public GitHub releases API.
+ */
+export interface UpdateCheckResult {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  release_url: string;
+}
+
+/**
+ * Manual-trigger update check: compares the running app version against the
+ * latest published GitHub release. Opt-in only — no automatic polling.
+ */
+export async function checkForUpdate(): Promise<UpdateCheckResult> {
+  return invoke<UpdateCheckResult>("check_for_update");
+}
+
+// =============================================================================
 // LLM Provider Commands
 // =============================================================================
 

@@ -128,6 +128,13 @@
     "backendDesc": "Windowing/display backend used for output injection",
     "exportDiagnostics": "Export Diagnostics",
     "exportDiagnosticsDesc": "Copy logs and debug files plus a redacted config summary into a local folder for troubleshooting. Nothing is sent anywhere; API keys and secrets are never included.",
+    "checkForUpdate": "Check for Updates",
+    "checkForUpdateDesc": "Check GitHub for a newer Voxis release. Runs only when you click — no automatic background checks.",
+    "updateChecking": "Checking…",
+    "updateUpToDate": "You're up to date (v{{version}}).",
+    "updateAvailable": "v{{version}} is available.",
+    "updateDownload": "Download",
+    "updateCheckFailed": "Couldn't check for updates: {{error}}",
     "sections": {
       "provider": "Provider",
       "recording": "Recording",

@@ -23,6 +23,7 @@ pub mod providers;
 pub mod recording;
 pub mod shortcut_bindings;
 pub mod suggestions;
+pub mod update_check;
 
 use crate::storage::{AppPaths, StorageFactory};
 use tauri::State;
@@ -74,6 +75,9 @@ pub use debug::{clear_debug, get_debug_dir, get_debug_entries};
 
 // Diagnostics
 pub use diagnostics::export_diagnostics;
+
+// Update check
+pub use update_check::{check_for_update, UpdateCheckResult};
 
 // Providers
 pub use providers::{
