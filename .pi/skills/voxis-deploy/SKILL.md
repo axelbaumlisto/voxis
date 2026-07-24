@@ -87,7 +87,11 @@ ssh spex 'cd ~/work/voxis && bash scripts/ci/build-ci-image.sh'
 - `.forgejo/workflows/ci.yml`: manual checkout; runs frontend build, clippy,
   Rust lib tests, and Vitest inside `voxis-ci:latest`.
 - `.forgejo/workflows/release.yml`: tag or manual dispatch; jobs are
-  `test -> build -> publish`, plus advisory `docs-audit`.
+  `test -> build -> publish`. Docs regeneration (`docs-audit`/`docs-screenshotter`)
+  is intentionally DECOUPLED from release — it lives in the separate
+  `.forgejo/workflows/docs.yml` (scheduled weekly + manual dispatch), not a
+  job in `release.yml`. `publish` gates on `build` only and never waits on
+  docs.
   - Linux GUI and Windows GUI/NSIS are built by `scripts/build-all-platforms.sh --no-macos`.
   - macOS unsigned binaries are best-effort via `scripts/macos-vm.sh build` and the
     prepared image at `~/clipshot-macos-vm/mac_hdd_ng.prepared.img`.
