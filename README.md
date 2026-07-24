@@ -34,6 +34,11 @@ Published docs: <https://docs.voxis.top/>
 
 `CLAUDE.md` is optional contributor guidance for AI coding assistants; normal user and developer documentation starts with this README and the published docs above.
 
+## Feedback
+
+Questions, ideas, and general discussion belong in [GitHub Discussions](https://github.com/axelbaumlisto/voxis/discussions).
+Bug reports and reproducible defects go to [GitHub Issues](https://github.com/axelbaumlisto/voxis/issues).
+
 ## Development
 
 ```bash
