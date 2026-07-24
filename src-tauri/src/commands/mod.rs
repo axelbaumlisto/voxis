@@ -11,6 +11,7 @@
 // Public modules to expose #[tauri::command] internal symbols
 pub mod config;
 pub mod debug;
+pub mod diagnostics;
 pub mod dictionary;
 pub mod failed;
 pub mod history;
@@ -70,6 +71,9 @@ pub use recording::{
 
 // Debug
 pub use debug::{clear_debug, get_debug_dir, get_debug_entries};
+
+// Diagnostics
+pub use diagnostics::export_diagnostics;
 
 // Providers
 pub use providers::{

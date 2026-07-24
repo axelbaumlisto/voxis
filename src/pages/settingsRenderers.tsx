@@ -6,6 +6,7 @@ import PasswordField from "../components/settings/PasswordField";
 import AlwaysOnMicrophone from "../components/settings/AlwaysOnMicrophone";
 import AudioFeedback from "../components/settings/AudioFeedback";
 import AutoSubmitSelector from "../components/settings/AutoSubmitSelector";
+import ExportDiagnostics from "../components/settings/ExportDiagnostics";
 import LlmPromptManager from "../components/settings/LlmPromptManager";
 import ShortcutBindingList from "../components/settings/ShortcutBindingList";
 import OverlayBackendSelector from "../components/settings/OverlayBackendSelector";
@@ -193,6 +194,8 @@ export function renderCustomWidget(
       );
     case "shortcut-binding-list":
       return <ShortcutBindingList />;
+    case "export-diagnostics":
+      return <ExportDiagnostics label={label} description={description} />;
     case "always-on-microphone":
       return (
         <AlwaysOnMicrophone

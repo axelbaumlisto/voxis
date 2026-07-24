@@ -126,6 +126,8 @@
     "debugDesc": "Enable debug logging",
     "backend": "Display Backend",
     "backendDesc": "Windowing/display backend used for output injection",
+    "exportDiagnostics": "Export Diagnostics",
+    "exportDiagnosticsDesc": "Copy logs and debug files plus a redacted config summary into a local folder for troubleshooting. Nothing is sent anywhere; API keys and secrets are never included.",
     "sections": {
       "provider": "Provider",
       "recording": "Recording",

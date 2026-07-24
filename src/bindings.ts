@@ -220,6 +220,18 @@ async debugEmitSilence() : Promise<Result<null, string>> {
 }
 },
 /**
+ * Export local diagnostics into a fresh timestamped folder under the config
+ * directory and return the created folder's absolute path as a String.
+ */
+async exportDiagnostics() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_diagnostics") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get all failed transcriptions.
  */
 async getFailedTranscriptions() : Promise<Result<FailedTranscription[], string>> {

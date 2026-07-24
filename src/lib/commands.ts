@@ -420,6 +420,15 @@ export async function getDebugDir(): Promise<string> {
   return invoke<string>("get_debug_dir");
 }
 
+/**
+ * Export local diagnostics (logs + debug JSONL + a redacted config summary)
+ * into a fresh timestamped folder under the config directory. 100% local,
+ * on-demand, no network call. Returns the created folder's path.
+ */
+export async function exportDiagnostics(): Promise<string> {
+  return invoke<string>("export_diagnostics");
+}
+
 // =============================================================================
 // LLM Provider Commands
 // =============================================================================

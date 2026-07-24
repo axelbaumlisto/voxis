@@ -98,6 +98,8 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
         crate::commands::debug::debug_set_overlay_state,
         crate::commands::debug::debug_emit_spectrum,
         crate::commands::debug::debug_emit_silence,
+        // diagnostics
+        crate::commands::diagnostics::export_diagnostics,
         // failed transcriptions
         crate::commands::failed::get_failed_transcriptions,
         crate::commands::failed::dismiss_failed_transcription,

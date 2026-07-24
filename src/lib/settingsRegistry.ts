@@ -457,6 +457,17 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     section: "Advanced",
     options: BACKEND_OPTIONS,
   },
+  {
+    key: "export_diagnostics",
+    label: "Export Diagnostics",
+    labelKey: "settings.exportDiagnostics",
+    widgetType: "custom",
+    section: "Advanced",
+    description:
+      "Copy logs and debug files plus a redacted config summary into a local folder for troubleshooting. Nothing is sent anywhere; API keys and secrets are never included.",
+    descriptionKey: "settings.exportDiagnosticsDesc",
+    customComponent: "export-diagnostics",
+  },
 ];
 
 /**
