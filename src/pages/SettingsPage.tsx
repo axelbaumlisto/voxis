@@ -166,17 +166,44 @@ function SettingsPage() {
             {t("settings.audioDevicesUnavailable")}
           </p>
         )}
-        {setting.key === "api_url_override" &&
-          !isApiUrlOverrideValid(String(value ?? "")) && (
-            <p
-              className="settings-field-error"
-              role="alert"
-              data-testid="api-url-override-error"
-              style={{ color: "var(--error)" }}
-            >
-              {t("settings.apiUrlOverrideInvalid")}
-            </p>
-          )}
+        {setting.key === "api_url_override" && (
+          <>
+            {!isApiUrlOverrideValid(String(value ?? "")) && (
+              <p
+                className="settings-field-error"
+                role="alert"
+                data-testid="api-url-override-error"
+                style={{ color: "var(--error)" }}
+              >
+                {t("settings.apiUrlOverrideInvalid")}
+              </p>
+            )}
+            <div style={{ marginTop: "0.5rem" }}>
+              <button
+                type="button"
+                className="secondary"
+                data-testid="use-local-server-preset"
+                onClick={() =>
+                  updateNestedConfig(
+                    "api_url_override",
+                    "http://localhost:8000/v1/audio/transcriptions"
+                  )
+                }
+              >
+                {t("settings.useLocalServerPreset")}
+              </button>
+              <p
+                style={{
+                  marginTop: "0.35rem",
+                  fontSize: "0.85em",
+                  color: "var(--fg-muted)",
+                }}
+              >
+                {t("settings.useLocalServerPresetHint")}
+              </p>
+            </div>
+          </>
+        )}
       </div>
     );
   };

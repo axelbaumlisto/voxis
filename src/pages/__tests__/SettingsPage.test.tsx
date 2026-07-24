@@ -387,6 +387,21 @@ describe("SettingsPage", () => {
       expect(screen.queryByTestId("api-url-override-error")).not.toBeInTheDocument();
       expect(saveButton).not.toBeDisabled();
     });
+
+    it("fills the field with the local self-hosted endpoint when the preset button is clicked", async () => {
+      render(<SettingsPage />);
+      await waitFor(() => {
+        expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+      });
+
+      expect(getApiUrlOverrideInput()).toHaveValue("");
+
+      fireEvent.click(screen.getByTestId("use-local-server-preset"));
+
+      expect(getApiUrlOverrideInput()).toHaveValue(
+        "http://localhost:8000/v1/audio/transcriptions"
+      );
+    });
   });
 
   it("reloads and previews selected overlay theme", async () => {
