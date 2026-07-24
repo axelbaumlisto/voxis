@@ -44,6 +44,8 @@
     "apiKey": "API Key",
     "model": "Model",
     "language": "Language",
+    "apiUrlOverride": "Custom Endpoint URL (Advanced)",
+    "apiUrlOverrideDesc": "Point transcription at any OpenAI-compatible endpoint, such as a self-hosted transcription server. Leave blank to use the default Groq endpoint. See the self-hosted transcription setup docs for details.",
     "hotkey": "Hotkey",
     "audioDevice": "Audio Device",
     "autoType": "Auto-type",

@@ -83,6 +83,17 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     section: "Provider",
     options: LANGUAGE_OPTIONS,
   },
+  {
+    key: "api_url_override",
+    label: "Custom Endpoint URL (Advanced)",
+    labelKey: "settings.apiUrlOverride",
+    widgetType: "input",
+    section: "Provider",
+    placeholder: "https://your-server/v1/audio/transcriptions",
+    description:
+      "Point transcription at any OpenAI-compatible endpoint, such as a self-hosted transcription server. Leave blank to use the default Groq endpoint. See the self-hosted transcription setup docs for details.",
+    descriptionKey: "settings.apiUrlOverrideDesc",
+  },
 
   // Recording section
   {
