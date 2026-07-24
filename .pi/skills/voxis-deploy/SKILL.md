@@ -32,6 +32,11 @@ GitHub is **binary releases only**. Do not push private Voxis source to GitHub.
 
 1. Bump version in both `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`.
 2. Commit the change.
+   - Recommended pre-tag manual check (not wired into CI): run the
+     Playwright E2E suite locally and confirm it is green
+     (`bunx playwright install chromium` once, then `bun run test:e2e`;
+     expected ~108 passed / 27 intentional skips / 0 failed). See
+     `docs-site/development.md` → "End-to-end tests".
 3. Push source to Forgejo (private, drives CI):
    ```bash
    TOKEN=$(ssh spex 'cat ~/.config/forgejo/token')

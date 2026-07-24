@@ -29,6 +29,25 @@ Rust tests can also be run directly:
 cd src-tauri && cargo test
 ```
 
+## End-to-end tests
+
+`bun run test:e2e` runs the Playwright suite (`e2e/*.spec.ts`, config in
+`playwright.config.ts`). Playwright starts the Vite dev server on
+`http://localhost:5173` and drives Chromium against the frontend with a
+mocked Tauri backend, so most of the suite runs headless on any host with
+Playwright's Chromium installed (`bunx playwright install chromium`).
+
+The suite is maintained and passing: a representative run is **108 passed,
+27 skipped, 0 failed**. The skipped tests are gated on purpose — the
+macOS-native overlay/AppKit tests (`test.skip(process.platform !== "darwin")`),
+the X11-display system-tray screenshot, and the legacy webview-overlay
+`describe.skip` blocks that were superseded by the native egui overlay.
+They are not failures.
+
+E2E is **not wired into automatic CI** (a separate decision about CI
+runtime/cost). Run it manually before tagging a release — see the release
+checklist in `.pi/skills/voxis-deploy/SKILL.md`.
+
 ## Architecture
 
 Frontend code lives in `src/` and uses React 18, TypeScript, Vite, React Router, and Tauri invoke wrappers. Public routes/pages are Settings (`/settings`), History (`/` and `/history`), Dictionary (`/dictionary`), and Onboarding (`/onboarding`).
