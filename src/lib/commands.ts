@@ -42,6 +42,7 @@ export interface AppConfig {
   retention_limit: number;
   active_provider: string;
   cloud_provider: string;
+  api_url_override: string | null;
   local_backend: string;
   text_processing: boolean;
   paste_shortcuts: string;
