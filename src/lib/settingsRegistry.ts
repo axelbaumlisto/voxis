@@ -58,6 +58,9 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     widgetType: "select",
     section: "Provider",
     options: CLOUD_PROVIDER_OPTIONS,
+    description:
+      "An informational label only. Transcription routing follows the Custom Endpoint URL field below when it is set; otherwise the default Groq endpoint is always used, regardless of this selection.",
+    descriptionKey: "settings.cloudProviderDesc",
   },
   {
     key: "api_key",

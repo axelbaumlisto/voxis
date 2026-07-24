@@ -41,6 +41,7 @@
     "description": "Configure your voice dictation preferences",
     "failedToLoad": "Failed to load settings: {{error}}",
     "provider": "Provider",
+    "cloudProviderDesc": "An informational label only. Transcription routing follows the Custom Endpoint URL field below when it is set; otherwise the default Groq endpoint is always used, regardless of this selection.",
     "apiKey": "API Key",
     "model": "Model",
     "language": "Language",
