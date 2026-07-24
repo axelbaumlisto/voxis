@@ -7,10 +7,6 @@ layout: default
 
 Settings are edited in the app and stored locally under the platform config directory. The Settings page is generated from `src/lib/settingsRegistry.ts`; dictionary learning controls also appear on the Dictionary page.
 
-![Settings page with provider and recording controls](images/settings.png)
-
-_Settings page with provider and recording controls._
-
 ## Provider
 
 - Provider (`cloud_provider`): Groq or OpenAI in the UI. This label is stored in config and debug metadata, but the current transcription client does not route by it; it uses the default Groq-compatible transcription URL unless a Custom Endpoint URL is set in Settings → Provider → "Custom Endpoint URL (Advanced)" (stored as `api_url_override`, with client-side URL validation and a one-click preset for the documented self-hosted `speaches` setup; also settable by tests or a custom build). For self-hosted or alternative protocol-compatible endpoints, see [Self-Hosted Transcription](self-hosted-transcription.md).

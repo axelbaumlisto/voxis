@@ -17,10 +17,6 @@ layout: default
 
 The overlay mirrors idle, recording, transcribing, and error states. It also supports press/release dictation on opaque canvas pixels, so transparent areas of larger aquarium-style themes do not start recording.
 
-![Drifting Contour overlay theme in recording mode](images/overlay-theme.png)
-
-_Drifting Contour overlay theme in recording mode._
-
 ## Pages and shortcuts
 
 The main app pages are History (`/` and `/history`), Dictionary (`/dictionary`), and Settings (`/settings`). The first-run flow uses `/onboarding`.
@@ -31,15 +27,7 @@ Layout shortcuts are `h` for History, `w` for Dictionary, `s` for Settings, `c` 
 
 Transcription history defaults to enabled in config (`history_enabled`, not exposed as a Settings toggle). Saved entries go to local `history.db`. History retention is controlled in Settings (`retention_period` / `retention_limit`). Failed transcriptions are stored in `failed_audio/` with WAV audio and JSON metadata; the storage keeps up to three entries (FIFO) and the History page can retry or dismiss them.
 
-![History page with mock transcription entries](images/history.png)
-
-_History page with mock transcription entries._
-
 Dictionary entries replace recognized text with preferred spelling or terms. Learning suggestions can be disabled, kept pending for manual approval, or applied automatically depending on dictionary settings.
-
-![Dictionary page with mock replacement entries](images/dictionary.png)
-
-_Dictionary page with mock replacement entries._
 
 ## Runtime data locations
 

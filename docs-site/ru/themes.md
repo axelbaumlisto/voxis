@@ -9,10 +9,6 @@ layout: default
 
 > **Безопасность:** `theme.js` — это исполняемый JavaScript-код, которому доверяет приложение. Не устанавливайте темы из ненадежных источников и проверяйте сторонний код перед использованием.
 
-![Theme visual harness showing Drifting Contour in recording mode](../images/theme-harness.png)
-
-_Визуальная среда разработки тем, показывающая Drifting Contour в режиме записи._
-
 Пользовательские темы находятся в каталоге конфигурации приложения в папке `themes/`:
 
 - Linux: `~/.config/voxis/themes/`
