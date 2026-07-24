@@ -58,7 +58,8 @@ OpenAI's own `/v1/audio/transcriptions` and by the projects listed below.
 ## Known cloud endpoints
 
 Set **Settings → Provider → API Key** and, for anything other than Groq,
-build with (or otherwise configure) `api_url_override`:
+set **Settings → Provider → "Custom Endpoint URL (Advanced)"** (stored as
+`api_url_override`; also settable by tests or a custom build):
 
 | Provider | URL | Notes |
 |---|---|---|
@@ -71,7 +72,8 @@ build with (or otherwise configure) `api_url_override`:
 ## Self-hosted / fully offline options
 
 If you want transcription with no cloud dependency at all, self-host a
-Whisper-compatible server and point `api_url_override` at
+Whisper-compatible server and point the **Custom Endpoint URL (Advanced)**
+field (Settings → Provider, stored as `api_url_override`) at
 `http://localhost:<port>/v1/audio/transcriptions` (adjust the path to match
 the server you choose).
 

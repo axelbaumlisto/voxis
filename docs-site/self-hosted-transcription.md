@@ -15,9 +15,12 @@ pointing the app's `api_url_override` at it. No code changes are required,
 and the app does not ship a provider-specific SDK per vendor or a
 platform-native transcription backend by design.
 
-`api_url_override` is not exposed in the Settings UI; it is a config field
-used through tests or a custom build. See the full write-up linked below
-for exact steps, verified endpoints, and worked examples.
+You can set this endpoint directly in the app: Settings → Provider →
+"Custom Endpoint URL (Advanced)" (stored as `api_url_override`), which
+validates the URL client-side and offers a one-click preset for the
+self-hosted `speaches` setup described below. The same field can also be
+set by tests or a custom build. See the full write-up linked below for
+exact steps, verified endpoints, and worked examples.
 
 ## Quick start: self-hosted with Docker
 

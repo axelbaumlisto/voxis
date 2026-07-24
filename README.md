@@ -61,7 +61,9 @@ current access limits/pricing in the Groq Console.
 The default transcription model is `whisper-large-v3`; Settings also offers
 `whisper-large-v3-turbo`. The Provider dropdown stores Groq/OpenAI labels, but
 the current transcription path uses the default Groq-compatible endpoint unless
-`api_url_override` is set by tests or a custom build. OpenAI keys often start
+a Custom Endpoint URL is set in Settings → Provider → "Custom Endpoint URL
+(Advanced)" (stored as `api_url_override`; also settable by tests or a custom
+build). OpenAI keys often start
 with `sk-...`; that is only an OpenAI credential example, not the expected key
 for default Groq transcription. Optional LLM post-processing has separate
 provider/model/API-key settings.
