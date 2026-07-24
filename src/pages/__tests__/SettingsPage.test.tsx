@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import SettingsPage from "../SettingsPage";
+import SettingsPage, { isApiUrlOverrideValid } from "../SettingsPage";
 import { mockInvoke, mockConfig } from "../../test/mocks/tauri";
+
+/** Locate the Custom Endpoint URL input via its rendered label. */
+function getApiUrlOverrideInput(): HTMLInputElement {
+  const label = screen.getByText("Custom Endpoint URL (Advanced)");
+  const field = label.closest(".settings-field");
+  return field?.querySelector("input") as HTMLInputElement;
+}
 
 describe("SettingsPage", () => {
   beforeEach(() => {
@@ -301,6 +308,84 @@ describe("SettingsPage", () => {
         themeId: mockConfig.overlay.theme,
         reloadFromDisk: false,
       });
+    });
+  });
+
+  describe("api_url_override validation", () => {
+    it("isApiUrlOverrideValid accepts empty and valid http(s) URLs, rejects others", () => {
+      // Empty / whitespace is the default valid state.
+      expect(isApiUrlOverrideValid("")).toBe(true);
+      expect(isApiUrlOverrideValid("   ")).toBe(true);
+      // Valid absolute http(s) URLs.
+      expect(isApiUrlOverrideValid("http://localhost:8000/v1/audio/transcriptions")).toBe(true);
+      expect(isApiUrlOverrideValid("https://example.com/api")).toBe(true);
+      // Invalid shapes.
+      expect(isApiUrlOverrideValid("not a url")).toBe(false);
+      expect(isApiUrlOverrideValid("ftp://example.com")).toBe(false);
+      expect(isApiUrlOverrideValid("example.com")).toBe(false);
+    });
+
+    it("shows no error for an empty value (default state)", async () => {
+      render(<SettingsPage />);
+      await waitFor(() => {
+        expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+      });
+
+      expect(getApiUrlOverrideInput()).toHaveValue("");
+      expect(screen.queryByTestId("api-url-override-error")).not.toBeInTheDocument();
+    });
+
+    it("shows no error for a valid http:// URL", async () => {
+      render(<SettingsPage />);
+      await waitFor(() => {
+        expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+      });
+
+      const input = getApiUrlOverrideInput();
+      fireEvent.change(input, {
+        target: { value: "http://localhost:8000/v1/audio/transcriptions" },
+      });
+
+      expect(screen.queryByTestId("api-url-override-error")).not.toBeInTheDocument();
+      const saveButton = screen.getByRole("button", { name: /save/i });
+      expect(saveButton).not.toBeDisabled();
+    });
+
+    it("shows no error for a valid https:// URL", async () => {
+      render(<SettingsPage />);
+      await waitFor(() => {
+        expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+      });
+
+      const input = getApiUrlOverrideInput();
+      fireEvent.change(input, { target: { value: "https://example.com/api" } });
+
+      expect(screen.queryByTestId("api-url-override-error")).not.toBeInTheDocument();
+      const saveButton = screen.getByRole("button", { name: /save/i });
+      expect(saveButton).not.toBeDisabled();
+    });
+
+    it("shows an inline error and blocks save for an invalid value", async () => {
+      render(<SettingsPage />);
+      await waitFor(() => {
+        expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+      });
+
+      const input = getApiUrlOverrideInput();
+      fireEvent.change(input, { target: { value: "not a url" } });
+
+      const alert = screen.getByTestId("api-url-override-error");
+      expect(alert).toHaveAttribute("role", "alert");
+      expect(alert).toHaveTextContent(/valid http/i);
+
+      // Save is blocked even though the config has changed.
+      const saveButton = screen.getByRole("button", { name: /save/i });
+      expect(saveButton).toBeDisabled();
+
+      // Correcting the value clears the error and unblocks save.
+      fireEvent.change(input, { target: { value: "https://example.com/api" } });
+      expect(screen.queryByTestId("api-url-override-error")).not.toBeInTheDocument();
+      expect(saveButton).not.toBeDisabled();
     });
   });
 

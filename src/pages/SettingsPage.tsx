@@ -14,6 +14,28 @@ import Section from "../components/settings/Section";
 import { renderBuiltinField, renderCustomWidget } from "./settingsRenderers";
 import "../styles/settings.css";
 
+/**
+ * Validate the optional custom transcription endpoint URL.
+ * An empty value is always valid (means "use the default Groq endpoint").
+ * A non-empty value must be a syntactically valid absolute http(s) URL — we
+ * only check URL *shape*, not any required path suffix, so self-hosted setups
+ * with arbitrary paths are accepted. `new URL()` alone accepts other schemes
+ * (e.g. ftp:, file:), so the explicit http(s) prefix check is required.
+ */
+export function isApiUrlOverrideValid(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed === "") return true;
+  if (!(trimmed.startsWith("http://") || trimmed.startsWith("https://"))) {
+    return false;
+  }
+  try {
+    new URL(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function SettingsPage() {
   const { t } = useTranslation();
   const {
@@ -90,6 +112,11 @@ function SettingsPage() {
       opt.labelKey ? { ...opt, label: t(opt.labelKey) } : opt
     );
 
+  // Block save while a non-empty custom endpoint URL is malformed.
+  const apiUrlOverrideValid = isApiUrlOverrideValid(
+    String(getConfigValue(config, "api_url_override") ?? "")
+  );
+
   const renderSettingField = (setting: SettingDefinition) => {
     const label = resolveLabel(setting.label, setting.labelKey);
     const description =
@@ -139,6 +166,17 @@ function SettingsPage() {
             {t("settings.audioDevicesUnavailable")}
           </p>
         )}
+        {setting.key === "api_url_override" &&
+          !isApiUrlOverrideValid(String(value ?? "")) && (
+            <p
+              className="settings-field-error"
+              role="alert"
+              data-testid="api-url-override-error"
+              style={{ color: "var(--error)" }}
+            >
+              {t("settings.apiUrlOverrideInvalid")}
+            </p>
+          )}
       </div>
     );
   };
@@ -167,7 +205,7 @@ function SettingsPage() {
             <button
               className="primary"
               onClick={handleSave}
-              disabled={!hasChanges || saving}
+              disabled={!hasChanges || saving || !apiUrlOverrideValid}
             >
               {saving ? t("common.saving") : t("common.save")}
             </button>
