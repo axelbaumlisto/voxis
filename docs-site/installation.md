@@ -59,4 +59,6 @@ Key format:
 
 Check current Groq access limits/pricing in the Groq Console.
 
+For self-hosted or other protocol-compatible transcription endpoints instead of Groq, see [Self-Hosted Transcription](self-hosted-transcription.md).
+
 Do not commit API keys. Configure transcription and optional LLM keys through the app settings UI; the code stores them in local config storage rather than loading them automatically from environment variables. See [Security](security.md).

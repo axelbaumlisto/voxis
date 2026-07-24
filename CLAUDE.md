@@ -96,6 +96,12 @@ All stored in platform-specific config directory:
 - Frontend: Vitest with jsdom, React Testing Library. Setup in `src/test/setup.ts`
 - Backend: Cargo test with tempfile for isolation, mockito for HTTP mocking
 - E2E: Playwright (not frequently used)
+- Manual protocol-compatibility verification (e.g. alternative/self-hosted
+  transcription providers): build a temporary throwaway `[[bin]]` target
+  that calls the real library code path (e.g. `voice_lib::transcription::
+  TranscriptionClient`) against a locally running server, confirm output,
+  then remove the temporary binary and revert `Cargo.toml` before
+  committing. See `docs/SELF_HOSTED_TRANSCRIPTION.md` for a worked example.
 
 ## Key Patterns
 

@@ -58,6 +58,14 @@ The app seeds bundled themes into the user themes directory at startup. Missing 
 
 Builtin themes currently bundled by `bun run build:themes` are: `default`, `winamp_classic`, `neon`, `handy_pill`, `metaballs`, `metaballs25d`, `metaballs3d`, `lavalamp`, `living_reed`, `quiet_reed`, `radiolarian`, `paramecium_solo`, `vorticella_bloom`, `drifting_contour`, `didinium_drift`, `euglena_drift`, `duo_aquarium`, and `all_aquarium`.
 
+The `metaballs`, `metaballs25d`, `metaballs3d`, and `lavalamp` themes
+(`src/theme-engine/builtin/<id>/index.ts`) are TypeScript ports of a
+standalone WebGL/Canvas visualizer originally built for the same
+`mount(container, api)` contract:
+[github.com/axelbaumlisto/metaballs-viz](https://github.com/axelbaumlisto/metaballs-viz)
+(MIT). See [Theme Author Guide](theme-author-guide.md#writing-a-webgl--canvas-3d-theme)
+for a WebGL authoring guide and how these builtins map to that source.
+
 ## Author references
 
 - [Theme Author Guide](theme-author-guide.md)

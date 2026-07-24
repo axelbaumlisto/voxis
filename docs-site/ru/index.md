@@ -15,6 +15,7 @@ Voxis — это невероятно быстрое десктопное при
 * [Использование](usage.md)
 * [Настройки](settings.md)
 * [Темы](themes.md)
+* [Self-Hosted транскрипция](self-hosted-transcription.md)
 * [Разработка](development.md)
 * [Безопасность](security.md)
 * [Решение проблем](troubleshooting.md)

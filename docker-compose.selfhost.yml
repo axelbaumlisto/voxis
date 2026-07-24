@@ -1,0 +1,59 @@
+# Self-hosted, OpenAI-compatible Whisper transcription server for Voxis.
+#
+# Runs `speaches` (faster-whisper behind an OpenAI-shaped HTTP API), the
+# option verified in docs/SELF_HOSTED_TRANSCRIPTION.md. Not built or
+# maintained by this project — this compose file just wires up the
+# upstream image with sane defaults for local use.
+#
+# Quick start (works on any OS with Docker: Linux, macOS, Windows):
+#
+#   docker compose -f docker-compose.selfhost.yml up -d
+#   docker compose -f docker-compose.selfhost.yml exec speaches \
+#     curl -sX POST "http://localhost:8000/v1/models/Systran/faster-whisper-large-v3"
+#
+# Then in Voxis Settings, set:
+#   API URL override: http://localhost:8000/v1/audio/transcriptions
+#   Model:             Systran/faster-whisper-large-v3
+#   API key:           any non-empty placeholder (server does not check it)
+#
+# For GPU acceleration (NVIDIA only, requires the NVIDIA Container Toolkit):
+#   docker compose -f docker-compose.selfhost.yml --profile gpu up -d speaches-gpu
+# and point api_url_override at the same http://localhost:8000/... URL.
+#
+# Swap the model name in the curl command above for a smaller/faster one
+# (e.g. Systran/faster-whisper-small, Systran/faster-whisper-medium) if
+# large-v3 is too slow on your hardware. See
+# https://github.com/speaches-ai/speaches for the full model list.
+
+services:
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    container_name: voxis-selfhost-speaches
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - speaches-models:/home/ubuntu/.cache/huggingface
+    restart: unless-stopped
+
+  # Optional GPU variant. Only starts with --profile gpu (see header comment).
+  speaches-gpu:
+    image: ghcr.io/speaches-ai/speaches:latest-cuda
+    container_name: voxis-selfhost-speaches-gpu
+    profiles: ["gpu"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - speaches-models:/home/ubuntu/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  # Persists downloaded models across container restarts/recreation so you
+  # don't re-download large-v3 (~3GB) every time.
+  speaches-models:

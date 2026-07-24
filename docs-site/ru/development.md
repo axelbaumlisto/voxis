@@ -48,7 +48,7 @@ cd src-tauri && cargo test
 
 - `audio/` — запись через CPAL, уровни, VAD, WAV.
 - `orchestrator/` — hotkey → запись → очередь транскрипции → постобработка → вывод.
-- `transcription/` — HTTP-клиент, совместимый с Whisper (по умолчанию Groq; кастомный URL только через `api_url_override`).
+- `transcription/` — HTTP-клиент, совместимый с Whisper (по умолчанию Groq; кастомный URL только через `api_url_override`). `docker-compose.selfhost.yml` в корне репозитория — обёртка для запуска self-hosted, protocol-совместимого сервера транскрипции локально — см. [Self-Hosted транскрипция](self-hosted-transcription.md).
 - `output/` — буфер обмена, paste shortcuts, auto-type, auto-submit.
 - `hotkey/` — низкоуровневый ввод через rdev.
 - `storage/` — config/history/dictionary/corrections/providers/prompts/failed_audio/themes/debug в каталоге `voxis`.

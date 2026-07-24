@@ -69,6 +69,7 @@ Read every line of these files if present:
 4. `docs/THEMES.md`
 5. `docs/THEME_EDITING.md`
 6. `docs/CELL_MATH.md`
+6a. `docs/SELF_HOSTED_TRANSCRIPTION.md`
 7. `docs-site/index.md`
 8. `docs-site/installation.md`
 9. `docs-site/usage.md`
@@ -88,6 +89,11 @@ If `docs-site/` does not exist or lacks the core pages, create/update a concise 
 - `docs-site/usage.md` — hotkey recording flow, output behavior, history/dictionary/failed audio.
 - `docs-site/settings.md` — provider/API key, audio device, hotkey, VAD, overlay, LLM, dictionary settings.
 - `docs-site/themes.md` — short user-facing theme guide linking to `docs/THEMES.md` and `docs/THEME_EDITING.md`.
+- `docs-site/self-hosted-transcription.md` — short user-facing summary linking
+  to `docs/SELF_HOSTED_TRANSCRIPTION.md` for alternative/self-hosted
+  transcription providers (`api_url_override`, the `docker-compose.selfhost.yml`
+  quick start, and the macOS `SpeechAnalyzer` option). Link this page from
+  `docs-site/settings.md` and `docs-site/index.md`.
 - `docs-site/development.md` — architecture, test/build commands, important modules.
 - `docs-site/security.md` — link/copy key points from `SECURITY.md`.
 - `docs-site/troubleshooting.md` — common problems: no audio, wrong input device, permissions, missing API key, build deps.

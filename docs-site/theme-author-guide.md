@@ -68,6 +68,25 @@ export function mount(container, api) {
 }
 ```
 
+## Writing a WebGL / Canvas-3D Theme
+
+The example above uses the 2D Canvas API, which covers most themes. For a
+raymarched/shader-based look, `theme.js` can instead draw with WebGL — the
+contract doesn't care how you render, as long as `mount()` returns
+`{ unmount() }`.
+
+The builtin `metaballs`, `metaballs25d`, `metaballs3d`, and `lavalamp`
+themes are TypeScript ports of a standalone visualizer built for this same
+contract:
+[github.com/axelbaumlisto/metaballs-viz](https://github.com/axelbaumlisto/metaballs-viz)
+(MIT). That repo documents its own `params` schema per engine, a WebGL
+graceful-fallback pattern (try/catch around context creation and shader
+compile/link — on failure, remove the canvas and return a no-op
+`{ unmount() {} }` instead of throwing), and a runnable demo. Cloning it and
+reading `metaballs3d.js` is the fastest way to see a complete worked WebGL
+example. Full detail and a minimal WebGL skeleton are in
+[`docs/THEMES.md`](https://github.com/axelbaumlisto/voxis/blob/main/docs/THEMES.md#writing-a-webgl--canvas-3d-theme).
+
 ## Theme API
 
 The Theme API version is `1` and includes:

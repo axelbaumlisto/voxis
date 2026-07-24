@@ -48,7 +48,7 @@ Important modules include:
 
 - `audio/` — recording via CPAL, audio levels, VAD, and WAV encoding.
 - `orchestrator/` — hotkey-to-transcription workflow, queueing, overlay updates, post-processing, and output.
-- `transcription/` — Whisper-compatible HTTP client (default Groq transcription URL; custom endpoints only via `api_url_override`).
+- `transcription/` — Whisper-compatible HTTP client (default Groq transcription URL; custom endpoints only via `api_url_override`). `docker-compose.selfhost.yml` at the repo root is a thin wrapper for running a self-hosted, protocol-compatible transcription server locally for this client — see [Self-Hosted Transcription](self-hosted-transcription.md).
 - `output/` — clipboard, paste shortcuts, auto-typing, and auto-submit.
 - `hotkey/` — low-level keyboard input via rdev.
 - `storage/` — config, history, dictionary, corrections, provider/prompt, failed-audio, theme, and debug storage under the platform `voxis` config directory.

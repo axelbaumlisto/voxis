@@ -58,6 +58,14 @@ bun run build:themes
 
 Builtin-темы, которые сейчас собирает `bun run build:themes`: `default`, `winamp_classic`, `neon`, `handy_pill`, `metaballs`, `metaballs25d`, `metaballs3d`, `lavalamp`, `living_reed`, `quiet_reed`, `radiolarian`, `paramecium_solo`, `vorticella_bloom`, `drifting_contour`, `didinium_drift`, `euglena_drift`, `duo_aquarium`, `all_aquarium`.
 
+Темы `metaballs`, `metaballs25d`, `metaballs3d` и `lavalamp`
+(`src/theme-engine/builtin/<id>/index.ts`) — это TypeScript-порты
+автономного WebGL/Canvas-визуализатора, изначально написанного для того же
+контракта `mount(container, api)`:
+[github.com/axelbaumlisto/metaballs-viz](https://github.com/axelbaumlisto/metaballs-viz)
+(MIT). См. [Theme Author Guide](../theme-author-guide.md#writing-a-webgl--canvas-3d-theme)
+(на английском) — руководство по написанию WebGL-тем и соответствие этим builtin-темам.
+
 ## Ссылки для авторов
 
 - [Руководство для авторов тем](../theme-author-guide.md)

@@ -240,6 +240,96 @@ speak — the circle pulses with your voice.
 > workflow in [`THEME_EDITING.md`](./THEME_EDITING.md) — two file locations,
 > the seeding gotcha, harness/E2E, and deploy-without-rebuild.
 
+## Writing a WebGL / Canvas-3D Theme
+
+The Pulsar example above uses the 2D Canvas API, which covers most themes.
+For a raymarched/shader-based look (glossy 3D blobs, volumetric shading,
+etc.), your `theme.js` can instead draw with WebGL — the contract doesn't
+care how you render, as long as `mount()` returns `{ unmount() }`.
+
+### Reference implementation: the Metaballs family
+
+The builtin `metaballs`, `metaballs25d`, `metaballs3d`, and `lavalamp`
+themes (`src/theme-engine/builtin/<id>/index.ts`) are TypeScript ports of a
+standalone, zero-dependency visualizer originally built for this exact
+`mount(container, api)` contract:
+
+**Source: [github.com/axelbaumlisto/metaballs-viz](https://github.com/axelbaumlisto/metaballs-viz) (MIT)**
+
+That repo ships four engines you can study or adapt directly (it's
+framework-agnostic — the same code works in any project speaking this
+contract, not just Voxis):
+
+| Engine | File | Technique |
+|---|---|---|
+| 2D | `src/metaballs.js` | CPU canvas metaball field, LUT-based clay shading |
+| 2.5D | `src/metaballs25d.js` | 2D field engine + 3D-style per-lobe color blending, analytic AA |
+| 3D | `src/metaballs3d.js` | WebGL raymarched spheres, smooth-min (`smin`) blend, energy-conserving Blinn shading |
+| Lava Lamp | `src/lavalamp.js` | 3D engine + convection motion (elliptical orbits, per-blob phase) |
+
+It also documents its own `params` schema per engine, a WebGL
+graceful-fallback pattern worth copying (`try/catch` around context
+creation and shader compile/link — on failure, remove the canvas, log one
+`console.warn`, return a valid no-op `{ unmount() {} }` instead of
+throwing), and a runnable `index.html` demo with a live 2D/3D toggle.
+
+The Voxis builtin versions in `src/theme-engine/builtin/` are adapted from
+that source: same shader math and contract, ported to TypeScript, imports
+switched to `import type { ThemeApi, ... } from "../../contract"` (types
+only — the bundled `theme.js` must still end up with zero runtime imports,
+see Rule 1 above). If you want to build your own WebGL theme, cloning that
+repo and reading `metaballs3d.js` end-to-end is the fastest way to see a
+complete, working example — including the shader source, uniform wiring,
+and the `ThemeState → uniforms` mapping per `mode`.
+
+### Minimal WebGL skeleton
+
+If you don't want the full raymarcher, here's the shape any WebGL theme
+follows — same lifecycle as the Canvas 2D example, just with a
+`WebGLRenderingContext` instead of `CanvasRenderingContext2D`:
+
+```js
+export function mount(container, api) {
+  const canvas = document.createElement("canvas");
+  canvas.width = api.size.width;
+  canvas.height = api.size.height;
+  container.appendChild(canvas);
+
+  const gl = canvas.getContext("webgl");
+  if (!gl) {
+    // Graceful fallback: no WebGL support. Don't throw — return a
+    // working no-op instance so the overlay never breaks.
+    console.warn("[my-theme] WebGL unavailable, skipping render");
+    canvas.remove();
+    return { unmount() {} };
+  }
+
+  // ... compile/link your vertex + fragment shaders, set up buffers ...
+  // (see metaballs3d.js above for a complete worked example: VERT/FRAG
+  // shader strings, program linking, uniform locations, and the render loop)
+
+  let rafId = null;
+  const unsub = api.onState((state) => {
+    // Push state into uniforms (e.g. audio level -> uLevel, mode -> uColorMode)
+    // and (re)start your requestAnimationFrame render loop here.
+  });
+
+  return {
+    unmount() {
+      unsub();
+      if (rafId) cancelAnimationFrame(rafId);
+      canvas.remove();
+    },
+  };
+}
+```
+
+Same rules apply as any other theme: self-contained (no imports in the
+final `theme.js`), never throw past `mount()` (crashes fall back to the
+builtin default theme, per Rule 2), and `unmount()` must fully clean up —
+for WebGL that means at minimum canceling your render loop and removing
+the canvas so the GL context can be garbage-collected.
+
 ## Editing Builtin Themes
 
 The builtin themes (Winamp Classic, Handy Pill, Default, Neon, etc.) are the

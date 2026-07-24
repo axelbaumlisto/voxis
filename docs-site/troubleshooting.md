@@ -40,7 +40,7 @@ The application stores API keys in local config and does not automatically read 
 
 ## Provider selection confusion
 
-The transcription Provider setting offers Groq and OpenAI labels, but the current transcription client does not route by that label; it uses the default Groq-compatible transcription URL unless `api_url_override` is set by tests or a custom build. Use a Groq `gsk_...` key for the default endpoint. OpenAI `sk-...` is only an example of OpenAI credential format. LLM provider settings are separate from transcription and support builtin Groq, OpenAI, and OpenRouter chat-completions providers plus custom provider definitions.
+The transcription Provider setting offers Groq and OpenAI labels, but the current transcription client does not route by that label; it uses the default Groq-compatible transcription URL unless `api_url_override` is set by tests or a custom build. Use a Groq `gsk_...` key for the default endpoint. OpenAI `sk-...` is only an example of OpenAI credential format. LLM provider settings are separate from transcription and support builtin Groq, OpenAI, and OpenRouter chat-completions providers plus custom provider definitions. To point Voxis at a self-hosted or alternative transcription endpoint via `api_url_override`, see [Self-Hosted Transcription](self-hosted-transcription.md).
 
 ## Build failures on Linux
 

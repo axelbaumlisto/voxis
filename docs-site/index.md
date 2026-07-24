@@ -15,6 +15,7 @@ The app records audio from a selected input device, transcribes it through a clo
 * [Usage](usage.md)
 * [Settings](settings.md)
 * [Themes](themes.md)
+* [Self-Hosted Transcription](self-hosted-transcription.md)
 * [Development](development.md)
 * [Security](security.md)
 * [Troubleshooting](troubleshooting.md)

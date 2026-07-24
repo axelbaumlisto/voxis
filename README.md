@@ -28,6 +28,7 @@ Published docs: <https://docs.voxis.top/>
 - [Usage](https://docs.voxis.top/usage.html)
 - [Settings](https://docs.voxis.top/settings.html)
 - [Themes](https://docs.voxis.top/themes.html)
+- [Self-Hosted Transcription](https://docs.voxis.top/self-hosted-transcription.html)
 - [Security](https://docs.voxis.top/security.html)
 - [Troubleshooting](https://docs.voxis.top/troubleshooting.html)
 
@@ -69,6 +70,27 @@ Voxis stores API keys as **local runtime configuration** and must not
 commit them to git. Configure the transcription API key and optional LLM key
 through the app settings UI; the application does not automatically load
 credentials from environment variables.
+
+### Alternative and self-hosted transcription providers
+
+The transcription client speaks the standard OpenAI-compatible
+`/audio/transcriptions` protocol (multipart form: `file`, `model`,
+`response_format=verbose_json`, optional `language`/`translate`). Any
+endpoint implementing that same contract works by setting
+`api_url_override` to the endpoint's `/audio/transcriptions` URL — no code
+changes required. This is intentional: Voxis deliberately does **not** ship
+built-in support for every provider or a platform-native (e.g. macOS
+`SpeechAnalyzer`) transcription backend, to keep the transcription client
+small and avoid multiplying platform-specific code paths.
+
+Self-hosting for fully offline/local transcription (e.g. a Docker-hosted
+Whisper server via `speaches` or a whisper.cpp OpenAI-shaped wrapper) is
+supported through this same mechanism and has been independently verified
+against the app's real client code. For a quick start, run
+`docker compose -f docker-compose.selfhost.yml up -d` (works on Linux,
+macOS, and Windows) — see
+**[docs/SELF_HOSTED_TRANSCRIPTION.md](docs/SELF_HOSTED_TRANSCRIPTION.md)**
+for the full provider list, setup steps, and verification details.
 
 Do not commit `config.db`, `history.db`, `dictionary.txt`, `corrections.db`,
 `providers.db`, `prompts.db`, user `themes/`, `failed_audio/`, `debug/`, `logs/`,
