@@ -1,17 +1,8 @@
-<div align="center">
-  <img src="docs-site/images/landing-hero.png" alt="Voxis Landing Page Hero" width="800"/>
-  <br/><br/>
-</div>
-
 # Voxis (formerly SoupaWhisper / TALRI)
 
 A blazing fast, completely private desktop voice dictation engine built with **Tauri v2**, **React 18**, and **Rust**.
 
-<div align="center">
-  <img src="docs-site/images/landing-architecture.png" alt="Voxis Isometric Architecture" width="800"/>
-  <br/>
-  <em>Zero-lag native hotkeys, Rust CPAL audio core, and a Whisper-compatible transcription client (Groq by default).</em>
-</div>
+Zero-lag native hotkeys, Rust CPAL audio core, and a Whisper-compatible transcription client (Groq by default).
 
 ## Tech Stack
 
