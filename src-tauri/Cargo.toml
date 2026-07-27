@@ -147,8 +147,12 @@ custom-protocol = ["tauri/custom-protocol"]
 # Crash diagnostics release-profile decisions:
 # - Keep the symbol table by stripping only debuginfo. `strip = "debuginfo"`
 #   preserves function names for backtraces with the clipshot-measured tradeoff
-#   of roughly +31% binary size. Full DWARF/file-line support (`strip = "none"`
-#   plus line-table debug info) was rejected after clipshot measured about +329%.
+#   of roughly +31% binary size. Voxis measured (2026-07-28, release build
+#   before/after this change): 31,480,528 -> 38,110,792 bytes = +21.06%
+#   (+6,630,264 bytes), under the plan's ~35% stop threshold. Function names
+#   verified present: file => "not stripped", nm -C | grep -c voice = 785.
+#   Full DWARF/file-line support (`strip = "none"` plus line-table debug info)
+#   was rejected after clipshot measured about +329%.
 # - Keep `panic = "abort"` for this diagnostics-only change so runtime semantics
 #   and release size stay unchanged. Panics therefore become SIGABRT; Task 2 of
 #   CRASH_DIAGNOSTICS_PLAN.md must install the fatal-signal handler that records
