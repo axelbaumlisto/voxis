@@ -133,9 +133,18 @@ mockito = "1"
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
+# Crash diagnostics release-profile decisions:
+# - Keep the symbol table by stripping only debuginfo. `strip = "debuginfo"`
+#   preserves function names for backtraces with the clipshot-measured tradeoff
+#   of roughly +31% binary size. Full DWARF/file-line support (`strip = "none"`
+#   plus line-table debug info) was rejected after clipshot measured about +329%.
+# - Keep `panic = "abort"` for this diagnostics-only change so runtime semantics
+#   and release size stay unchanged. Panics therefore become SIGABRT; Task 2 of
+#   CRASH_DIAGNOSTICS_PLAN.md must install the fatal-signal handler that records
+#   SIGABRT evidence.
 [profile.release]
 panic = "abort"
 codegen-units = 1
 lto = true
 opt-level = "s"
-strip = true
+strip = "debuginfo"
