@@ -7,17 +7,18 @@ layout: default
 
 Voxis's transcription client speaks the standard OpenAI-compatible
 `/audio/transcriptions` protocol: a multipart form (`file`, `model`,
-`response_format=verbose_json`, optional `language`/`translate`) sent with
+`response_format=verbose_json`, optional `language`, and optional
+`task=translate`) sent with
 an `Authorization: Bearer <api_key>` header, expecting back a JSON body
 with at least `text`. Any server implementing that same contract — another
 cloud provider, or a fully self-hosted Whisper-compatible server — works by
-pointing the app's `api_url_override` at it. No code changes are required,
-and the app does not ship a provider-specific SDK per vendor or a
+pointing **Custom Endpoint URL (Advanced)** (`api_url_override`) at it. No code
+changes are required, and the app does not ship a provider-specific SDK per vendor or a
 platform-native transcription backend by design.
 
-`api_url_override` is not exposed in the Settings UI; it is a config field
-used through tests or a custom build. See the full write-up linked below
-for exact steps, verified endpoints, and worked examples.
+Set it in **Settings → Provider → Custom Endpoint URL (Advanced)**. Leave the
+field blank to use the default Groq endpoint. See the full write-up linked below
+for exact protocol details, verified endpoints, and worked examples.
 
 ## Quick start: self-hosted with Docker
 
@@ -36,7 +37,7 @@ docker compose -f docker-compose.selfhost.yml exec speaches \
 
 Then in Voxis Settings, set:
 
-- **API URL override**: `http://localhost:8000/v1/audio/transcriptions`
+- **Custom Endpoint URL (Advanced)**: `http://localhost:8000/v1/audio/transcriptions`
 - **Model**: `Systran/faster-whisper-large-v3` (or whichever model you pulled)
 - **API key**: any non-empty placeholder — the server doesn't check it, but
   the Voxis client always sends an `Authorization: Bearer <key>` header

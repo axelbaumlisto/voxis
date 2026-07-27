@@ -55,7 +55,7 @@ Key format:
 
 - Paste the raw key only — no `Bearer ` prefix, no quotes, no extra spaces.
 - Groq keys usually look like `gsk_...`.
-- OpenAI keys usually look like `sk-...`; that is only an OpenAI credential-format example. The Settings UI includes OpenAI, but the current transcription client uses the default Groq-compatible transcription endpoint unless `api_url_override` is set by tests or a custom build.
+- OpenAI keys usually look like `sk-...`; that is only an OpenAI credential-format example. The Settings UI includes OpenAI, but the current transcription client uses the default Groq-compatible transcription endpoint unless **Custom Endpoint URL (Advanced)** (`api_url_override`) is set.
 
 Check current Groq access limits/pricing in the Groq Console.
 

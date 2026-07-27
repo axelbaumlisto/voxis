@@ -13,10 +13,11 @@ _Settings page with provider and recording controls._
 
 ## Provider
 
-- Provider (`cloud_provider`): Groq or OpenAI in the UI. This label is stored in config and debug metadata, but the current transcription client does not route by it; it uses the default Groq-compatible transcription URL unless `api_url_override` is set by tests or a custom build. For self-hosted or alternative protocol-compatible endpoints, see [Self-Hosted Transcription](self-hosted-transcription.md).
+- Provider (`cloud_provider`): Groq or OpenAI in the UI. This label is stored in config and debug metadata, but the current transcription client does not route by it; it uses the default Groq-compatible transcription URL unless the custom endpoint field below is set.
 - API Key (`api_key`): password field stored locally. For default Groq transcription, paste the raw `gsk_...` key only — no `Bearer ` prefix, no quotes, no extra spaces. Groq keys are created in the [Groq Console](https://console.groq.com/). OpenAI keys commonly look like `sk-...`, but that is only an OpenAI credential-format example, not the expected key for default Groq transcription.
 - Model (`model`): default `whisper-large-v3`; the other UI choice is `whisper-large-v3-turbo`.
 - Language (`language`): auto-detect plus Russian, English, German, French, Spanish, Chinese, Japanese, Korean, Portuguese, Italian, Dutch, Polish, and Ukrainian.
+- Custom Endpoint URL (Advanced) (`api_url_override`): optional OpenAI-compatible `/audio/transcriptions` endpoint. Leave it blank for Groq. For local and alternative endpoints, see [Self-Hosted Transcription](self-hosted-transcription.md).
 
 ## Recording
 
