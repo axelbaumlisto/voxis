@@ -17,6 +17,7 @@ pub mod audio;
 pub mod audio_feedback;
 pub mod commands;
 pub mod config;
+pub mod diagnostics;
 pub mod error;
 pub mod hotkey;
 pub mod learning;
@@ -170,6 +171,8 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
 
 /// Initialize and run the Tauri application.
 pub fn run() {
+    diagnostics::breadcrumbs::init();
+
     // Migrate user data before logging creates the new config directory.
     // Fail closed (per rename plan): never start with empty defaults while
     // legacy data exists. Logging is not up yet, so surface a detailed reason
@@ -223,12 +226,14 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_plugin_macos_permissions::init());
 
+    diagnostics::breadcrumbs::sites::tauri_build_pre();
     let app = builder
         .setup(setup::configure_app)
         .on_window_event(setup::handle_window_event)
         .invoke_handler(setup::command_handler())
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
+    diagnostics::breadcrumbs::sites::tauri_build_post();
 
     app.run(|_app_handle, _event| {
         // Esc hides the main window (removes it from the Dock/taskbar). Without a

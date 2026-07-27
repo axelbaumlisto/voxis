@@ -53,12 +53,14 @@ pub async fn transcribe_and_output(
     let result = match run_transcription(&config, audio_data).await {
         Ok(r) => r,
         Err(e) => {
+            crate::diagnostics::breadcrumbs::sites::transcription_failed();
             save_failed_audio(&ctx, &config, &e);
             handle_transcription_error(&ctx, &e, true).await;
             return;
         }
     };
 
+    crate::diagnostics::breadcrumbs::sites::first_transcription_success();
     let transcription_duration_ms = transcription_start.elapsed().as_millis() as u64;
     tracing::info!(
         "⏱️ [PERF] Transcription API: {}ms, text: \"{}\"",
@@ -140,6 +142,8 @@ pub async fn transcribe_and_output(
     let mut s = ctx.state.lock().await;
     *s = RecordingState::Idle;
     let _ = ctx.app.emit("state-changed", RecordingState::Idle);
+
+    crate::diagnostics::breadcrumbs::sites::transcription_completed();
 
     // Total pipeline timing
     let total_duration_ms = total_start.elapsed().as_millis();

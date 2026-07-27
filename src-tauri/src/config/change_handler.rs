@@ -82,6 +82,7 @@ pub async fn apply_config_changes(
     old: &AppConfig,
     new: &AppConfig,
 ) -> Result<(), String> {
+    crate::diagnostics::breadcrumbs::sites::audio_device_changed_if(old.audio_device != new.audio_device);
     for handler in handlers {
         if handler.should_handle(old, new) {
             handler

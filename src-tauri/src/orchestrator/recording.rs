@@ -112,6 +112,7 @@ impl RecordingCoordinator {
     }
 
     pub async fn on_hotkey_pressed(&self, skip_debounce: bool) {
+        crate::diagnostics::breadcrumbs::sites::hotkey_pressed();
         tracing::info!("on_hotkey_pressed: enter");
         let stage = self.coordinator.current_stage();
         tracing::info!("on_hotkey_pressed: current_stage={:?}", stage);
@@ -216,6 +217,7 @@ impl RecordingCoordinator {
                 .await;
             return;
         }
+        crate::diagnostics::breadcrumbs::sites::recording_started();
         tracing::info!("on_hotkey_pressed: recorder started OK");
         // Audio feedback for successful recording start. Non-blocking
         // (RodioPlayer spawns its own short-lived audio thread).
@@ -264,6 +266,7 @@ impl RecordingCoordinator {
     }
 
     pub async fn on_hotkey_released(&self) {
+        crate::diagnostics::breadcrumbs::sites::hotkey_released();
         // Toggle mode (#3): a release does nothing on its own — the
         // user has to press again to stop. Skip even the debounce-cancel
         // path so a short tap counts as a 'start' (handled when the
@@ -310,6 +313,7 @@ impl RecordingCoordinator {
                 return;
             }
         };
+        crate::diagnostics::breadcrumbs::sites::recording_stopped();
 
         // Drop too-short captures (accidental click/tap on the overlay, or a
         // hold over silence that VAD trimmed to near-zero). Sending these to

@@ -462,6 +462,7 @@ impl OverlayBackend for WebviewOverlay {
         if !self.running.load(Ordering::SeqCst) {
             return;
         }
+        crate::diagnostics::breadcrumbs::sites::overlay_state_transition();
         tracing::info!("webview: emit overlay state -> {state:?}");
         self.emit(events::STATE, &state);
         // Ensure the OS window is actually shown — Tauri may have kept it
@@ -478,6 +479,7 @@ impl OverlayBackend for WebviewOverlay {
         // We don't actually hide the OS window — the pill must remain
         // visible at idle (only the small icon shows). Just emit Idle
         // so the React app transitions to the idle state.
+        crate::diagnostics::breadcrumbs::sites::overlay_state_transition();
         tracing::info!("webview: emit overlay state -> Idle (hide)");
         self.emit(events::STATE, &OverlayState::Idle);
     }

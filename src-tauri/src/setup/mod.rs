@@ -19,13 +19,20 @@ use tauri::{App, Manager};
 
 use crate::{storage, tray};
 
-pub use logging::{init_logging, init_x11_threads};
+pub use logging::init_logging;
+
+/// Initialize X11 thread support and record the Linux GUI-stack milestone.
+pub fn init_x11_threads() {
+    logging::init_x11_threads();
+    crate::diagnostics::breadcrumbs::sites::x11_threads_done();
+}
 pub use process::kill_existing_instances;
 pub use window::handle_window_event;
 
 /// Configure the Tauri application during setup.
 /// This is called by `tauri::Builder::setup()`.
 pub fn configure_app(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
+    crate::diagnostics::breadcrumbs::sites::setup_configure_entry();
     tracing::debug!("Setup: initializing app paths...");
     let app_handle = app.handle();
     let paths = storage::AppPaths::new(app_handle)?;
@@ -79,6 +86,7 @@ pub fn configure_app(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     });
 
     tracing::info!("Setup: complete!");
+    crate::diagnostics::breadcrumbs::sites::setup_configure_exit();
     Ok(())
 }
 

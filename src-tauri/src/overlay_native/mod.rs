@@ -42,6 +42,7 @@ pub struct CreateOverlayParams<'a> {
 /// webview backend, which now covers all platforms.
 pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend> {
     if !params.enabled || params.backend == "none" {
+        crate::diagnostics::breadcrumbs::sites::overlay_backend_noop();
         return Box::new(NoopOverlay::new());
     }
 
@@ -64,6 +65,7 @@ pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend
     match params.backend {
         "webview" => {
             if let Some(o) = try_webview() {
+                crate::diagnostics::breadcrumbs::sites::overlay_backend_webview();
                 return o;
             }
         }
@@ -86,9 +88,11 @@ pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend
     //   2. NoopOverlay if no AppHandle available
     // ----------------------------------------------------------------
     if let Some(o) = try_webview() {
+        crate::diagnostics::breadcrumbs::sites::overlay_backend_webview();
         return o;
     }
 
+    crate::diagnostics::breadcrumbs::sites::overlay_backend_noop();
     Box::new(NoopOverlay::new())
 }
 

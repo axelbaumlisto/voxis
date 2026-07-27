@@ -65,6 +65,7 @@ impl TranscriptionQueue {
         });
         let len = q.len();
         drop(q); // Release lock before notifying
+        crate::diagnostics::breadcrumbs::sites::transcription_queued();
         self.notify.notify_one();
         len
     }
