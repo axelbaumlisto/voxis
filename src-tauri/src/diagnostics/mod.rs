@@ -4,3 +4,4 @@
 //! from fatal-signal handlers or heartbeat snapshots.
 
 pub mod breadcrumbs;
+pub mod fatal;

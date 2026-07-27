@@ -99,6 +99,7 @@ pub fn setup_tray(app: &App, paths: &AppPaths) -> Result<(), Box<dyn std::error:
                                 let text = entries[0].text.clone();
                                 // Spawn thread to avoid blocking UI
                                 std::thread::spawn(move || {
+                                    crate::diagnostics::fatal::install_thread_altstack_best_effort();
                                     if let Ok(mut clipboard) = Clipboard::new() {
                                         #[cfg(target_os = "linux")]
                                         {

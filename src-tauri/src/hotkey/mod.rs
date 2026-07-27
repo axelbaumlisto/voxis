@@ -381,6 +381,7 @@ impl HotkeyListener {
         let target_key = Arc::clone(&self.target_key);
 
         thread::spawn(move || {
+            crate::diagnostics::fatal::install_thread_altstack_best_effort();
             let mut is_pressed = false;
             let mut last_pressed_key: Option<Key> = None;
 

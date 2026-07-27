@@ -5941,6 +5941,7 @@ dependencies = [
  "tracing-subscriber",
  "vad-rs",
  "webkit2gtk",
+ "windows-sys 0.59.0",
  "x11",
  "x11rb",
 ]

@@ -140,6 +140,7 @@ impl SoundPlayer for RodioPlayer {
         let samples = synthesize_beep(kind);
         let duration_ms = (samples.len() as u64 * 1000) / SAMPLE_RATE as u64 + 50;
         std::thread::spawn(move || {
+            crate::diagnostics::fatal::install_thread_altstack_best_effort();
             let (stream, handle) = match rodio::OutputStream::try_default() {
                 Ok(pair) => pair,
                 Err(e) => {

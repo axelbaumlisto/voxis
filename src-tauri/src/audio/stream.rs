@@ -40,6 +40,7 @@ pub(crate) fn spawn_recording_thread(
     is_ready.store(false, Ordering::SeqCst);
 
     thread::spawn(move || {
+        crate::diagnostics::fatal::install_thread_altstack_best_effort();
         let stream = match build_and_play_stream(
             sample_format,
             device,

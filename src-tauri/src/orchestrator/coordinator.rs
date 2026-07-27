@@ -89,7 +89,10 @@ impl TranscriptionCoordinator {
 
         let handle = thread::Builder::new()
             .name("transcription-coordinator".into())
-            .spawn(move || worker_loop(rx, stage_for_worker))
+            .spawn(move || {
+                crate::diagnostics::fatal::install_thread_altstack_best_effort();
+                worker_loop(rx, stage_for_worker);
+            })
             .expect("failed to spawn coordinator thread");
 
         Self {

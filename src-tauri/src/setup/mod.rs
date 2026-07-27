@@ -74,6 +74,7 @@ pub fn configure_app(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let retention_policy = config.retention_period.clone();
     let retention_limit = config.retention_limit as usize;
     std::thread::spawn(move || {
+        crate::diagnostics::fatal::install_thread_altstack_best_effort();
         let storage =
             crate::storage::history_sqlite::HistorySqliteStorage::new(history_path);
         match storage.cleanup_by_retention(&retention_policy, retention_limit) {

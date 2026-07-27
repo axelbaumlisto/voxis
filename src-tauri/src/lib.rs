@@ -34,13 +34,35 @@ pub mod theme_engine;
 pub mod transcription;
 pub mod tray;
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use audio::AudioRecorder;
 use hotkey::HotkeyListener;
 use orchestrator::Orchestrator;
 use output::OutputHandler;
 use tokio::sync::Mutex;
+
+static TAURI_ASYNC_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+
+fn build_tauri_async_runtime_with_altstack() -> std::io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .thread_name("voxis-async-runtime")
+        .enable_all()
+        .on_thread_start(|| {
+            crate::diagnostics::fatal::install_thread_altstack_best_effort();
+        })
+        .build()
+}
+
+fn install_tauri_async_runtime_with_altstack() {
+    let runtime = build_tauri_async_runtime_with_altstack()
+        .expect("failed to build Tauri async runtime with fatal-diagnostics altstack hook");
+    let handle = runtime.handle().clone();
+    TAURI_ASYNC_RUNTIME
+        .set(runtime)
+        .unwrap_or_else(|_| panic!("Tauri async runtime initialized more than once"));
+    tauri::async_runtime::set(handle);
+}
 
 // =============================================================================
 // Domain-specific State structs (SRP: each state handles one domain)
@@ -171,6 +193,7 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
 
 /// Initialize and run the Tauri application.
 pub fn run() {
+    install_tauri_async_runtime_with_altstack();
     diagnostics::breadcrumbs::init();
 
     // Migrate user data before logging creates the new config directory.
@@ -193,6 +216,8 @@ pub fn run() {
 
     // Initialize logging
     setup::init_logging();
+
+    diagnostics::fatal::install();
 
     // Kill any existing instances (after logging init so we see the logs)
     setup::kill_existing_instances();
@@ -250,6 +275,37 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(all(test, unix))]
+mod fatal_async_runtime_tests {
+    use super::build_tauri_async_runtime_with_altstack;
+
+    fn current_thread_has_altstack() -> bool {
+        // SAFETY: A zeroed stack_t is valid output storage for the query-only
+        // sigaltstack call below.
+        let mut old_stack: libc::stack_t = unsafe { std::mem::zeroed() };
+        // SAFETY: Passing NULL as the new stack and a valid output pointer is
+        // the POSIX query form of sigaltstack(2); it does not install/modify.
+        let rc = unsafe { libc::sigaltstack(std::ptr::null(), &mut old_stack) };
+        rc == 0 && (old_stack.ss_flags & libc::SS_DISABLE) == 0 && old_stack.ss_size > 0
+    }
+
+    #[test]
+    fn fatal_async_runtime_worker_threads_install_altstack_on_thread_start() {
+        let runtime = build_tauri_async_runtime_with_altstack().expect("build test runtime");
+        let (thread_name, has_altstack) = runtime.block_on(async {
+            tokio::spawn(async {
+                let thread_name = std::thread::current().name().unwrap_or("").to_owned();
+                (thread_name, current_thread_has_altstack())
+            })
+            .await
+            .expect("worker task should complete")
+        });
+
+        assert_eq!(thread_name, "voxis-async-runtime");
+        assert!(has_altstack, "runtime worker thread should have sigaltstack");
+    }
 }
 
 #[cfg(test)]

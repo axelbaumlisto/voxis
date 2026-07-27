@@ -144,6 +144,7 @@ pub fn spawn(app: AppHandle) {
     tracing::info!("debug socket listening at {path:?}");
 
     thread::spawn(move || {
+        crate::diagnostics::fatal::install_thread_altstack_best_effort();
         for incoming in listener.incoming() {
             let stream = match incoming {
                 Ok(s) => s,
@@ -154,6 +155,7 @@ pub fn spawn(app: AppHandle) {
             };
             let app_clone = app.clone();
             thread::spawn(move || {
+                crate::diagnostics::fatal::install_thread_altstack_best_effort();
                 let mut writer = stream
                     .try_clone()
                     .expect("UnixStream clone for writer half");
