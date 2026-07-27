@@ -50,6 +50,8 @@ import {
   getDebugEntries,
   clearDebug,
   getDebugDir,
+  // Diagnostics
+  getCrashDiagnostics,
   // LLM Providers
   getLlmProviders,
   addLlmProvider,
@@ -747,6 +749,37 @@ describe("commands.ts", () => {
       it("handles errors", async () => {
         mockInvoke.mockRejectedValueOnce(new Error("Path error"));
         await expect(getDebugDir()).rejects.toThrow("Path error");
+      });
+    });
+  });
+
+  // ===========================================================================
+  // Diagnostics Commands
+  // ===========================================================================
+  describe("Diagnostics Commands", () => {
+    describe("getCrashDiagnostics", () => {
+      it("calls invoke with correct command", async () => {
+        const mockReport = {
+          severity: "warn",
+          headline: "Crash diagnostics need attention",
+          details: ["previous run ended uncleanly; captured last state: uptime=42s"],
+          hints: [],
+          settings_notice: "previous run ended uncleanly; captured last state: uptime=42s",
+          last_crash_report: null,
+          previous_run_ended_uncleanly: true,
+          previous_run_last_state: "uptime=42s",
+          heartbeat_freshness: "fresh age=5s (fresh<=30s)",
+          fatal_handler_install_error: null,
+        };
+        mockInvoke.mockResolvedValueOnce(mockReport);
+        const result = await getCrashDiagnostics();
+        expect(mockInvoke).toHaveBeenCalledWith("get_crash_diagnostics");
+        expect(result).toEqual(mockReport);
+      });
+
+      it("handles errors", async () => {
+        mockInvoke.mockRejectedValueOnce(new Error("Diagnostics unavailable"));
+        await expect(getCrashDiagnostics()).rejects.toThrow("Diagnostics unavailable");
       });
     });
   });

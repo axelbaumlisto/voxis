@@ -74,7 +74,7 @@ pub use recording::{
 pub use debug::{clear_debug, get_debug_dir, get_debug_entries};
 
 // Diagnostics
-pub use diagnostics::export_diagnostics;
+pub use diagnostics::{export_diagnostics, get_crash_diagnostics};
 
 // Update check
 pub use update_check::{check_for_update, UpdateCheckResult};

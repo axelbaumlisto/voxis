@@ -136,6 +136,30 @@ export interface TranscriptionResult {
   duration: number | null;
 }
 
+export type CrashDiagnosticsSeverity = "ok" | "warn";
+export type CrashEventKind = "panic" | "fatal_signal" | "windows_exception";
+
+export interface CrashReportSummary {
+  kind: CrashEventKind;
+  summary: string;
+  when_label: string;
+  wall_ts: number | null;
+  monotonic_ms: number | null;
+}
+
+export interface CrashDiagnosticsReport {
+  severity: CrashDiagnosticsSeverity;
+  headline: string;
+  details: string[];
+  hints: string[];
+  settings_notice: string | null;
+  last_crash_report: CrashReportSummary | null;
+  previous_run_ended_uncleanly: boolean;
+  previous_run_last_state: string | null;
+  heartbeat_freshness: string | null;
+  fatal_handler_install_error: string | null;
+}
+
 // =============================================================================
 // Config Commands
 // =============================================================================
@@ -427,6 +451,14 @@ export async function getDebugDir(): Promise<string> {
  */
 export async function exportDiagnostics(): Promise<string> {
   return invoke<string>("export_diagnostics");
+}
+
+/**
+ * Query local crash-diagnostics evidence for a Settings status line. 100% local;
+ * returns summarized/redacted crash log and heartbeat evidence only.
+ */
+export async function getCrashDiagnostics(): Promise<CrashDiagnosticsReport> {
+  return invoke<CrashDiagnosticsReport>("get_crash_diagnostics");
 }
 
 // =============================================================================

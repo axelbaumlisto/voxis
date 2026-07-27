@@ -21,10 +21,20 @@
 //! sensitive. `history.db` and `dictionary.txt` (personal content, not
 //! diagnostics) are never copied — only `logs/` and `debug/` are.
 
+use crate::diagnostics::{
+    fatal, heartbeat,
+    report::{
+        self, CrashDiagnosticsInput, CrashDiagnosticsReport, CrashLogEvidence,
+        FatalInstallErrorInput, HeartbeatEvidence, HeartbeatObservedInput, HeartbeatSnapshotInput,
+        ReportedUncleanInput,
+    },
+};
 use crate::error::{BoxedIntoCommandError, IntoCommandError};
 use crate::storage::AppPaths;
+use serde::Deserialize;
 use serde_json::Value;
 use std::fs;
+use std::io;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
@@ -37,6 +47,13 @@ pub fn export_diagnostics(paths: State<AppPaths>) -> Result<String, String> {
     let config = super::get_factory(&paths).config().load().cmd_err()?;
     let config_dir = paths.config_dir().clone();
     export_diagnostics_into(&config_dir, &config).cmd_err()
+}
+
+/// Return the current local crash-diagnostics evidence without requiring an export.
+#[tauri::command]
+#[specta::specta]
+pub fn get_crash_diagnostics(paths: State<AppPaths>) -> Result<CrashDiagnosticsReport, String> {
+    Ok(build_crash_diagnostics_report(paths.config_dir()))
 }
 
 /// Core implementation, decoupled from Tauri `State` so it is unit-testable.
@@ -64,7 +81,154 @@ fn export_diagnostics_into(
     let summary = build_config_summary(config);
     fs::write(export_dir.join("config-summary.txt"), summary)?;
 
+    let crash_report = build_crash_diagnostics_report(config_dir);
+    write_crash_diagnostics_files(&export_dir, &crash_report)?;
+
     Ok(export_dir.to_string_lossy().to_string())
+}
+
+fn write_crash_diagnostics_files(
+    export_dir: &Path,
+    crash_report: &CrashDiagnosticsReport,
+) -> io::Result<()> {
+    // Export only the sanitized summary, not personal history/dictionary data.
+    // Fatal breadcrumbs are safe by construction: Task 3 records only Voxis-owned
+    // &'static str literals, never transcription text, user paths, or API keys.
+    let diagnostics_dir = export_dir.join("diagnostics");
+    fs::create_dir_all(&diagnostics_dir)?;
+    let json = serde_json::to_string_pretty(crash_report)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    fs::write(diagnostics_dir.join("crash-diagnostics.json"), json)?;
+    fs::write(
+        diagnostics_dir.join("crash-diagnostics.txt"),
+        report::render_report_text(crash_report),
+    )?;
+    Ok(())
+}
+
+fn build_crash_diagnostics_report(config_dir: &Path) -> CrashDiagnosticsReport {
+    let input = CrashDiagnosticsInput {
+        crash_log: read_crash_log_evidence(config_dir),
+        heartbeat: read_heartbeat_evidence(config_dir),
+        fatal_install_error: fatal::last_install_error().map(|error| FatalInstallErrorInput {
+            step: format!("{:?}", error.step),
+            os_error: error.os_error,
+        }),
+        now_wall_ts: now_unix(),
+        now_monotonic_ms: Some(crate::diagnostics::breadcrumbs::monotonic_ms_now()),
+    };
+    report::crash_diagnostics_report(&input)
+}
+
+fn read_crash_log_evidence(config_dir: &Path) -> CrashLogEvidence {
+    let diagnostics_dir = config_dir.join("diagnostics");
+    let current = diagnostics_dir.join("crash.log");
+    let backup = diagnostics_dir.join("crash.log.1");
+    let existing: Vec<_> = [&backup, &current]
+        .into_iter()
+        .filter(|path| path.exists())
+        .collect();
+
+    if existing.is_empty() {
+        return CrashLogEvidence::Missing;
+    }
+
+    let mut combined = String::new();
+    for path in existing {
+        match fs::read_to_string(path) {
+            Ok(text) => {
+                if !combined.is_empty() && !combined.ends_with('\n') {
+                    combined.push('\n');
+                }
+                combined.push_str(&text);
+            }
+            Err(error) => {
+                return CrashLogEvidence::Unreadable {
+                    error: report::redact_sensitive_text(&error.to_string()),
+                };
+            }
+        }
+    }
+
+    CrashLogEvidence::Present(report::parse_crash_log(&combined))
+}
+
+#[derive(Deserialize)]
+struct ReportedUncleanShutdownOnDisk {
+    reported_at_wall_ts: u64,
+    snapshot: heartbeat::HeartbeatSnapshot,
+}
+
+fn read_heartbeat_evidence(config_dir: &Path) -> HeartbeatEvidence {
+    let diagnostics_dir = config_dir.join("diagnostics");
+    let heartbeat_path = diagnostics_dir.join("heartbeat.json");
+    let crashed_path = diagnostics_dir.join("heartbeat.crashed.json");
+
+    let heartbeat_present = heartbeat_path.exists();
+    let reported_unclean_present = crashed_path.exists();
+    if !heartbeat_present && !reported_unclean_present {
+        return HeartbeatEvidence::MissingAll;
+    }
+
+    let heartbeat_snapshot = if heartbeat_present {
+        read_json_file::<heartbeat::HeartbeatSnapshot>(&heartbeat_path).ok()
+    } else {
+        None
+    };
+    let reported_unclean = if reported_unclean_present {
+        read_json_file::<ReportedUncleanShutdownOnDisk>(&crashed_path).ok()
+    } else {
+        None
+    };
+
+    HeartbeatEvidence::Observed(Box::new(HeartbeatObservedInput {
+        heartbeat: heartbeat_snapshot.as_ref().map(heartbeat_snapshot_input),
+        heartbeat_parse_error: heartbeat_present && heartbeat_snapshot.is_none(),
+        reported_unclean: reported_unclean.as_ref().map(|reported| ReportedUncleanInput {
+            reported_at_wall_ts: reported.reported_at_wall_ts,
+            snapshot: heartbeat_snapshot_input(&reported.snapshot),
+        }),
+        reported_unclean_parse_error: reported_unclean_present && reported_unclean.is_none(),
+    }))
+}
+
+fn read_json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> io::Result<T> {
+    let bytes = fs::read(path)?;
+    serde_json::from_slice(&bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+fn heartbeat_snapshot_input(snapshot: &heartbeat::HeartbeatSnapshot) -> HeartbeatSnapshotInput {
+    HeartbeatSnapshotInput {
+        pid: snapshot.pid,
+        wall_ts: snapshot.wall_ts,
+        uptime_s: snapshot.monotonic_uptime_s,
+        process_start_unix_s: snapshot.process_start_unix_s,
+        last_breadcrumb: snapshot
+            .last_breadcrumb
+            .as_deref()
+            .map(report::redact_sensitive_text),
+        rss_kb: snapshot.rss_kb,
+        recording_state: snapshot
+            .recording_state
+            .as_deref()
+            .map(report::redact_sensitive_text),
+        queue_depth: snapshot.queue_depth,
+        last_transcription_outcome: snapshot
+            .last_transcription_outcome
+            .as_deref()
+            .map(report::redact_sensitive_text),
+        overlay_backend: snapshot
+            .overlay_backend
+            .as_deref()
+            .map(report::redact_sensitive_text),
+    }
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 /// Recursively copy the regular files under `source` into `destination`.
@@ -137,15 +301,7 @@ fn flatten_value(prefix: &str, value: &Value, out: &mut Vec<String>) {
 
 /// Whether a (possibly dotted) config key is secret-shaped and must be redacted.
 fn is_secret_key(key: &str) -> bool {
-    let leaf = key.rsplit('.').next().unwrap_or(key).to_lowercase();
-    leaf.contains("api_key")
-        || leaf.contains("apikey")
-        || leaf.contains("secret")
-        || leaf.contains("token")
-        || leaf.contains("password")
-        // Catch any lone "key"-suffixed field, but not innocuous ones like
-        // "hotkey" / "auto_submit_key" which are not credentials.
-        || leaf == "key"
+    report::is_secret_key_name(key)
 }
 
 /// True when the value is "unset" for presence purposes (empty string / null).
@@ -272,6 +428,50 @@ mod tests {
         let summary = fs::read_to_string(out_dir.join("config-summary.txt")).unwrap();
         assert!(!summary.contains("gsk_secret_value"));
         assert!(summary.contains("api_key = [REDACTED - present]"));
+        assert!(out_dir.join("diagnostics/crash-diagnostics.json").exists());
+        assert!(out_dir.join("diagnostics/crash-diagnostics.txt").exists());
+    }
+
+    #[test]
+    fn crash_diagnostics_export_withholds_json_panic_payload_text() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path();
+        let diagnostics = config_dir.join("diagnostics");
+        fs::create_dir_all(&diagnostics).unwrap();
+        fs::write(
+            diagnostics.join("crash.log"),
+            b"{\"panic_message\":\"boom api_key=gsk_SHOULD_NOT_LEAK_12345 token=sk-LEAKLEAKLEAK transcript private dictated phrase zebra\",\"timestamp\":\"2026-07-27T00:00:00Z\"}\n",
+        )
+        .unwrap();
+
+        let out = export_diagnostics_into(config_dir, &AppConfig::default()).unwrap();
+        let out_dir = Path::new(&out);
+        let text = fs::read_to_string(out_dir.join("diagnostics/crash-diagnostics.txt")).unwrap();
+        let json = fs::read_to_string(out_dir.join("diagnostics/crash-diagnostics.json")).unwrap();
+
+        for exported in [&text, &json] {
+            assert!(!exported.contains("boom"), "{exported}");
+            assert!(!exported.contains("gsk_SHOULD_NOT_LEAK_12345"), "{exported}");
+            assert!(!exported.contains("sk-LEAKLEAKLEAK"), "{exported}");
+            assert!(!exported.contains("private dictated phrase zebra"), "{exported}");
+            assert!(exported.contains("message withheld"), "{exported}");
+        }
+    }
+
+    #[test]
+    fn crash_diagnostics_reads_malformed_files_without_panicking() {
+        let temp = tempfile::tempdir().unwrap();
+        let diagnostics = temp.path().join("diagnostics");
+        fs::create_dir_all(&diagnostics).unwrap();
+        fs::write(diagnostics.join("crash.log"), b"not-json\n").unwrap();
+        fs::write(diagnostics.join("heartbeat.json"), b"not-json").unwrap();
+        fs::write(diagnostics.join("heartbeat.crashed.json"), b"not-json").unwrap();
+
+        let report = build_crash_diagnostics_report(temp.path());
+        let details = report.details.join("; ");
+        assert!(details.contains("malformed/corrupt"), "{details}");
+        assert!(details.contains("heartbeat.json corrupt"), "{details}");
+        assert!(details.contains("heartbeat.crashed.json corrupt"), "{details}");
     }
 
     #[test]

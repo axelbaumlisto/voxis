@@ -232,6 +232,17 @@ async exportDiagnostics() : Promise<Result<string, string>> {
 }
 },
 /**
+ * Return the current local crash-diagnostics evidence without requiring an export.
+ */
+async getCrashDiagnostics() : Promise<Result<CrashDiagnosticsReport, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_crash_diagnostics") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Manual-trigger command: check whether a newer Voxis release is available.
  * 
  * Reads the running app's own version via `app.package_info().version` (Tauri
@@ -927,6 +938,10 @@ volume: number }
  * auto-sent.
  */
 export type AutoSubmitKey = "off" | "enter" | "cmd_enter" | "shift_enter"
+export type CrashDiagnosticsReport = { severity: CrashDiagnosticsSeverity; headline: string; details: string[]; hints: string[]; settings_notice: string | null; last_crash_report: CrashReportSummary | null; previous_run_ended_uncleanly: boolean; previous_run_last_state: string | null; heartbeat_freshness: string | null; fatal_handler_install_error: string | null }
+export type CrashDiagnosticsSeverity = "ok" | "warn"
+export type CrashEventKind = "panic" | "fatal_signal" | "windows_exception"
+export type CrashReportSummary = { kind: CrashEventKind; summary: string; when_label: string; wall_ts: number | null; monotonic_ms: number | null }
 /**
  * Debug log entry for a single recording session.
  */

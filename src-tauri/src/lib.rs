@@ -123,6 +123,7 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
         crate::commands::debug::debug_emit_silence,
         // diagnostics
         crate::commands::diagnostics::export_diagnostics,
+        crate::commands::diagnostics::get_crash_diagnostics,
         // update check
         crate::commands::update_check::check_for_update,
         // failed transcriptions

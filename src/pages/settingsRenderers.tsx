@@ -6,6 +6,7 @@ import PasswordField from "../components/settings/PasswordField";
 import AlwaysOnMicrophone from "../components/settings/AlwaysOnMicrophone";
 import AudioFeedback from "../components/settings/AudioFeedback";
 import AutoSubmitSelector from "../components/settings/AutoSubmitSelector";
+import CrashDiagnosticsStatus from "../components/settings/CrashDiagnosticsStatus";
 import ExportDiagnostics from "../components/settings/ExportDiagnostics";
 import UpdateNotice from "../components/settings/UpdateNotice";
 import LlmPromptManager from "../components/settings/LlmPromptManager";
@@ -195,6 +196,8 @@ export function renderCustomWidget(
       );
     case "shortcut-binding-list":
       return <ShortcutBindingList />;
+    case "crash-diagnostics-status":
+      return <CrashDiagnosticsStatus label={label} description={description} />;
     case "export-diagnostics":
       return <ExportDiagnostics label={label} description={description} />;
     case "check-for-update":

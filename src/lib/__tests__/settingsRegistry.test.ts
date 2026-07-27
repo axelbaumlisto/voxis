@@ -336,11 +336,15 @@ describe("settingsRegistry.ts", () => {
       expect(keys).toContain("llm.enabled");
     });
 
-    it("Advanced section has debug", () => {
+    it("Advanced section has debug and diagnostics surfaces", () => {
       const settings = getSettingsBySection("Advanced");
       const keys = settings.map((s) => s.key);
       expect(keys).toContain("debug");
       expect(keys).toContain("backend");
+      expect(keys).toContain("crash_diagnostics_status");
+      const crashStatus = settings.find((s) => s.key === "crash_diagnostics_status");
+      expect(crashStatus?.widgetType).toBe("custom");
+      expect(crashStatus?.customComponent).toBe("crash-diagnostics-status");
     });
   });
 

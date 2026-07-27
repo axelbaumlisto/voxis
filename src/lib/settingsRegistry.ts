@@ -458,6 +458,17 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     options: BACKEND_OPTIONS,
   },
   {
+    key: "crash_diagnostics_status",
+    label: "Crash Diagnostics",
+    labelKey: "settings.crashDiagnostics",
+    widgetType: "custom",
+    section: "Advanced",
+    description:
+      "Shows local crash evidence when the previous run ended uncleanly or crash capture is unavailable.",
+    descriptionKey: "settings.crashDiagnosticsDesc",
+    customComponent: "crash-diagnostics-status",
+  },
+  {
     key: "export_diagnostics",
     label: "Export Diagnostics",
     labelKey: "settings.exportDiagnostics",
