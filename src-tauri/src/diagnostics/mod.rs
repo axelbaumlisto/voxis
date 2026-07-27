@@ -5,3 +5,4 @@
 
 pub mod breadcrumbs;
 pub mod fatal;
+pub mod heartbeat;

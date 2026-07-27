@@ -259,6 +259,8 @@ pub fn restart_app() {
     if let Ok(exe) = std::env::current_exe() {
         tracing::info!("Restarting app from: {:?}", exe);
         let _ = Command::new(&exe).spawn();
+        // Direct restart exits bypass Tauri exit events; mark this shutdown clean first.
+        crate::diagnostics::heartbeat::write_clean_shutdown_marker();
         std::process::exit(0);
     } else {
         tracing::error!("Failed to get current executable path for restart");

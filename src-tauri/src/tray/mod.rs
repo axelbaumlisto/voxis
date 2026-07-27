@@ -144,7 +144,10 @@ pub fn setup_tray(app: &App, paths: &AppPaths) -> Result<(), Box<dyn std::error:
                     }
                 }
 
-                "quit" => app.exit(0),
+                "quit" => {
+                    crate::diagnostics::heartbeat::write_clean_shutdown_marker();
+                    app.exit(0);
+                }
 
                 #[cfg(debug_assertions)]
                 "demo" => {

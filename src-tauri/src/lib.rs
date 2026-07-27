@@ -218,6 +218,8 @@ pub fn run() {
     setup::init_logging();
 
     diagnostics::fatal::install();
+    diagnostics::heartbeat::log_previous_unclean_shutdown_once();
+    diagnostics::heartbeat::spawn_background_writer();
 
     // Kill any existing instances (after logging init so we see the logs)
     setup::kill_existing_instances();
@@ -260,20 +262,24 @@ pub fn run() {
         .expect("error while building tauri application");
     diagnostics::breadcrumbs::sites::tauri_build_post();
 
-    app.run(|_app_handle, _event| {
+    app.run(|_app_handle, event| match event {
+        tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } => {
+            diagnostics::heartbeat::write_clean_shutdown_marker();
+        }
         // Esc hides the main window (removes it from the Dock/taskbar). Without a
         // Reopen handler, clicking the Dock icon afterwards does nothing — the
         // window only came back via the tray "Show". On macOS a Dock-icon click
         // on a hidden app sends RunEvent::Reopen; re-show + focus the main window
         // (same logic as the tray Show menu item) so the Dock icon works too.
         #[cfg(target_os = "macos")]
-        if let tauri::RunEvent::Reopen { .. } = _event {
+        tauri::RunEvent::Reopen { .. } => {
             use tauri::Manager;
             if let Some(window) = _app_handle.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
         }
+        _ => {}
     });
 }
 
