@@ -7,7 +7,8 @@ layout: default
 
 Клиент транскрипции Voxis использует стандартный, совместимый с OpenAI
 протокол `/audio/transcriptions`: multipart-форма (`file`, `model`,
-`response_format=verbose_json`, опционально `language`/`translate`),
+`response_format=verbose_json`, опционально `language` и опционально
+`task=translate`),
 отправляемая с заголовком `Authorization: Bearer <api_key>`, и ожидает в
 ответ JSON как минимум с полем `text`. Любой сервер, реализующий этот же
 контракт — другой облачный провайдер или полностью self-hosted

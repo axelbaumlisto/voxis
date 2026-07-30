@@ -43,8 +43,8 @@ From `TranscriptionClient` (`src-tauri/src/transcription/mod.rs`):
   - `model`: model name string (whatever the target server expects)
   - `response_format`: always `verbose_json`
   - `language`: optional, omitted when `"auto"`
-  - `translate`: optional boolean flag (uses the same endpoint, not a
-    separate `/translations` route)
+  - `task`: optional; set to `translate` to request English output (uses the
+    same endpoint, not a separate `/translations` route)
 - **Response**: JSON body with at least `text` (string); `language`
   (string, optional) and `duration` (float, optional) are read if present.
   Anything else in the payload (segments, words, timestamps) is ignored.

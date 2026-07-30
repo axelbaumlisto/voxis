@@ -23,3 +23,9 @@ git grep -InE '(ghp_|gho_|github_pat_|sk-[A-Za-z0-9]|GROQ_API_KEY|OPENAI_API_KEY
 ```
 
 If a real credential was ever committed to a public repository, rotate or revoke it immediately. Removing it from the current tree is not enough if the old Git history is public.
+
+When debug mode is enabled, Voxis stores transcription metadata in
+`debug/debug_log.jsonl` and keeps the three most recent WAV files. WAV files
+are rotated automatically, but the JSONL log is append-only until you clear
+all debug data. Disable debug mode during normal use and clear debug files
+before sharing diagnostics.

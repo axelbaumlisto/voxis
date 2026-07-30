@@ -7,7 +7,8 @@ layout: default
 
 Voxis's transcription client speaks the standard OpenAI-compatible
 `/audio/transcriptions` protocol: a multipart form (`file`, `model`,
-`response_format=verbose_json`, optional `language`/`translate`) sent with
+`response_format=verbose_json`, optional `language`, and optional
+`task=translate`) sent with
 an `Authorization: Bearer <api_key>` header, expecting back a JSON body
 with at least `text`. Any server implementing that same contract — another
 cloud provider, or a fully self-hosted Whisper-compatible server — works by

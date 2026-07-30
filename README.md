@@ -73,7 +73,8 @@ credentials from environment variables.
 
 The transcription client speaks the standard OpenAI-compatible
 `/audio/transcriptions` protocol (multipart form: `file`, `model`,
-`response_format=verbose_json`, optional `language`/`translate`). Any
+`response_format=verbose_json`, optional `language`, and optional
+`task=translate`). Any
 endpoint implementing that same contract works by setting
 `api_url_override` to the endpoint's `/audio/transcriptions` URL — no code
 changes required. This is intentional: Voxis deliberately does **not** ship
