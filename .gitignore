@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+# Bun <=1.1 binary lockfile; current source of truth is text bun.lock.
+bun.lockb
 
 # Build
 dist/
@@ -71,6 +73,7 @@ scripts/*.py
 
 # Local-only artifacts (media exports, capture specs, screenshots, scratch notes)
 docs/media/
+landing-screenshots/
 docs/archive/root-notes/
 e2e/_bz-didinium-capture.spec.ts
 e2e/screenshots/
