@@ -207,7 +207,14 @@ jobs:
 
       - name: build macOS (best-effort — KVM VM)
         continue-on-error: true
-        timeout-minutes: 60
+        timeout-minutes: 90
+        env:
+          # Developer ID signing + notarization config lives OUTSIDE the repo.
+          # scripts/macos-vm.sh sources this to learn SIGNING_IDENTITY +
+          # APPLE_API_ISSUER; the .p8 key + cert live in the macOS VM itself.
+          # Absent file => ad-hoc unsigned .app/DMG (today's behavior, xattr -cr
+          # needed on install). Default path is ~/secrets/apple-dev/notary.env.
+          APPLE_NOTARY_ENV: /home/spex/secrets/apple-dev/notary.env
         run: |
           set -uo pipefail
           cd /home/spex/work/voxis
@@ -220,10 +227,14 @@ jobs:
             echo "⚠️ /dev/kvm not available — skipping macOS"
             exit 0
           fi
-          if bash scripts/macos-vm.sh build; then
-            echo "=== macOS artifacts (arm64-only; ort has no x86_64-darwin prebuilt) ==="
-            ls -lh artifacts/voxis-macos-* 2>/dev/null
-            tar -C artifacts -czf artifacts/voxis-macos-arm64.tar.gz voxis-macos-arm64 2>/dev/null || true
+          # Signed/notarized GUI lane: produces artifacts/Voxis_<ver>_aarch64.dmg
+          # (Developer ID-signed + Apple-notarized + stapled when VM creds are
+          # present; ad-hoc unsigned otherwise). Advisory — never blocks release.
+          # build-gui emits both artifacts/Voxis_<ver>_aarch64.dmg AND the bare
+          # arm64 binary + tarball (for the existing Homebrew formula).
+          if bash scripts/macos-vm.sh build-gui; then
+            echo "=== macOS artifacts ==="
+            ls -lh artifacts/Voxis_*_aarch64.dmg artifacts/voxis-macos-arm64* 2>/dev/null
             echo "✅ macOS build succeeded"
           else
             echo "⚠️ macOS build failed (advisory — not blocking release)"
@@ -259,7 +270,8 @@ jobs:
           )
           shopt -s nullglob
           for f in artifacts/*.deb artifacts/*.rpm \
-                   artifacts/voxis-macos-arm64 artifacts/voxis-macos-arm64.tar.gz; do
+                   artifacts/voxis-macos-arm64 artifacts/voxis-macos-arm64.tar.gz \
+                   artifacts/Voxis_*_aarch64.dmg; do
             artifacts+=("$f")
           done
           shopt -u nullglob
@@ -311,6 +323,7 @@ jobs:
             artifacts/*.rpm
             artifacts/voxis-macos-arm64
             artifacts/voxis-macos-arm64.tar.gz
+            artifacts/Voxis_*_aarch64.dmg
           )
           shopt -u nullglob
           ls artifacts/*.deb >/dev/null 2>&1 || { echo "ERROR: no .deb for GitHub release"; exit 1; }

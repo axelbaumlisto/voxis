@@ -130,7 +130,32 @@ macOS is arm64-only: `ort` rc.12 ships no prebuilt ONNX Runtime for
 `x86_64-apple-darwin`, so an Intel build fails at `ort-sys`. Apple Silicon
 covers all current Macs.
 
-Signed/notarized DMG is out of scope until Apple Developer credentials are available.
+### Signed/notarized DMG lane (`build-gui`)
+
+The release workflow uses `scripts/macos-vm.sh build-gui` (NOT the bare
+`build`). It builds the Tauri `Voxis.app`, Developer ID-signs it, submits it to
+Apple's notary service, staples the ticket, and packs `Voxis_<ver>_aarch64.dmg`
+(also emitting the bare `voxis-macos-arm64` + tarball so the Homebrew formula
+keeps working). Credentials are read the clipshot way, kept OUTSIDE the repo:
+
+- Host env file `~/secrets/apple-dev/notary.env` (path override via
+  `APPLE_NOTARY_ENV`) supplies `SIGNING_IDENTITY` + `APPLE_API_ISSUER`. On the
+  CI host (spex) it lives at `/home/spex/secrets/apple-dev/notary.env`.
+- The Developer ID cert + private key live in the macOS VM login keychain; the
+  App Store Connect API key `.p8` lives in the VM at
+  `~/.appstoreconnect/private_keys/AuthKey_*.p8`. Nothing secret is ever in the
+  repo or on the host argv.
+
+When either the env file or the VM credentials are absent, `build-gui` degrades
+to an **ad-hoc unsigned** `.app`/DMG (Gatekeeper warns; `xattr -cr` needed on
+install) — the build never fails on missing signing.
+
+Two-branch notarization (ported from clipshot): if Apple's queue is slow the
+SIGNED-but-unstapled DMG ships now and the submission id is recorded in
+`artifacts/.notary-pending`; finish later with
+`scripts/macos-vm.sh notary-finish` (waits for Accepted, staples, re-emits the
+DMG). Invalid/Rejected always hard-fails — that is a real signing problem, not
+a queue delay.
 
 ---
 

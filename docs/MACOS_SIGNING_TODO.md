@@ -1,16 +1,25 @@
 # macOS Code Signing + Notarization — TODO / Scope
 
-> **Status: BLOCKED on a human/funding decision.**
-> This is a *research + scoping* document, not an implementation. Voxis ships
-> **unsigned** macOS binaries today. Signing and notarization cannot be added
-> without an **Apple Developer Program membership (99 USD/year)**, which
-> requires a real person/organization to enroll and pay — no code change in
-> this repo can produce it. See [§5 Blocked-on-human-decision](#5-blocked-on-a-human-decision-the-99year-gate).
+> **Status: IMPLEMENTED (2026-08).** The Apple Developer Program membership +
+> a *Developer ID Application* certificate now exist, and the signed/notarized
+> DMG lane is live in `scripts/macos-vm.sh` (`build-gui` / `notary-finish`),
+> wired into `.forgejo/workflows/release.yml`, and documented in the
+> `voxis-deploy` skill (see its "Signed/notarized DMG lane" section).
 >
-> Once the account + a *Developer ID Application* certificate exist, the actual
-> implementation is a **known, bounded piece of work** (est. **~1–2 focused
-> days**, see [§4](#4-efforttime-estimate)) — the sections below tell a future
-> implementer exactly what to add and where.
+> Credentials follow the clipshot convention and stay OUTSIDE the repo: the
+> host env file `~/secrets/apple-dev/notary.env` (on spex:
+> `/home/spex/secrets/apple-dev/notary.env`) supplies `SIGNING_IDENTITY` +
+> `APPLE_API_ISSUER`; the Developer ID cert/key live in the macOS VM login
+> keychain and the App Store Connect API `.p8` lives in the VM at
+> `~/.appstoreconnect/private_keys/`. When they are absent the lane degrades to
+> an ad-hoc unsigned `.app`/DMG (never blocks a release).
+>
+> The sections below are retained as the historical research/scoping record
+> (Apple enrollment terms, secret inventory, insertion points, effort estimate)
+> that the implementation was built from. Where they describe secrets as
+> "Forgejo Actions secrets", the actual implementation instead keeps them in
+> the VM + a host env file (the clipshot pattern), which avoids putting the
+> `.p12`/`.p8` bytes through the CI secret store at all.
 
 This document was written after verifying the *current* requirements against
 Apple's live enrollment page, the Tauri v2 macOS signing documentation, and

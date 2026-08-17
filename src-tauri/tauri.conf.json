@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Voxis",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "top.voxis.app",
   "build": {
     "beforeBuildCommand": "bun run build",
@@ -37,10 +37,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["resources/silero_vad_v4.onnx", "themes"],
-    "macOS": {
-      "signingIdentity": "Voxis Dev"
-    }
+    "resources": ["resources/silero_vad_v4.onnx", "themes"]
   },
   "plugins": {}
 }
