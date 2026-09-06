@@ -3,7 +3,10 @@ use super::press_release::{
     ContinueOrAbort, PostStageAction, PressEnterAction, PressExitGuard, PressReleaseMachine,
     ReleaseAction,
 };
-use super::{audio_level, load_config_from_app, ErrorContext, RecordingState, TranscriptionQueue};
+use super::{
+    audio_level, load_config_from_app, recording_guard, ErrorContext, RecordingState,
+    TranscriptionQueue,
+};
 use crate::audio::vad::build_vad;
 use crate::audio::{AudioError, AudioRecorder};
 use crate::config::VadConfig;
@@ -65,15 +68,8 @@ pub(crate) fn stage_to_state(stage: Stage) -> RecordingState {
     }
 }
 
-/// Why `stop_recording` is being called. `SilenceTimeout` and
-/// `MaxDuration` are constructed by Layer 2's not-yet-landed recording
-/// guard — defined now, alongside the reasons already constructed
-/// (`Release`, `TogglePress`, `Cancel`, and `ReleasePending` as of this
-/// step), so `stop_recording`'s API is stable across that step and its
-/// caller doesn't need to touch this enum again. Remove the `allow` once
-/// that step constructs them too.
+/// Why `stop_recording` is being called.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum StopReason {
     /// Normal hotkey release.
     Release,
@@ -87,11 +83,11 @@ pub(crate) enum StopReason {
     /// arrived after `await_stage(Recording)` but wasn't seen in time by
     /// the release task itself.
     ReleasePending,
-    /// Layer 2 recording guard: continuous near-silence exceeded the
-    /// configured timeout.
+    /// Layer 2 recording guard (`recording_guard.rs`): continuous
+    /// near-silence exceeded the configured timeout.
     SilenceTimeout,
-    /// Layer 2/3: recording exceeded the configured (or absolute) maximum
-    /// duration.
+    /// Layer 2/3 recording guard: recording exceeded the configured (or
+    /// absolute) maximum duration.
     MaxDuration,
 }
 
@@ -115,12 +111,11 @@ pub(crate) enum StopDecision {
     /// `stop_lock` this can NEVER be a benign race-loser (T3 r1 review,
     /// finding 1) — it means the recording thread died after `start()`
     /// returned `Ok` (stream build/play failure, a panic, device
-    /// unplugged) or a bypassing raw `stop_recording` command stopped the
-    /// recorder underneath the orchestrator. `stop_recording` must NOT
-    /// call `recorder.stop()` (nothing to stop) and must still return the
-    /// coordinator to `Idle` — leaving it pinned at `Recording` makes the
-    /// hotkey dead until restart (`press_action` ignores/skips every
-    /// subsequent press/toggle/cancel while stage is `Recording`).
+    /// unplugged). `stop_recording` must NOT call `recorder.stop()`
+    /// (nothing to stop) and must still return the coordinator to `Idle`
+    /// — leaving it pinned at `Recording` makes the hotkey dead until
+    /// restart (`press_action` ignores/skips every subsequent
+    /// press/toggle/cancel while stage is `Recording`).
     Recover,
     /// Stop the recorder but throw the audio away: no `queue.push`, no
     /// transcription. Used only by `StopReason::Cancel`.
@@ -570,6 +565,42 @@ impl RecordingCoordinator {
         } else {
             tracing::info!("on_hotkey_pressed: overlay disabled, returning");
         }
+
+        // Plan §3 Layer 2/3: recording guard (silence timeout + max
+        // duration, `recording_guard.rs`) — spawned UNCONDITIONALLY,
+        // unlike the overlay/poller block just above. The bug this fixes
+        // (plan §1.4 "не два толкователя тишины") was the old ad-hoc
+        // silence detector living inside the overlay's spectrum poller,
+        // so silence was only ever detected while `overlay.enabled` was
+        // true. Still inside `stop_lock` (same critical section as the
+        // overlay/poller block), same take-and-cancel-old-token discipline
+        // as `polling_cancel` just above.
+        //
+        // `recorder.sample_rate()` is only valid once `recorder.start()`
+        // has returned `Ok` (native rate is stored during device open) —
+        // we're well past that point here, so the cap this computes is
+        // correct even on this recorder's very first recording.
+        let native_rate = self.recorder.sample_rate();
+        self.recorder.set_max_samples(recording_guard::native_cap_samples(
+            config.max_recording_ms,
+            native_rate,
+        ));
+
+        let guard_cfg = recording_guard::GuardCfg::from_app_config(&config);
+        let guard_token = CancellationToken::new();
+        let mut guard_cancel_lock = self.guard_cancel.lock().await;
+        if let Some(old_token) = guard_cancel_lock.take() {
+            old_token.cancel();
+        }
+        *guard_cancel_lock = Some(guard_token.clone());
+        drop(guard_cancel_lock);
+
+        recording_guard::spawn_recording_guard(
+            Arc::clone(&self.recorder),
+            self.clone(),
+            guard_cfg,
+            guard_token,
+        );
         drop(_start_guard);
     }
 
@@ -660,8 +691,7 @@ impl RecordingCoordinator {
             tracing::warn!(
                 "stop_recording({:?}): coordinator says Recording but recorder is not \
                  recording — recovering to Idle. Abnormal: recording thread died after \
-                 start() (stream build/play failure, panic, device unplugged), or a \
-                 bypassing raw stop_recording command stopped the recorder.",
+                 start() (stream build/play failure, panic, device unplugged).",
                 reason
             );
             crate::diagnostics::breadcrumbs::sites::recording_stop_recover();
@@ -755,8 +785,9 @@ impl RecordingCoordinator {
             }
             StopReason::TogglePress => crate::diagnostics::breadcrumbs::sites::recording_stop_toggle(),
             StopReason::Cancel => crate::diagnostics::breadcrumbs::sites::recording_stop_cancel(),
-            // Layer 2's guard (not yet landed) owns its own
-            // `recording:auto_stopped_*` breadcrumbs for these two reasons.
+            // Layer 2's guard (`recording_guard.rs`) already emitted its
+            // own `recording:auto_stopped_*` breadcrumb for these two
+            // reasons before calling this function.
             StopReason::SilenceTimeout | StopReason::MaxDuration => {}
         }
 
@@ -1048,10 +1079,9 @@ mod stop_decision_tests {
         // Processing/Idle — never `Recording` with a dead recorder. This
         // combination exclusively means the recording thread died after
         // `start()` returned `Ok` (stream build/play failure, a panic,
-        // device unplugged) or a bypassing raw `stop_recording` command
-        // stopped the recorder underneath the orchestrator. Treating it as
-        // a silent Skip (the original, regressed behaviour this test used
-        // to pin) leaves the coordinator stuck at `Recording` forever —
+        // device unplugged). Treating it as a silent Skip (the original,
+        // regressed behaviour this test used to pin) leaves the
+        // coordinator stuck at `Recording` forever —
         // every subsequent press/toggle/cancel is Ignored/Skipped, so the
         // hotkey goes dead until the app restarts. `Recover` fixes that by
         // still returning the coordinator to `Idle`, just without calling

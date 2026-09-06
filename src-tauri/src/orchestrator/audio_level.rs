@@ -2,6 +2,12 @@
 //!
 //! SRP: This module handles audio level polling and overlay updates only.
 //! Uses FFT-based spectrum analysis for Winamp-style frequency visualization.
+//! Silence detection (and auto-stop) is NOT this module's concern — it used
+//! to live here (a one-time `WARN` log, active only while this poller ran,
+//! i.e. only when `overlay.enabled`) and has moved to
+//! `orchestrator::recording_guard`, which runs unconditionally and can
+//! actually act on what it detects (plan §1.4 "не два толкователя тишины" —
+//! don't leave two independent silence interpreters in the codebase).
 
 use crate::audio::{AudioRecorder, SpectrumAnalyzer};
 use crate::overlay_native::OverlayBackend;
@@ -32,17 +38,6 @@ pub fn start_audio_level_polling(
         // Create spectrum analyzer for FFT processing
         let mut analyzer = SpectrumAnalyzer::new();
         let fft_size = SpectrumAnalyzer::fft_size();
-
-        // Detect a microphone that is connected but producing silence
-        // (e.g. a wireless lavalier paired but powered off, or a hardware
-        // mute switch engaged). We count consecutive iterations where the
-        // raw RMS reading from the recorder is exactly 0; after a window
-        // this strongly suggests the wrong device is selected or the mic
-        // is muted at the OS / hardware level.
-        let mut silent_iters: u32 = 0;
-        // ~1 second of polling (12 × 80ms) before warning the user.
-        const SILENT_ITER_THRESHOLD: u32 = 12;
-        let mut warned_silent = false;
 
         let mut count = 0u32;
         loop {
@@ -86,33 +81,6 @@ pub fn start_audio_level_polling(
                     peak_bar,
                     spectrum.iter().cloned().fold(0.0f32, f32::max)
                 );
-            }
-
-            // Detect a silent input device: cpal happily returns a stream
-            // for a device that the OS reports as available but whose
-            // samples are all zero (BOYA lavalier in standby, mute switch,
-            // permission revoked mid-session, virtual loopback with no
-            // source). Surface this once to the log so the user sees why
-            // bars / ring aren't reacting.
-            //
-            // We check the recorder's raw audio_level atomic (RMS scaled
-            // by audio_boost) rather than the FFT output — the analyzer's
-            // adaptive noise floor can mask near-zero noise as exactly 0
-            // even when samples have legitimate noise.
-            let raw_level = recorder.audio_level();
-            if raw_level == 0 && !samples.is_empty() {
-                silent_iters += 1;
-                if silent_iters == SILENT_ITER_THRESHOLD && !warned_silent {
-                    tracing::warn!(
-                        "Audio level has been 0 for ~1s while recording with {} samples in buffer. \
-                         The configured input device may be muted / disconnected / standby. \
-                         Check System Settings → Sound → Input, or change 'audio_device' in config.",
-                        samples.len(),
-                    );
-                    warned_silent = true;
-                }
-            } else if raw_level > 0 {
-                silent_iters = 0;
             }
 
             // Derive scalar audio level for webview overlays (peak of spectrum).

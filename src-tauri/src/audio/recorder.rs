@@ -391,6 +391,15 @@ impl AudioRecorder {
         self.audio_level.load(Ordering::SeqCst)
     }
 
+    /// Native (device-negotiated) sample rate, stored by `start()` /
+    /// `get_device_config()`. Valid once `start()` has returned `Ok` at
+    /// least once for this recorder — used by the recording guard (plan
+    /// §3 Layer 3) to convert `max_recording_ms` into a native-rate
+    /// sample-buffer cap (`native_cap_samples`).
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate.load(Ordering::SeqCst)
+    }
+
     /// Peak (pre-boost) RMS observed across all chunks since the last
     /// call to this method (or since `start()`) — "peak since last
     /// poll". Boost-independent silence signal for the recording guard

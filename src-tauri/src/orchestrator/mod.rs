@@ -9,6 +9,7 @@ pub mod post_process;
 pub mod press_release;
 pub mod queue;
 pub mod recording;
+pub mod recording_guard;
 pub mod state;
 pub mod transcription;
 

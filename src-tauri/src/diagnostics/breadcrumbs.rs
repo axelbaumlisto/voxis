@@ -425,6 +425,9 @@ pub mod sites {
     static RELEASE_PENDING_ARMED_LAST_MS: AtomicU64 = AtomicU64::new(0);
     static RELEASE_PENDING_APPLIED_LAST_MS: AtomicU64 = AtomicU64::new(0);
     static PRESS_START_ORPHAN_RECOVERED_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static RECORDING_AUTO_STOPPED_SILENCE_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static RECORDING_AUTO_STOPPED_MAX_DURATION_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static RECORDING_GUARD_PRE_CUTOFF_BEEP_LAST_MS: AtomicU64 = AtomicU64::new(0);
 
     pub fn tauri_build_pre() {
         sticky("tauri:build:pre");
@@ -575,6 +578,36 @@ pub mod sites {
         rolling_rate_limited(
             &PRESS_START_ORPHAN_RECOVERED_LAST_MS,
             "recording:press_start_orphan_recovered",
+        );
+    }
+
+    /// The recording guard (plan §3 Layer 2) auto-stopped a recording
+    /// after continuous near-silence exceeded `silence_timeout_ms`.
+    pub fn recording_auto_stopped_silence() {
+        rolling_rate_limited(
+            &RECORDING_AUTO_STOPPED_SILENCE_LAST_MS,
+            "recording:auto_stopped_silence",
+        );
+    }
+
+    /// The recording guard (plan §3 Layer 2/3) auto-stopped a recording
+    /// after it exceeded its configured (or absolute) maximum duration —
+    /// either by wall-clock elapsed time or by the native sample buffer
+    /// hitting its cap (`AudioRecorder::cap_hit`).
+    pub fn recording_auto_stopped_max_duration() {
+        rolling_rate_limited(
+            &RECORDING_AUTO_STOPPED_MAX_DURATION_LAST_MS,
+            "recording:auto_stopped_max_duration",
+        );
+    }
+
+    /// The recording guard played its pre-cutoff warning cue
+    /// (`pre_cutoff_beep_ms` before an in-progress silence run would
+    /// reach `silence_timeout_ms`).
+    pub fn recording_guard_pre_cutoff_beep() {
+        rolling_rate_limited(
+            &RECORDING_GUARD_PRE_CUTOFF_BEEP_LAST_MS,
+            "recording:guard_pre_cutoff_beep",
         );
     }
 }
