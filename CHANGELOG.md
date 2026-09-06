@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.1.3
+
+Fixes the "stuck recording" class of incidents (recording never stops, RAM grows to
+gigabytes, multi-GB WAV dumps, app goes deaf until restart) and adds a recording guard.
+
+### Root cause fixed
+- Press/release ordering race: a hotkey/overlay release arriving while the press was
+  blocked in the (0.2–5 s) synchronous microphone-permission probe was silently dropped,
+  leaving a recording nobody would stop. Now: single-flight start, release-pending
+  checkpoints, deterministic — the recording either never starts or stops immediately.
+- Microphone permission probe is native (AVFoundation, ~10–40 ms) instead of `osascript`.
+
+### Recording guard (new settings, Recording section)
+- Auto-stop after continuous silence (default 60 s; 0 = off) with a warning beep 3 s before.
+- Max recording length (default 10 min; 0 = off). An absolute 30-min cap always applies.
+- Buffer is hard-capped at the native sample rate; memory is released on stop.
+
+### Robustness
+- One serialized stop path for hotkey release, toggle press, cancel button and the guard;
+  toggle mode's tap-to-stop (previously dead code) works.
+- Dead audio stream mid-recording recovers to idle with an error cue instead of pinning
+  the app in "Recording".
+- Oversize audio (>25 MB) is rejected before any disk write or network call; the
+  failed-audio and debug dumps no longer write multi-GB files.
+- Overlay spectrum logging throttled; heartbeat no longer fsyncs every 10 s.
+
+### macOS release pipeline
+- CI now codesigns (Developer ID, Hardened Runtime + microphone/Apple-Events
+  entitlements), notarizes and staples a DMG; own VM image and a host-wide launch lock.
+
+## v0.1.2
+
+First signed+notarized macOS DMG via the CI lane (commit e188a8d); no app-code changes.
+
 ## v0.1.1
 
 CI/release-pipeline hardening (no user-facing app changes):
