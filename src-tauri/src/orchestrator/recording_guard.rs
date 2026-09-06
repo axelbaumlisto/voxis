@@ -27,12 +27,13 @@
 //!   single loud poll (a keyboard click, a cough) not reset a real
 //!   silence in progress, plan §3 Layer 2. Once `silent_ms` reaches
 //!   `silence_timeout_ms`, stop.
-//! - **Max duration**: wall-clock `elapsed_ms` since the guard started,
-//!   independent of silence — plan §3 Layer 3's "active stop" half (the
-//!   cpal callback's own `AudioRecorder::set_max_samples`/`cap_hit` only
+//! - **Max duration**: poll-accumulated `elapsed_ms` since the guard
+//!   started (≤ wall-clock — see `GuardState::elapsed_ms`), independent
+//!   of silence — plan §3 Layer 3's "active stop" half (the cpal
+//!   callback's own `AudioRecorder::set_max_samples`/`cap_hit` only
 //!   stops *pushing* into the buffer; this guard is what actually calls
-//!   `stop_recording` when that cap is hit, or when wall-clock time alone
-//!   exceeds the limit). `effective_max_recording_ms` folds in the
+//!   `stop_recording` when that cap is hit, or when accumulated poll
+//!   time alone exceeds the limit). `effective_max_recording_ms` folds in the
 //!   `ABS_MAX_RECORDING_MS` backstop, so this condition can never be
 //!   truly "off" even if the user's `max_recording_ms` config is `0` or a
 //!   hand-edited out-of-range value (T1 r1 review, R1).
@@ -193,8 +194,14 @@ struct GuardState {
     /// condition stops holding (a real "un-silence": speech, not just one
     /// loud poll — the fraction test already absorbs those).
     silent_ms: u32,
-    /// Wall-clock milliseconds elapsed since the guard started (i.e.
-    /// since `recorder.start()` returned `Ok` for this recording).
+    /// Poll-accumulated milliseconds since the guard started (i.e. since
+    /// `recorder.start()` returned `Ok` for this recording): poll count ×
+    /// `poll_ms`, NOT a wall-clock reading — so it is ≤ wall-clock (tokio
+    /// `sleep` never fires early; per-poll processing time is not
+    /// counted). Consequence: `MaxDuration` may fire *late* by the
+    /// accumulated processing time, never early; `cap_hit` is the exact
+    /// byte-level backstop. Deliberately not an `Instant` — that would
+    /// make `guard_step` impure/untestable without a clock.
     elapsed_ms: u32,
     /// Whether the pre-cutoff beep has already fired for the CURRENT
     /// silence run — reset to `false` alongside `silent_ms` on a genuine
@@ -235,7 +242,7 @@ enum GuardEvent {
 /// the absolute backstop `ABS_MAX_RECORDING_MS`, and any configured value
 /// above the backstop is clamped down to it. Single source of truth so
 /// `native_cap_samples` (the buffer cap) and `guard_step`'s own
-/// wall-clock check can never disagree about "how long is too long" — T1
+/// elapsed-time check can never disagree about "how long is too long" — T1
 /// r1 review R1 (config load is intentionally unvalidated, matching
 /// `hotkey_hold_ms`/`typing_delay`; a hand-edited out-of-range DB value
 /// must not silently produce an unbounded buffer).
@@ -411,6 +418,21 @@ pub(crate) fn spawn_recording_guard(
                         state.elapsed_ms,
                         state.silent_ms
                     );
+                    // The decision-to-stop above was made OUTSIDE
+                    // `stop_lock`. A release that already took the lock
+                    // cancels this token inside `stop_recording` — so
+                    // re-checking it here (cheap, lock-free) narrows the
+                    // stale-guard window from "one poll interval" to
+                    // microseconds (T5 r1 review, finding 3). The
+                    // breadcrumb + warn! above are intentionally emitted
+                    // BEFORE this check so the cause stays visible even
+                    // when the stop is (correctly) skipped or hangs.
+                    if token.is_cancelled() {
+                        tracing::debug!(
+                            "guard: token cancelled before stop — release won the race"
+                        );
+                        break;
+                    }
                     // No lock held here (module doc, "Locking
                     // discipline") — `stop_recording` takes `stop_lock`
                     // itself and silently tolerates having lost a race
@@ -758,7 +780,8 @@ mod tests {
         ); // silent_ms=50
     }
 
-    // ---- t18: a speech burst resets silent_ms AND re-arms the beep latch -
+    // ---- t17b (extra, not in plan §4): a speech burst resets silent_ms AND
+    // ---- re-arms the beep latch -------------------------------------------
 
     #[test]
     fn test_speech_burst_resets_silent_ms_and_rearms_beep() {
@@ -828,7 +851,11 @@ mod tests {
         assert_eq!(effective_max_recording_ms(600_000), 600_000);
     }
 
-    // t20 (runtime: `spawn_recording_guard` end-to-end) is NOT implemented —
+    // plan §4 #18 / #20 (runtime: release cancels token; rapid restart → one
+    // guard alive): NOT automatable without tauri/test harness — verified by
+    // inspection in review; Phase 5 manual checklist.
+    //
+    // Runtime `spawn_recording_guard` end-to-end is NOT implemented —
     // `RecordingCoordinator::new` requires a real `AppHandle`, and this
     // crate has no `tauri/test` feature (plan §4 harness discussion,
     // option A vs B; this codebase already chose B for exactly this
