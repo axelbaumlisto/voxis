@@ -91,7 +91,7 @@
 //!    `hotkey/mod.rs`'s press/release alternation filter guarantees such a
 //!    follow-on press always means the first press's key was already
 //!    released, never a real single-flight conflict. See
-//!    `test_release_during_debounce_wakes_press_and_frees_slot_for_next_press`.)
+//!    `test_release_during_debounce_cancels_token_and_frees_slot`.)
 //!
 //! 4. **`release_arrived` only arms `release_pending` (and cancels the
 //!    wake token) when `in_flight` is `Some`** (conditional set), not
@@ -114,17 +114,21 @@
 //!    `coordinator.on_press()` hasn't run yet) *before* the matching
 //!    press's task ever reaches `press_enter()` — i.e. the press task is
 //!    starved for the entire hold/tap duration (≥`hotkey_hold_ms` for the
-//!    keyboard path) while the release task runs to completion. This is
-//!    the actual size of the window (corrected from an earlier, inaccurate
-//!    claim of "a few CPU instructions": `press_enter()` is called after a
-//!    stage read and a synchronous SQLite config load, so the true
-//!    pre-admission window is on the order of the scheduler's fairness
-//!    plus that load, not zero) — still orders of magnitude narrower than
-//!    the observed bug (a 0.3-5.4s permission check) and not a pattern
-//!    seen in any of the ~121 historical incidents analysed for the plan.
-//!    Structurally closing it requires in-order delivery between the
-//!    independent press/release tasks (e.g. a single ordered event channel
-//!    or per-event sequence numbers) — carried forward past this step.
+//!    keyboard path) while the release task runs to completion. Since T4a
+//!    r2 moved `press_enter()` to the very first line of
+//!    `on_hotkey_pressed` (ahead of the stage read and config load that an
+//!    earlier revision of this note placed before it), there is no longer
+//!    any synchronous work of our own in this window: the window IS the
+//!    scheduler gap between the press task being *spawned* (by the hotkey
+//!    listener / overlay tap handler) and that task actually getting its
+//!    first poll on a tokio worker — the release task must run
+//!    `release_arrived` to completion inside that gap for this race to
+//!    manifest. Still orders of magnitude narrower than the observed bug
+//!    (a 0.3-5.4s permission check) and not a pattern seen in any of the
+//!    ~121 historical incidents analysed for the plan. Structurally
+//!    closing it requires in-order delivery between the independent
+//!    press/release tasks (e.g. a single ordered event channel or
+//!    per-event sequence numbers) — carried forward past this step.
 //!    See `test_release_with_no_press_in_flight_is_proceed_release` for
 //!    why the conditional arm, not this residual, is the load-bearing
 //!    correctness property here.

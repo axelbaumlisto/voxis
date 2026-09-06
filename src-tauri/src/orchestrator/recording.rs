@@ -294,9 +294,11 @@ impl RecordingCoordinator {
         // ---- Layer 0(a): single-flight admission, as early as possible
         // ---- (T4a r1 review finding 2: admitting right after the
         // ---- breadcrumb — before the stage read, config load, and
-        // ---- press_action match below — shrinks the pre-admission
-        // ---- window to a handful of synchronous instructions; see
-        // ---- press_release module docs, deviation 4).
+        // ---- press_action match below — leaves no synchronous work of
+        // ---- our own before admission. The remaining pre-admission
+        // ---- window is purely the scheduler gap between this task being
+        // ---- spawned and its first poll; see press_release module docs,
+        // ---- deviation 4).
         let (press_id, wake_token) =
             match lock_press_release(&self.press_release).press_enter() {
                 PressEnterAction::Proceed(id, token) => (id, token),
@@ -648,12 +650,13 @@ impl RecordingCoordinator {
             // Abnormal: coordinator says Recording, recorder disagrees.
             // Under stop_lock this is never a benign race-loser (T3 r1
             // review, finding 1) — recover to Idle without calling
-            // recorder.stop() (there is nothing to stop). Minimum viable
-            // per review: warn + breadcrumb are the only user-visible
-            // trace (no Error beep / state_cache=Error banner) — the next
-            // press starts a fresh recording immediately rather than
-            // sitting behind handle_error's 2s sleep for a failure the
-            // user didn't cause.
+            // recorder.stop() (there is nothing to stop). The user spoke
+            // and nothing will be transcribed, so this is NOT silent (T3 r2
+            // review scrutiny (b)): an Error beep + `emit_error` tell them
+            // now, same as a real failure would. It deliberately skips
+            // handle_error's state_cache=Error banner and 2s sleep — the
+            // next press must start a fresh recording immediately, not sit
+            // behind a cooldown for a failure the user didn't cause.
             tracing::warn!(
                 "stop_recording({:?}): coordinator says Recording but recorder is not \
                  recording — recovering to Idle. Abnormal: recording thread died after \
@@ -662,6 +665,13 @@ impl RecordingCoordinator {
                 reason
             );
             crate::diagnostics::breadcrumbs::sites::recording_stop_recover();
+            let recover_config = load_config_from_app(&self.app);
+            let _ = crate::audio_feedback::play(
+                crate::audio_feedback::SoundType::Error,
+                recover_config.audio_feedback,
+                &crate::audio_feedback::RodioPlayer,
+            );
+            self.emit_error("Recording was interrupted (audio device stopped)");
             self.coordinator.cancel();
             self.await_stage(Stage::Idle).await;
             self.overlay.lock().await.hide();

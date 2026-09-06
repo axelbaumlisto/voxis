@@ -7,14 +7,35 @@ use crate::transcription::{TranscriptionClient, TranscriptionResult};
 use crate::{AudioState, OrchestratorState, OutputState};
 use tauri::State;
 
+use crate::permissions::PermissionStatus;
+
+/// Pure decision: does this permission status refuse to even attempt the
+/// permission-gated action? Extracted from `check_microphone_permission` so
+/// the Denied-only-blocks semantics (T4b carry-forward) are unit-testable
+/// without a platform-specific `PermissionChecker`.
+fn permission_blocks(status: PermissionStatus) -> Option<String> {
+    if status.blocks_start() {
+        Some("Microphone permission required. Please grant access in System Settings.".to_string())
+    } else {
+        None
+    }
+}
+
 /// Check microphone permission before accessing audio hardware.
 /// Returns Ok(()) if granted, Err with user-friendly message otherwise.
+///
+/// Uses `blocks_start()`, not `is_granted()` (T4b carry-forward, second
+/// half — `orchestrator/recording.rs` already gates on `blocks_start()`
+/// for the hotkey path): only an explicit `Denied` refuses outright.
+/// `Unknown`/`NotDetermined` fall through to `state.recorder.start()`,
+/// which triggers the real OS permission prompt on first use and lets
+/// cpal report the actual denial if the user declines — rather than this
+/// pre-check blocking on a status the platform hasn't determined yet.
 fn check_microphone_permission() -> Result<(), String> {
     let checker = create_permission_checker();
-    if checker.check(Permission::Microphone).is_granted() {
-        Ok(())
-    } else {
-        Err("Microphone permission required. Please grant access in System Settings.".to_string())
+    match permission_blocks(checker.check(Permission::Microphone)) {
+        Some(msg) => Err(msg),
+        None => Ok(()),
     }
 }
 
@@ -29,24 +50,39 @@ pub fn list_audio_devices() -> Result<Vec<AudioDevice>, String> {
 
 /// Start audio recording.
 /// Requires microphone permission to access audio hardware.
+///
+/// Thin wrapper over the orchestrator (T4c, plan §3 Layer 1: "единственный
+/// путь остановки"). This command used to drive `state.recorder` directly,
+/// bypassing `stop_lock`, the `PressReleaseMachine`, the coordinator and
+/// the transcription queue entirely — the last such bypass identified by
+/// the T3 r1 review (its `recorder.stop()` was the only other producer of
+/// the `Recover` recovery path besides a genuinely dead recording thread).
+/// `device_id` is accepted for API/`specta` binding compatibility with the
+/// pre-T4c signature but is otherwise unused: the orchestrator's recording
+/// path reads `audio_device` from config, not from a per-call override.
 #[tauri::command]
 #[specta::specta]
-pub fn start_recording(device_id: Option<String>, state: State<AudioState>) -> Result<(), String> {
+pub async fn start_recording(
+    device_id: Option<String>,
+    state: State<'_, OrchestratorState>,
+) -> Result<(), String> {
+    if let Some(device_id) = &device_id {
+        tracing::debug!(
+            "start_recording: device_id {device_id:?} accepted for API compatibility, ignored \
+             (orchestrator reads audio_device from config)"
+        );
+    }
     check_microphone_permission()?;
-    let device = device_id.unwrap_or_else(|| "default".to_string());
-    state.recorder.start(&device).cmd_err()
+    state.orchestrator.manual_start().await;
+    Ok(())
 }
 
-/// Stop recording and return audio data.
+/// Stop recording (audio flows through the orchestrator's own transcription
+/// queue, not a `pending_audio` side channel — see `start_recording` doc).
 #[tauri::command]
 #[specta::specta]
-pub fn stop_recording(state: State<AudioState>) -> Result<(), String> {
-    let audio_data = state.recorder.stop().cmd_err()?;
-
-    // Store audio data for transcription
-    let mut pending = state.pending_audio.lock().unwrap();
-    *pending = Some(audio_data);
-
+pub async fn stop_recording(state: State<'_, OrchestratorState>) -> Result<(), String> {
+    state.orchestrator.manual_stop().await;
     Ok(())
 }
 
@@ -267,5 +303,32 @@ mod tests {
         // Simulate the error when no audio is available
         let error_msg = "No audio data to transcribe";
         assert!(error_msg.contains("audio"));
+    }
+
+    // T4c: `permission_blocks` (T4b carry-forward) — only Denied blocks;
+    // Unknown/NotDetermined must fall through to `recorder.start()`.
+    #[test]
+    fn test_permission_blocks_denied_only() {
+        assert!(
+            permission_blocks(PermissionStatus::Denied).is_some(),
+            "Denied must block start with a user-facing message"
+        );
+    }
+
+    #[test]
+    fn test_permission_blocks_granted_passes() {
+        assert!(
+            permission_blocks(PermissionStatus::Granted).is_none(),
+            "Granted must not block start"
+        );
+    }
+
+    #[test]
+    fn test_permission_blocks_unknown_passes() {
+        assert!(
+            permission_blocks(PermissionStatus::Unknown).is_none(),
+            "Unknown/NotDetermined must fall through to recorder.start(), not be \
+             pre-emptively blocked — cpal/the OS prompt reports the real denial"
+        );
     }
 }
