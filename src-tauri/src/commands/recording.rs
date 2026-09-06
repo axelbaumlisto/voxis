@@ -146,7 +146,7 @@ pub async fn manual_stop_recording(state: State<'_, OrchestratorState>) -> Resul
 #[tauri::command]
 #[specta::specta]
 pub async fn cancel_operation(state: State<'_, OrchestratorState>) -> Result<(), String> {
-    state.orchestrator.cancel();
+    state.orchestrator.cancel().await;
     Ok(())
 }
 

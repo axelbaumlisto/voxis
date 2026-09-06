@@ -416,6 +416,11 @@ pub mod sites {
     static TRANSCRIPTION_FAILED_LAST_MS: AtomicU64 = AtomicU64::new(0);
     static OVERLAY_STATE_LAST_MS: AtomicU64 = AtomicU64::new(0);
     static AUDIO_DEVICE_CHANGED_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static RECORDING_STOP_RELEASE_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static RECORDING_STOP_TOGGLE_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static RECORDING_STOP_CANCEL_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static RECORDING_STOP_RACE_LOST_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static RECORDING_STOP_RECOVER_LAST_MS: AtomicU64 = AtomicU64::new(0);
 
     pub fn tauri_build_pre() {
         sticky("tauri:build:pre");
@@ -485,6 +490,52 @@ pub mod sites {
         if changed {
             rolling_rate_limited(&AUDIO_DEVICE_CHANGED_LAST_MS, "audio:device_changed");
         }
+    }
+
+    /// `stop_recording(StopReason::Release)` reached the Finalize path
+    /// (i.e. actually stopped the recorder) — `Release` never `Discard`s,
+    /// only `Cancel` does, plan §3 Layer 1.
+    pub fn recording_stop_release() {
+        rolling_rate_limited(&RECORDING_STOP_RELEASE_LAST_MS, "recording:stop:release");
+    }
+
+    /// `stop_recording(StopReason::TogglePress)` reached the Finalize path —
+    /// the toggle-mode second-press-stops-recording gesture actually ran
+    /// `recorder.stop()` (previously dead code, see plan §1.4).
+    pub fn recording_stop_toggle() {
+        rolling_rate_limited(&RECORDING_STOP_TOGGLE_LAST_MS, "recording:stop:toggle");
+    }
+
+    /// `stop_recording(StopReason::Cancel)` reached the Discard path —
+    /// `Orchestrator::cancel()` actually stopped the recorder (previously it
+    /// only touched the coordinator's stage, plan §1.4).
+    pub fn recording_stop_cancel() {
+        rolling_rate_limited(&RECORDING_STOP_CANCEL_LAST_MS, "recording:stop:cancel");
+    }
+
+    /// `stop_recording` lost a race: `recorder.stop()` returned
+    /// `StopInProgress` because another caller's stop already won the
+    /// single-flight CAS a moment earlier. Silent to the user by design
+    /// (plan §3 Layer 1 / T2 review finding C3) — this breadcrumb is the
+    /// only visible trace.
+    pub fn recording_stop_race_lost() {
+        rolling_rate_limited(&RECORDING_STOP_RACE_LOST_LAST_MS, "recording:stop:race_lost");
+    }
+
+    /// `stop_recording` hit `StopDecision::Recover`: the coordinator still
+    /// says `Stage::Recording` but `AudioRecorder::is_recording()` is
+    /// already `false` — under `stop_lock` this is never a benign
+    /// race-loser (the winner of a real race holds the lock through its
+    /// own stage transition), so it is exclusively the abnormal case: the
+    /// recording thread died after `start()` returned `Ok` (stream
+    /// build/play failure, a panic, device unplugged), or a bypassing raw
+    /// `stop_recording` Tauri command stopped the recorder underneath the
+    /// orchestrator (T3 r1 review, finding 1 / D2). Recovery skips
+    /// `recorder.stop()` entirely and returns the coordinator to `Idle` —
+    /// this breadcrumb plus the accompanying `tracing::warn!` are the only
+    /// visible trace.
+    pub fn recording_stop_recover() {
+        rolling_rate_limited(&RECORDING_STOP_RECOVER_LAST_MS, "recording:stop:recover");
     }
 }
 

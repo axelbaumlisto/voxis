@@ -30,7 +30,7 @@ use tokio_util::sync::CancellationToken;
 use coordinator::TranscriptionCoordinator;
 use dispatch::TranscriptionDispatcher;
 use overlay_manager::OverlayManager;
-use recording::RecordingCoordinator;
+use recording::{RecordingCoordinator, StopReason};
 
 pub(crate) fn load_config_from_app(app: &AppHandle) -> AppConfig {
     if let Some(paths) = storage::get_app_paths(app) {
@@ -122,11 +122,16 @@ impl Orchestrator {
         self.on_hotkey_released().await;
     }
 
-    /// Cancel any in-progress recording. Delegates to the Coordinator's
-    /// state machine; has no effect while `Processing` (the pipeline runs
-    /// to completion in that case).
-    pub fn cancel(&self) {
-        self.coordinator.cancel();
+    /// Cancel any in-progress recording: stop the recorder (if one is
+    /// running) and discard its audio — no `queue.push`, no transcription.
+    /// Has no effect while `Processing` (the pipeline runs to completion in
+    /// that case) or while `Idle`. Routes through `stop_recording` (plan
+    /// §3 Layer 1) so this actually stops the recorder and cancels the
+    /// overlay poller — previously it only touched the coordinator's
+    /// stage, leaving the microphone recording and the spectrum poller
+    /// running for as long as 9.7h (plan §1.4).
+    pub async fn cancel(&self) {
+        self.recording.stop_recording(StopReason::Cancel).await;
     }
     pub fn shutdown(&self) {
         self.recording.shutdown();
