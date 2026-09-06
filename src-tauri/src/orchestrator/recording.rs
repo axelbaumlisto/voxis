@@ -1,4 +1,8 @@
 use super::coordinator::{Stage, TranscriptionCoordinator};
+use super::press_release::{
+    ContinueOrAbort, PostStageAction, PressEnterAction, PressExitGuard, PressReleaseMachine,
+    ReleaseAction,
+};
 use super::{audio_level, load_config_from_app, ErrorContext, RecordingState, TranscriptionQueue};
 use crate::audio::vad::build_vad;
 use crate::audio::{AudioError, AudioRecorder};
@@ -27,6 +31,19 @@ fn resolve_silero_model_path(app: &AppHandle) -> Option<PathBuf> {
     None
 }
 
+/// Poisoning-recovery lock for `RecordingCoordinator::press_release`. Same
+/// one-liner as `crate::audio::sync::lock_or_recover` and
+/// `press_release::lock_or_recover` — that module is private to `audio`
+/// and widening its visibility is outside this step's file scope.
+fn lock_press_release(
+    machine: &std::sync::Mutex<PressReleaseMachine>,
+) -> std::sync::MutexGuard<'_, PressReleaseMachine> {
+    match machine.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
 fn install_vad(recorder: &AudioRecorder, app: &AppHandle, vad_config: &VadConfig) {
     let model_path = if vad_config.backend == "silero" {
         resolve_silero_model_path(app)
@@ -48,13 +65,13 @@ pub(crate) fn stage_to_state(stage: Stage) -> RecordingState {
     }
 }
 
-/// Why `stop_recording` is being called. `ReleasePending`, `SilenceTimeout`
-/// and `MaxDuration` are constructed by not-yet-landed steps (Layer 0's
-/// press/release residual-window fix; Layer 2's recording guard) — defined
-/// now, alongside the three reasons this step actually triggers, so
-/// `stop_recording`'s API is stable across those steps and callers don't
-/// need to touch this enum again. Remove the `allow` once those steps
-/// construct them.
+/// Why `stop_recording` is being called. `SilenceTimeout` and
+/// `MaxDuration` are constructed by Layer 2's not-yet-landed recording
+/// guard — defined now, alongside the reasons already constructed
+/// (`Release`, `TogglePress`, `Cancel`, and `ReleasePending` as of this
+/// step), so `stop_recording`'s API is stable across that step and its
+/// caller doesn't need to touch this enum again. Remove the `allow` once
+/// that step constructs them too.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) enum StopReason {
@@ -223,16 +240,15 @@ pub struct RecordingCoordinator {
     /// the single signal `Command::Cancel`-ordering (see `stop_recording`)
     /// relies on.
     stop_lock: Arc<tokio::sync::Mutex<()>>,
-    /// Token that an in-flight `on_hotkey_pressed` is sleeping on while it
-    /// waits for the debounce threshold. `on_hotkey_released` cancels this
-    /// token so a short press (key used as modifier in a combination)
-    /// never starts recording. Tagged with a monotonically increasing
-    /// press id so a race — release of press N after press N+1 has begun —
-    /// cannot accidentally cancel the wrong token.
-    pending_press: Arc<Mutex<Option<(u64, CancellationToken)>>>,
-    /// Counter for press ids — only used to disambiguate concurrent press
-    /// cycles inside the debounce window.
-    press_seq: Arc<std::sync::atomic::AtomicU64>,
+    /// Single source of truth for press/release ordering (plan §3 Layer
+    /// 0(a)) — see `press_release` module docs for the full design and
+    /// disclosed deviations from the plan's literal two-primitive sketch.
+    /// Replaces the old `pending_press: Arc<Mutex<Option<(u64,
+    /// CancellationToken)>>>` debounce-phase-only cancellation slot
+    /// entirely — that mechanism covered only the hold-timer sleep,
+    /// leaving a seam with the post-debounce window that is exactly where
+    /// the historical bug (plan §1.1) lived.
+    press_release: Arc<std::sync::Mutex<PressReleaseMachine>>,
 }
 
 impl RecordingCoordinator {
@@ -255,8 +271,7 @@ impl RecordingCoordinator {
             polling_cancel,
             guard_cancel: Arc::new(Mutex::new(None)),
             stop_lock: Arc::new(tokio::sync::Mutex::new(())),
-            pending_press: Arc::new(Mutex::new(None)),
-            press_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            press_release: Arc::new(std::sync::Mutex::new(PressReleaseMachine::new())),
         }
     }
 
@@ -275,6 +290,30 @@ impl RecordingCoordinator {
     pub async fn on_hotkey_pressed(&self, skip_debounce: bool) {
         crate::diagnostics::breadcrumbs::sites::hotkey_pressed();
         tracing::info!("on_hotkey_pressed: enter");
+
+        // ---- Layer 0(a): single-flight admission, as early as possible
+        // ---- (T4a r1 review finding 2: admitting right after the
+        // ---- breadcrumb — before the stage read, config load, and
+        // ---- press_action match below — shrinks the pre-admission
+        // ---- window to a handful of synchronous instructions; see
+        // ---- press_release module docs, deviation 4).
+        let (press_id, wake_token) =
+            match lock_press_release(&self.press_release).press_enter() {
+                PressEnterAction::Proceed(id, token) => (id, token),
+                PressEnterAction::IgnorePress => {
+                    crate::diagnostics::breadcrumbs::sites::press_ignored_in_flight();
+                    tracing::debug!(
+                        "on_hotkey_pressed: another press is already in flight, ignoring \
+                         (plan §1.4 single-flight start)"
+                    );
+                    return;
+                }
+            };
+        // Safety net (plan §3 Layer 0(a) step 6): guarantees `press_id` is
+        // cleared from the machine on every exit path below, even one a
+        // future edit adds without remembering to call a checkpoint.
+        let mut press_exit = PressExitGuard::new(Arc::clone(&self.press_release), press_id);
+
         let stage = self.coordinator.current_stage();
         tracing::info!("on_hotkey_pressed: current_stage={:?}", stage);
 
@@ -289,75 +328,81 @@ impl RecordingCoordinator {
         match press_action(is_toggle_mode, stage) {
             PressAction::StopToggle => {
                 tracing::info!("on_hotkey_pressed: toggle mode — stopping current recording");
-                // Directly to the shared stop path — NOT `on_hotkey_released()`,
-                // which returns immediately in toggle mode (see its own toggle
-                // guard) and would never reach `recorder.stop()` (plan §1.4:
+                // Admission above is unconditional now (T4a r1 review
+                // finding 2), so this branch briefly held `in_flight` —
+                // release it before falling through to the shared stop
+                // path, NOT `on_hotkey_released()` (which returns
+                // immediately in toggle mode, see its own toggle guard,
+                // and would never reach `recorder.stop()` — plan §1.4:
                 // toggle-mode recordings could never be stopped).
+                press_exit.early_return();
                 self.stop_recording(StopReason::TogglePress).await;
                 return;
             }
             PressAction::Ignore => {
                 tracing::debug!("Ignoring hotkey press - stage: {:?}", stage);
+                press_exit.early_return();
                 return;
             }
             PressAction::Start => {}
         }
 
         // ---- Debounce: short presses are key-combination modifiers ----
-        // Read the user-configured hold threshold (default 300 ms). Sleep
-        // that long while listening for a cancellation from
-        // `on_hotkey_released`. If the release fires first the user was
-        // pressing AltGr/Ctrl as part of a shortcut — bail out silently.
+        // Read the user-configured hold threshold (default 300 ms) and
+        // race it against `wake_token`: a release arriving while this
+        // press is in flight cancels the token
+        // (`PressReleaseMachine::release_arrived`), waking this sleep
+        // within µs instead of occupying `in_flight` for the rest of
+        // `hold_ms` (T4a r1 review finding 1 — an earlier revision used a
+        // plain, uncancellable sleep here, which silently dropped a
+        // legitimate follow-on press admitted in that window;
+        // `hotkey/mod.rs`'s press/release alternation filter guarantees
+        // such a follow-on press always means this one's key was already
+        // released, never a real single-flight conflict). Either branch
+        // of the `select!` falls through to the SAME, unchanged
+        // `post_debounce` checkpoint below — the token is only a
+        // wake-up, never a second decision point.
         //
         // skip_debounce: when true (e.g. pointer/touch overlay tap),
         // the debounce is skipped entirely — a tap on the cell is
         // explicit intent and must start recording immediately.
         if !skip_debounce {
-        let config_for_hold = load_config_from_app(&self.app);
-        let hold_ms = config_for_hold.hotkey_hold_ms as u64;
-        if hold_ms > 0 {
-            let press_id = self
-                .press_seq
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                + 1;
-            let token = CancellationToken::new();
-            {
-                let mut slot = self.pending_press.lock().await;
-                if let Some((_, prev)) = slot.take() {
-                    prev.cancel();
-                }
-                *slot = Some((press_id, token.clone()));
-            }
-            let cancelled = tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_millis(hold_ms)) => false,
-                _ = token.cancelled() => true,
-            };
-            // Clear our slot iff it still carries OUR press id (a later
-            // press could have replaced it while we slept).
-            {
-                let mut slot = self.pending_press.lock().await;
-                if matches!(slot.as_ref(), Some((id, _)) if *id == press_id) {
-                    *slot = None;
+            let config_for_hold = load_config_from_app(&self.app);
+            let hold_ms = config_for_hold.hotkey_hold_ms as u64;
+            if hold_ms > 0 {
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(hold_ms)) => {}
+                    _ = wake_token.cancelled() => {}
                 }
             }
-            if cancelled {
-                tracing::info!(
-                    "on_hotkey_pressed: short press (<{}ms) - treated as key combo, ignored",
-                    hold_ms
-                );
-                return;
-            }
-        }
         } // end skip_debounce guard
 
+        // Checkpoint (i): did a release already arrive (plan §3 Layer 0(a))?
+        if matches!(press_exit.post_debounce(), ContinueOrAbort::NeverStart) {
+            tracing::info!(
+                "on_hotkey_pressed: released before/during debounce (id={press_id}) - \
+                 treated as key combo or already released, never starting"
+            );
+            return;
+        }
+
         tracing::info!("on_hotkey_pressed: checking mic permission");
-        if !create_permission_checker()
+        // `blocks_start()`, not `is_granted()` (T4b landed after this step
+        // was drafted, in the parallel batch): only an explicit `Denied`
+        // should refuse to start. `Unknown` must fall through to
+        // `recorder.start()` — cpal has its own accurate, synchronous
+        // failure path for a genuine denial, and refusing on `Unknown`
+        // reintroduces exactly the gap T4b's `blocks_start()` exists to
+        // close (permissions/checker.rs doc comment, T2-round review
+        // finding M8).
+        if create_permission_checker()
             .check(Permission::Microphone)
-            .is_granted()
+            .blocks_start()
         {
             self.emit_error(
                 "Microphone permission required. Please grant access in System Settings.",
             );
+            press_exit.early_return();
             return;
         }
 
@@ -372,13 +417,29 @@ impl RecordingCoordinator {
         install_vad(&self.recorder, &self.app, &config.vad);
         tracing::info!("on_hotkey_pressed: starting recorder, device={device}");
         // Hold `stop_lock` across the whole start-critical section (start
-        // .. await_stage(Recording)) so this can never race a concurrent
-        // `stop_recording` — plan §3 Layer 1. `AudioRecorder::start()` (T2)
-        // already refuses on its own while a stop is mid-flight; this lock
-        // closes the last few-instructions TOCTOU window a lone atomic
-        // flag can't (T2 review, scrutiny b), by ensuring no `stop_recording`
-        // call is *itself* in flight while we're here at all.
+        // .. await_stage(Recording) .. overlay/poller spawn — T3 r2 review
+        // finding N3 extends this to cover the overlay section too, see
+        // below) so this can never race a concurrent `stop_recording` —
+        // plan §3 Layer 1. `AudioRecorder::start()` (T2) already refuses on
+        // its own while a stop is mid-flight; this lock closes the last
+        // few-instructions TOCTOU window a lone atomic flag can't (T2
+        // review, scrutiny b), by ensuring no `stop_recording` call is
+        // *itself* in flight while we're here at all.
         let _start_guard = self.stop_lock.lock().await;
+
+        // Checkpoint (ii): plan §3 Layer 0(a) — the checkpoint that closes
+        // the actual observed bug: a release arriving during the (possibly
+        // multi-second) permission check just above.
+        if matches!(press_exit.pre_start(), ContinueOrAbort::NeverStart) {
+            tracing::info!(
+                "on_hotkey_pressed: release arrived during permission check (id={press_id}) - \
+                 never starting the recorder"
+            );
+            crate::diagnostics::breadcrumbs::sites::release_pending_applied();
+            drop(_start_guard);
+            return;
+        }
+
         if let Err(e) = self.recorder.start(&device) {
             if matches!(e, AudioError::StopInProgress) {
                 // A stop is (or just was) in flight. Not a user-facing
@@ -387,6 +448,7 @@ impl RecordingCoordinator {
                 tracing::debug!(
                     "on_hotkey_pressed: recorder.start refused, a stop is in flight: {e}"
                 );
+                press_exit.early_return();
                 return;
             }
             tracing::error!("on_hotkey_pressed: recorder.start failed: {e}");
@@ -401,9 +463,14 @@ impl RecordingCoordinator {
             // recorder.start() has already returned — nothing left to
             // serialize against, and handle_error sleeps 2s; drop the lock
             // first so a concurrent stop/press isn't queued behind that
-            // sleep for no reason (T3 r1 review, finding 2).
+            // sleep for no reason (T3 r1 review, finding 2). Stage can
+            // never be Recording here (coordinator.on_press() hasn't been
+            // called yet), so unlike stop_recording's UserError arm
+            // (T3 r2 review N1) there is no coordinator.cancel() to run
+            // before dropping the guard — it would always be a no-op.
             drop(_start_guard);
-            self.handle_error(&e.to_string(), ErrorContext::Hotkey)
+            press_exit.early_return();
+            self.handle_error(&e.to_string(), ErrorContext::Hotkey, false)
                 .await;
             return;
         }
@@ -420,15 +487,62 @@ impl RecordingCoordinator {
         // Drive Coordinator + wait for the worker to apply the transition.
         self.coordinator.on_press();
         tracing::info!("on_hotkey_pressed: sent on_press, awaiting stage Recording");
-        self.await_stage(Stage::Recording).await;
+        let reached_recording = self.await_stage(Stage::Recording).await;
         tracing::info!(
             "on_hotkey_pressed: stage now {:?}",
             self.coordinator.current_stage()
         );
         tracing::info!("on_hotkey_pressed: mirror_state");
         self.mirror_state().await;
-        drop(_start_guard);
 
+        if !reached_recording {
+            // C1 orphan (plan §1.4 / T3 r1 review carry-forward C1): the
+            // coordinator's own internal 30ms press-debounce
+            // (`coordinator::DEBOUNCE`) dropped our Press after
+            // `recorder.start()` already returned Ok — is_recording()==true
+            // but stage never became Recording. `stop_decision` would say
+            // Skip here (stage != Recording), so stop_recording is a
+            // no-op; stop the orphaned recorder directly, under the
+            // stop_lock we're already holding.
+            tracing::warn!(
+                "on_hotkey_pressed: stage did not reach Recording after recorder.start() Ok \
+                 (id={press_id}) - coordinator's internal press-debounce likely dropped the \
+                 Press; stopping the orphaned recorder directly"
+            );
+            press_exit.stage_timeout();
+            let recorder = Arc::clone(&self.recorder);
+            let _ = tokio::task::spawn_blocking(move || recorder.stop()).await;
+            crate::diagnostics::breadcrumbs::sites::press_start_orphan_recovered();
+            drop(_start_guard);
+            return;
+        }
+
+        // Checkpoint (iii): plan §3 Layer 0(a) residual window — a release
+        // that arrived between recorder.start() returning Ok and the
+        // stage actually becoming Recording.
+        if matches!(press_exit.post_stage_recording(), PostStageAction::StopReleasePending) {
+            tracing::info!(
+                "on_hotkey_pressed: release arrived just before stage became Recording \
+                 (id={press_id}) - stopping immediately"
+            );
+            crate::diagnostics::breadcrumbs::sites::release_pending_applied();
+            // stop_recording takes stop_lock itself — must drop this
+            // guard first to avoid deadlocking on our own lock.
+            drop(_start_guard);
+            self.stop_recording(StopReason::ReleasePending).await;
+            return;
+        }
+
+        // T3 r2 review finding N3: overlay.show() + poller spawn run
+        // INSIDE the stop_lock-held critical section (guard dropped only
+        // at the very end of this function) — previously the guard was
+        // dropped here, and a release that acquired stop_lock in that gap
+        // would finalize the recording, after which this code would still
+        // show "Recording" and spawn a poller for a now-dead recorder.
+        // Safe: the poller task never takes stop_lock, and stop_recording
+        // only takes polling_cancel/overlay while it already holds
+        // stop_lock, so holding it here too cannot invert any lock order
+        // (verified in T3 r1 review scrutiny (a)/(b)).
         if config.overlay.enabled {
             tracing::info!("on_hotkey_pressed: about to acquire overlay lock");
             let overlay_guard = self.overlay.lock().await;
@@ -454,27 +568,39 @@ impl RecordingCoordinator {
         } else {
             tracing::info!("on_hotkey_pressed: overlay disabled, returning");
         }
+        drop(_start_guard);
     }
 
     pub async fn on_hotkey_released(&self) {
         crate::diagnostics::breadcrumbs::sites::hotkey_released();
         // Toggle mode (#3): a release does nothing on its own — the
-        // user has to press again to stop. Skip even the debounce-cancel
-        // path so a short tap counts as a 'start' (handled when the
-        // press itself completes).
+        // user has to press again to stop. Releases never touch
+        // `press_release` in toggle mode either — that machine only
+        // matters for hold-mode's press/release ordering.
         let mode_config = load_config_from_app(&self.app);
         if mode_config.hotkey_mode == "toggle" {
             tracing::debug!("on_hotkey_released: toggle mode — ignoring release");
             return;
         }
 
-        // If a press is still inside its debounce window, cancel it: the
-        // user lifted the key before the hold threshold so we never wanted
-        // to start recording in the first place.
-        if let Some((_id, token)) = self.pending_press.lock().await.take() {
-            token.cancel();
-            tracing::info!("on_hotkey_released: cancelled pending press (short hold)");
-            return;
+        // Plan §3 Layer 0(a): tell the ordering machine a release happened.
+        // If a press is currently in flight, it owns responding to this
+        // (via its own next checkpoint) — return without touching
+        // `stop_recording` at all, there's nothing stage-visible to stop
+        // yet. Otherwise this is either a genuinely spurious release or
+        // the normal release of an already-fully-started recording;
+        // proceed exactly as if this machine didn't exist.
+        let action = lock_press_release(&self.press_release).release_arrived();
+        match action {
+            ReleaseAction::ArmReleasePending => {
+                crate::diagnostics::breadcrumbs::sites::release_pending_armed();
+                tracing::debug!(
+                    "on_hotkey_released: a press is in flight — armed release_pending, \
+                     it will self-abort at its next checkpoint"
+                );
+                return;
+            }
+            ReleaseAction::ProceedRelease => {}
         }
 
         self.stop_recording(StopReason::Release).await;
@@ -583,15 +709,30 @@ impl RecordingCoordinator {
                             release_config.audio_feedback,
                             &crate::audio_feedback::RodioPlayer,
                         );
+                        // T3 r2 review findings N1/N2: do the
+                        // coordinator-cancel and overlay-hide that used to
+                        // happen inside/after handle_error's 2s sleep WHILE
+                        // STILL HOLDING stop_lock. Stage is guaranteed
+                        // Recording here (stop_decision only reaches
+                        // Finalize/Discard, and thus this arm, when
+                        // stage==Recording), so coordinator.cancel() is
+                        // guaranteed to apply. Without this, a press racing
+                        // the 2s sleep could start recording #2 only to have
+                        // *its* stage cancelled by this stale error's
+                        // handle_error call, and *its* live overlay hidden
+                        // by this call — both reached via the guard being
+                        // dropped before those side effects used to run.
+                        self.coordinator.cancel();
+                        self.await_stage(Stage::Idle).await;
+                        self.overlay.lock().await.hide();
                         // recorder.stop() has already returned — nothing
                         // left to serialize against, and handle_error
                         // sleeps 2s; drop the lock first so a concurrent
                         // press/stop isn't queued behind that sleep for no
                         // reason (T3 r1 review, finding 2).
                         drop(_guard);
-                        self.handle_error(&e.to_string(), ErrorContext::Hotkey)
+                        self.handle_error(&e.to_string(), ErrorContext::Hotkey, false)
                             .await;
-                        self.overlay.lock().await.hide();
                     }
                 }
                 return;
@@ -690,7 +831,20 @@ impl RecordingCoordinator {
         }
     }
 
-    async fn handle_error(&self, error: &str, context: ErrorContext) {
+    /// `cancel_coordinator`: whether this call should itself run
+    /// `coordinator.cancel()`. Callers that have *already* cancelled (and
+    /// awaited the resulting stage transition) while still holding
+    /// `stop_lock` pass `false` (T3 r2 review findings N1/N2) so this
+    /// doesn't cancel a second time — harmless in isolation
+    /// (`coordinator.cancel()` is a no-op outside `Recording`), but doing
+    /// it here, after the lock is dropped and after a 2s sleep, is
+    /// precisely the window a concurrent press's *new* recording could be
+    /// wrongly cancelled in. Callers where stage can never be `Recording`
+    /// at all (e.g. `on_hotkey_pressed`'s start-error branch —
+    /// `coordinator.on_press()` hasn't been called yet) also pass `false`:
+    /// cancelling would always be a no-op there, so it's simply not done
+    /// rather than done pointlessly.
+    async fn handle_error(&self, error: &str, context: ErrorContext, cancel_coordinator: bool) {
         tracing::error!("{:?} error: {}", context, error);
         self.emit_error(error);
 
@@ -702,8 +856,10 @@ impl RecordingCoordinator {
         }
         self.emit_state(RecordingState::Error);
 
-        // Cancel coordinator so it returns to Idle from Recording.
-        self.coordinator.cancel();
+        if cancel_coordinator {
+            // Cancel coordinator so it returns to Idle from Recording.
+            self.coordinator.cancel();
+        }
 
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
@@ -713,10 +869,15 @@ impl RecordingCoordinator {
 
     /// Wait briefly for the Coordinator worker to apply a transition.
     /// Uses a deterministic poll loop with a tight bound (max 100ms).
-    async fn await_stage(&self, expected: Stage) {
+    /// Returns whether `expected` was actually reached in time — callers
+    /// that need to distinguish a genuine transition from a timeout (e.g.
+    /// the C1 orphan-recorder check in `on_hotkey_pressed`) inspect the
+    /// return value; callers that don't care simply discard it, exactly as
+    /// they did when this returned `()`.
+    async fn await_stage(&self, expected: Stage) -> bool {
         for _ in 0..50 {
             if self.coordinator.current_stage() == expected {
-                return;
+                return true;
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
         }
@@ -725,6 +886,7 @@ impl RecordingCoordinator {
             expected,
             self.coordinator.current_stage()
         );
+        false
     }
 }
 

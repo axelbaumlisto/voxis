@@ -421,6 +421,10 @@ pub mod sites {
     static RECORDING_STOP_CANCEL_LAST_MS: AtomicU64 = AtomicU64::new(0);
     static RECORDING_STOP_RACE_LOST_LAST_MS: AtomicU64 = AtomicU64::new(0);
     static RECORDING_STOP_RECOVER_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static PRESS_IGNORED_IN_FLIGHT_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static RELEASE_PENDING_ARMED_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static RELEASE_PENDING_APPLIED_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static PRESS_START_ORPHAN_RECOVERED_LAST_MS: AtomicU64 = AtomicU64::new(0);
 
     pub fn tauri_build_pre() {
         sticky("tauri:build:pre");
@@ -536,6 +540,42 @@ pub mod sites {
     /// visible trace.
     pub fn recording_stop_recover() {
         rolling_rate_limited(&RECORDING_STOP_RECOVER_LAST_MS, "recording:stop:recover");
+    }
+
+    /// `PressReleaseMachine::press_enter` refused a press because another
+    /// one was already in flight — plan §1.4 "single-flight start" (the
+    /// 6-parallel-presses-all-started incident, Aug 18).
+    pub fn press_ignored_in_flight() {
+        rolling_rate_limited(&PRESS_IGNORED_IN_FLIGHT_LAST_MS, "recording:press_ignored_in_flight");
+    }
+
+    /// `on_hotkey_released` found a press in flight and armed
+    /// `release_pending` instead of calling `stop_recording` directly —
+    /// the press will consume it at its own next checkpoint (plan §3
+    /// Layer 0(a)).
+    pub fn release_pending_armed() {
+        rolling_rate_limited(&RELEASE_PENDING_ARMED_LAST_MS, "recording:release_pending_armed");
+    }
+
+    /// A press checkpoint ((ii) pre_start or (iii) post_stage_recording)
+    /// found `release_pending` set and aborted/stopped instead of
+    /// starting/continuing — this is the actual fix for the plan §1.1 root
+    /// cause (release arrived during the permission check, or in the
+    /// residual window before the stage became `Recording`).
+    pub fn release_pending_applied() {
+        rolling_rate_limited(&RELEASE_PENDING_APPLIED_LAST_MS, "recording:release_pending_applied");
+    }
+
+    /// `on_hotkey_pressed` found `is_recording()==true` but the
+    /// coordinator's stage never reached `Recording` (its own internal
+    /// 30ms press-debounce dropped the Press after `recorder.start()`
+    /// already returned `Ok`) and stopped the orphaned recorder directly
+    /// (plan §1.4 / T3 r1 review carry-forward C1).
+    pub fn press_start_orphan_recovered() {
+        rolling_rate_limited(
+            &PRESS_START_ORPHAN_RECOVERED_LAST_MS,
+            "recording:press_start_orphan_recovered",
+        );
     }
 }
 
