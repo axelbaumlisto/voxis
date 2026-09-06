@@ -1,25 +1,98 @@
-# macOS Code Signing + Notarization — TODO / Scope
+# macOS Code Signing + Notarization
 
-> **Status: IMPLEMENTED (2026-08).** The Apple Developer Program membership +
-> a *Developer ID Application* certificate now exist, and the signed/notarized
-> DMG lane is live in `scripts/macos-vm.sh` (`build-gui` / `notary-finish`),
-> wired into `.forgejo/workflows/release.yml`, and documented in the
-> `voxis-deploy` skill (see its "Signed/notarized DMG lane" section).
->
-> Credentials follow the clipshot convention and stay OUTSIDE the repo: the
-> host env file `~/secrets/apple-dev/notary.env` (on spex:
-> `/home/spex/secrets/apple-dev/notary.env`) supplies `SIGNING_IDENTITY` +
-> `APPLE_API_ISSUER`; the Developer ID cert/key live in the macOS VM login
-> keychain and the App Store Connect API `.p8` lives in the VM at
-> `~/.appstoreconnect/private_keys/`. When they are absent the lane degrades to
-> an ad-hoc unsigned `.app`/DMG (never blocks a release).
->
-> The sections below are retained as the historical research/scoping record
-> (Apple enrollment terms, secret inventory, insertion points, effort estimate)
-> that the implementation was built from. Where they describe secrets as
-> "Forgejo Actions secrets", the actual implementation instead keeps them in
-> the VM + a host env file (the clipshot pattern), which avoids putting the
-> `.p12`/`.p8` bytes through the CI secret store at all.
+> **Status: IMPLEMENTED in CI (2026-09-07).** An Apple Developer Program
+> membership, a *Developer ID Application* certificate, and an App Store
+> Connect API key now exist and are wired into `scripts/macos-vm.sh`'s
+> `build-gui` lane. `.forgejo/workflows/release.yml` calls it on every tagged
+> release. This section documents the CURRENT implementation; §1–§6 below are
+> kept as **historical research** (moved under "History") from before the
+> account existed — still useful background (the container-format reasoning
+> in the old §3 precondition note is exactly what `build-gui` implements),
+> but no longer the plan to follow.
+
+## Current implementation
+
+- **Entry point:** `scripts/macos-vm.sh build-gui` (new; `build` — the
+  existing unsigned bare-binary lane that feeds the Homebrew tarball via
+  `scripts/ci/update-homebrew.sh` — is unchanged). Called from
+  `.forgejo/workflows/release.yml`'s "build macOS (best-effort — KVM VM)"
+  step, `continue-on-error: true`, alongside the existing `build` call.
+- **What it produces:** `artifacts/Voxis_<version>_aarch64.dmg` — a
+  Developer-ID-signed, hardened-runtime, notarized-and-stapled DMG
+  containing `Voxis.app` (built via `cargo tauri build --target
+  aarch64-apple-darwin --bundles app` inside the VM, then packed with
+  `hdiutil` — Tauri's own `--bundles dmg` fails headless).
+- **Where the secrets live** (paths only — no values in this repo or in any
+  log):
+  - Host (spex): `~/secrets/apple-dev/notary.env` — `SIGNING_IDENTITY`,
+    `APPLE_API_ISSUER`, `APPLE_API_KEY_ID`, `APPLE_API_KEY_PATH`. Same file
+    format/location the sibling `clipshot` project's `scripts/macos-vm.sh`
+    already reads (`APPLE_NOTARY_ENV`, override-able via env var) — one
+    secrets file shared across projects on this host, not duplicated.
+  - Inside the macOS build VM (`~/voxis-macos-vm/mac_hdd_ng.prepared.img`,
+    voxis's own clone — see "VM image ownership + host lock" below): the
+    `Developer ID Application` certificate lives in `login.keychain`
+    (unlocked at build time with the VM's own `VM_PASS`); the App Store
+    Connect API key `.p8` lives at `~/.appstoreconnect/private_keys/AuthKey_*.p8`.
+- **Unsigned/ad-hoc fallback:** if `SIGNING_IDENTITY`/`APPLE_API_ISSUER` are
+  unset on the host, or the identity/`.p8` key are missing in the VM,
+  `build-gui` still produces and ships an **ad-hoc-signed** `.app`/DMG (from
+  `tauri.conf.json`'s `bundle.macOS.signingIdentity: "-"` — Apple's ad-hoc
+  sentinel) rather than failing the release. Users see the Gatekeeper
+  "cannot verify the developer" warning in that case (`xattr -cr` /
+  right-click → Open).
+- **Slow Apple notarization queue:** `build-gui` polls with a bounded
+  `NOTARY_WAIT` (default 1800s). If the queue hasn't accepted by then, it
+  ships the **signed-but-unstapled** DMG immediately (Gatekeeper still
+  passes once Apple accepts online) and records the submission in
+  `artifacts/.notary-pending`. Finish later with
+  `scripts/macos-vm.sh notary-finish` — waits for `Accepted`, staples the
+  `.app` and a freshly rebuilt DMG, re-emits it at the same local path. In CI
+  the *unstapled* DMG was already uploaded to the Forgejo/GitHub release, so
+  after `notary-finish` completes, re-upload the re-emitted DMG to that
+  release **manually** (`gh release upload --clobber` / the Forgejo release
+  assets API) — do this **before** the next release build runs, since `build`/
+  `build-gui` both wipe `~/voxis` (and with it the `.app` that `notary-finish`
+  needs) in the VM on their next invocation.
+  `Invalid`/`Rejected` always hard-fails `build-gui` (a real signing problem,
+  not a queue delay) rather than silently shipping unsigned.
+- **VM image ownership + host lock:** the macOS build VM used to mount
+  clipshot's prepared disk image directly (read-write) — two QEMU processes
+  on one qcow2 corrupted a clipshot release (v0.8.77, 2026-09-07). voxis now
+  clones its **own** copy via `scripts/macos-vm.sh clone-image`
+  (`~/voxis-macos-vm/mac_hdd_ng.prepared.img`, ~38 GB, one-time; the
+  Developer ID cert and API key are already inside the cloned qcow2, no
+  extra copy step) and `cmd_naked`/`build`/`build-gui` refuse to run
+  ("run `clone-image` first") if that clone is missing — they never
+  silently fall back to clipshot's image. Independently, **even without a
+  shared disk** two 8 GB-RAM/4-core macOS VMs on the same host still starve
+  each other's KVM/CPU time, so `scripts/macos-vm.sh` also takes a
+  **host-wide** `flock` (`/home/spex/.macos-vm.lock` by default, both
+  voxis's and clipshot's copies of the script point at the same path) held
+  for the container's entire lifetime (not just around `docker run -d`,
+  which returns immediately) via a detached background holder process that
+  polls `docker ps` and exits — releasing the lock — once the container is
+  gone. A contending run fails fast with a message naming which container
+  currently holds it.
+- **`src-tauri/tauri.conf.json`**: `bundle.macOS.signingIdentity` is `"-"`
+  (ad-hoc), not a named identity — the named `Developer ID Application`
+  signing happens in `macos-vm.sh` *after* `cargo tauri build` produces the
+  `.app`, overwriting the ad-hoc signature. A literal identity name in
+  `tauri.conf.json` (the previous `"Voxis Dev"`, which doesn't exist in any
+  keychain) would break local `cargo tauri build`/`bun run tauri build` for
+  every contributor; `"-"` keeps local builds working everywhere.
+
+---
+
+## History (pre-implementation research, kept for reference)
+
+> Everything below this line was written **before** the Apple Developer
+> account existed, as scoping/research for a future implementer. It is
+> preserved because the reasoning (esp. the container-format precondition in
+> the old §3) is still accurate and matches what `build-gui` above actually
+> does — but treat the concrete secret names/insertion-point line numbers as
+> historical, not current; see "Current implementation" above for what's
+> actually wired up today.
 
 This document was written after verifying the *current* requirements against
 Apple's live enrollment page, the Tauri v2 macOS signing documentation, and

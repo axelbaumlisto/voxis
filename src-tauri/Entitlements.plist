@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Hardened Runtime (enabled via codesign's runtime option in
+         scripts/macos-vm.sh cmd_build_gui) gates access to protected
+         resources. Without these two entries a Developer ID signed and
+         notarized Voxis.app silently cannot record audio and cannot send
+         the Apple Event that triggers the Accessibility permission prompt
+         (errAEEventNotPermitted -1743), even though the app worked
+         unsigned or ad-hoc signed. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+</dict>
+</plist>

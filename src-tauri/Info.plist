@@ -4,5 +4,7 @@
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Voxis requires microphone access to record voice for transcription</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Voxis sends Apple Events to System Events to prompt for the Accessibility permission needed for auto-typing transcribed text</string>
 </dict>
 </plist>

@@ -207,37 +207,45 @@ jobs:
 
       - name: build macOS (best-effort — KVM VM)
         continue-on-error: true
-        timeout-minutes: 90
-        env:
-          # Developer ID signing + notarization config lives OUTSIDE the repo.
-          # scripts/macos-vm.sh sources this to learn SIGNING_IDENTITY +
-          # APPLE_API_ISSUER; the .p8 key + cert live in the macOS VM itself.
-          # Absent file => ad-hoc unsigned .app/DMG (today's behavior, xattr -cr
-          # needed on install). Default path is ~/secrets/apple-dev/notary.env.
-          APPLE_NOTARY_ENV: /home/spex/secrets/apple-dev/notary.env
+        timeout-minutes: 150
         run: |
           set -uo pipefail
           cd /home/spex/work/voxis
-          PREPARED="$HOME/clipshot-macos-vm/mac_hdd_ng.prepared.img"
+          # voxis now owns its own VM disk clone (2026-09-07, see
+          # docs/MACOS_SIGNING_TODO.md "VM image ownership + host lock") —
+          # this must match scripts/macos-vm.sh's PREPARED default, not
+          # clipshot's source image, or this preflight check silently lies.
+          PREPARED="${VOXIS_MACOS_VM_DIR:-$HOME/voxis-macos-vm}/mac_hdd_ng.prepared.img"
           if [ ! -f "$PREPARED" ]; then
-            echo "⚠️ no prepared macOS VM image at $PREPARED — skipping macOS"
+            echo "⚠️ no voxis-owned prepared macOS VM image at $PREPARED — skipping macOS"
+            echo "   (run 'scripts/macos-vm.sh clone-image' once on this host first)"
             exit 0
           fi
           if [ ! -e /dev/kvm ]; then
             echo "⚠️ /dev/kvm not available — skipping macOS"
             exit 0
           fi
-          # Signed/notarized GUI lane: produces artifacts/Voxis_<ver>_aarch64.dmg
-          # (Developer ID-signed + Apple-notarized + stapled when VM creds are
-          # present; ad-hoc unsigned otherwise). Advisory — never blocks release.
-          # build-gui emits both artifacts/Voxis_<ver>_aarch64.dmg AND the bare
-          # arm64 binary + tarball (for the existing Homebrew formula).
-          if bash scripts/macos-vm.sh build-gui; then
-            echo "=== macOS artifacts ==="
-            ls -lh artifacts/Voxis_*_aarch64.dmg artifacts/voxis-macos-arm64* 2>/dev/null
+          # Lane 1: bare binary (unsigned) — feeds the Homebrew tarball via
+          # scripts/ci/update-homebrew.sh, which pins voxis-macos-arm64.tar.gz.
+          if bash scripts/macos-vm.sh build; then
+            echo "=== macOS artifacts (arm64-only; ort has no x86_64-darwin prebuilt) ==="
+            ls -lh artifacts/voxis-macos-* 2>/dev/null
+            tar -C artifacts -czf artifacts/voxis-macos-arm64.tar.gz voxis-macos-arm64 2>/dev/null || true
             echo "✅ macOS build succeeded"
           else
             echo "⚠️ macOS build failed (advisory — not blocking release)"
+          fi
+          # Lane 2: signed + notarized .app -> DMG (GUI install path). Degrades
+          # to an ad-hoc-signed DMG if SIGNING_IDENTITY/the API key aren't
+          # present in the VM — see scripts/macos-vm.sh cmd_build_gui and
+          # docs/MACOS_SIGNING_TODO.md. Independent of Lane 1: its failure
+          # does not affect the tar.gz produced above.
+          if bash scripts/macos-vm.sh build-gui; then
+            echo "=== macOS signed GUI DMG ==="
+            ls -lh artifacts/Voxis_*_aarch64.dmg 2>/dev/null
+            echo "✅ macOS GUI build succeeded"
+          else
+            echo "⚠️ macOS GUI build failed (advisory — not blocking release; unsigned tar.gz above may still ship)"
           fi
           bash scripts/macos-vm.sh stop 2>/dev/null || true
 
@@ -389,6 +397,14 @@ jobs:
           echo "$fg_names" | grep -q '\.rpm$' || { echo "ERROR: Forgejo release missing .rpm"; exit 1; }
           echo "=== local artifacts (bare ls — no globs that could hide a mis-named file) ==="
           ls -la /home/spex/work/voxis/artifacts/ 2>/dev/null || true
+          # Signed macOS DMG is advisory/best-effort (KVM VM + notarization can
+          # legitimately fail or be skipped) — informational only, never gates
+          # the release the way deb/rpm do above.
+          if echo "$fg_names" | grep -q '\.dmg$'; then
+            echo "macOS signed DMG present in Forgejo release ✓"
+          else
+            echo "NOTE: no signed macOS DMG in this release (advisory — see docs/MACOS_SIGNING_TODO.md)"
+          fi
           echo "=== GitHub release probe (canonical download channel) ==="
           if command -v gh >/dev/null 2>&1; then
             # subshell unsets the Forgejo GITHUB_TOKEN so gh uses its own keyring
