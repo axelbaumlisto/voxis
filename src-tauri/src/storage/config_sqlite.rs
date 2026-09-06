@@ -121,6 +121,12 @@ impl ConfigSqliteStorage {
         config.hotkey_hold_ms =
             self.get_typed(&conn, "hotkey_hold_ms", config.hotkey_hold_ms);
 
+        // Recording guard (Layer 5)
+        config.silence_timeout_ms =
+            self.get_typed(&conn, "silence_timeout_ms", config.silence_timeout_ms);
+        config.max_recording_ms =
+            self.get_typed(&conn, "max_recording_ms", config.max_recording_ms);
+
         // Behavior
         config.auto_type = self.get_bool(&conn, "auto_type", config.auto_type);
         config.auto_enter = self.get_bool(&conn, "auto_enter", config.auto_enter);
@@ -273,6 +279,18 @@ impl ConfigSqliteStorage {
         // Hotkey
         self.set(&conn, "hotkey", &config.hotkey)?;
         self.set(&conn, "hotkey_hold_ms", &config.hotkey_hold_ms.to_string())?;
+
+        // Recording guard (Layer 5)
+        self.set(
+            &conn,
+            "silence_timeout_ms",
+            &config.silence_timeout_ms.to_string(),
+        )?;
+        self.set(
+            &conn,
+            "max_recording_ms",
+            &config.max_recording_ms.to_string(),
+        )?;
 
         // Behavior
         self.set(&conn, "auto_type", &config.auto_type.to_string())?;
@@ -578,6 +596,8 @@ mod tests {
             language: "ru".to_string(),
             hotkey: "ctrl+shift+r".to_string(),
             hotkey_hold_ms: 750,
+            silence_timeout_ms: 45_000,
+            max_recording_ms: 300_000,
             auto_type: false,
             auto_enter: true,
             typing_delay: 50,
@@ -613,6 +633,14 @@ mod tests {
         assert_eq!(
             loaded.hotkey_hold_ms, 750,
             "custom hotkey hold threshold must persist across save/load"
+        );
+        assert_eq!(
+            loaded.silence_timeout_ms, 45_000,
+            "silence_timeout_ms must persist across save/load (Layer 5 test 24)"
+        );
+        assert_eq!(
+            loaded.max_recording_ms, 300_000,
+            "max_recording_ms must persist across save/load (Layer 5 test 24)"
         );
         assert!(!loaded.auto_type);
         assert!(loaded.auto_enter);
@@ -978,5 +1006,35 @@ mod tests {
         // Don't save anything - should get default
         let loaded = storage.load().unwrap();
         assert_eq!(loaded.paste_shortcuts, "ctrl_shift_v");
+    }
+
+    #[test]
+    fn test_recording_guard_zero_disabled_round_trip() {
+        // Layer 5 test 24: `0` (disabled) must persist as-is across
+        // save/load, not fall back to the default via `get_typed`.
+        let file = NamedTempFile::new().unwrap();
+        let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
+
+        let config = AppConfig {
+            silence_timeout_ms: 0,
+            max_recording_ms: 0,
+            ..AppConfig::default()
+        };
+        storage.save(&config).unwrap();
+        let loaded = storage.load().unwrap();
+
+        assert_eq!(loaded.silence_timeout_ms, 0);
+        assert_eq!(loaded.max_recording_ms, 0);
+    }
+
+    #[test]
+    fn test_recording_guard_defaults_when_absent() {
+        let file = NamedTempFile::new().unwrap();
+        let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
+
+        // Don't save anything - should get defaults
+        let loaded = storage.load().unwrap();
+        assert_eq!(loaded.silence_timeout_ms, 60_000);
+        assert_eq!(loaded.max_recording_ms, 600_000);
     }
 }

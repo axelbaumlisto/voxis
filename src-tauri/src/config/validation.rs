@@ -38,6 +38,22 @@ fn validate_max(field: &str, value: u32, max: u32) -> Option<ValidationError> {
     })
 }
 
+/// Validate that a value is either `0` (a sentinel meaning "disabled") or
+/// within a range (min..=max). DRY: `validate_range` has no "0 = exempt"
+/// shape, and the recording-guard fields (`silence_timeout_ms`,
+/// `max_recording_ms`) both need it — one helper instead of duplicating
+/// the exemption check at each call site.
+/// Returns Some(ValidationError) if invalid, None if valid.
+fn validate_zero_or_range(field: &str, value: u32, min: u32, max: u32) -> Option<ValidationError> {
+    (value != 0 && (value < min || value > max)).then(|| ValidationError {
+        field: field.into(),
+        message: format!(
+            "{} must be 0 (disabled) or {}-{}, got {}",
+            field, min, max, value
+        ),
+    })
+}
+
 /// Check if hotkey string is valid.
 ///
 /// Supports:
@@ -117,6 +133,20 @@ pub fn validate_config(config: &AppConfig) -> Vec<ValidationError> {
         config.dictionary.learning_threshold,
         1,
         100,
+    ));
+
+    // Recording guard (Layer 5): 0 = disabled, else must be in range.
+    errors.extend(validate_zero_or_range(
+        "silence_timeout_ms",
+        config.silence_timeout_ms,
+        5_000,
+        300_000,
+    ));
+    errors.extend(validate_zero_or_range(
+        "max_recording_ms",
+        config.max_recording_ms,
+        10_000,
+        super::MAX_RECORDING_MS_CEILING,
     ));
 
     // Hotkey validation (custom logic)
@@ -298,6 +328,84 @@ mod tests {
         let err = result.unwrap();
         assert_eq!(err.field, "field");
         assert!(err.message.contains("101"));
+    }
+
+    #[test]
+    fn test_validate_zero_or_range_zero_is_exempt() {
+        assert!(validate_zero_or_range("field", 0, 5_000, 300_000).is_none());
+    }
+
+    #[test]
+    fn test_validate_zero_or_range_in_range_valid() {
+        assert!(validate_zero_or_range("field", 5_000, 5_000, 300_000).is_none()); // min edge
+        assert!(validate_zero_or_range("field", 300_000, 5_000, 300_000).is_none()); // max edge
+        assert!(validate_zero_or_range("field", 60_000, 5_000, 300_000).is_none());
+    }
+
+    #[test]
+    fn test_validate_zero_or_range_out_of_range_invalid() {
+        assert!(validate_zero_or_range("field", 4_999, 5_000, 300_000).is_some());
+        assert!(validate_zero_or_range("field", 300_001, 5_000, 300_000).is_some());
+    }
+
+    // =========================================================================
+    // Layer 5 test 24: recording-guard config validation
+    // =========================================================================
+
+    #[test]
+    fn test_silence_timeout_ms_zero_disabled_is_valid() {
+        let config = AppConfig {
+            silence_timeout_ms: 0,
+            ..AppConfig::default()
+        };
+        assert!(validate_config(&config).is_empty());
+    }
+
+    #[test]
+    fn test_silence_timeout_ms_below_min_rejected() {
+        assert_single_error(|c| c.silence_timeout_ms = 4_999, "silence_timeout_ms");
+    }
+
+    #[test]
+    fn test_silence_timeout_ms_above_max_rejected() {
+        assert_single_error(|c| c.silence_timeout_ms = 300_001, "silence_timeout_ms");
+    }
+
+    #[test]
+    fn test_silence_timeout_ms_in_range_valid() {
+        let config = AppConfig {
+            silence_timeout_ms: 60_000,
+            ..AppConfig::default()
+        };
+        assert!(validate_config(&config).is_empty());
+    }
+
+    #[test]
+    fn test_max_recording_ms_zero_disabled_is_valid() {
+        let config = AppConfig {
+            max_recording_ms: 0,
+            ..AppConfig::default()
+        };
+        assert!(validate_config(&config).is_empty());
+    }
+
+    #[test]
+    fn test_max_recording_ms_below_min_rejected() {
+        assert_single_error(|c| c.max_recording_ms = 9_999, "max_recording_ms");
+    }
+
+    #[test]
+    fn test_max_recording_ms_above_ceiling_rejected() {
+        assert_single_error(|c| c.max_recording_ms = 780_001, "max_recording_ms");
+    }
+
+    #[test]
+    fn test_max_recording_ms_in_range_valid() {
+        let config = AppConfig {
+            max_recording_ms: 600_000,
+            ..AppConfig::default()
+        };
+        assert!(validate_config(&config).is_empty());
     }
 
     #[test]

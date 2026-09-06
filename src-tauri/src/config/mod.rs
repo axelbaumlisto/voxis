@@ -273,6 +273,19 @@ pub struct AppConfig {
     #[serde(default = "default_min_recording_ms")]
     pub min_recording_ms: u32,
 
+    /// Recording guard (Layer 5): auto-stop after this many ms of
+    /// near-continuous silence. `0` disables the silence guard. See
+    /// `DEFAULT_SILENCE_TIMEOUT_MS`.
+    #[serde(default = "default_silence_timeout_ms")]
+    pub silence_timeout_ms: u32,
+
+    /// Recording guard (Layer 5): auto-stop after this many ms of
+    /// recording regardless of silence. `0` disables the config-level
+    /// cap (an absolute hard-coded backstop still applies). See
+    /// `DEFAULT_MAX_RECORDING_MS`.
+    #[serde(default = "default_max_recording_ms")]
+    pub max_recording_ms: u32,
+
     // Behavior
     #[serde(default = "default_true")]
     pub auto_type: bool,
@@ -414,6 +427,8 @@ impl Default for AppConfig {
             hotkey: DEFAULT_HOTKEY.into(),
             hotkey_hold_ms: DEFAULT_HOTKEY_HOLD_MS,
             min_recording_ms: DEFAULT_MIN_RECORDING_MS,
+            silence_timeout_ms: DEFAULT_SILENCE_TIMEOUT_MS,
+            max_recording_ms: DEFAULT_MAX_RECORDING_MS,
             auto_type: true,
             auto_enter: false,
             typing_delay: DEFAULT_TYPING_DELAY,
@@ -469,6 +484,14 @@ fn default_hotkey_hold_ms() -> u32 {
 
 fn default_min_recording_ms() -> u32 {
     DEFAULT_MIN_RECORDING_MS
+}
+
+fn default_silence_timeout_ms() -> u32 {
+    DEFAULT_SILENCE_TIMEOUT_MS
+}
+
+fn default_max_recording_ms() -> u32 {
+    DEFAULT_MAX_RECORDING_MS
 }
 
 fn default_hotkey_mode() -> String {
@@ -609,6 +632,28 @@ mod tests {
         assert!(!config.first_run_completed);
         // T-B2 · shortcut_bindings seeded with 2 defaults.
         assert_eq!(config.shortcut_bindings.len(), 2);
+        // Layer 5 · recording guard defaults (silence-watchdog plan).
+        assert_eq!(config.silence_timeout_ms, 60_000);
+        assert_eq!(config.max_recording_ms, 600_000);
+    }
+
+    #[test]
+    fn test_recording_guard_defaults_from_empty_json() {
+        // Layer 5 test 24: defaults must also hold via serde `#[serde(default)]`
+        // (not just `AppConfig::default()`), matching the `hotkey_hold_ms` pattern.
+        let config: AppConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.silence_timeout_ms, 60_000);
+        assert_eq!(config.max_recording_ms, 600_000);
+    }
+
+    #[test]
+    fn test_recording_guard_zero_means_disabled_via_serde() {
+        // Layer 5 test 24: `0` must parse through untouched (disabled), not be
+        // coerced back to the default by serde.
+        let json = r#"{"silence_timeout_ms": 0, "max_recording_ms": 0}"#;
+        let config: AppConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.silence_timeout_ms, 0);
+        assert_eq!(config.max_recording_ms, 0);
     }
 
     #[test]

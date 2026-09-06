@@ -132,6 +132,55 @@ pub const DEFAULT_HOTKEY_HOLD_MS: u32 = 300;
 /// press-and-hold overlay.
 pub const DEFAULT_MIN_RECORDING_MS: u32 = 300;
 
+/// Recording guard (Layer 5): auto-stop when the mic has been silent for
+/// this long, so a lost hotkey-release (see press/release race,
+/// `orchestrator::recording`) doesn't leave the recorder running
+/// indefinitely. `0` disables the silence guard.
+pub const DEFAULT_SILENCE_TIMEOUT_MS: u32 = 60_000;
+
+/// Recording guard (Layer 5): absolute wall-clock ceiling on one
+/// recording, independent of silence detection — the deterministic
+/// backstop against an unbounded in-memory sample buffer. `0` disables
+/// the config-level cap (the hard-coded `ABS_MAX_RECORDING_MS` backstop
+/// still applies).
+pub const DEFAULT_MAX_RECORDING_MS: u32 = 600_000;
+
+/// Upper bound accepted for `max_recording_ms`: 25 MiB (Groq's
+/// transcription upload limit) / 32 000 B/s (16 kHz, 16-bit mono WAV)
+/// ≈ 819 s, with a small safety margin so a capture at the ceiling still
+/// clears the API's size check after downsampling.
+pub const MAX_RECORDING_MS_CEILING: u32 = 780_000;
+
+/// Hard backstop applied to the raw sample buffer when
+/// `max_recording_ms == 0` (config-level cap disabled). Independent of
+/// user config so the buffer can never grow unbounded even with a
+/// misconfigured/zeroed setting.
+pub const ABS_MAX_RECORDING_MS: u32 = 1_800_000;
+
+/// Recording guard (Layer 5): peak-RMS threshold (linear amplitude,
+/// pre-boost) below which a poll counts as "silent". ≈ -46 dBFS.
+/// Tunable; not empirically validated against real hardware noise
+/// floors yet.
+pub const SILENCE_RMS: f32 = 0.005;
+
+/// Recording guard (Layer 5): how often the guard polls the recorder's
+/// peak-RMS signal.
+pub const GUARD_POLL_MS: u32 = 250;
+
+/// Recording guard (Layer 5): sliding window length used to decide
+/// "mostly silent" — avoids a single loud poll (keyboard click) resetting
+/// the whole silence counter.
+pub const SILENCE_WINDOW_MS: u32 = 10_000;
+
+/// Recording guard (Layer 5): fraction of polls in `SILENCE_WINDOW_MS`
+/// that must be below `SILENCE_RMS` for the window to count as silent.
+pub const SILENCE_FRACTION: f32 = 0.80;
+
+/// Recording guard (Layer 5): lead time before the silence-timeout stop
+/// at which a warning beep plays, so the user has a chance to keep
+/// talking before the recording is cut.
+pub const PRE_CUTOFF_BEEP_MS: u32 = 3_000;
+
 /// Default typing delay in milliseconds.
 pub const DEFAULT_TYPING_DELAY: u32 = 12;
 

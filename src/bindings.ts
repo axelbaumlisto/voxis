@@ -840,7 +840,20 @@ hotkey_hold_ms?: number;
  * recording is dropped without hitting the API. See
  * `DEFAULT_MIN_RECORDING_MS`.
  */
-min_recording_ms?: number; auto_type?: boolean; auto_enter?: boolean; typing_delay?: number; notifications?: boolean; backend?: string; debug?: boolean; audio_device?: string; history_enabled?: boolean; history_days?: number; active_provider?: string; cloud_provider?: string; local_backend?: string; text_processing?: boolean; 
+min_recording_ms?: number; 
+/**
+ * Recording guard (Layer 5): auto-stop after this many ms of
+ * near-continuous silence. `0` disables the silence guard. See
+ * `DEFAULT_SILENCE_TIMEOUT_MS`.
+ */
+silence_timeout_ms?: number; 
+/**
+ * Recording guard (Layer 5): auto-stop after this many ms of
+ * recording regardless of silence. `0` disables the config-level
+ * cap (an absolute hard-coded backstop still applies). See
+ * `DEFAULT_MAX_RECORDING_MS`.
+ */
+max_recording_ms?: number; auto_type?: boolean; auto_enter?: boolean; typing_delay?: number; notifications?: boolean; backend?: string; debug?: boolean; audio_device?: string; history_enabled?: boolean; history_days?: number; active_provider?: string; cloud_provider?: string; local_backend?: string; text_processing?: boolean; 
 /**
  * Append a single trailing space to the output (after dictionary +
  * hallucination filter + optional LLM post-process). Prevents
