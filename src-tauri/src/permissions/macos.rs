@@ -7,7 +7,13 @@
 //! KISS: Uses std::process::Command for opening System Preferences (simple, reliable).
 
 use super::checker::{Permission, PermissionChecker, PermissionStatus};
-use std::process::Command;
+use objc2::ffi::NSInteger;
+use objc2::msg_send;
+use objc2::runtime::{AnyClass, AnyObject};
+use std::io::Read;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 // FFI bindings for IOKit HID access checking
 #[allow(non_camel_case_types)]
@@ -29,6 +35,185 @@ extern "C" {
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn AXIsProcessTrusted() -> bool;
+}
+
+// FFI binding for the native microphone-permission probe (plan Layer 0(b)).
+//
+// AVFoundation ships on every Mac (it backs Photos/QuickTime/Camera at the
+// OS level), so this framework link is always satisfiable — there is no
+// "AVFoundation missing" failure mode to guard against, only "the specific
+// class/selector we want isn't there" (handled below via `AnyClass::get`
+// returning `None` instead of the panicking `class!` macro).
+#[link(name = "AVFoundation", kind = "framework")]
+extern "C" {
+    // `NSString * const AVMediaTypeAudio` — a read-only global owned by the
+    // framework, initialized before any Rust code runs. We only ever read
+    // this pointer and hand it to `authorizationStatusForMediaType:`, never
+    // mutate or free it, so referencing it as `*const AnyObject` (the raw
+    // untyped `id` representation) needs no `objc2-foundation` dependency.
+    static AVMediaTypeAudio: *const AnyObject;
+}
+
+/// Map a raw `AVAuthorizationStatus` (AVFoundation/AVCaptureDevice.h) to our
+/// platform-neutral `PermissionStatus`.
+///
+/// ```text
+/// NotDetermined = 0  -> Unknown  (no decision recorded yet; must NOT block
+///                                 recorder.start() — see PermissionStatus::
+///                                 blocks_start and plan Layer 0(b) point 4)
+/// Restricted    = 1  -> Denied   (parental controls / MDM; same as Denied
+///                                 from the caller's point of view)
+/// Denied        = 2  -> Denied
+/// Authorized    = 3  -> Granted
+/// ```
+/// Any other raw value (a future OS adding a case we don't know about, or a
+/// defensive catch-all) maps to `Unknown` rather than panicking or assuming
+/// either extreme.
+fn map_av_authorization_status(raw: NSInteger) -> PermissionStatus {
+    match raw {
+        3 => PermissionStatus::Granted,
+        1 | 2 => PermissionStatus::Denied,
+        _ => PermissionStatus::Unknown,
+    }
+}
+
+/// Native microphone-permission probe: a single synchronous Objective-C
+/// class-method call, no subprocess. Measured on this machine: ~41ms cold
+/// (first call in the process — AVFoundation appears to do real work here,
+/// not just a symbol/class lookup, likely a round-trip to the system media
+/// daemon for the authorization decision) and ~9ms warm. Neither is
+/// literally microseconds, but both are 10–100x faster than the osascript
+/// path this replaces (measured 0.24–5.38s, see plan §1.1) — small enough
+/// that it does not reopen the press/release race the plan is fixing.
+///
+/// Returns `None` if the `AVCaptureDevice` class cannot be found at runtime
+/// (would require a corrupted/ancient system install — practically never
+/// happens, but we check rather than assume) so the caller can fall back to
+/// the `osascript` path instead of crashing.
+fn check_microphone_native() -> Option<PermissionStatus> {
+    // `AnyClass::get` performs a real runtime lookup and returns `None` on
+    // a miss, unlike the `class!` macro (which panics / fails to link) — we
+    // want the graceful fallback path, not a crash.
+    let cls = AnyClass::get(c"AVCaptureDevice")?;
+
+    // SAFETY: `cls` is a valid, registered class (checked above).
+    // `AVMediaTypeAudio` is the framework's own constant, read-only and
+    // non-null on every shipping macOS version (declared in the `extern`
+    // block above; the link happens because AVFoundation is always
+    // available). `authorizationStatusForMediaType:` is a synchronous,
+    // side-effect-free class method — it only *reports* the current TCC
+    // decision and never itself prompts the user (only
+    // `requestAccessForMediaType:completionHandler:`, which we never call,
+    // can show a system dialog) — so calling it from any thread at any
+    // time is safe.
+    let raw: NSInteger = unsafe {
+        let media_type: *const AnyObject = AVMediaTypeAudio;
+        msg_send![cls, authorizationStatusForMediaType: media_type]
+    };
+    Some(map_av_authorization_status(raw))
+}
+
+/// Poll `child` with `try_wait` until it exits or `timeout` elapses;
+/// kills and reaps the child on timeout. Extracted from the osascript
+/// fallback so the bounded-wait behaviour itself is unit-testable without
+/// depending on AppleScript (see `test_wait_with_timeout_*` below).
+fn wait_with_timeout(
+    child: &mut std::process::Child,
+    timeout: Duration,
+) -> Option<std::process::ExitStatus> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait(); // reap so we don't leak a zombie
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+/// Fallback microphone probe when the native objc2 path is unavailable.
+/// Same AppleScript this file always used, but now bounded to 1s total
+/// (plan Layer 0(b) point 3): the whole reason this used to sit on the hot
+/// path was that a plain `.output()` call can block for seconds, which is
+/// exactly the window that lets a hotkey release race past `stop_recording`
+/// (plan §1.1). A timeout that returns `Unknown` is safe because
+/// `PermissionStatus::blocks_start` only refuses to start on `Denied`.
+fn check_microphone_osascript_fallback() -> PermissionStatus {
+    let mut child = match Command::new("osascript")
+        .args([
+            "-e",
+            r#"use framework "AVFoundation"
+            set authStatus to current application's AVCaptureDevice's authorizationStatusForMediaType:(current application's AVMediaTypeAudio)
+            if authStatus is 3 then
+                return "granted"
+            else if authStatus is 2 then
+                return "denied"
+            else
+                return "unknown"
+            end if"#,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return PermissionStatus::Unknown,
+    };
+
+    if wait_with_timeout(&mut child, Duration::from_secs(1)).is_none() {
+        tracing::warn!(
+            "osascript microphone permission probe timed out after 1s; treating as Unknown"
+        );
+        return PermissionStatus::Unknown;
+    }
+
+    let mut stdout_buf = Vec::new();
+    if let Some(mut out) = child.stdout.take() {
+        let _ = out.read_to_end(&mut stdout_buf);
+    }
+    let status_str = String::from_utf8_lossy(&stdout_buf).trim().to_lowercase();
+    if status_str.contains("granted") {
+        PermissionStatus::Granted
+    } else if status_str.contains("denied") {
+        PermissionStatus::Denied
+    } else {
+        PermissionStatus::Unknown
+    }
+}
+
+/// Sticky cache: once the OS reports the microphone permission as
+/// `Granted`, macOS does not silently revoke it out from under a running
+/// process (a mid-session revoke in System Settings delivers zeroed audio
+/// buffers instead — the Layer 2 silence guard is the correct backstop for
+/// that, not a re-probe here). `Denied`/`Unknown` are deliberately never
+/// cached: both can change at any time (user grants it in Settings; macOS
+/// finishes recording an initial decision) and re-probing costs only a few
+/// milliseconds once the native path is available (see
+/// `check_microphone_native`'s doc comment), so there is no real cost to
+/// always checking again.
+static MICROPHONE_GRANTED_CACHE: AtomicBool = AtomicBool::new(false);
+
+/// Cache-wrapping helper taking the cache and probe as parameters (rather
+/// than reaching for the module `static` directly) so the caching policy
+/// itself is unit-testable in isolation, with a fake probe and a
+/// test-local `AtomicBool`, without touching AVFoundation or spawning
+/// `osascript`.
+fn check_microphone_with(cache: &AtomicBool, probe: impl Fn() -> PermissionStatus) -> PermissionStatus {
+    if cache.load(Ordering::Acquire) {
+        return PermissionStatus::Granted;
+    }
+    let status = probe();
+    if status == PermissionStatus::Granted {
+        cache.store(true, Ordering::Release);
+    }
+    status
 }
 
 /// Check if Accessibility permission is granted.
@@ -106,41 +291,18 @@ impl MacOSPermissionChecker {
     }
 
     /// Check Microphone permission.
-    /// Uses AVCaptureDevice authorization status via swift command.
+    ///
+    /// Primary path: a native `AVCaptureDevice authorizationStatusForMediaType:`
+    /// call via objc2 — single-digit milliseconds, no subprocess (plan Layer
+    /// 0(b); see `check_microphone_native`'s doc comment for measured
+    /// numbers). Falls back to a bounded (1s) `osascript` probe only if the
+    /// class lookup somehow misses. Successful `Granted` results are cached
+    /// (see `MICROPHONE_GRANTED_CACHE`); `Denied`/`Unknown` are always
+    /// re-probed.
     fn check_microphone(&self) -> PermissionStatus {
-        // Check microphone by attempting to list audio input devices
-        // This approach uses AVFoundation via a swift inline script
-        let output = Command::new("osascript")
-            .args([
-                "-e",
-                r#"use framework "AVFoundation"
-                set authStatus to current application's AVCaptureDevice's authorizationStatusForMediaType:(current application's AVMediaTypeAudio)
-                if authStatus is 3 then
-                    return "granted"
-                else if authStatus is 2 then
-                    return "denied"
-                else
-                    return "unknown"
-                end if"#,
-            ])
-            .output();
-
-        match output {
-            Ok(result) => {
-                let stdout = String::from_utf8_lossy(&result.stdout);
-                let status_str = stdout.trim().to_lowercase();
-
-                if status_str.contains("granted") {
-                    PermissionStatus::Granted
-                } else if status_str.contains("denied") {
-                    PermissionStatus::Denied
-                } else {
-                    // Not determined or restricted
-                    PermissionStatus::Unknown
-                }
-            }
-            Err(_) => PermissionStatus::Unknown,
-        }
+        check_microphone_with(&MICROPHONE_GRANTED_CACHE, || {
+            check_microphone_native().unwrap_or_else(check_microphone_osascript_fallback)
+        })
     }
 
     /// Get the System Preferences URL for a permission type.
@@ -428,4 +590,141 @@ mod tests {
     }
 
     // Note: restart_app cannot be tested directly as it calls exit(0)
+
+    // ==========================================================================
+    // Layer 0(b): native microphone-permission probe
+    // ==========================================================================
+
+    #[test]
+    fn test_map_av_authorization_status_exhaustive() {
+        // AVAuthorizationStatus: NotDetermined=0, Restricted=1, Denied=2, Authorized=3
+        assert_eq!(
+            map_av_authorization_status(0),
+            PermissionStatus::Unknown,
+            "NotDetermined must fall through, not block start"
+        );
+        assert_eq!(map_av_authorization_status(1), PermissionStatus::Denied);
+        assert_eq!(map_av_authorization_status(2), PermissionStatus::Denied);
+        assert_eq!(map_av_authorization_status(3), PermissionStatus::Granted);
+    }
+
+    #[test]
+    fn test_map_av_authorization_status_out_of_range_is_unknown() {
+        assert_eq!(map_av_authorization_status(99), PermissionStatus::Unknown);
+        assert_eq!(map_av_authorization_status(-1), PermissionStatus::Unknown);
+    }
+
+    #[test]
+    fn test_permission_status_blocks_start_only_denied() {
+        assert!(!PermissionStatus::Granted.blocks_start());
+        assert!(PermissionStatus::Denied.blocks_start());
+        assert!(
+            !PermissionStatus::Unknown.blocks_start(),
+            "Unknown must fall through to recorder.start(), not block it"
+        );
+    }
+
+    #[test]
+    fn test_check_microphone_with_caches_granted() {
+        let cache = AtomicBool::new(false);
+        let calls = std::cell::Cell::new(0u32);
+        let probe = || {
+            calls.set(calls.get() + 1);
+            PermissionStatus::Granted
+        };
+        assert_eq!(
+            check_microphone_with(&cache, probe),
+            PermissionStatus::Granted
+        );
+        assert_eq!(
+            check_microphone_with(&cache, probe),
+            PermissionStatus::Granted
+        );
+        assert_eq!(
+            calls.get(),
+            1,
+            "probe must not be called again once cached Granted"
+        );
+    }
+
+    #[test]
+    fn test_check_microphone_with_never_caches_denied() {
+        let cache = AtomicBool::new(false);
+        let calls = std::cell::Cell::new(0u32);
+        let probe = || {
+            calls.set(calls.get() + 1);
+            PermissionStatus::Denied
+        };
+        check_microphone_with(&cache, probe);
+        check_microphone_with(&cache, probe);
+        assert_eq!(calls.get(), 2, "Denied must always re-probe, never cache");
+    }
+
+    #[test]
+    fn test_check_microphone_with_never_caches_unknown() {
+        let cache = AtomicBool::new(false);
+        let calls = std::cell::Cell::new(0u32);
+        let probe = || {
+            calls.set(calls.get() + 1);
+            PermissionStatus::Unknown
+        };
+        check_microphone_with(&cache, probe);
+        check_microphone_with(&cache, probe);
+        assert_eq!(calls.get(), 2, "Unknown must always re-probe, never cache");
+    }
+
+    #[test]
+    fn test_wait_with_timeout_kills_slow_child() {
+        // Hermetic: plain POSIX `sleep`, not osascript — verifies the
+        // bounded-wait loop itself, independent of AppleScript / AVFoundation.
+        let mut child = Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .expect("spawn sleep 5");
+        let start = Instant::now();
+        let result = wait_with_timeout(&mut child, Duration::from_millis(300));
+        let elapsed = start.elapsed();
+        assert!(result.is_none(), "expected timeout (None), got {result:?}");
+        assert!(
+            elapsed < Duration::from_millis(2000),
+            "wait_with_timeout took too long: {elapsed:?} (plan bound: < 2s)"
+        );
+    }
+
+    #[test]
+    fn test_wait_with_timeout_returns_status_for_fast_child() {
+        let mut child = Command::new("true").spawn().expect("spawn true");
+        let result = wait_with_timeout(&mut child, Duration::from_secs(1));
+        assert!(result.is_some(), "a fast child must not be reported as timed out");
+    }
+
+    #[test]
+    fn test_check_microphone_native_smoke() {
+        // Not gated by #[ignore]: this is a pure, side-effect-free class-method
+        // read (no permission prompt — see check_microphone_native's doc
+        // comment), safe to run unconditionally in CI on macOS runners.
+        //
+        // Bound is 200ms, not the originally-hoped "microseconds": measured
+        // on this machine the native path is ~41ms cold / ~9ms warm (see
+        // check_microphone_native's doc comment for why). 200ms keeps a
+        // wide margin against a loaded CI runner while still failing loudly
+        // if this regresses back to osascript-scale latency (0.24–5.38s
+        // measured for the fallback path, plan §1.1).
+        let start = Instant::now();
+        let result = check_microphone_native();
+        let elapsed = start.elapsed();
+        assert!(
+            result.is_some(),
+            "AVCaptureDevice must be found on any shipping macOS"
+        );
+        assert!(matches!(
+            result.unwrap(),
+            PermissionStatus::Granted | PermissionStatus::Denied | PermissionStatus::Unknown
+        ));
+        assert!(
+            elapsed.as_millis() < 200,
+            "native probe took {}ms, expected well under 200ms (no subprocess)",
+            elapsed.as_millis()
+        );
+    }
 }

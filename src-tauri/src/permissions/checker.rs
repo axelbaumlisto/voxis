@@ -61,6 +61,25 @@ impl PermissionStatus {
     pub fn is_granted(&self) -> bool {
         matches!(self, PermissionStatus::Granted)
     }
+
+    /// Whether this status should refuse to even attempt the
+    /// permission-gated action outright (e.g. starting the recorder).
+    ///
+    /// This is deliberately narrower than `!is_granted()`: only `Denied` —
+    /// an explicit, already-recorded refusal — should block. `Unknown`
+    /// (no decision recorded yet, or a probe that could not determine one)
+    /// must NOT block, because refusing to even try is exactly what
+    /// prevents the OS from ever recording a first decision, and because a
+    /// slow/bounded fallback probe timing out must not be indistinguishable
+    /// from a real denial. The action being gated (e.g. `cpal`'s device
+    /// open) already has its own accurate, synchronous failure path for a
+    /// genuine denial, so `Unknown` falling through costs nothing.
+    ///
+    /// See plan `silence-watchdog-and-crash-root-fix.md` §3 Layer 0(b) point
+    /// 4 and the T2-round review finding M8 that named this gap.
+    pub fn blocks_start(&self) -> bool {
+        matches!(self, PermissionStatus::Denied)
+    }
 }
 
 /// Trait for checking and requesting permissions (DIP).
