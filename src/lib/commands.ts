@@ -23,6 +23,9 @@ export interface AppConfig {
   language: string;
   hotkey: string;
   hotkey_hold_ms: number;
+  min_recording_ms: number;
+  silence_timeout_ms: number;
+  max_recording_ms: number;
   hotkey_mode: string;
   auto_type: boolean;
   auto_enter: boolean;

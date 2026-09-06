@@ -119,6 +119,28 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     descriptionKey: "settings.hotkeyHoldMsDesc",
   },
   {
+    key: "silence_timeout_ms",
+    label: "Silence auto-stop (ms)",
+    labelKey: "settings.silenceTimeoutMs",
+    widgetType: "input",
+    section: "Recording",
+    placeholder: "60000",
+    description:
+      "Stop recording automatically after this much continuous silence. 5000-300000; 0 = off.",
+    descriptionKey: "settings.silenceTimeoutMsDesc",
+  },
+  {
+    key: "max_recording_ms",
+    label: "Max recording length (ms)",
+    labelKey: "settings.maxRecordingMs",
+    widgetType: "input",
+    section: "Recording",
+    placeholder: "600000",
+    description:
+      "Hard cap on a single recording. 10000-780000 (~13 min, the transcription API limit); 0 = off (an absolute 30-min safety cap still applies).",
+    descriptionKey: "settings.maxRecordingMsDesc",
+  },
+  {
     key: "shortcut_bindings",
     label: "Shortcut bindings",
     labelKey: "settings.shortcutBindings",

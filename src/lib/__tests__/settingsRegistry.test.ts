@@ -416,6 +416,26 @@ describe("settingsRegistry.ts", () => {
       expect(values).toContain("x11");
       expect(values).toContain("wayland");
     });
+
+    it("silence_timeout_ms is an input in the Recording section (guard: 0 = off, 5000-300000)", () => {
+      const setting = SETTINGS_REGISTRY.find((s) => s.key === "silence_timeout_ms");
+      expect(setting).toBeDefined();
+      expect(setting?.widgetType).toBe("input");
+      expect(setting?.section).toBe("Recording");
+      expect(setting?.placeholder).toBe("60000");
+      expect(setting?.labelKey).toBe("settings.silenceTimeoutMs");
+      expect(setting?.descriptionKey).toBe("settings.silenceTimeoutMsDesc");
+    });
+
+    it("max_recording_ms is an input in the Recording section (guard: 0 = off, 10000-780000)", () => {
+      const setting = SETTINGS_REGISTRY.find((s) => s.key === "max_recording_ms");
+      expect(setting).toBeDefined();
+      expect(setting?.widgetType).toBe("input");
+      expect(setting?.section).toBe("Recording");
+      expect(setting?.placeholder).toBe("600000");
+      expect(setting?.labelKey).toBe("settings.maxRecordingMs");
+      expect(setting?.descriptionKey).toBe("settings.maxRecordingMsDesc");
+    });
   });
 
   // ===========================================================================
