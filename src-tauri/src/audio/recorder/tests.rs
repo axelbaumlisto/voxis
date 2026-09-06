@@ -1,5 +1,6 @@
 use super::*;
 use crate::audio::sync::lock_or_recover;
+use std::sync::Barrier;
 
 #[test]
 fn test_recorder_creation() {
@@ -178,4 +179,175 @@ fn test_apply_vad_filters_silence_with_threshold_vad() {
     let mut vad = ThresholdVad::new(0.1);
     let out = filter_with_vad(&silence, &mut vad, SILERO_FRAME_SAMPLES);
     assert!(out.is_empty(), "ThresholdVad must drop silent frames");
+}
+
+// ---------------------------------------------------------------------
+// T2: single-flight `stop()`, `mem::take` drain, peak-RMS wrapper, cap
+// wrapper (plan Layers 1/2/3 primitives).
+// ---------------------------------------------------------------------
+
+#[test]
+fn test_stopping_resets_after_not_recording_error() {
+    let recorder = AudioRecorder::new();
+    let result = recorder.stop();
+    assert!(matches!(result, Err(AudioError::NotRecording)));
+    assert!(
+        !recorder.is_stopping(),
+        "stopping must reset even on the NotRecording error path"
+    );
+}
+
+#[test]
+fn test_concurrent_stop_is_single_flight() {
+    let recorder = Arc::new(AudioRecorder::new());
+    match recorder.start("default") {
+        Ok(()) => {
+            // Let the cpal callback actually start writing samples.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+
+            let barrier = Arc::new(Barrier::new(2));
+            let (r1, b1) = (Arc::clone(&recorder), Arc::clone(&barrier));
+            let (r2, b2) = (Arc::clone(&recorder), Arc::clone(&barrier));
+            let h1 = std::thread::spawn(move || {
+                b1.wait();
+                r1.stop()
+            });
+            let h2 = std::thread::spawn(move || {
+                b2.wait();
+                r2.stop()
+            });
+            let res1 = h1.join().expect("thread 1 panicked");
+            let res2 = h2.join().expect("thread 2 panicked");
+
+            let ok_count = [&res1, &res2].iter().filter(|r| r.is_ok()).count();
+            assert_eq!(
+                ok_count, 1,
+                "exactly one concurrent stop() must succeed, got res1_ok={} res2_ok={}",
+                res1.is_ok(),
+                res2.is_ok()
+            );
+            let loser = if res1.is_err() { &res1 } else { &res2 };
+            assert!(
+                matches!(loser, Err(AudioError::StopInProgress)),
+                "the losing concurrent stop() must get StopInProgress specifically, got {:?}",
+                loser
+            );
+            assert!(
+                !recorder.is_stopping(),
+                "stopping flag must be false once both calls have returned"
+            );
+        }
+        Err(e) => {
+            // Headless CI: no input device available to actually race
+            // two stops against. Fall back to exercising the guard's
+            // reset-on-error path (mirrors
+            // test_stopping_resets_after_not_recording_error) — this
+            // recorder never started, so the CAS itself succeeds (nobody
+            // else holds the flag) and it's the is_recording check below
+            // it that returns NotRecording, not the StopInProgress branch.
+            println!(
+                "test_concurrent_stop_is_single_flight: no device ({e}), checking guard reset only"
+            );
+            let result = recorder.stop();
+            assert!(matches!(result, Err(AudioError::NotRecording)));
+            assert!(!recorder.is_stopping());
+        }
+    }
+}
+
+#[test]
+fn test_get_samples_drains_and_releases_capacity() {
+    let recorder = AudioRecorder::new();
+    {
+        let mut samples = lock_or_recover(&recorder.samples);
+        samples.extend_from_slice(&[0.1; 1000]);
+        assert!(samples.capacity() >= 1000);
+    }
+
+    let taken = recorder.get_samples();
+    assert_eq!(taken.len(), 1000);
+
+    let guard = lock_or_recover(&recorder.samples);
+    assert_eq!(guard.len(), 0);
+    assert_eq!(
+        guard.capacity(),
+        0,
+        "mem::take must release the old buffer's capacity, not just clear() it"
+    );
+}
+
+#[test]
+fn test_take_rms_peak_swaps_and_resets() {
+    let recorder = AudioRecorder::new();
+    recorder
+        .rms_peak_bits
+        .store(0.25f32.to_bits(), Ordering::SeqCst);
+
+    let taken = recorder.take_rms_peak();
+    assert!((taken - 0.25).abs() < 1e-6);
+
+    assert_eq!(
+        recorder.take_rms_peak(),
+        0.0,
+        "second call after draining must read back 0.0"
+    );
+}
+
+#[test]
+fn test_set_max_samples_and_cap_hit_default() {
+    let recorder = AudioRecorder::new();
+    assert!(!recorder.cap_hit(), "cap_hit must start false");
+    assert_eq!(
+        recorder.max_samples.load(Ordering::SeqCst),
+        usize::MAX,
+        "default cap must be unlimited so existing behavior is unchanged"
+    );
+
+    recorder.set_max_samples(1000);
+    assert_eq!(recorder.max_samples.load(Ordering::SeqCst), 1000);
+}
+
+#[test]
+fn test_start_resets_rms_peak_and_cap_hit() {
+    let recorder = AudioRecorder::new();
+    // Dirty the state that start() must reset. NOTE: `stopping` is
+    // deliberately NOT dirtied/checked here — start() must never clear
+    // it (see test_start_refused_while_stopping); only `StoppingGuard`
+    // may.
+    recorder
+        .rms_peak_bits
+        .store(0.5f32.to_bits(), Ordering::SeqCst);
+    recorder.cap_hit.store(true, Ordering::SeqCst);
+
+    // The resets happen unconditionally before device access, so this
+    // holds whether or not a real input device is available in CI.
+    let _ = recorder.start("totally_nonexistent_device_xyz_999");
+
+    assert_eq!(recorder.take_rms_peak(), 0.0, "start() must reset rms_peak");
+    assert!(!recorder.cap_hit(), "start() must reset cap_hit");
+
+    let _ = recorder.stop();
+}
+
+#[test]
+fn test_start_refused_while_stopping() {
+    // Fail-safe primitive-level enforcement of plan §4 test 6 ("press
+    // во время stopping → отказывает, не стартует поверх"): start()
+    // must refuse — not silently resume — while a stop() owns the flag,
+    // and must leave the flag untouched (only StoppingGuard's Drop may
+    // clear it).
+    let recorder = AudioRecorder::new();
+    recorder.stopping.store(true, Ordering::SeqCst);
+
+    let result = recorder.start("default");
+
+    assert!(
+        matches!(result, Err(AudioError::StopInProgress)),
+        "start() must refuse while a stop() is in flight, got {:?}",
+        result
+    );
+    assert!(
+        recorder.is_stopping(),
+        "start() must NOT clear `stopping` — only StoppingGuard's Drop may"
+    );
 }

@@ -17,6 +17,12 @@ pub enum AudioError {
     WavError(String),
     #[error("Recording not started")]
     NotRecording,
+    /// A `stop()` call is already in flight (single-flight guard CAS
+    /// failed). Distinct from `NotRecording` — the recorder IS recording
+    /// (or was, a moment ago); another caller just got there first. See
+    /// `AudioRecorder::stop()` / `StoppingGuard`.
+    #[error("Stop already in progress")]
+    StopInProgress,
     #[error("Recording thread error: {0}")]
     ThreadError(String),
 }
@@ -34,6 +40,7 @@ mod tests {
             (AudioError::StreamError("stream fail".into()), "stream fail"),
             (AudioError::WavError("wav fail".into()), "wav fail"),
             (AudioError::NotRecording, "not started"),
+            (AudioError::StopInProgress, "already in progress"),
             (AudioError::ThreadError("thread fail".into()), "thread fail"),
         ];
 

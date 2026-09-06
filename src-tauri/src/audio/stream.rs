@@ -3,7 +3,7 @@ use crate::audio::sync::lock_or_recover;
 use crate::audio::AudioError;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, StreamConfig};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -31,6 +31,9 @@ pub(crate) fn spawn_recording_thread(
     audio_boost: Arc<AtomicU32>,
     is_recording: Arc<AtomicBool>,
     is_ready: Arc<AtomicBool>,
+    rms_peak_bits: Arc<AtomicU32>,
+    max_samples: Arc<AtomicUsize>,
+    cap_hit: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     let stream_config: StreamConfig = config.clone().into();
     let channels = stream_config.channels as usize;
@@ -51,6 +54,9 @@ pub(crate) fn spawn_recording_thread(
             channels,
             &is_recording,
             &is_ready,
+            rms_peak_bits,
+            max_samples,
+            cap_hit,
         ) {
             Some(s) => s,
             None => return,
@@ -74,6 +80,9 @@ fn build_and_play_stream(
     channels: usize,
     is_recording: &AtomicBool,
     is_ready: &AtomicBool,
+    rms_peak_bits: Arc<AtomicU32>,
+    max_samples: Arc<AtomicUsize>,
+    cap_hit: Arc<AtomicBool>,
 ) -> Option<cpal::Stream> {
     // Wrap build_stream_for_format in catch_unwind to handle cpal panics
     // when microphone permission is denied
@@ -86,6 +95,9 @@ fn build_and_play_stream(
             audio_level.clone(),
             audio_boost.clone(),
             channels,
+            rms_peak_bits,
+            max_samples,
+            cap_hit,
         )
     }));
 
@@ -179,6 +191,7 @@ pub(crate) fn run_command_loop(
 
 /// Build audio stream for the detected sample format.
 /// KISS: Dispatches to generic build_stream based on format.
+#[allow(clippy::too_many_arguments)]
 fn build_stream_for_format(
     format: SampleFormat,
     device: &cpal::Device,
@@ -187,22 +200,50 @@ fn build_stream_for_format(
     audio_level: Arc<AtomicU32>,
     audio_boost: Arc<AtomicU32>,
     channels: usize,
+    rms_peak_bits: Arc<AtomicU32>,
+    max_samples: Arc<AtomicUsize>,
+    cap_hit: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, AudioError> {
     match format {
-        SampleFormat::F32 => {
-            build_stream::<f32>(device, config, samples, audio_level, audio_boost, channels)
-        }
-        SampleFormat::I16 => {
-            build_stream::<i16>(device, config, samples, audio_level, audio_boost, channels)
-        }
-        SampleFormat::U16 => {
-            build_stream::<u16>(device, config, samples, audio_level, audio_boost, channels)
-        }
+        SampleFormat::F32 => build_stream::<f32>(
+            device,
+            config,
+            samples,
+            audio_level,
+            audio_boost,
+            channels,
+            rms_peak_bits,
+            max_samples,
+            cap_hit,
+        ),
+        SampleFormat::I16 => build_stream::<i16>(
+            device,
+            config,
+            samples,
+            audio_level,
+            audio_boost,
+            channels,
+            rms_peak_bits,
+            max_samples,
+            cap_hit,
+        ),
+        SampleFormat::U16 => build_stream::<u16>(
+            device,
+            config,
+            samples,
+            audio_level,
+            audio_boost,
+            channels,
+            rms_peak_bits,
+            max_samples,
+            cap_hit,
+        ),
         _ => Err(AudioError::StreamError("Unsupported sample format".into())),
     }
 }
 
 /// Build audio stream for a specific sample type.
+#[allow(clippy::too_many_arguments)]
 fn build_stream<T>(
     device: &cpal::Device,
     config: &StreamConfig,
@@ -210,6 +251,9 @@ fn build_stream<T>(
     audio_level: Arc<AtomicU32>,
     audio_boost: Arc<AtomicU32>,
     channels: usize,
+    rms_peak_bits: Arc<AtomicU32>,
+    max_samples: Arc<AtomicUsize>,
+    cap_hit: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, AudioError>
 where
     T: cpal::Sample + cpal::SizedSample,
@@ -228,6 +272,9 @@ where
                     &mut samples_guard,
                     &audio_level,
                     &audio_boost,
+                    &rms_peak_bits,
+                    &max_samples,
+                    &cap_hit,
                 );
             },
             err_fn,
