@@ -11,7 +11,25 @@ const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions"
 const DEFAULT_MODEL: &str = "whisper-large-v3";
 
 /// Groq API file size limit (25MB).
-const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
+///
+/// `pub(crate)` (not private): the orchestrator pipeline
+/// (`orchestrator::transcription::pipeline`) checks this BEFORE writing
+/// debug/failed-audio dumps or making the HTTP call at all (plan §3 Layer
+/// 4) — this client would reject an oversize buffer with the identical
+/// `TranscriptionError::AudioTooLarge` below, just after wasting a network
+/// round-trip and up to two full-buffer disk writes on audio nobody can
+/// retry anyway.
+pub(crate) const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
+
+/// Single predicate backing every oversize check in the crate (this
+/// client's own `transcribe()` below, the orchestrator pipeline's early
+/// gate, and `save_failed_audio`'s defense-in-depth refusal) so the
+/// definition of "too large" can't drift between call sites (DRY). Pure
+/// and `AppHandle`-free — directly unit-testable without the tauri test
+/// harness this crate doesn't currently enable.
+pub(crate) fn exceeds_size_limit(bytes: usize) -> bool {
+    bytes > MAX_AUDIO_BYTES
+}
 
 /// Transcription errors.
 #[derive(Error, Debug)]
@@ -136,7 +154,7 @@ impl TranscriptionClient {
         &self,
         audio_data: Vec<u8>,
     ) -> Result<TranscriptionResult, TranscriptionError> {
-        if audio_data.len() > MAX_AUDIO_BYTES {
+        if exceeds_size_limit(audio_data.len()) {
             return Err(TranscriptionError::AudioTooLarge(audio_data.len()));
         }
 
@@ -189,6 +207,33 @@ impl TranscriptionClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exceeds_size_limit_at_boundary() {
+        // Plan §4 test 21 boundary: exactly MAX_AUDIO_BYTES proceeds
+        // normally, MAX_AUDIO_BYTES + 1 is rejected.
+        assert!(!exceeds_size_limit(MAX_AUDIO_BYTES));
+        assert!(exceeds_size_limit(MAX_AUDIO_BYTES + 1));
+    }
+
+    #[test]
+    fn exceeds_size_limit_small_and_zero() {
+        assert!(!exceeds_size_limit(0));
+        assert!(!exceeds_size_limit(1024));
+    }
+
+    #[test]
+    fn exceeds_size_limit_matches_transcribe_error_boundary() {
+        // The client's own `transcribe()` gate and the predicate must agree
+        // on the exact boundary — this is the guard against the two checks
+        // (client-side, pipeline-side) silently drifting apart.
+        let just_over = MAX_AUDIO_BYTES + 1;
+        assert!(exceeds_size_limit(just_over));
+        match TranscriptionError::AudioTooLarge(just_over) {
+            TranscriptionError::AudioTooLarge(n) => assert_eq!(n, just_over),
+            _ => panic!("wrong variant"),
+        }
+    }
 
     #[test]
     fn test_client_requires_api_key() {

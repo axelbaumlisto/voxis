@@ -16,7 +16,6 @@ type CtxCtor = fn(
     Arc<OutputHandler>,
     Arc<Mutex<RecordingState>>,
     Arc<Mutex<Box<dyn OverlayBackend>>>,
-    Vec<u8>,
     Arc<TranscriptionCoordinator>,
 ) -> TranscriptionContext;
 

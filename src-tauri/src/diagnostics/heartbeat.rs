@@ -333,7 +333,24 @@ fn serialize_clean_marker(marker: &CleanShutdownMarker) -> io::Result<Vec<u8>> {
 }
 
 /// Atomic, Windows/EXDEV-safe replacement: create the temp file in the
-/// destination directory, write+sync it, then persist over the fixed target.
+/// destination directory, write it, then persist (rename) over the fixed
+/// target.
+///
+/// Deliberately does NOT `sync_all()` before the rename (plan §1.3-B / §3
+/// Layer 4): this heartbeat is a best-effort liveness marker written every
+/// `HEARTBEAT_INTERVAL` (10s), not a durability-critical record — losing the
+/// last few seconds of writes to a page-cache flush on power loss is
+/// acceptable, while `fsync`ing on every single write is not free: it was
+/// the single most-sampled call in the crash-forensics stack trace that
+/// diagnosed the Sep 4 incident (`persist_bytes_atomic` — `rename`+`write_all`
+/// — 20/39 samples), i.e. this file's own atomicity mechanism was
+/// measurably contributing to the disk-write budget it exists to diagnose.
+/// `rename()` is already atomic on every platform this targets (POSIX
+/// same-filesystem rename, or the Windows-safe `tempfile::persist` path) —
+/// dropping `sync_all` does not weaken the "never observe a partial file"
+/// guarantee the atomic-replace pattern exists for, only the "survives a
+/// power cut within the last write" guarantee, which this diagnostic file
+/// never needed.
 fn persist_bytes_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let parent = path
         .parent()
@@ -349,7 +366,6 @@ fn persist_bytes_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
     set_owner_only(temp.as_file())?;
     temp.write_all(bytes)?;
-    temp.as_file().sync_all()?;
     temp.persist(path).map_err(|err| err.error)?;
     Ok(())
 }
@@ -711,6 +727,57 @@ mod tests {
         let parsed: HeartbeatSnapshot = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(parsed, snapshot);
         assert!(!String::from_utf8_lossy(&bytes).contains("partial"));
+    }
+
+    #[test]
+    fn heartbeat_persist_without_sync_all_is_valid_and_leaves_no_temp_file() {
+        // Plan §3 Layer 4 / §4 test 23: `sync_all()` was removed from
+        // `persist_bytes_atomic` — the rename alone is still atomic, and the
+        // result must still be valid, complete JSON with no stray
+        // `NamedTempFile` left behind (a leftover would mean `persist()`
+        // failed to rename it away). A plain unit test can't observe the
+        // ABSENCE of an fsync syscall directly; this instead pins the
+        // externally-visible contract (valid file, exactly one entry in the
+        // directory) that removing `sync_all` must not break.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("heartbeat.json");
+
+        persist_bytes_atomic(&path, br#"{"pid":1,"ok":true}"#).unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["pid"], 1);
+        assert_eq!(parsed["ok"], true);
+
+        let entries: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(
+            entries.len(),
+            1,
+            "exactly heartbeat.json should remain, found: {:?}",
+            entries
+                .iter()
+                .filter_map(|e| e.as_ref().ok().map(|e| e.file_name()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn heartbeat_persist_repeated_writes_replace_cleanly() {
+        // Guards against a regression where a missing sync somehow left a
+        // dangling temp file behind on repeated writes to the same path
+        // (would manifest as extra files accumulating in the directory).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("heartbeat.json");
+
+        for i in 0..5u32 {
+            let body = format!(r#"{{"iteration":{i}}}"#);
+            persist_bytes_atomic(&path, body.as_bytes()).unwrap();
+        }
+
+        let bytes = std::fs::read(&path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["iteration"], 4);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]

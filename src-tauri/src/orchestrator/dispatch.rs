@@ -27,12 +27,16 @@ impl TranscriptionDispatcher {
                 );
 
                 let config = load_config_from_app(&app);
+                // No `item.audio_data.clone()` here (plan §1.3-A / §3 Layer
+                // 4): `TranscriptionContext` no longer owns a second copy of
+                // the WAV — `item.audio_data` moves into
+                // `transcribe_and_output` as the single canonical buffer for
+                // the whole pipeline call.
                 let ctx = transcription::TranscriptionContext::new(
                     app.clone(),
                     Arc::clone(&output),
                     Arc::clone(&state),
                     Arc::clone(&overlay),
-                    item.audio_data.clone(),
                     Arc::clone(&coordinator),
                 );
 

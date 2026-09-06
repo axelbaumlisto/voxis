@@ -15,6 +15,29 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+/// Overlay spectrum poll interval. Named (not an inline literal) so the
+/// `Spectrum [N]` log throttle below is DERIVED from it instead of
+/// hardcoding a second, independent magic number that could silently drift
+/// out of sync if this interval ever changes.
+const POLL_INTERVAL_MS: u32 = 80;
+
+/// At most one `Spectrum [N]` line per this many milliseconds. The file
+/// appender already records at DEBUG (`setup/logging.rs`), so an earlier
+/// INFO→DEBUG change alone did not reduce disk writes (plan §1.4) — a
+/// stuck ~10 h recording produced 87 053 of 87 097 total log lines this way
+/// (plan §1.3-B). `tracing::trace!` plus this throttle keeps the spam down
+/// even when trace-level logging is enabled for diagnosis.
+const SPECTRUM_LOG_INTERVAL_MS: u32 = 5_000;
+
+/// Pure: true once every `interval_ms / poll_ms` polls (at least every
+/// poll, never less often than every poll). Free of the loop's `count`
+/// state and any async/task context so it's directly unit-testable (plan
+/// §4 test 22) without spinning up the polling task.
+pub(crate) fn should_log_spectrum(count: u32, poll_ms: u32, interval_ms: u32) -> bool {
+    let every = (interval_ms / poll_ms.max(1)).max(1);
+    count % every == 0
+}
+
 /// Start polling audio levels and sending FFT spectrum to overlay.
 ///
 /// This spawns a background task that polls the audio recorder,
@@ -66,15 +89,18 @@ pub fn start_audio_level_polling(
             // Compute FFT spectrum bins
             let spectrum = analyzer.analyze(&samples, spectrum_boost);
 
-            if count % 5 == 0 {
-                // Log peak frequency for debugging
+            if should_log_spectrum(count, POLL_INTERVAL_MS, SPECTRUM_LOG_INTERVAL_MS) {
+                // Log peak frequency for debugging. `trace!`, not `info!`/
+                // `debug!` (plan §1.4 / §3 Layer 4 item 4): the file appender
+                // already records DEBUG, so this is the only level change
+                // that actually reduces bytes written for a long recording.
                 let peak_bar = spectrum
                     .iter()
                     .enumerate()
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
                     .map(|(i, _)| i)
                     .unwrap_or(0);
-                tracing::info!(
+                tracing::trace!(
                     "Spectrum [{}]: {} samples, peak bar {}, max {:.3}",
                     count,
                     samples.len(),
@@ -105,7 +131,7 @@ pub fn start_audio_level_polling(
                     tracing::info!("Audio level polling cancelled during sleep after {} iterations", count);
                     break;
                 }
-                _ = tokio::time::sleep(tokio::time::Duration::from_millis(80)) => {}
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(POLL_INTERVAL_MS as u64)) => {}
             }
         }
 
@@ -150,6 +176,48 @@ pub fn start_audio_level_polling(
 mod tests {
     use super::*;
     use crate::overlay_native::NoopOverlay;
+
+    // ---- plan §4 test 22: Spectrum log throttle (pure, no task/loop) ----
+
+    #[test]
+    fn should_log_spectrum_fires_at_multiples_of_interval() {
+        // 5000ms / 80ms = 62 (integer division) polls between log lines.
+        assert!(should_log_spectrum(0, POLL_INTERVAL_MS, SPECTRUM_LOG_INTERVAL_MS));
+        assert!(!should_log_spectrum(1, POLL_INTERVAL_MS, SPECTRUM_LOG_INTERVAL_MS));
+        assert!(!should_log_spectrum(61, POLL_INTERVAL_MS, SPECTRUM_LOG_INTERVAL_MS));
+        assert!(should_log_spectrum(62, POLL_INTERVAL_MS, SPECTRUM_LOG_INTERVAL_MS));
+        assert!(should_log_spectrum(124, POLL_INTERVAL_MS, SPECTRUM_LOG_INTERVAL_MS));
+    }
+
+    #[test]
+    fn should_log_spectrum_at_most_one_line_per_five_seconds() {
+        // Over a simulated 10 h stuck recording (450_000 polls @ 80ms), the
+        // number of log lines must stay near "total duration / 5s", not
+        // "total duration / 80ms" (the pre-fix behavior that produced
+        // 87_053 of 87_097 lines — plan §1.3-B).
+        let total_polls = (10 * 3600 * 1000) / POLL_INTERVAL_MS; // ~450_000
+        let logged = (0..total_polls)
+            .filter(|&c| should_log_spectrum(c, POLL_INTERVAL_MS, SPECTRUM_LOG_INTERVAL_MS))
+            .count() as u32;
+        // `every` truncates (5000/80 = 62, not 62.5), so the real period is
+        // 62 * 80ms = 4960ms, slightly under the nominal 5s — the bound must
+        // be derived from the same truncated integer division the
+        // implementation uses, not the idealized 5000ms period, or this
+        // assertion is tighter than the code actually guarantees.
+        let every = SPECTRUM_LOG_INTERVAL_MS / POLL_INTERVAL_MS;
+        let expected_max = total_polls / every + 1;
+        assert!(
+            logged <= expected_max,
+            "logged {logged} lines, expected at most {expected_max} (one per ~5s)"
+        );
+        assert!(logged < total_polls / 10, "throttle did not meaningfully reduce log volume");
+    }
+
+    #[test]
+    fn should_log_spectrum_never_divides_by_zero_poll_interval() {
+        // Defensive: a misconfigured poll_ms=0 must not panic (div-by-zero).
+        assert!(should_log_spectrum(0, 0, SPECTRUM_LOG_INTERVAL_MS));
+    }
 
     #[tokio::test]
     async fn test_polling_stops_when_not_recording() {
