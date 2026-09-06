@@ -13,14 +13,16 @@ pub struct AudioRecorder {
     is_recording: Arc<AtomicBool>,
     is_ready: Arc<AtomicBool>,
     /// Single-flight guard for `stop()`: CAS'd `false -> true` at entry,
-    /// reset to `false` on every exit path via `StoppingGuard` (RAII) and
-    /// defensively in `start()`. Distinct from `is_recording` — that flag
-    /// is the *stream*-state flag flipped by the recording thread on
-    /// `Pause` (`stream.rs`), and `stop_macos_pause()` busy-waits on it;
-    /// CASing `is_recording` here would break that wait and
-    /// `try_resume_recording`. A second concurrent `stop()` call gets
-    /// `Err(NotRecording)` immediately from this flag, without touching
-    /// `is_recording`, cloning samples, or re-entering VAD.
+    /// reset to `false` on every exit path via `StoppingGuard::drop`
+    /// (RAII) — and *only* there; `start()` never clears it, it refuses
+    /// with `Err(StopInProgress)` while the flag is set. Distinct from
+    /// `is_recording` — that flag is the *stream*-state flag flipped by
+    /// the recording thread on `Pause` (`stream.rs`), and
+    /// `stop_macos_pause()` busy-waits on it; CASing `is_recording` here
+    /// would break that wait and `try_resume_recording`. The losing
+    /// concurrent `stop()` call gets `Err(StopInProgress)` immediately
+    /// from this flag, without touching `is_recording`, cloning samples,
+    /// or re-entering VAD.
     stopping: Arc<AtomicBool>,
     samples: Arc<Mutex<Vec<f32>>>,
     audio_level: Arc<AtomicU32>,

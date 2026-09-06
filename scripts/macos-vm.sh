@@ -214,7 +214,8 @@ cmd_install() {
   fi
   # Fresh install DOES need serial generation + plist (unlike naked boot).
   vm_lock_acquire_or_die
-  docker run -d --name "$NAME" --restart unless-stopped \
+  # --restart no: the build-VM must NOT auto-start after a host reboot — two macOS VMs (voxis + clipshot) would come up simultaneously, bypassing the launch lock (clipshot made the same change, 65152c06).
+  docker run -d --name "$NAME" --restart no \
     -v "$DISK:/home/arch/OSX-KVM/mac_hdd_ng.img" \
     ${BASESYSTEM:+-v "$BASESYSTEM:/home/arch/OSX-KVM/BaseSystem.img"} \
     -e GENERATE_UNIQUE=true \
@@ -237,7 +238,7 @@ cmd_naked() {
   [[ -f "$PREPARED" ]] || { echo "ERROR: no voxis-owned prepared image at $PREPARED — run: $0 clone-image"; exit 1; }
   docker rm -f "$NAME" 2>/dev/null || true
   vm_lock_acquire_or_die
-  docker run -d --name "$NAME" --restart unless-stopped \
+  docker run -d --name "$NAME" --restart no \
     -v "$PREPARED:/home/arch/OSX-KVM/mac_hdd_ng.img" \
     -e IMAGE_PATH=/home/arch/OSX-KVM/mac_hdd_ng.img \
     -e NOPICKER=true \
