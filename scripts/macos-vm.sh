@@ -395,11 +395,25 @@ KEY=\$(ls ~/.appstoreconnect/private_keys/AuthKey_*.p8 | head -1)
 KEY_ID=\$(basename "\$KEY" .p8 | sed 's/^AuthKey_//')
 ISSUER="${APPLE_API_ISSUER}"
 security unlock-keychain -p "$VM_PASS" ~/Library/Keychains/login.keychain-db
-# Inner binary first, then the bundle — Apple's inside-out signing order.
-codesign --force --options runtime --timestamp --entitlements "\$ENTITLEMENTS" --sign "\$ID" "\$APP/Contents/MacOS/voice"
+# Inner binaries first, then the bundle — Apple's inside-out signing order.
+# Incident (v0.1.3 run 4295): notarization returned Invalid because only
+# the voice binary was re-signed here — the bundle's second [[bin]],
+# typing_bench (Contents/MacOS/typing_bench), kept Tauri's non-Developer-ID
+# signature, and notarization validates every Mach-O in the archive. Sign ALL
+# executables and any bundled dylibs/frameworks generically instead of naming
+# one file.
+for f in "\$APP"/Contents/MacOS/* "\$APP"/Contents/Frameworks/*; do
+  [ -e "\$f" ] || continue
+  file "\$f" | grep -q Mach-O || continue
+  codesign --force --options runtime --timestamp --entitlements "\$ENTITLEMENTS" --sign "\$ID" "\$f"
+done
 codesign --force --options runtime --timestamp --entitlements "\$ENTITLEMENTS" --sign "\$ID" "\$APP"
-codesign --verify --strict --verbose=2 "\$APP"
-codesign -d --entitlements :- "\$APP" 2>/dev/null | grep -q 'audio-input' || { echo "ERROR: entitlements missing audio-input after signing"; exit 2; }
+codesign --verify --strict --deep --verbose=2 "\$APP"
+for f in "\$APP"/Contents/MacOS/*; do
+  [ -e "\$f" ] || continue
+  file "\$f" | grep -q Mach-O || continue
+  codesign -d --entitlements :- "\$f" 2>/dev/null | grep -q 'audio-input' || { echo "ERROR: entitlements missing audio-input on \$f after signing"; exit 2; }
+done
 rm -f /tmp/voice-notarize.zip
 ditto -c -k --keepParent "\$APP" /tmp/voice-notarize.zip
 # Submit WITHOUT --wait: poll ourselves so a slow Apple queue degrades to

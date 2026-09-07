@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.4
+
+macOS release lane: sign every bundled executable (voice AND typing_bench) with
+Developer ID + Hardened Runtime + entitlements; v0.1.3's notarization was rejected on
+typing_bench, so v0.1.3 shipped without a DMG (Linux/Windows/Homebrew tarball
+unaffected). No app-code changes.
+
 ## v0.1.3
 
 Fixes the "stuck recording" class of incidents (recording never stops, RAM grows to
