@@ -118,7 +118,10 @@ Host-executor gotchas:
 
 ## macOS KVM
 
-The Voxis macOS script intentionally reuses the prepared Clipshot VM image path:
+The Voxis macOS script clones its **own** copy of the Clipshot-prepared VM image
+(`scripts/macos-vm.sh clone-image`, one-time, ~38 GB) rather than mounting
+Clipshot's disk directly — two QEMU processes on one qcow2 corrupted a
+Clipshot release. `build`/`build-gui` refuse to run until the clone exists.
 
 ```bash
 ssh spex 'cd ~/work/voxis && ./scripts/macos-vm.sh build'
@@ -156,6 +159,16 @@ SIGNED-but-unstapled DMG ships now and the submission id is recorded in
 `scripts/macos-vm.sh notary-finish` (waits for Accepted, staples, re-emits the
 DMG). Invalid/Rejected always hard-fails — that is a real signing problem, not
 a queue delay.
+
+The Hardened Runtime build needs `src-tauri/Entitlements.plist`
+(`com.apple.security.device.audio-input` + `.automation.apple-events`) or the
+notarized app silently can't hear the mic or send the Accessibility-prompt
+Apple Event. Only ONE macOS Docker-OSX container (voxis's or clipshot's) may
+run at a time on this host — a host-wide `flock` (`/home/spex/.macos-vm.lock`,
+override `MACOS_VM_LOCK`) enforces it; `--restart no` means the VM does NOT
+auto-start after a host reboot (start it manually before dispatching a
+release). See `docs/MACOS_SIGNING_TODO.md` "VM image ownership + host lock"
+for the full incident writeup.
 
 ---
 
