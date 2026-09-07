@@ -3,8 +3,9 @@ name: voxis-deploy
 description: |
   Use when deploying Voxis, building releases, running CI, or publishing packages —
   the SERVER-WAY: trigger Forgejo CI/CD on spex; the server rebuilds GUI-only
-  Linux + Windows artifacts in Docker and macOS unsigned binaries in a KVM VM,
-  then publishes release artifacts. Triggers: voxis deploy, release, build, run ci,
+  Linux + Windows artifacts in Docker and a Developer-ID-signed + notarized
+  macOS DMG (plus bare arm64 binary for Homebrew) in a KVM VM, then publishes
+  release artifacts to Forgejo, GitHub and the Homebrew tap. Triggers: voxis deploy, release, build, run ci,
   tag release, voxis.top, publish, homebrew.
 ---
 
@@ -22,7 +23,9 @@ build outDir and gets emptied on every `bun run build`):
 - `artifacts/voxis-linux-x64-gui` (+ `.deb` / `.rpm`)
 - `artifacts/voxis-windows-x64-gui.exe`
 - `artifacts/Voxis_<version>_x64-setup.exe` (NSIS)
-- best-effort unsigned macOS (arm64-only): `artifacts/voxis-macos-arm64` (+ `.tar.gz`)
+- macOS (arm64-only, best-effort lane): `artifacts/voxis-macos-arm64` (+ `.tar.gz`,
+  Homebrew) and `artifacts/Voxis_<version>_aarch64.dmg` (Developer ID signed,
+  notarized, stapled — see "Signed/notarized DMG lane")
 
 GitHub is **binary releases only**. Do not push private Voxis source to GitHub.
 
@@ -30,49 +33,93 @@ GitHub is **binary releases only**. Do not push private Voxis source to GitHub.
 
 ## Release checklist
 
-1. Bump version in both `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`.
-2. Commit the change.
-   - Recommended pre-tag manual check (not wired into CI): run the
-     Playwright E2E suite locally and confirm it is green
-     (`bunx playwright install chromium` once, then `bun run test:e2e`;
-     expected ~108 passed / 27 intentional skips / 0 failed). See
-     `docs-site/development.md` → "End-to-end tests".
+0. **Sync with Forgejo first** — CI regen and other sessions commit to `forgejo/main`;
+   a local clone can silently fall behind (2026-09-07: a signed-DMG lane had been on
+   Forgejo for 3 weeks while a local clone re-implemented it).
+   ```bash
+   TOKEN=$(ssh spex 'cat ~/.config/forgejo/token')
+   git remote add forgejo https://clipshot.cc/git/zverozabr/voxis.git 2>/dev/null || true
+   git -c http.extraheader="Authorization: token $TOKEN" fetch forgejo main
+   git log --oneline HEAD..forgejo/main     # must be empty, else rebase onto forgejo/main
+   ```
+1. Bump version in **four** places: `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`,
+   `package.json`, and the `voice` entry in `src-tauri/Cargo.lock` (edit the one line;
+   no `cargo update`). Add a `CHANGELOG.md` section. Check the tag is free:
+   `git ls-remote --tags forgejo | grep vX.Y.Z` — a published tag can NOT be re-published
+   (guard in release.yml); if a release shipped incomplete, bump again instead.
+2. Commit. Run locally before tagging (fast, catches 95%):
+   `cd src-tauri && cargo test --lib && cargo clippy --all-targets -- -D warnings`
+   and `bun run test:run` (2 pre-existing golden-hash failures in
+   `theme-engine/renderers/__tests__/cell-render-golden.test.ts` are known).
+   Optional: Playwright E2E (`bun run test:e2e`, ~108 pass / 27 skip).
 3. Push source to Forgejo (private, drives CI):
    ```bash
-   TOKEN=$(ssh spex 'cat ~/.config/forgejo/token')
-   git remote add forgejo https://clipshot.cc/git/zverozabr/voxis.git 2>/dev/null || \
-     git remote set-url forgejo https://clipshot.cc/git/zverozabr/voxis.git
    git -c http.extraheader="Authorization: token $TOKEN" push forgejo main
    ```
-4. Dispatch required CI and wait for green:
+4. Dispatch `ci.yml` (`fast` job, ~3 min warm) and wait for `success`:
    ```bash
-   TOKEN=$(ssh spex 'cat ~/.config/forgejo/token')
    API="https://clipshot.cc/git/api/v1/repos/zverozabr/voxis"
    curl -sS -X POST -H "Authorization: token $TOKEN" -H "Content-Type: application/json" \
      "$API/actions/workflows/ci.yml/dispatches" -d '{"ref":"main"}'
-   curl -sS -H "Authorization: token $TOKEN" "$API/actions/tasks?limit=5"
+   curl -sS -H "Authorization: token $TOKEN" "$API/actions/tasks?limit=5"   # name/status/head_sha
    ```
-5. Tag and push to Forgejo; this triggers `.forgejo/workflows/release.yml`:
+   A job that fails within ~2 s of creation is an infra failure, not code — read the
+   log (see "Reading job logs") before touching anything.
+5. Tag and push; this triggers `release.yml` (`test -> build -> publish`, 40–60 min warm,
+   up to ~2 h cold):
    ```bash
-   git tag -a vX.Y.Z -m "vX.Y.Z"
+   git tag -a vX.Y.Z -m "vX.Y.Z — <one line>"
    git -c http.extraheader="Authorization: token $TOKEN" push forgejo vX.Y.Z
    ```
-6. Verify package publication:
+   `workflow_dispatch` on a tag ref returns HTTP 400 — to re-run a release, delete and
+   re-push the tag (`git push forgejo :refs/tags/vX.Y.Z && git push forgejo vX.Y.Z`),
+   but ONLY if nothing was published yet (`$API/releases/tags/vX.Y.Z` → 404).
+6. Verify publication AND the macOS artifact **on a real Mac** (CI's `publish` succeeds
+   even when the macOS lane degraded — it prints `::warning::no signed macOS DMG` and a
+   job-summary line; look for it):
    ```bash
-   curl -sS -H "Authorization: token $TOKEN" "$API/releases/tags/vX.Y.Z"
-   gh release view vX.Y.Z --repo axelbaumlisto/voxis   # canonical public channel
+   gh release view vX.Y.Z --repo axelbaumlisto/voxis --json assets --jq '.assets[].name'
+   gh release download vX.Y.Z --repo axelbaumlisto/voxis --pattern "Voxis_*_aarch64.dmg" -D /tmp/rel
+   spctl -a -vvv -t open --context context:primary-signature /tmp/rel/Voxis_*.dmg   # accepted, Notarized Developer ID
+   hdiutil attach /tmp/rel/Voxis_*.dmg -nobrowse -quiet -mountpoint /tmp/rel/mnt
+   spctl -a -vvv -t exec /tmp/rel/mnt/Voxis.app && xcrun stapler validate /tmp/rel/mnt/Voxis.app
+   for b in /tmp/rel/mnt/Voxis.app/Contents/MacOS/*; do   # EVERY binary: runtime flag + audio-input
+     codesign -dv "$b" 2>&1 | grep -o 'flags=0x10000(runtime)'; codesign -d --entitlements :- "$b" 2>/dev/null | grep -o audio-input; done
    ```
+7. Install on the dev Mac (permissions carry over when the Developer ID signer/TeamID is
+   unchanged; a signer CHANGE — e.g. Apple Development → Developer ID — resets TCC and
+   needs `tccutil reset {Accessibility,ListenEvent,Microphone} top.voxis.app` + re-grant):
+   ```bash
+   pkill -f /Applications/Voxis.app/Contents/MacOS/voice; mv /Applications/Voxis.app /tmp/Voxis-old.app
+   ditto /tmp/rel/mnt/Voxis.app /Applications/Voxis.app && hdiutil detach /tmp/rel/mnt -quiet
+   open -a /Applications/Voxis.app
+   ```
+   Expect one `previous instance died without shutdown` WARN in the log if the old
+   process was `pkill`ed (SIGTERM writes no clean-shutdown marker) — not a crash.
 
 ---
 
 ## Server preflight
 
 ```bash
-ssh spex 'echo spex-ok && systemctl --user is-active forgejo-runner && docker ps --format "{{.Names}}" | grep forgejo && ls -lh ~/clipshot-macos-vm/mac_hdd_ng.prepared.img'
-ssh spex 'ls ~/.config/forgejo/token && echo token-ok'
+ssh spex 'systemctl --user is-active forgejo-runner && docker ps --format "{{.Names}}" | grep -q forgejo && echo forgejo-ok
+  ls -lh ~/voxis-macos-vm/mac_hdd_ng.prepared.img          # voxis OWN image (~38G); missing → macos-vm.sh clone-image
+  ls ~/secrets/apple-dev/notary.env && ls /dev/kvm && echo creds-kvm-ok
+  docker images voxis-ci --format "{{.Repository}}:{{.Tag}}" | grep -q voxis-ci && echo ci-image-ok || echo "CI IMAGE MISSING"
+  docker ps --format "{{.Names}} {{.Status}}" | grep -iE "macos|osx" || echo "no macOS VM running (good)"
+  cd ~/work/voxis && git status --short | head -3            # MUST be empty (see below)'
 ```
 
-Expected: runner `active`, Forgejo container present, prepared 31G macOS image, token present.
+Two host states that silently break every release (both hit on 2026-09-07):
+
+- **`voxis-ci:latest` missing** — a `docker system prune` (e.g. during a clipshot image
+  rebuild) removes it; `ci.yml`/`release.yml` then fail at `docker run` in ~2 s with
+  `Unable to find image 'voxis-ci:latest'`. Rebuild (see "CI image").
+- **Dirty `~/work/voxis` checkout on spex** — the `build` job is a host executor that
+  `git checkout <tag>`s in that persistent working copy; any local modification
+  (staged or not) aborts with `Your local changes … would be overwritten`. Fix:
+  `ssh spex 'cd ~/work/voxis && git stash push -m "ci-host leftovers $(date +%F)"'`
+  (never `checkout -- .`; someone may have WIP there).
 
 ---
 
@@ -82,7 +129,11 @@ Expected: runner `active`, Forgejo container present, prepared 31G macOS image, 
 GTK/WebKit/AppIndicator, Bun, Docker CLI). Rebuild on spex after changing CI dependencies:
 
 ```bash
-ssh spex 'cd ~/work/voxis && bash scripts/ci/build-ci-image.sh'
+# from a throwaway clean clone so the persistent checkout is never touched:
+ssh spex "rm -rf /tmp/voxis-ci-build && git -c http.extraheader='Authorization: token $(ssh spex cat ~/.config/forgejo/token)' \
+  clone -q --depth 1 https://clipshot.cc/git/zverozabr/voxis.git /tmp/voxis-ci-build && \
+  cd /tmp/voxis-ci-build && nohup bash scripts/ci/build-ci-image.sh > /tmp/voxis-ci-build.log 2>&1 &"
+# ~10–20 min (pulls the Rust base image from a slow registry); done when the log ends with "voxis-ci:latest ready"
 ```
 
 ---
@@ -98,8 +149,11 @@ ssh spex 'cd ~/work/voxis && bash scripts/ci/build-ci-image.sh'
   job in `release.yml`. `publish` gates on `build` only and never waits on
   docs.
   - Linux GUI and Windows GUI/NSIS are built by `scripts/build-all-platforms.sh --no-macos`.
-  - macOS unsigned binaries are best-effort via `scripts/macos-vm.sh build` and the
-    prepared image at `~/clipshot-macos-vm/mac_hdd_ng.prepared.img`.
+  - macOS runs TWO lanes in the KVM VM (both `continue-on-error`, advisory):
+    `scripts/macos-vm.sh build` (bare arm64 binary + tarball for Homebrew) then
+    `build-gui` (signed/notarized DMG). The target dir is preserved between lanes.
+    If the DMG is missing at publish time the job prints `::warning::` + a job-summary
+    line but still succeeds — check for it.
   - Publish uploads to the Forgejo release and the GitHub release
     (`axelbaumlisto/voxis`), and pushes the regenerated formula to the tap repo
     `axelbaumlisto/homebrew-voxis` (via `HOMEBREW_TAP_REPO`) when the macOS arm64
@@ -169,6 +223,36 @@ override `MACOS_VM_LOCK`) enforces it; `--restart no` means the VM does NOT
 auto-start after a host reboot (start it manually before dispatching a
 release). See `docs/MACOS_SIGNING_TODO.md` "VM image ownership + host lock"
 for the full incident writeup.
+
+### Signing gotcha (v0.1.3 post-mortem)
+
+Notarization validates **every Mach-O in the archive**. The bundle has TWO executables
+(`voice` and `typing_bench`, both `[[bin]]`s) — `build-gui` signs everything under
+`Contents/MacOS/*` and `Contents/Frameworks/*` in a loop, inside-out, with the same
+`--options runtime --timestamp --entitlements` flags, then the bundle. Never sign a
+single named binary. v0.1.3 shipped without a DMG because only `voice` was re-signed
+(`Invalid: The binary is not signed with a valid Developer ID certificate` on
+`typing_bench`).
+
+---
+
+## Reading job logs
+
+The Forgejo API exposes tasks but not job logs; the web log URL under `/git` 404s.
+Read them from the container instead (logs are zstd-compressed JSONL):
+
+```bash
+ssh spex 'f=$(docker exec forgejo sh -c "find /data/gitea/actions_log/zverozabr/voxis -name <TASK_ID>.log.zst"); \
+  docker cp forgejo:$f /tmp/t.log.zst && python3 -c "
+import zstandard,json
+d=zstandard.ZstdDecompressor().stream_reader(open(\"/tmp/t.log.zst\",\"rb\")).read().decode(\"utf-8\",\"replace\")
+for l in d.splitlines():
+    try: print(json.loads(l).get(\"content\",\"\")[:200])
+    except Exception: print(l[:200])" | grep -vE "^\s*(remote:|Receiving|Resolving)" | tail -60'
+```
+
+`<TASK_ID>` is the `id` from `$API/actions/tasks`. Useful greps: `notarization`,
+`ERROR`, `::warning::`, `Unable to find image`, `would be overwritten`.
 
 ---
 
