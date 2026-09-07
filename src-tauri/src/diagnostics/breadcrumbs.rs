@@ -426,6 +426,7 @@ pub mod sites {
     static RELEASE_PENDING_APPLIED_LAST_MS: AtomicU64 = AtomicU64::new(0);
     static PRESS_START_ORPHAN_RECOVERED_LAST_MS: AtomicU64 = AtomicU64::new(0);
     static RECORDING_AUTO_STOPPED_SILENCE_LAST_MS: AtomicU64 = AtomicU64::new(0);
+    static RECORDING_AUTO_STOPPED_SILENCE_NO_SPEECH_LAST_MS: AtomicU64 = AtomicU64::new(0);
     static RECORDING_AUTO_STOPPED_MAX_DURATION_LAST_MS: AtomicU64 = AtomicU64::new(0);
     static RECORDING_GUARD_PRE_CUTOFF_BEEP_LAST_MS: AtomicU64 = AtomicU64::new(0);
 
@@ -501,21 +502,22 @@ pub mod sites {
 
     /// `stop_recording(StopReason::Release)` reached the Finalize path
     /// (i.e. actually stopped the recorder) — `Release` never `Discard`s,
-    /// only `Cancel` does, plan §3 Layer 1.
+    /// only `Cancel`/`SilenceTimeoutNoSpeech` do.
     pub fn recording_stop_release() {
         rolling_rate_limited(&RECORDING_STOP_RELEASE_LAST_MS, "recording:stop:release");
     }
 
     /// `stop_recording(StopReason::TogglePress)` reached the Finalize path —
     /// the toggle-mode second-press-stops-recording gesture actually ran
-    /// `recorder.stop()` (previously dead code, see plan §1.4).
+    /// `recorder.stop()` (previously dead code: `on_hotkey_released`'s
+    /// toggle guard returned before ever reaching it).
     pub fn recording_stop_toggle() {
         rolling_rate_limited(&RECORDING_STOP_TOGGLE_LAST_MS, "recording:stop:toggle");
     }
 
     /// `stop_recording(StopReason::Cancel)` reached the Discard path —
     /// `Orchestrator::cancel()` actually stopped the recorder (previously it
-    /// only touched the coordinator's stage, plan §1.4).
+    /// only touched the coordinator's stage, leaving the mic recording).
     pub fn recording_stop_cancel() {
         rolling_rate_limited(&RECORDING_STOP_CANCEL_LAST_MS, "recording:stop:cancel");
     }
@@ -523,8 +525,8 @@ pub mod sites {
     /// `stop_recording` lost a race: `recorder.stop()` returned
     /// `StopInProgress` because another caller's stop already won the
     /// single-flight CAS a moment earlier. Silent to the user by design
-    /// (plan §3 Layer 1 / T2 review finding C3) — this breadcrumb is the
-    /// only visible trace.
+    /// (the other caller already owns telling them what happened) — this
+    /// breadcrumb is the only visible trace.
     pub fn recording_stop_race_lost() {
         rolling_rate_limited(&RECORDING_STOP_RACE_LOST_LAST_MS, "recording:stop:race_lost");
     }
@@ -535,9 +537,9 @@ pub mod sites {
     /// race-loser (the winner of a real race holds the lock through its
     /// own stage transition), so it is exclusively the abnormal case: the
     /// recording thread died after `start()` returned `Ok` (stream
-    /// build/play failure, a panic, device unplugged), or a bypassing raw
-    /// `stop_recording` Tauri command stopped the recorder underneath the
-    /// orchestrator (T3 r1 review, finding 1 / D2). Recovery skips
+    /// build/play failure, a panic, device unplugged) — the recording
+    /// guard's own `is_recording()` poll is what usually notices this and
+    /// calls `stop_recording(StopReason::StreamDied)`. Recovery skips
     /// `recorder.stop()` entirely and returns the coordinator to `Idle` —
     /// this breadcrumb plus the accompanying `tracing::warn!` are the only
     /// visible trace.
@@ -546,24 +548,23 @@ pub mod sites {
     }
 
     /// `PressReleaseMachine::press_enter` refused a press because another
-    /// one was already in flight — plan §1.4 "single-flight start" (the
-    /// 6-parallel-presses-all-started incident, Aug 18).
+    /// one was already in flight — single-flight start (guards against
+    /// e.g. the 6-parallel-presses-all-started incident, Aug 18).
     pub fn press_ignored_in_flight() {
         rolling_rate_limited(&PRESS_IGNORED_IN_FLIGHT_LAST_MS, "recording:press_ignored_in_flight");
     }
 
     /// `on_hotkey_released` found a press in flight and armed
     /// `release_pending` instead of calling `stop_recording` directly —
-    /// the press will consume it at its own next checkpoint (plan §3
-    /// Layer 0(a)).
+    /// the press will consume it at its own next checkpoint.
     pub fn release_pending_armed() {
         rolling_rate_limited(&RELEASE_PENDING_ARMED_LAST_MS, "recording:release_pending_armed");
     }
 
     /// A press checkpoint ((ii) pre_start or (iii) post_stage_recording)
     /// found `release_pending` set and aborted/stopped instead of
-    /// starting/continuing — this is the actual fix for the plan §1.1 root
-    /// cause (release arrived during the permission check, or in the
+    /// starting/continuing — this is the actual fix for the historical
+    /// root cause (release arrived during the permission check, or in the
     /// residual window before the stage became `Recording`).
     pub fn release_pending_applied() {
         rolling_rate_limited(&RELEASE_PENDING_APPLIED_LAST_MS, "recording:release_pending_applied");
@@ -572,8 +573,7 @@ pub mod sites {
     /// `on_hotkey_pressed` found `is_recording()==true` but the
     /// coordinator's stage never reached `Recording` (its own internal
     /// 30ms press-debounce dropped the Press after `recorder.start()`
-    /// already returned `Ok`) and stopped the orphaned recorder directly
-    /// (plan §1.4 / T3 r1 review carry-forward C1).
+    /// already returned `Ok`) and stopped the orphaned recorder directly.
     pub fn press_start_orphan_recovered() {
         rolling_rate_limited(
             &PRESS_START_ORPHAN_RECOVERED_LAST_MS,
@@ -581,8 +581,10 @@ pub mod sites {
         );
     }
 
-    /// The recording guard (plan §3 Layer 2) auto-stopped a recording
-    /// after continuous near-silence exceeded `silence_timeout_ms`.
+    /// The recording guard auto-stopped a recording after continuous
+    /// near-silence exceeded `silence_timeout_ms`, having heard some
+    /// sound above `SILENCE_RMS` at some point earlier in the take —
+    /// finalized and queued for transcription as usual.
     pub fn recording_auto_stopped_silence() {
         rolling_rate_limited(
             &RECORDING_AUTO_STOPPED_SILENCE_LAST_MS,
@@ -590,8 +592,19 @@ pub mod sites {
         );
     }
 
-    /// The recording guard (plan §3 Layer 2/3) auto-stopped a recording
-    /// after it exceeded its configured (or absolute) maximum duration —
+    /// The recording guard auto-stopped a recording after continuous
+    /// near-silence exceeded `silence_timeout_ms`, having NEVER heard any
+    /// sound above `SILENCE_RMS` during the whole take — discarded rather
+    /// than transcribed (silence-hallucination safety valve).
+    pub fn recording_auto_stopped_silence_no_speech() {
+        rolling_rate_limited(
+            &RECORDING_AUTO_STOPPED_SILENCE_NO_SPEECH_LAST_MS,
+            "recording:auto_stopped_silence_no_speech",
+        );
+    }
+
+    /// The recording guard auto-stopped a recording after it exceeded its
+    /// configured (or absolute) maximum duration —
     /// either by wall-clock elapsed time or by the native sample buffer
     /// hitting its cap (`AudioRecorder::cap_hit`).
     pub fn recording_auto_stopped_max_duration() {

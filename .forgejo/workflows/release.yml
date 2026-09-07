@@ -403,7 +403,13 @@ jobs:
           if echo "$fg_names" | grep -q '\.dmg$'; then
             echo "macOS signed DMG present in Forgejo release ✓"
           else
-            echo "NOTE: no signed macOS DMG in this release (advisory — see docs/MACOS_SIGNING_TODO.md)"
+            # Advisory, not a hard-fail (KVM VM + notarization can legitimately
+            # fail or be skipped) — but make the degradation LOUD: a maintainer
+            # skimming a green run must not mistake "advisory" for "invisible".
+            echo "::warning::no signed macOS DMG in this release ($tag) — macOS lane degraded or skipped, see docs/MACOS_SIGNING_TODO.md"
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              echo "⚠️ **No signed macOS DMG in $tag** — macOS lane degraded or skipped (advisory, see \`docs/MACOS_SIGNING_TODO.md\`)." >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
           echo "=== GitHub release probe (canonical download channel) ==="
           if command -v gh >/dev/null 2>&1; then

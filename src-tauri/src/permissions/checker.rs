@@ -74,9 +74,6 @@ impl PermissionStatus {
     /// from a real denial. The action being gated (e.g. `cpal`'s device
     /// open) already has its own accurate, synchronous failure path for a
     /// genuine denial, so `Unknown` falling through costs nothing.
-    ///
-    /// See plan `silence-watchdog-and-crash-root-fix.md` §3 Layer 0(b) point
-    /// 4 and the T2-round review finding M8 that named this gap.
     pub fn blocks_start(&self) -> bool {
         matches!(self, PermissionStatus::Denied)
     }

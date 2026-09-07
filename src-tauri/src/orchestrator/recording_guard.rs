@@ -1,7 +1,7 @@
-//! Recording guard: silence-timeout + max-duration auto-stop (plan §3
-//! Layer 2/3) — defense-in-depth *behind* the deterministic press/release
-//! fix (`press_release.rs`). That fix closes the specific race that used
-//! to leave a recording running forever; this guard is the backstop for
+//! Recording guard: silence-timeout + max-duration auto-stop —
+//! defense-in-depth *behind* the deterministic press/release fix
+//! (`press_release.rs`). That fix closes the specific race that used to
+//! leave a recording running forever; this guard is the backstop for
 //! everything else that can leave the mic open with nobody watching it
 //! (a hold-mode key stuck at the OS level, a lost hotkey event class we
 //! haven't found yet, a future regression, ...). It is what the user
@@ -14,29 +14,35 @@
 //! (`GuardCfg::poll_ms`, default 250ms), driving one pure decision
 //! function (`guard_step`) that owns ALL policy — the task itself is a
 //! thin, untested-by-necessity shell around it (mirrors
-//! `orchestrator::recording`'s `stop_decision`/`press_action` split, and
-//! the plan §4 harness choice: policy lives in a function that doesn't
-//! need a device or a runtime, so it's exhaustively unit-tested; the task
-//! wrapper is exercised only implicitly). Two independent conditions can
-//! end a recording:
+//! `orchestrator::recording`'s `stop_decision`/`press_action` split:
+//! policy lives in a function that doesn't need a device or a runtime, so
+//! it's exhaustively unit-tested; the task wrapper is exercised only
+//! implicitly). Two independent conditions can end a recording:
 //!
 //! - **Silence**: a sliding window of the last `SILENCE_WINDOW_MS` polls
 //!   (`SilenceWindow`, ring buffer of "was this poll silent") must be
 //!   both *full* and at least `SILENCE_FRACTION` silent before any
 //!   silent duration starts accumulating at all — this is what makes a
 //!   single loud poll (a keyboard click, a cough) not reset a real
-//!   silence in progress, plan §3 Layer 2. Once `silent_ms` reaches
-//!   `silence_timeout_ms`, stop.
+//!   silence in progress. Once `silent_ms` reaches `silence_timeout_ms`,
+//!   stop — as `SilenceTimeout` (`Finalize`) if the guard heard any
+//!   sound at all earlier in the take, or `SilenceTimeoutNoSpeech`
+//!   (`Discard`) if it never did (see `GuardState::ever_loud`): an
+//!   all-silent take risks a Whisper silence hallucination being
+//!   auto-typed with no human in the loop, so it is thrown away instead
+//!   of transcribed.
 //! - **Max duration**: poll-accumulated `elapsed_ms` since the guard
 //!   started (≤ wall-clock — see `GuardState::elapsed_ms`), independent
-//!   of silence — plan §3 Layer 3's "active stop" half (the cpal
+//!   of silence — the "active stop" half of the buffer cap (the cpal
 //!   callback's own `AudioRecorder::set_max_samples`/`cap_hit` only
 //!   stops *pushing* into the buffer; this guard is what actually calls
 //!   `stop_recording` when that cap is hit, or when accumulated poll
-//!   time alone exceeds the limit). `effective_max_recording_ms` folds in the
-//!   `ABS_MAX_RECORDING_MS` backstop, so this condition can never be
-//!   truly "off" even if the user's `max_recording_ms` config is `0` or a
-//!   hand-edited out-of-range value (T1 r1 review, R1).
+//!   time alone exceeds the limit). The guard clamps its own elapsed
+//!   check to `MAX_RECORDING_MS_CEILING` (see `guard_max_recording_ms`)
+//!   — stricter than the raw buffer's `ABS_MAX_RECORDING_MS` backstop —
+//!   so this condition can never be truly "off" even if the user's
+//!   `max_recording_ms` config is `0` or a hand-edited out-of-range value,
+//!   AND never produces a take too large to ever transcribe.
 //!
 //! Max-duration is checked (and, if true, returned) *before* silence in
 //! `guard_step` — deliberate precedence: if both conditions are satisfied
@@ -47,12 +53,16 @@
 //! (`silent_iters`/`SILENT_ITER_THRESHOLD`/`warned_silent`) that used to
 //! live inside `orchestrator::audio_level`'s overlay-spectrum poller —
 //! that detector only ever logged a one-time `WARN` and, critically, only
-//! ran when `overlay.enabled` was true (plan §1.4: "не два толкователя
-//! тишины", i.e. don't leave two independent silence interpreters in the
-//! codebase). This guard is spawned unconditionally, regardless of the
-//! overlay setting.
+//! ran when `overlay.enabled` was true. This guard is spawned
+//! unconditionally, regardless of the overlay setting, so it is also the
+//! only place that notices a recording thread dying on its own: if
+//! `AudioRecorder::is_recording()` ever goes false while the guard is
+//! still polling, it calls `stop_recording(StopReason::StreamDied)`
+//! (resolves to `StopDecision::Recover`) instead of silently exiting —
+//! otherwise the coordinator would stay pinned at `Stage::Recording`
+//! until the user's next gesture.
 //!
-//! # Locking discipline (T3 r1 review, carry-forward C4)
+//! # Locking discipline
 //!
 //! `spawn_recording_guard`'s task holds **no lock of its own** — not
 //! `stop_lock`, not `guard_cancel`, not `polling_cancel`. It reads
@@ -64,24 +74,25 @@
 //! (the release beat the guard to it) via `stop_decision`'s own logic,
 //! and cancellation of this task's own token is what the caller
 //! (`stop_recording`) uses to end the guard's lifetime — never
-//! `JoinHandle::abort()` (plan §3 Layer 2: "отмена только через
-//! `CancellationToken`, никогда `JoinHandle::abort()`" — an abort mid-way
-//! through a `stop_recording` call holding `stop_lock` would be fatal).
+//! `JoinHandle::abort()`: an abort mid-way through a `stop_recording`
+//! call holding `stop_lock` would be fatal, so cancellation is always
+//! cooperative (`CancellationToken`).
 //!
-//! # Disclosed deviation from the plan's literal `guard_step` sketch
+//! # A subtlety in `guard_step`'s ordering
 //!
-//! The plan's pseudocode evaluates the silence/beep/timeout checks on
-//! every poll, with only the *accumulation* step ("silent_ms += poll_ms")
-//! gated behind `window.is_full()` — falling through to the timeout/beep
-//! comparisons against `silent_ms`'s current (possibly still-zero) value
-//! regardless. That has a real bug: `pre_cutoff_beep_ms > silence_timeout_ms`
-//! (reachable via a hand-edited config row, since load is unvalidated —
-//! T1 r1 review) saturating-subs `beep_at` to `0`, and `silent_ms(0) >=
-//! beep_at(0)` is trivially true — firing `PreCutoffBeep` on literally
-//! the FIRST poll of every recording, before the window has even filled
-//! once, let alone measured any real silence. This implementation instead
-//! gates the *entire* silence/beep/timeout block behind
-//! `window.is_full()`, returning `GuardEvent::None` early otherwise — see
+//! Evaluating the silence/beep/timeout checks on every poll, with only
+//! the *accumulation* step ("silent_ms += poll_ms") gated behind
+//! `window.is_full()`, has a real bug: falling through to the
+//! timeout/beep comparisons against `silent_ms`'s current (possibly
+//! still-zero) value regardless means `pre_cutoff_beep_ms >
+//! silence_timeout_ms` (reachable via a hand-edited config row, since
+//! load is unvalidated) saturating-subs `beep_at` to `0`, and
+//! `silent_ms(0) >= beep_at(0)` is trivially true — firing
+//! `PreCutoffBeep` on literally the FIRST poll of every recording,
+//! before the window has even filled once, let alone measured any real
+//! silence. This implementation instead gates the *entire*
+//! silence/beep/timeout block behind `window.is_full()`, returning
+//! `GuardEvent::None` early otherwise — see
 //! `test_beep_lead_time_exceeding_timeout_does_not_fire_before_window_fills`
 //! for the exact scenario this fixes, and `test_window_not_full_yields_no_decision`
 //! for the (unchanged) normal case this same gate also covers.
@@ -89,8 +100,8 @@
 use super::recording::{RecordingCoordinator, StopReason};
 use crate::audio::AudioRecorder;
 use crate::config::{
-    AppConfig, ABS_MAX_RECORDING_MS, GUARD_POLL_MS, PRE_CUTOFF_BEEP_MS, SILENCE_FRACTION,
-    SILENCE_RMS, SILENCE_WINDOW_MS,
+    AppConfig, ABS_MAX_RECORDING_MS, GUARD_POLL_MS, MAX_RECORDING_MS_CEILING, PRE_CUTOFF_BEEP_MS,
+    SILENCE_FRACTION, SILENCE_RMS, SILENCE_WINDOW_MS,
 };
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -98,7 +109,7 @@ use tokio_util::sync::CancellationToken;
 
 /// Ring buffer of "was this poll silent" over the last `capacity` polls.
 /// Capacity is fixed for the buffer's lifetime (derived once from
-/// `GuardCfg::window_ms / poll_ms` — plan §3 Layer 2).
+/// `GuardCfg::window_ms / poll_ms`).
 struct SilenceWindow {
     buf: VecDeque<bool>,
     capacity: usize,
@@ -142,8 +153,8 @@ impl SilenceWindow {
 }
 
 /// Everything `guard_step` needs to make a decision, snapshotted once
-/// from `AppConfig` + tuning constants at guard-spawn time (plan §3 Layer
-/// 2). Also carries `audio_feedback` (the pre-cutoff beep's volume/
+/// from `AppConfig` + tuning constants at guard-spawn time. Also carries
+/// `audio_feedback` (the pre-cutoff beep's volume/
 /// enabled settings) so `spawn_recording_guard`'s task never needs an
 /// `AppHandle` of its own — KISS: the guard's only dependencies are the
 /// recorder's atomics and an owned `RecordingCoordinator` clone: it has
@@ -169,9 +180,9 @@ pub(crate) struct GuardCfg {
 impl GuardCfg {
     /// Snapshot the user-configurable fields plus the (currently fixed,
     /// not user-configurable) tuning constants. Read once, at
-    /// `on_hotkey_pressed`'s start-critical section (plan §3 Layer 2) —
-    /// the guard's whole lifetime uses this single snapshot, same as
-    /// every other per-recording config read in that function.
+    /// `on_hotkey_pressed`'s start-critical section — the guard's whole
+    /// lifetime uses this single snapshot, same as every other
+    /// per-recording config read in that function.
     pub(crate) fn from_app_config(config: &AppConfig) -> Self {
         Self {
             silence_timeout_ms: config.silence_timeout_ms,
@@ -208,6 +219,16 @@ struct GuardState {
     /// un-silence, so a later silence run can beep again
     /// (`test_speech_burst_resets_silent_ms_and_rearms_beep`).
     beeped: bool,
+    /// Whether ANY poll during this recording's WHOLE lifetime (not just
+    /// the current silence run — unlike `silent_ms`/`beeped`, never reset)
+    /// has seen `rms_peak >= silence_rms`. If a silence-timeout stop fires
+    /// and this is still `false`, the recording never had any detectable
+    /// sound at all, so it is routed to `StopReason::SilenceTimeoutNoSpeech`
+    /// (→ `StopDecision::Discard`) instead of the normal `SilenceTimeout`
+    /// (→ `Finalize`) — sending an all-silent take to transcription risks
+    /// a Whisper silence hallucination being auto-typed with no human in
+    /// the loop.
+    ever_loud: bool,
 }
 
 impl GuardState {
@@ -218,6 +239,7 @@ impl GuardState {
             silent_ms: 0,
             elapsed_ms: 0,
             beeped: false,
+            ever_loud: false,
         }
     }
 }
@@ -237,15 +259,15 @@ enum GuardEvent {
 }
 
 /// Clamp a possibly-zero, possibly-out-of-range `max_recording_ms` config
-/// value to what the guard and the buffer cap actually enforce: `0`
-/// (silence-only, "no max" as far as the user is concerned) still gets
-/// the absolute backstop `ABS_MAX_RECORDING_MS`, and any configured value
-/// above the backstop is clamped down to it. Single source of truth so
-/// `native_cap_samples` (the buffer cap) and `guard_step`'s own
-/// elapsed-time check can never disagree about "how long is too long" — T1
-/// r1 review R1 (config load is intentionally unvalidated, matching
-/// `hotkey_hold_ms`/`typing_delay`; a hand-edited out-of-range DB value
-/// must not silently produce an unbounded buffer).
+/// value to the RAW-BUFFER backstop: `0` (silence-only, "no max" as far as
+/// the user is concerned) still gets `ABS_MAX_RECORDING_MS`, and any
+/// configured value above it is clamped down to it — config load is
+/// intentionally unvalidated (matching `hotkey_hold_ms`/`typing_delay`), so
+/// a hand-edited out-of-range DB value must not silently produce an
+/// unbounded buffer. This is `native_cap_samples`'s cap; the guard's own
+/// elapsed-time check applies a STRICTER second clamp on top of this one
+/// (`guard_max_recording_ms`, below) — the two are deliberately allowed to
+/// disagree, see that function's doc for why.
 fn effective_max_recording_ms(max_recording_ms: u32) -> u32 {
     if max_recording_ms == 0 {
         ABS_MAX_RECORDING_MS
@@ -254,9 +276,26 @@ fn effective_max_recording_ms(max_recording_ms: u32) -> u32 {
     }
 }
 
+/// The cap the guard's OWN elapsed-time check actually stops at — distinct
+/// from `native_cap_samples`'s raw-buffer cap, which keeps using the full
+/// `effective_max_recording_ms` (up to `ABS_MAX_RECORDING_MS`, 30 min)
+/// unchanged: that cap only bounds memory. `max_recording_ms = 0` ("off",
+/// or a hand-edited out-of-range value) still clamps to
+/// `ABS_MAX_RECORDING_MS` via `effective_max_recording_ms`, but 30 min of
+/// 16 kHz/16-bit audio is 57.6 MB — always over `MAX_AUDIO_BYTES` (25 MiB)
+/// — so a recording that actually reached that backstop would be
+/// guaranteed-rejected with no failed-audio dump to retry from. The guard
+/// clamps a second time to `MAX_RECORDING_MS_CEILING` (the longest take
+/// that's actually transcribable) so "off" produces the longest USABLE
+/// recording instead of a guaranteed-useless one; the raw buffer is still
+/// allowed to grow all the way to the 30-minute backstop in the meantime
+/// (belt and suspenders — the guard is expected to fire first).
+fn guard_max_recording_ms(max_recording_ms: u32) -> u32 {
+    effective_max_recording_ms(max_recording_ms).min(MAX_RECORDING_MS_CEILING)
+}
+
 /// Native-rate (pre-downsample) sample-buffer cap for
-/// `AudioRecorder::set_max_samples` — plan §3 Layer 3. `max_recording_ms`
-/// is the raw config value (see `effective_max_recording_ms` for the
+/// `AudioRecorder::set_max_samples`. `max_recording_ms` is the raw config value (see `effective_max_recording_ms` for the
 /// clamping this applies first); `native_rate` is
 /// `AudioRecorder::sample_rate()`, valid once `recorder.start()` has
 /// returned `Ok`.
@@ -268,8 +307,8 @@ pub(crate) fn native_cap_samples(max_recording_ms: u32, native_rate: u32) -> usi
 
 /// The ONLY place with policy (module doc, "Design") — decide what, if
 /// anything, the guard should do this poll. Pure: no I/O, no locks, no
-/// `AppHandle` — testable without a device or a runtime (plan §4 harness
-/// option B, same shape as `orchestrator::recording`'s `stop_decision`).
+/// `AppHandle` — testable without a device or a runtime, same shape as
+/// `orchestrator::recording`'s `stop_decision`.
 ///
 /// `rms_peak` is boost-independent pre-boost peak RMS since the last poll
 /// (`AudioRecorder::take_rms_peak`); `cap_hit` is whether the native
@@ -277,15 +316,21 @@ pub(crate) fn native_cap_samples(max_recording_ms: u32, native_rate: u32) -> usi
 /// last poll.
 fn guard_step(state: &mut GuardState, rms_peak: f32, cap_hit: bool, cfg: &GuardCfg) -> GuardEvent {
     state.elapsed_ms = state.elapsed_ms.saturating_add(cfg.poll_ms);
-    state.window.push(rms_peak < cfg.silence_rms);
+    let is_silent = rms_peak < cfg.silence_rms;
+    if !is_silent {
+        // Whole-recording flag, independent of the window/fraction gate
+        // below and never reset — see `GuardState::ever_loud` doc.
+        state.ever_loud = true;
+    }
+    state.window.push(is_silent);
 
     // Max-duration: checked (and, if true, returned) BEFORE silence,
-    // unconditionally — plan §3 Layer 3's "active stop" half, and never
-    // truly "off" (see `effective_max_recording_ms`). Deliberate
+    // unconditionally — the guard's "active stop" half of the buffer cap,
+    // and never truly "off" (see `effective_max_recording_ms`). Deliberate
     // precedence: if both conditions hold on the same poll, the event is
     // always `MaxDuration` —
     // `test_max_duration_wins_over_simultaneous_silence_timeout`.
-    let effective_max_ms = effective_max_recording_ms(cfg.max_recording_ms);
+    let effective_max_ms = guard_max_recording_ms(cfg.max_recording_ms);
     if cap_hit || state.elapsed_ms >= effective_max_ms {
         return GuardEvent::Stop(StopReason::MaxDuration);
     }
@@ -317,7 +362,14 @@ fn guard_step(state: &mut GuardState, rms_peak: f32, cap_hit: bool, cfg: &GuardC
     }
 
     if state.silent_ms >= cfg.silence_timeout_ms {
-        return GuardEvent::Stop(StopReason::SilenceTimeout);
+        // Whether this take ever had any detectable sound decides Finalize
+        // (SilenceTimeout) vs. Discard (SilenceTimeoutNoSpeech) — see
+        // `GuardState::ever_loud` doc.
+        return GuardEvent::Stop(if state.ever_loud {
+            StopReason::SilenceTimeout
+        } else {
+            StopReason::SilenceTimeoutNoSpeech
+        });
     }
 
     let beep_at_ms = cfg.silence_timeout_ms.saturating_sub(cfg.pre_cutoff_beep_ms);
@@ -329,7 +381,7 @@ fn guard_step(state: &mut GuardState, rms_peak: f32, cap_hit: bool, cfg: &GuardC
     GuardEvent::None
 }
 
-/// Spawn the recording guard task — plan §3 Layer 2. Runs unconditionally
+/// Spawn the recording guard task. Runs unconditionally
 /// (regardless of `overlay.enabled`, see module doc) for the lifetime of
 /// one recording; ends when either `token` is cancelled (a normal stop
 /// beat the guard to it) or the recorder itself stops recording (mirrors
@@ -351,10 +403,9 @@ pub(crate) fn spawn_recording_guard(
         let poll = std::time::Duration::from_millis(cfg.poll_ms as u64);
 
         loop {
-            // Check the token FIRST on every iteration (plan §3 Layer 2,
-            // T3 r1 review carry-forward C5) — `select!` resolves
-            // immediately if already cancelled, without waiting out the
-            // sleep.
+            // Check the token FIRST on every iteration — `select!`
+            // resolves immediately if already cancelled, without waiting
+            // out the sleep.
             tokio::select! {
                 _ = token.cancelled() => {
                     tracing::debug!("Recording guard cancelled");
@@ -364,7 +415,25 @@ pub(crate) fn spawn_recording_guard(
             }
 
             if !recorder.is_recording() {
-                tracing::debug!("Recording guard stopping: recorder no longer recording");
+                // The recording thread stopped on its own — nobody called
+                // `stop_recording` (that path cancels this task's token
+                // instead, handled above). Route through the shared stop
+                // path so the coordinator actually returns to Idle
+                // (`StopDecision::Recover`, since `is_recording()` now
+                // disagrees with `Stage::Recording`) instead of silently
+                // exiting and leaving the hotkey dead until the user's
+                // next gesture.
+                tracing::warn!(
+                    "Recording guard: recorder stopped recording on its own (no matching \
+                     stop_recording call) — recovering to Idle"
+                );
+                if token.is_cancelled() {
+                    // A release already took stop_lock and is (or just
+                    // did) handle this the normal way — nothing left for
+                    // us to do.
+                    break;
+                }
+                coordinator.stop_recording(StopReason::StreamDied).await;
                 break;
             }
 
@@ -404,12 +473,15 @@ pub(crate) fn spawn_recording_guard(
                         StopReason::SilenceTimeout => {
                             crate::diagnostics::breadcrumbs::sites::recording_auto_stopped_silence();
                         }
+                        StopReason::SilenceTimeoutNoSpeech => {
+                            crate::diagnostics::breadcrumbs::sites::recording_auto_stopped_silence_no_speech();
+                        }
                         StopReason::MaxDuration => {
                             crate::diagnostics::breadcrumbs::sites::recording_auto_stopped_max_duration();
                         }
                         other => unreachable!(
-                            "guard_step only ever returns StopReason::SilenceTimeout or \
-                             MaxDuration, got {other:?}"
+                            "guard_step only ever returns StopReason::SilenceTimeout, \
+                             SilenceTimeoutNoSpeech, or MaxDuration, got {other:?}"
                         ),
                     }
                     tracing::warn!(
@@ -423,8 +495,7 @@ pub(crate) fn spawn_recording_guard(
                     // cancels this token inside `stop_recording` — so
                     // re-checking it here (cheap, lock-free) narrows the
                     // stale-guard window from "one poll interval" to
-                    // microseconds (T5 r1 review, finding 3). The
-                    // breadcrumb + warn! above are intentionally emitted
+                    // microseconds. The breadcrumb + warn! above are intentionally emitted
                     // BEFORE this check so the cause stays visible even
                     // when the stop is (correctly) skipped or hangs.
                     if token.is_cancelled() {
@@ -448,6 +519,8 @@ pub(crate) fn spawn_recording_guard(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestrator::coordinator::Stage;
+    use crate::orchestrator::recording::{stop_decision, StopDecision};
 
     // ---- SilenceWindow --------------------------------------------------
 
@@ -506,8 +579,11 @@ mod tests {
         guard_step(state, 1.0, false, cfg)
     }
 
-    // ---- t12: full + >=fraction silent for >= timeout -> Stop(SilenceTimeout),
-    // ---- at exactly the poll where silent_ms reaches timeout -------------
+    // ---- t12: full + >=fraction silent for >= timeout -> Stop, at exactly
+    // ---- the poll where silent_ms reaches timeout. This recording never
+    // ---- had a loud poll, so the reason is the Discard-routing
+    // ---- `SilenceTimeoutNoSpeech`, not `SilenceTimeout` — see the
+    // ---- `_after_earlier_speech` variant below for the Finalize case. ----
 
     #[test]
     fn test_silence_timeout_fires_at_exact_poll_silent_ms_reaches_timeout() {
@@ -533,8 +609,83 @@ mod tests {
         assert_eq!(silent_step(&mut state, &cfg), GuardEvent::PreCutoffBeep); // silent_ms=200, beep_at=200
         assert_eq!(
             silent_step(&mut state, &cfg),
-            GuardEvent::Stop(StopReason::SilenceTimeout)
-        ); // silent_ms=300 >= timeout(300)
+            GuardEvent::Stop(StopReason::SilenceTimeoutNoSpeech)
+        ); // silent_ms=300 >= timeout(300), never loud -> NoSpeech
+    }
+
+    // ---- never-loud vs. loud-then-silent: the two SilenceTimeout reasons -
+
+    #[test]
+    fn test_silence_timeout_with_no_speech_ever_discards() {
+        // A recording that is silent from the very first poll (mic muted,
+        // VAD off, nobody spoke) must route to the Discard-mapped reason,
+        // not the normal Finalize one — sending pure room noise to
+        // transcription risks an auto-typed Whisper silence hallucination.
+        let cfg = GuardCfg {
+            silence_timeout_ms: 300,
+            max_recording_ms: 60_000,
+            poll_ms: 100,
+            window_ms: 400,
+            silence_fraction: 0.75,
+            silence_rms: 0.01,
+            pre_cutoff_beep_ms: 100,
+            audio_feedback: Default::default(),
+        };
+        let mut state = GuardState::new(&cfg);
+        assert!(!state.ever_loud);
+
+        for _ in 0..10 {
+            match silent_step(&mut state, &cfg) {
+                GuardEvent::Stop(reason) => {
+                    assert_eq!(reason, StopReason::SilenceTimeoutNoSpeech);
+                    assert_eq!(
+                        stop_decision(Stage::Recording, true, reason),
+                        StopDecision::Discard,
+                        "SilenceTimeoutNoSpeech must Discard, not Finalize"
+                    );
+                    return;
+                }
+                _ => continue,
+            }
+        }
+        panic!("expected a Stop(SilenceTimeoutNoSpeech) within 10 polls");
+    }
+
+    #[test]
+    fn test_silence_timeout_after_earlier_speech_finalizes_normally() {
+        // The user spoke early in the take, then fell silent (walked away,
+        // finished dictating): the eventual silence-timeout stop must
+        // still Finalize — they want the earlier speech transcribed.
+        let cfg = GuardCfg {
+            silence_timeout_ms: 300,
+            max_recording_ms: 60_000,
+            poll_ms: 100,
+            window_ms: 400,
+            silence_fraction: 0.75,
+            silence_rms: 0.01,
+            pre_cutoff_beep_ms: 100,
+            audio_feedback: Default::default(),
+        };
+        let mut state = GuardState::new(&cfg);
+
+        assert_eq!(loud_step(&mut state, &cfg), GuardEvent::None); // the user's speech
+        assert!(state.ever_loud);
+
+        for _ in 0..10 {
+            match silent_step(&mut state, &cfg) {
+                GuardEvent::Stop(reason) => {
+                    assert_eq!(reason, StopReason::SilenceTimeout);
+                    assert_eq!(
+                        stop_decision(Stage::Recording, true, reason),
+                        StopDecision::Finalize,
+                        "SilenceTimeout after earlier speech must Finalize"
+                    );
+                    return;
+                }
+                _ => continue,
+            }
+        }
+        panic!("expected a Stop(SilenceTimeout) within 10 polls");
     }
 
     // ---- t13: one loud poll inside an otherwise silent window (real
@@ -663,7 +814,8 @@ mod tests {
     }
 
     // ---- t16: silence_timeout_ms=0 -> silence never fires, max still
-    // ---- works; max_recording_ms=0 -> ABS_MAX_RECORDING_MS still applies --
+    // ---- works; max_recording_ms=0 -> the guard still stops, at the
+    // ---- transcribable ceiling (not the raw buffer's larger backstop) ----
 
     #[test]
     fn test_silence_disabled_never_fires_even_when_fully_silent() {
@@ -685,12 +837,21 @@ mod tests {
     }
 
     #[test]
-    fn test_max_recording_zero_still_stops_at_absolute_backstop() {
+    fn test_max_recording_zero_still_stops_at_the_guards_transcribable_ceiling() {
+        // The raw-buffer clamp (`effective_max_recording_ms`, feeding
+        // `native_cap_samples`) still allows the full 30-minute backstop—
+        // that part is unchanged and covered by
+        // `test_native_cap_samples_zero_uses_absolute_backstop` below.
         assert_eq!(effective_max_recording_ms(0), ABS_MAX_RECORDING_MS);
+        // But the GUARD's own elapsed check clamps a second time, to the
+        // largest take that's actually transcribable — "off" must not
+        // produce a recording that's guaranteed to be rejected with no
+        // failed-audio dump to retry from.
+        assert_eq!(guard_max_recording_ms(0), MAX_RECORDING_MS_CEILING);
 
         let cfg = GuardCfg {
             silence_timeout_ms: 0,
-            max_recording_ms: 0, // "off" per the user, but ABS_MAX_RECORDING_MS still applies
+            max_recording_ms: 0, // "off" per the user
             poll_ms: 100,
             window_ms: 200,
             silence_fraction: 0.5,
@@ -698,10 +859,10 @@ mod tests {
             pre_cutoff_beep_ms: 0,
             audio_feedback: Default::default(),
         };
-        // Fast-forward instead of looping 18,000 times (ABS_MAX_RECORDING_MS
-        // / poll_ms): construct the state already almost at the backstop.
+        // Fast-forward instead of looping thousands of times: construct the
+        // state already almost at the guard's (ceiling-clamped) backstop.
         let mut state = GuardState::new(&cfg);
-        state.elapsed_ms = ABS_MAX_RECORDING_MS - cfg.poll_ms;
+        state.elapsed_ms = MAX_RECORDING_MS_CEILING - cfg.poll_ms;
 
         assert_eq!(
             loud_step(&mut state, &cfg),
@@ -711,7 +872,8 @@ mod tests {
 
     // ---- t17: PreCutoffBeep exactly once, then Stop at timeout; a
     // ---- pathological pre_cutoff_beep_ms > silence_timeout_ms (hand-edited
-    // ---- DB, T1 r1 review) must not fire before the window ever fills ----
+    // ---- DB, load is unvalidated) must not fire before the window ever
+    // ---- fills -------------------------------------------------------
 
     #[test]
     fn test_pre_cutoff_beep_fires_exactly_once_then_stops() {
@@ -732,7 +894,8 @@ mod tests {
         for _ in 0..10 {
             match silent_step(&mut state, &cfg) {
                 GuardEvent::PreCutoffBeep => beeps += 1,
-                GuardEvent::Stop(StopReason::SilenceTimeout) => {
+                // Never a loud poll in this test -> NoSpeech, not SilenceTimeout.
+                GuardEvent::Stop(StopReason::SilenceTimeoutNoSpeech) => {
                     stopped = true;
                     break;
                 }
@@ -776,12 +939,12 @@ mod tests {
         assert_eq!(silent_step(&mut state, &cfg), GuardEvent::None); // silent_ms=40
         assert_eq!(
             silent_step(&mut state, &cfg),
-            GuardEvent::Stop(StopReason::SilenceTimeout)
-        ); // silent_ms=50
+            GuardEvent::Stop(StopReason::SilenceTimeoutNoSpeech)
+        ); // silent_ms=50, never loud -> NoSpeech
     }
 
-    // ---- t17b (extra, not in plan §4): a speech burst resets silent_ms AND
-    // ---- re-arms the beep latch -------------------------------------------
+    // ---- t17b (extra coverage beyond the core test list): a speech burst
+    // ---- resets silent_ms AND re-arms the beep latch ----------------------
 
     #[test]
     fn test_speech_burst_resets_silent_ms_and_rearms_beep() {
@@ -851,15 +1014,30 @@ mod tests {
         assert_eq!(effective_max_recording_ms(600_000), 600_000);
     }
 
-    // plan §4 #18 / #20 (runtime: release cancels token; rapid restart → one
-    // guard alive): NOT automatable without tauri/test harness — verified by
-    // inspection in review; Phase 5 manual checklist.
+    #[test]
+    fn test_guard_max_recording_ms_clamps_stricter_than_buffer_cap() {
+        // Default (600_000) is under the ceiling: passes through unchanged,
+        // matching the buffer cap.
+        assert_eq!(guard_max_recording_ms(600_000), 600_000);
+        // Anything at or above the ceiling clamps to it, even though the
+        // buffer cap (`effective_max_recording_ms`) would allow up to
+        // ABS_MAX_RECORDING_MS (30 min) — the two are deliberately
+        // different once past MAX_RECORDING_MS_CEILING.
+        assert_eq!(guard_max_recording_ms(MAX_RECORDING_MS_CEILING), MAX_RECORDING_MS_CEILING);
+        assert_eq!(guard_max_recording_ms(ABS_MAX_RECORDING_MS), MAX_RECORDING_MS_CEILING);
+        assert_eq!(guard_max_recording_ms(0), MAX_RECORDING_MS_CEILING);
+    }
+
+    // Runtime behavior NOT automatable without a `tauri/test` harness
+    // (release cancels the guard's token; a rapid restart leaves exactly
+    // one guard alive) — verified by inspection; tracked on the manual
+    // hardware checklist instead.
     //
     // Runtime `spawn_recording_guard` end-to-end is NOT implemented —
     // `RecordingCoordinator::new` requires a real `AppHandle`, and this
-    // crate has no `tauri/test` feature (plan §4 harness discussion,
-    // option A vs B; this codebase already chose B for exactly this
-    // reason). The policy this task would exercise is guard_step, fully
+    // crate has no `tauri/test` feature; the pure-decision-function split
+    // used throughout this module was chosen specifically to avoid
+    // needing one. The policy this task would exercise is guard_step, fully
     // covered above; the task wrapper's only untested-here behaviour is
     // its cancellation/exit plumbing, which mirrors
     // `orchestrator::audio_level::start_audio_level_polling`'s

@@ -625,15 +625,17 @@ async listAudioDevices() : Promise<Result<AudioDevice[], string>> {
  * Start audio recording.
  * Requires microphone permission to access audio hardware.
  * 
- * Thin wrapper over the orchestrator (T4c, plan §3 Layer 1: "единственный
- * путь остановки"). This command used to drive `state.recorder` directly,
- * bypassing `stop_lock`, the `PressReleaseMachine`, the coordinator and
- * the transcription queue entirely — the last such bypass identified by
- * the T3 r1 review (its `recorder.stop()` was the only other producer of
- * the `Recover` recovery path besides a genuinely dead recording thread).
- * `device_id` is accepted for API/`specta` binding compatibility with the
- * pre-T4c signature but is otherwise unused: the orchestrator's recording
- * path reads `audio_device` from config, not from a per-call override.
+ * Thin wrapper over the orchestrator: every recorder-starting/-stopping
+ * path funnels through `RecordingCoordinator` so `stop_lock`, the
+ * press/release ordering machine, the coordinator and the transcription
+ * queue all stay authoritative. This command used to drive
+ * `state.recorder` directly, bypassing all of that — the last such
+ * bypass in the crate, and the only other way `recorder.stop()` could
+ * run out from under the orchestrator (surfacing as a spurious
+ * `StopDecision::Recover`). `device_id` is accepted for API/`specta`
+ * binding compatibility with callers that still pass one, but is
+ * otherwise unused: the orchestrator's recording path reads
+ * `audio_device` from config, not from a per-call override.
  */
 async startRecording(deviceId: string | null) : Promise<Result<null, string>> {
     try {

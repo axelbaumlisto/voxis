@@ -379,8 +379,7 @@ fn test_reset_clears_noise_floor() {
 }
 
 // ---------------------------------------------------------------------
-// T2: `process_chunk` primitives — boost-independent peak RMS + sample
-// cap (plan Layers 1/2/3).
+// `process_chunk` primitives — boost-independent peak RMS + sample cap.
 // ---------------------------------------------------------------------
 
 #[test]

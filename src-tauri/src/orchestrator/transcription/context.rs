@@ -17,8 +17,8 @@ use crate::orchestrator::state::RecordingState;
 /// mirrors coordinator state plus a transient `Error` value the `Stage` enum
 /// can't express.
 ///
-/// Deliberately does NOT own the audio bytes (plan §1.3-A / §3 Layer 4): an
-/// earlier revision cloned the whole WAV into `ctx.audio_data` in
+/// Deliberately does NOT own the audio bytes: an earlier revision cloned
+/// the whole WAV into `ctx.audio_data` in
 /// `dispatch.rs` so `save_failed_audio` could still read it after the
 /// original was moved into `run_transcription` — a second full-size copy
 /// alive for the ENTIRE pipeline (success path included), on top of the one

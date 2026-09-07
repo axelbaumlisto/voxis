@@ -14,8 +14,8 @@ const DEFAULT_MODEL: &str = "whisper-large-v3";
 ///
 /// `pub(crate)` (not private): the orchestrator pipeline
 /// (`orchestrator::transcription::pipeline`) checks this BEFORE writing
-/// debug/failed-audio dumps or making the HTTP call at all (plan §3 Layer
-/// 4) — this client would reject an oversize buffer with the identical
+/// debug/failed-audio dumps or making the HTTP call at all — this client
+/// would reject an oversize buffer with the identical
 /// `TranscriptionError::AudioTooLarge` below, just after wasting a network
 /// round-trip and up to two full-buffer disk writes on audio nobody can
 /// retry anyway.

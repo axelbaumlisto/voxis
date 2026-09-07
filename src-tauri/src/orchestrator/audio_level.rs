@@ -6,8 +6,8 @@
 //! to live here (a one-time `WARN` log, active only while this poller ran,
 //! i.e. only when `overlay.enabled`) and has moved to
 //! `orchestrator::recording_guard`, which runs unconditionally and can
-//! actually act on what it detects (plan §1.4 "не два толкователя тишины" —
-//! don't leave two independent silence interpreters in the codebase).
+//! actually act on what it detects — don't leave two independent silence
+//! interpreters in the codebase.
 
 use crate::audio::{AudioRecorder, SpectrumAnalyzer};
 use crate::overlay_native::OverlayBackend;
@@ -23,16 +23,16 @@ const POLL_INTERVAL_MS: u32 = 80;
 
 /// At most one `Spectrum [N]` line per this many milliseconds. The file
 /// appender already records at DEBUG (`setup/logging.rs`), so an earlier
-/// INFO→DEBUG change alone did not reduce disk writes (plan §1.4) — a
-/// stuck ~10 h recording produced 87 053 of 87 097 total log lines this way
-/// (plan §1.3-B). `tracing::trace!` plus this throttle keeps the spam down
-/// even when trace-level logging is enabled for diagnosis.
+/// INFO→DEBUG change alone did not reduce disk writes — a stuck ~10 h
+/// recording produced 87 053 of 87 097 total log lines this way.
+/// `tracing::trace!` plus this throttle keeps the spam down even when
+/// trace-level logging is enabled for diagnosis.
 const SPECTRUM_LOG_INTERVAL_MS: u32 = 5_000;
 
 /// Pure: true once every `interval_ms / poll_ms` polls (at least every
 /// poll, never less often than every poll). Free of the loop's `count`
-/// state and any async/task context so it's directly unit-testable (plan
-/// §4 test 22) without spinning up the polling task.
+/// state and any async/task context so it's directly unit-testable
+/// without spinning up the polling task.
 pub(crate) fn should_log_spectrum(count: u32, poll_ms: u32, interval_ms: u32) -> bool {
     let every = (interval_ms / poll_ms.max(1)).max(1);
     count % every == 0
@@ -91,9 +91,9 @@ pub fn start_audio_level_polling(
 
             if should_log_spectrum(count, POLL_INTERVAL_MS, SPECTRUM_LOG_INTERVAL_MS) {
                 // Log peak frequency for debugging. `trace!`, not `info!`/
-                // `debug!` (plan §1.4 / §3 Layer 4 item 4): the file appender
-                // already records DEBUG, so this is the only level change
-                // that actually reduces bytes written for a long recording.
+                // `debug!`: the file appender already records DEBUG, so this
+                // is the only level change that actually reduces bytes
+                // written for a long recording.
                 let peak_bar = spectrum
                     .iter()
                     .enumerate()
@@ -177,7 +177,7 @@ mod tests {
     use super::*;
     use crate::overlay_native::NoopOverlay;
 
-    // ---- plan §4 test 22: Spectrum log throttle (pure, no task/loop) ----
+    // ---- Spectrum log throttle (pure, no task/loop) -----------------
 
     #[test]
     fn should_log_spectrum_fires_at_multiples_of_interval() {
@@ -194,7 +194,7 @@ mod tests {
         // Over a simulated 10 h stuck recording (450_000 polls @ 80ms), the
         // number of log lines must stay near "total duration / 5s", not
         // "total duration / 80ms" (the pre-fix behavior that produced
-        // 87_053 of 87_097 lines — plan §1.3-B).
+        // 87_053 of 87_097 lines).
         let total_polls = (10 * 3600 * 1000) / POLL_INTERVAL_MS; // ~450_000
         let logged = (0..total_polls)
             .filter(|&c| should_log_spectrum(c, POLL_INTERVAL_MS, SPECTRUM_LOG_INTERVAL_MS))

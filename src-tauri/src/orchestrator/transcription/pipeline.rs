@@ -30,10 +30,10 @@ pub async fn transcribe_and_output(
     );
 
     // Oversize gate — reject BEFORE any dump write, config validation, or
-    // HTTP round-trip (plan §1.3-B / §3 Layer 4). The client would reject
-    // this identically (same `TranscriptionError::AudioTooLarge`, reused
-    // here so the user-facing text is unchanged) — but only after this
-    // pipeline had already written the full buffer to disk TWICE
+    // HTTP round-trip. The client would reject this identically (same
+    // `TranscriptionError::AudioTooLarge`, reused here so the user-facing
+    // text is unchanged) — but only after this pipeline had already
+    // written the full buffer to disk TWICE
     // (`save_debug_audio` + `save_failed_audio`, 2 × 1684 MB in the Sep 4
     // incident) for output nobody can retry: an oversize WAV fails the same
     // way every time. Placed ahead of `validate_config` deliberately — a
@@ -74,9 +74,9 @@ pub async fn transcribe_and_output(
     // `TranscriptionClient::transcribe` builds an owned multipart body) —
     // `audio_data` itself stays alive and unmodified for the whole function,
     // so the error branch below can pass it to `save_failed_audio` by
-    // reference without a second long-lived copy (plan §1.3-A / §3 Layer 4:
-    // was previously a THIRD full-buffer copy living in `ctx.audio_data` for
-    // the entire pipeline, success path included).
+    // reference without a second long-lived copy (this used to be a THIRD
+    // full-buffer copy living in `ctx.audio_data` for the entire pipeline,
+    // success path included).
     let transcription_start = Instant::now();
     let result = match run_transcription(&config, audio_data.clone()).await {
         Ok(r) => r,
@@ -186,11 +186,11 @@ pub async fn transcribe_and_output(
 /// Persist `audio` for user-visible retry after a transcription failure.
 ///
 /// Takes `audio: &[u8]` explicitly (not `ctx.audio_data`, which no longer
-/// exists — plan §1.3-A / §3 Layer 4: `TranscriptionContext` stopped owning
-/// a redundant clone of the WAV). Refuses oversize audio as defense-in-depth
-/// (plan §3 Layer 4 item 2): the pipeline's own gate above already prevents
-/// this call for oversize audio on the normal path, but a future caller
-/// reaching this function directly must not resurrect the double-dump bug.
+/// exists — `TranscriptionContext` stopped owning a redundant clone of the
+/// WAV). Refuses oversize audio as defense-in-depth: the pipeline's own
+/// gate above already prevents this call for oversize audio on the normal
+/// path, but a future caller reaching this function directly must not
+/// resurrect the double-dump bug.
 fn save_failed_audio(app: &tauri::AppHandle, audio: &[u8], config: &AppConfig, error: &str) {
     if exceeds_size_limit(audio.len()) {
         tracing::warn!(

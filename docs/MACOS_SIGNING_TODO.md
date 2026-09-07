@@ -404,10 +404,11 @@ requires:
 3. The resulting **secrets to be added to the Forgejo CI secret store** by
    someone with access to it.
 
-Until then, Voxis correctly ships **unsigned** macOS binaries, and macOS users
-will see the Gatekeeper "cannot verify the developer" warning and must
-right-click → Open (or clear the quarantine attribute). This is a known,
-accepted limitation, not a bug.
+(historical) Until then, Voxis correctly ships **unsigned** macOS binaries, and
+macOS users will see the Gatekeeper "cannot verify the developer" warning and
+must right-click → Open (or clear the quarantine attribute). This is a known,
+accepted limitation, not a bug. See "Current implementation" above — signing
+secrets now exist and CI codesigns/notarizes by default.
 
 ### Optional: funding the $99/year via GitHub Sponsors
 

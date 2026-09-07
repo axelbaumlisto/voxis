@@ -13,22 +13,28 @@ gigabytes, multi-GB WAV dumps, app goes deaf until restart) and adds a recording
 - Microphone permission probe is native (AVFoundation, ~10–40 ms) instead of `osascript`.
 
 ### Recording guard (new settings, Recording section)
-- Auto-stop after continuous silence (default 60 s; 0 = off) with a warning beep 3 s before.
-- Max recording length (default 10 min; 0 = off). An absolute 30-min cap always applies.
+- Auto-stop after continuous silence (default 60 s + ~10 s detection window; 0 = off)
+  with a warning beep 3 s before. A take that was silent from start to finish is
+  discarded instead of transcribed, to avoid an auto-typed Whisper silence hallucination.
+- Max recording length (default 10 min; 0 = off — recording still stops at ~13 min, the
+  transcription limit; the raw audio buffer keeps a separate, larger safety backstop).
 - Buffer is hard-capped at the native sample rate; memory is released on stop.
 
 ### Robustness
 - One serialized stop path for hotkey release, toggle press, cancel button and the guard;
   toggle mode's tap-to-stop (previously dead code) works.
 - Dead audio stream mid-recording recovers to idle with an error cue instead of pinning
-  the app in "Recording".
+  the app in "Recording" — on the next stop request, or automatically once the recording
+  guard notices the stream died.
 - Oversize audio (>25 MB) is rejected before any disk write or network call; the
   failed-audio and debug dumps no longer write multi-GB files.
 - Overlay spectrum logging throttled; heartbeat no longer fsyncs every 10 s.
 
 ### macOS release pipeline
 - CI now codesigns (Developer ID, Hardened Runtime + microphone/Apple-Events
-  entitlements), notarizes and staples a DMG; own VM image and a host-wide launch lock.
+  entitlements), notarizes and staples a DMG (falls back to an ad-hoc-signed DMG when
+  signing secrets are absent; unstapled if Apple's queue exceeds 30 min — see
+  `docs/MACOS_SIGNING_TODO.md`); own VM image and a host-wide launch lock.
 
 ## v0.1.2
 

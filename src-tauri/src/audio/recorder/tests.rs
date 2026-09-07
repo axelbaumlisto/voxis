@@ -182,8 +182,8 @@ fn test_apply_vad_filters_silence_with_threshold_vad() {
 }
 
 // ---------------------------------------------------------------------
-// T2: single-flight `stop()`, `mem::take` drain, peak-RMS wrapper, cap
-// wrapper (plan Layers 1/2/3 primitives).
+// Single-flight `stop()`, `mem::take` drain, peak-RMS wrapper, cap
+// wrapper primitives.
 // ---------------------------------------------------------------------
 
 #[test]
@@ -331,11 +331,11 @@ fn test_start_resets_rms_peak_and_cap_hit() {
 
 #[test]
 fn test_start_refused_while_stopping() {
-    // Fail-safe primitive-level enforcement of plan §4 test 6 ("press
-    // во время stopping → отказывает, не стартует поверх"): start()
-    // must refuse — not silently resume — while a stop() owns the flag,
-    // and must leave the flag untouched (only StoppingGuard's Drop may
-    // clear it).
+    // Fail-safe primitive-level enforcement: a press arriving while a
+    // stop() is still in flight must refuse, not start on top of it.
+    // start() must refuse — not silently resume — while a stop() owns the
+    // flag, and must leave the flag untouched (only StoppingGuard's Drop
+    // may clear it).
     let recorder = AudioRecorder::new();
     recorder.stopping.store(true, Ordering::SeqCst);
 

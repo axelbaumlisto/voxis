@@ -75,7 +75,7 @@ pub(crate) enum StopReason {
     Release,
     /// Toggle-mode second press (was dead code — previously routed through
     /// `on_hotkey_released`'s toggle guard, which returns immediately in
-    /// toggle mode and never reached `recorder.stop()`; plan §1.4).
+    /// toggle mode and never reached `recorder.stop()`).
     TogglePress,
     /// `Orchestrator::cancel()` — discard path, no `queue.push`.
     Cancel,
@@ -84,11 +84,34 @@ pub(crate) enum StopReason {
     /// the release task itself.
     ReleasePending,
     /// Layer 2 recording guard (`recording_guard.rs`): continuous
-    /// near-silence exceeded the configured timeout.
+    /// near-silence exceeded the configured timeout, and the guard heard
+    /// some sound above `SILENCE_RMS` at some point earlier in this same
+    /// recording (the user spoke, then presumably walked away) — finalize
+    /// and transcribe as usual.
     SilenceTimeout,
+    /// Layer 2 recording guard, safety variant: continuous near-silence
+    /// exceeded the configured timeout AND the guard never once heard
+    /// anything above `SILENCE_RMS` during the whole recording (VAD
+    /// disabled or unavailable, mic muted/disconnected for the entire
+    /// take). Routes to `StopDecision::Discard` instead of `Finalize`:
+    /// sending pure room noise to the transcription API risks a
+    /// well-known Whisper silence hallucination (e.g. "Thank you for
+    /// watching") being auto-typed into whatever window has focus, with
+    /// no human in the loop to notice it was never real speech.
+    SilenceTimeoutNoSpeech,
     /// Layer 2/3 recording guard: recording exceeded the configured (or
     /// absolute) maximum duration.
     MaxDuration,
+    /// The recording guard observed `AudioRecorder::is_recording() ==
+    /// false` while it was still polling — the recording thread stopped
+    /// on its own (a stream build/play failure after `start()` returned
+    /// `Ok`, a panic) rather than via any `stop_recording` call. Always
+    /// resolves to `StopDecision::Recover` (any reason does, once
+    /// `is_recording` disagrees with the coordinator's stage) — this is a
+    /// distinct variant purely so the resulting `warn!`/breadcrumb says
+    /// why, instead of borrowing `MaxDuration`/`SilenceTimeout` for
+    /// something neither describes.
+    StreamDied,
 }
 
 /// Outcome of checking whether a `stop_recording` call should actually touch
@@ -97,7 +120,7 @@ pub(crate) enum StopReason {
 /// SRP: pure decision, no side effects — `stop_recording` performs the
 /// logging/recorder/queue/overlay side effects based on this value. Kept
 /// free of any `AppHandle`/`Arc` dependency so it's unit-testable without a
-/// running Tauri app (plan §4 harness option B).
+/// running Tauri app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StopDecision {
     /// Nothing to stop: the coordinator isn't in `Stage::Recording` at
@@ -108,8 +131,10 @@ pub(crate) enum StopDecision {
     Skip,
     /// Abnormal: the coordinator still says `Stage::Recording` but
     /// `AudioRecorder::is_recording()` is already `false`. Under
-    /// `stop_lock` this can NEVER be a benign race-loser (T3 r1 review,
-    /// finding 1) — it means the recording thread died after `start()`
+    /// `stop_lock` this can NEVER be a benign race-loser (the winner of a
+    /// real race holds the lock through its own stage transition, so a
+    /// loser only ever observes `Processing`/`Idle`) — it means the
+    /// recording thread died after `start()`
     /// returned `Ok` (stream build/play failure, a panic, device
     /// unplugged). `stop_recording` must NOT call `recorder.stop()`
     /// (nothing to stop) and must still return the coordinator to `Idle`
@@ -129,8 +154,7 @@ pub(crate) enum StopDecision {
 /// Decide what a `stop_recording(reason)` call should do, given the
 /// coordinator's current stage and whether the recorder is actually
 /// recording. Re-checked *inside* `stop_lock` by the caller, so this is the
-/// single source of truth for "is there a live recording to stop" —
-/// plan §3 Layer 1 tests 1-6 (+ T3 r1 review finding 1: `Recover`).
+/// single source of truth for "is there a live recording to stop".
 pub(crate) fn stop_decision(
     stage: Stage,
     is_recording: bool,
@@ -141,11 +165,11 @@ pub(crate) fn stop_decision(
     }
     if !is_recording {
         // Stage says Recording but the recorder disagrees — abnormal for
-        // EVERY reason, not just some (T3 r1 review, finding 1).
+        // EVERY reason, not just some.
         return StopDecision::Recover;
     }
     match reason {
-        StopReason::Cancel => StopDecision::Discard,
+        StopReason::Cancel | StopReason::SilenceTimeoutNoSpeech => StopDecision::Discard,
         _ => StopDecision::Finalize,
     }
 }
@@ -156,7 +180,8 @@ pub(crate) enum StopErrorAction {
     /// `AudioError::StopInProgress`: another caller's `stop()` won the
     /// single-flight CAS a moment earlier and is already handling this
     /// stop (or just finished). Not a user-facing error — no beep, no
-    /// `handle_error`, no overlay change; see T2 review finding C3.
+    /// `handle_error`, no overlay change; the other caller already owns
+    /// telling the user what happened.
     SilentRaceLost,
     /// Any other error (device gone, WAV encode failure, ...) — the
     /// existing user-visible error path (beep + `handle_error` + hide
@@ -175,8 +200,7 @@ pub(crate) fn map_stop_error(e: &AudioError) -> StopErrorAction {
 /// What a hotkey/tap press should do, given the current hotkey mode and
 /// coordinator stage. Mirrors the two checks `on_hotkey_pressed` used to
 /// perform inline (toggle-stops-recording branch, then the TALRI
-/// Idle/Processing gate) as one pure, exhaustively-tested decision — plan
-/// §4 test 3.
+/// Idle/Processing gate) as one pure, exhaustively-tested decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PressAction {
     /// Toggle mode, already `Recording`: this press stops the current
@@ -228,21 +252,20 @@ pub struct RecordingCoordinator {
     /// Serializes every path that stops the recorder (`stop_recording`) and
     /// the recorder-starting section of `on_hotkey_pressed`, so at most one
     /// of {a start, a stop} touches `AudioRecorder`'s stream-state at a
-    /// time — plan §3 Layer 1. The `stopping: AtomicBool` guard inside
-    /// `AudioRecorder` (T2) already makes concurrent `stop()`/`start()`
-    /// calls individually safe; this lock closes the last few-instructions
-    /// TOCTOU window between them (T2 review finding, scrutiny b) and is
-    /// the single signal `Command::Cancel`-ordering (see `stop_recording`)
-    /// relies on.
+    /// time. The `stopping: AtomicBool` guard inside `AudioRecorder`
+    /// already makes concurrent `stop()`/`start()` calls individually
+    /// safe; this lock closes the last few-instructions TOCTOU window
+    /// between them and is the single signal `Command::Cancel`-ordering
+    /// (see `stop_recording`) relies on.
     stop_lock: Arc<tokio::sync::Mutex<()>>,
-    /// Single source of truth for press/release ordering (plan §3 Layer
-    /// 0(a)) — see `press_release` module docs for the full design and
-    /// disclosed deviations from the plan's literal two-primitive sketch.
-    /// Replaces the old `pending_press: Arc<Mutex<Option<(u64,
-    /// CancellationToken)>>>` debounce-phase-only cancellation slot
-    /// entirely — that mechanism covered only the hold-timer sleep,
-    /// leaving a seam with the post-debounce window that is exactly where
-    /// the historical bug (plan §1.1) lived.
+    /// Single source of truth for press/release ordering — see
+    /// `press_release` module docs for the full design and disclosed
+    /// deviations from the original two-primitive sketch. Replaces the
+    /// old `pending_press: Arc<Mutex<Option<(u64, CancellationToken)>>>`
+    /// debounce-phase-only cancellation slot entirely — that mechanism
+    /// covered only the hold-timer sleep, leaving a seam with the
+    /// post-debounce window that is exactly where the historical bug
+    /// lived.
     press_release: Arc<std::sync::Mutex<PressReleaseMachine>>,
 }
 
@@ -286,63 +309,75 @@ impl RecordingCoordinator {
         crate::diagnostics::breadcrumbs::sites::hotkey_pressed();
         tracing::info!("on_hotkey_pressed: enter");
 
+        let stage = self.coordinator.current_stage();
+        tracing::info!("on_hotkey_pressed: current_stage={:?}", stage);
+
+        // Toggle mode: a press while already Recording stops the current
+        // take instead of being ignored. Hold-mode (default) keeps the
+        // legacy 'only Idle/Processing' guard. TALRI semantics: allow a
+        // press from Idle (start fresh) or Processing (queue a new
+        // recording while the previous transcription finishes). Both
+        // checks are one pure, unit-tested decision — see `press_action`.
+        //
+        // Deliberately decided BEFORE touching the press/release ordering
+        // machine below: `Ignore` and `StopToggle` both mean a DIFFERENT
+        // recording is already under way (or this press was never going
+        // to start a new one at all), so neither should ever occupy
+        // `in_flight` — doing so would let a genuine release of that
+        // other, already-running recording be misread as belonging to
+        // THIS (about-to-be-discarded) press, and dropped the moment this
+        // branch returns. Only `PressAction::Start` below ever calls
+        // `press_enter()`. The machine-side half of why this is safe:
+        // `test_release_with_no_press_in_flight_is_proceed_release` in
+        // `press_release.rs` pins that a release with nothing in flight
+        // always reaches `stop_recording` normally — exactly the state
+        // these two branches leave the machine in, since they never touch
+        // it at all.
+        let early_config = load_config_from_app(&self.app);
+        let is_toggle_mode = early_config.hotkey_mode == "toggle";
+        match press_action(is_toggle_mode, stage) {
+            PressAction::StopToggle => {
+                tracing::info!("on_hotkey_pressed: toggle mode — stopping current recording");
+                // Route directly to the shared stop path, NOT
+                // `on_hotkey_released()` (which returns immediately in
+                // toggle mode — see its own toggle guard — and would
+                // never reach `recorder.stop()`, leaving toggle-mode
+                // recordings impossible to stop).
+                self.stop_recording(StopReason::TogglePress).await;
+                return;
+            }
+            PressAction::Ignore => {
+                tracing::debug!("Ignoring hotkey press - stage: {:?}", stage);
+                return;
+            }
+            PressAction::Start => {}
+        }
+
         // ---- Layer 0(a): single-flight admission, as early as possible
-        // ---- (T4a r1 review finding 2: admitting right after the
-        // ---- breadcrumb — before the stage read, config load, and
-        // ---- press_action match below — leaves no synchronous work of
-        // ---- our own before admission. The remaining pre-admission
-        // ---- window is purely the scheduler gap between this task being
-        // ---- spawned and its first poll; see press_release module docs,
-        // ---- deviation 4).
+        // ---- now that we know this press will actually try to start a
+        // ---- recording — before the debounce sleep and before any
+        // ---- further `.await`, so `in_flight` stays occupied
+        // ---- continuously from here through every checkpoint below. The
+        // ---- window between this task being scheduled and this line is
+        // ---- the scheduler gap plus the one stage read and one config
+        // ---- load just above — both synchronous, with no `.await`
+        // ---- between them and this line (see press_release module docs
+        // ---- for the full accounting of this window).
         let (press_id, wake_token) =
             match lock_press_release(&self.press_release).press_enter() {
                 PressEnterAction::Proceed(id, token) => (id, token),
                 PressEnterAction::IgnorePress => {
                     crate::diagnostics::breadcrumbs::sites::press_ignored_in_flight();
                     tracing::debug!(
-                        "on_hotkey_pressed: another press is already in flight, ignoring \
-                         (plan §1.4 single-flight start)"
+                        "on_hotkey_pressed: another press is already in flight, ignoring"
                     );
                     return;
                 }
             };
-        // Safety net (plan §3 Layer 0(a) step 6): guarantees `press_id` is
-        // cleared from the machine on every exit path below, even one a
-        // future edit adds without remembering to call a checkpoint.
+        // Safety net: guarantees `press_id` is cleared from the machine on
+        // every exit path below, even one a future edit adds without
+        // remembering to call a checkpoint.
         let mut press_exit = PressExitGuard::new(Arc::clone(&self.press_release), press_id);
-
-        let stage = self.coordinator.current_stage();
-        tracing::info!("on_hotkey_pressed: current_stage={:?}", stage);
-
-        // Toggle mode (#3): a press while already Recording stops the
-        // current take instead of being ignored. Hold-mode (default)
-        // keeps the legacy 'only Idle/Processing' guard. TALRI semantics:
-        // allow press from Idle (start fresh) or Processing (queue a new
-        // recording while previous transcription finishes). Both checks
-        // are now one pure, unit-tested decision — see `press_action`.
-        let early_config = load_config_from_app(&self.app);
-        let is_toggle_mode = early_config.hotkey_mode == "toggle";
-        match press_action(is_toggle_mode, stage) {
-            PressAction::StopToggle => {
-                tracing::info!("on_hotkey_pressed: toggle mode — stopping current recording");
-                // Admission above is unconditional now (T4a r1 review
-                // finding 2), so this branch briefly held `in_flight` —
-                // release it before falling through to the shared stop
-                // path, NOT `on_hotkey_released()` (which returns
-                // immediately in toggle mode, see its own toggle guard,
-                // and would never reach `recorder.stop()` — plan §1.4:
-                // toggle-mode recordings could never be stopped).
-                press_exit.early_return();
-                self.stop_recording(StopReason::TogglePress).await;
-                return;
-            }
-            PressAction::Ignore => {
-                tracing::debug!("Ignoring hotkey press - stage: {:?}", stage);
-                press_exit.early_return();
-                return;
-            }
-            PressAction::Start => {}
-        }
 
         // ---- Debounce: short presses are key-combination modifiers ----
         // Read the user-configured hold threshold (default 300 ms) and
@@ -350,9 +385,9 @@ impl RecordingCoordinator {
         // press is in flight cancels the token
         // (`PressReleaseMachine::release_arrived`), waking this sleep
         // within µs instead of occupying `in_flight` for the rest of
-        // `hold_ms` (T4a r1 review finding 1 — an earlier revision used a
-        // plain, uncancellable sleep here, which silently dropped a
-        // legitimate follow-on press admitted in that window;
+        // `hold_ms` (an earlier revision used a plain, uncancellable sleep
+        // here, which silently dropped a legitimate follow-on press
+        // admitted in that window;
         // `hotkey/mod.rs`'s press/release alternation filter guarantees
         // such a follow-on press always means this one's key was already
         // released, never a real single-flight conflict). Either branch
@@ -374,7 +409,7 @@ impl RecordingCoordinator {
             }
         } // end skip_debounce guard
 
-        // Checkpoint (i): did a release already arrive (plan §3 Layer 0(a))?
+        // Checkpoint (i): did a release already arrive?
         if matches!(press_exit.post_debounce(), ContinueOrAbort::NeverStart) {
             tracing::info!(
                 "on_hotkey_pressed: released before/during debounce (id={press_id}) - \
@@ -384,14 +419,14 @@ impl RecordingCoordinator {
         }
 
         tracing::info!("on_hotkey_pressed: checking mic permission");
-        // `blocks_start()`, not `is_granted()` (T4b landed after this step
-        // was drafted, in the parallel batch): only an explicit `Denied`
+        // `blocks_start()`, not `is_granted()`: only an explicit `Denied`
         // should refuse to start. `Unknown` must fall through to
         // `recorder.start()` — cpal has its own accurate, synchronous
         // failure path for a genuine denial, and refusing on `Unknown`
-        // reintroduces exactly the gap T4b's `blocks_start()` exists to
-        // close (permissions/checker.rs doc comment, T2-round review
-        // finding M8).
+        // would reintroduce the exact multi-second permission-check
+        // window that used to let a hotkey release race past
+        // `stop_recording` (see `permissions/checker.rs`'s doc comment on
+        // `blocks_start`).
         if create_permission_checker()
             .check(Permission::Microphone)
             .blocks_start()
@@ -414,19 +449,18 @@ impl RecordingCoordinator {
         install_vad(&self.recorder, &self.app, &config.vad);
         tracing::info!("on_hotkey_pressed: starting recorder, device={device}");
         // Hold `stop_lock` across the whole start-critical section (start
-        // .. await_stage(Recording) .. overlay/poller spawn — T3 r2 review
-        // finding N3 extends this to cover the overlay section too, see
-        // below) so this can never race a concurrent `stop_recording` —
-        // plan §3 Layer 1. `AudioRecorder::start()` (T2) already refuses on
-        // its own while a stop is mid-flight; this lock closes the last
-        // few-instructions TOCTOU window a lone atomic flag can't (T2
-        // review, scrutiny b), by ensuring no `stop_recording` call is
+        // .. await_stage(Recording) .. overlay/poller spawn, see below —
+        // this extends all the way to the end of the function) so this
+        // can never race a concurrent `stop_recording`. `AudioRecorder::
+        // start()` already refuses on its own while a stop is mid-flight;
+        // this lock closes the last few-instructions TOCTOU window a lone
+        // atomic flag can't, by ensuring no `stop_recording` call is
         // *itself* in flight while we're here at all.
         let _start_guard = self.stop_lock.lock().await;
 
-        // Checkpoint (ii): plan §3 Layer 0(a) — the checkpoint that closes
-        // the actual observed bug: a release arriving during the (possibly
-        // multi-second) permission check just above.
+        // Checkpoint (ii): the checkpoint that closes the actual observed
+        // bug — a release arriving during the (possibly multi-second)
+        // permission check just above.
         if matches!(press_exit.pre_start(), ContinueOrAbort::NeverStart) {
             tracing::info!(
                 "on_hotkey_pressed: release arrived during permission check (id={press_id}) - \
@@ -460,11 +494,11 @@ impl RecordingCoordinator {
             // recorder.start() has already returned — nothing left to
             // serialize against, and handle_error sleeps 2s; drop the lock
             // first so a concurrent stop/press isn't queued behind that
-            // sleep for no reason (T3 r1 review, finding 2). Stage can
-            // never be Recording here (coordinator.on_press() hasn't been
-            // called yet), so unlike stop_recording's UserError arm
-            // (T3 r2 review N1) there is no coordinator.cancel() to run
-            // before dropping the guard — it would always be a no-op.
+            // sleep for no reason. Stage can never be Recording here
+            // (coordinator.on_press() hasn't been called yet), so unlike
+            // stop_recording's UserError arm there is no
+            // coordinator.cancel() to run before dropping the guard — it
+            // would always be a no-op.
             drop(_start_guard);
             press_exit.early_return();
             self.handle_error(&e.to_string(), ErrorContext::Hotkey, false)
@@ -493,8 +527,7 @@ impl RecordingCoordinator {
         self.mirror_state().await;
 
         if !reached_recording {
-            // C1 orphan (plan §1.4 / T3 r1 review carry-forward C1): the
-            // coordinator's own internal 30ms press-debounce
+            // Orphan recorder: the coordinator's own internal 30ms press-debounce
             // (`coordinator::DEBOUNCE`) dropped our Press after
             // `recorder.start()` already returned Ok — is_recording()==true
             // but stage never became Recording. `stop_decision` would say
@@ -514,9 +547,9 @@ impl RecordingCoordinator {
             return;
         }
 
-        // Checkpoint (iii): plan §3 Layer 0(a) residual window — a release
-        // that arrived between recorder.start() returning Ok and the
-        // stage actually becoming Recording.
+        // Checkpoint (iii): residual-window check — a release that
+        // arrived between recorder.start() returning Ok and the stage
+        // actually becoming Recording.
         if matches!(press_exit.post_stage_recording(), PostStageAction::StopReleasePending) {
             tracing::info!(
                 "on_hotkey_pressed: release arrived just before stage became Recording \
@@ -530,16 +563,15 @@ impl RecordingCoordinator {
             return;
         }
 
-        // T3 r2 review finding N3: overlay.show() + poller spawn run
-        // INSIDE the stop_lock-held critical section (guard dropped only
-        // at the very end of this function) — previously the guard was
-        // dropped here, and a release that acquired stop_lock in that gap
-        // would finalize the recording, after which this code would still
-        // show "Recording" and spawn a poller for a now-dead recorder.
-        // Safe: the poller task never takes stop_lock, and stop_recording
-        // only takes polling_cancel/overlay while it already holds
-        // stop_lock, so holding it here too cannot invert any lock order
-        // (verified in T3 r1 review scrutiny (a)/(b)).
+        // overlay.show() + poller spawn run INSIDE the stop_lock-held
+        // critical section (guard dropped only at the very end of this
+        // function) — dropping the guard earlier here would let a release
+        // that acquired stop_lock in that gap finalize the recording,
+        // after which this code would still show "Recording" and spawn a
+        // poller for a now-dead recorder. Safe: the poller task never
+        // takes stop_lock, and stop_recording only takes
+        // polling_cancel/overlay while it already holds stop_lock, so
+        // holding it here too cannot invert any lock order.
         if config.overlay.enabled {
             tracing::info!("on_hotkey_pressed: about to acquire overlay lock");
             let overlay_guard = self.overlay.lock().await;
@@ -566,13 +598,13 @@ impl RecordingCoordinator {
             tracing::info!("on_hotkey_pressed: overlay disabled, returning");
         }
 
-        // Plan §3 Layer 2/3: recording guard (silence timeout + max
-        // duration, `recording_guard.rs`) — spawned UNCONDITIONALLY,
-        // unlike the overlay/poller block just above. The bug this fixes
-        // (plan §1.4 "не два толкователя тишины") was the old ad-hoc
-        // silence detector living inside the overlay's spectrum poller,
-        // so silence was only ever detected while `overlay.enabled` was
-        // true. Still inside `stop_lock` (same critical section as the
+        // Recording guard (silence timeout + max duration,
+        // `recording_guard.rs`) — spawned UNCONDITIONALLY, unlike the
+        // overlay/poller block just above. The bug this fixes was the old
+        // ad-hoc silence detector living inside the overlay's spectrum
+        // poller, so silence was only ever detected while `overlay.enabled`
+        // was true — one interpreter of "silence", not two. Still inside
+        // `stop_lock` (same critical section as the
         // overlay/poller block), same take-and-cancel-old-token discipline
         // as `polling_cancel` just above.
         //
@@ -640,26 +672,25 @@ impl RecordingCoordinator {
     }
 
     /// The ONE path that stops the recorder — release, toggle-mode
-    /// second-press, and `Orchestrator::cancel()` all funnel through here
-    /// (plan §2 DRY, §3 Layer 1). Serialized against `on_hotkey_pressed`'s
-    /// start-critical section by `stop_lock`.
+    /// second-press, and `Orchestrator::cancel()` all funnel through here.
+    /// Serialized against `on_hotkey_pressed`'s start-critical section by
+    /// `stop_lock`.
     pub(crate) async fn stop_recording(&self, reason: StopReason) {
         let _guard = self.stop_lock.lock().await;
 
         // Re-check under the lock — single source of truth for "is there a
-        // live recording to stop", plan §4 tests 1-6 (+ T3 r1 review finding 1).
+        // live recording to stop".
         let stage = self.coordinator.current_stage();
         let is_recording = self.recorder.is_recording();
         let decision = stop_decision(stage, is_recording, reason);
 
         // Cancel any live polling/guard tokens up front, BEFORE branching
-        // on the decision at all (T3 r1 review, D1 hardening: hoisted
-        // above the Skip/Recover checks). A Skip/Recover cancels `None` in
-        // the normal race-loser case (zero risk) and additionally cleans
-        // up the orphan-recorder state noted in the review's
-        // CARRY-FORWARD C1 (the coordinator's 30ms Press debounce can drop
-        // a Press after `recorder.start()` already returned `Ok`, leaving
-        // a poller animating an overlay nobody would otherwise stop).
+        // on the decision at all. A Skip/Recover cancels `None` in the
+        // normal race-loser case (zero risk) and additionally cleans up
+        // the orphan-recorder state (the coordinator's 30ms Press
+        // debounce can drop a Press after `recorder.start()` already
+        // returned `Ok`, leaving a poller animating an overlay nobody
+        // would otherwise stop).
         if let Some(token) = self.polling_cancel.lock().await.take() {
             token.cancel();
         }
@@ -679,12 +710,13 @@ impl RecordingCoordinator {
 
         if matches!(decision, StopDecision::Recover) {
             // Abnormal: coordinator says Recording, recorder disagrees.
-            // Under stop_lock this is never a benign race-loser (T3 r1
-            // review, finding 1) — recover to Idle without calling
-            // recorder.stop() (there is nothing to stop). The user spoke
-            // and nothing will be transcribed, so this is NOT silent (T3 r2
-            // review scrutiny (b)): an Error beep + `emit_error` tell them
-            // now, same as a real failure would. It deliberately skips
+            // Under stop_lock this is never a benign race-loser (the
+            // winner of a real race holds the lock through its own stage
+            // transition) — recover to Idle without calling recorder.stop()
+            // (there is nothing to stop). The user spoke and nothing will
+            // be transcribed, so this is NOT silent: an Error beep +
+            // `emit_error` tell them now, same as a real failure would. It
+            // deliberately skips
             // handle_error's state_cache=Error banner and 2s sleep — the
             // next press must start a fresh recording immediately, not sit
             // behind a cooldown for a failure the user didn't cause.
@@ -710,11 +742,11 @@ impl RecordingCoordinator {
         }
 
         // `recorder.stop()` can take MINUTES on a large stuck buffer (6m13s
-        // observed, plan §1.4: pause + clone-under-mutex + downsample + VAD
-        // + WAV encode are all O(buffer size)) — run it off the async
-        // runtime so it can't stall other tokio tasks while `stop_lock` is
-        // held (holding the lock across the `.await` IS the intended
-        // serialization point, plan §3 Layer 1).
+        // observed: pause + clone-under-mutex + downsample + VAD + WAV
+        // encode are all O(buffer size)) — run it off the async runtime so
+        // it can't stall other tokio tasks while `stop_lock` is held
+        // (holding the lock across the `.await` IS the intended
+        // serialization point).
         let recorder = Arc::clone(&self.recorder);
         let stop_result = tokio::task::spawn_blocking(move || recorder.stop())
             .await
@@ -735,8 +767,9 @@ impl RecordingCoordinator {
                     StopErrorAction::SilentRaceLost => {
                         // Another stop_recording call's `recorder.stop()`
                         // already won the single-flight CAS a moment ago
-                        // (or just finished) — not a user-facing error, see
-                        // T2 review finding C3.
+                        // (or just finished) — not a user-facing error, the
+                        // other caller already owns telling the user what
+                        // happened.
                         tracing::debug!(
                             "stop_recording({:?}): lost race, another stop already in flight/done: {e}",
                             reason
@@ -749,9 +782,8 @@ impl RecordingCoordinator {
                             release_config.audio_feedback,
                             &crate::audio_feedback::RodioPlayer,
                         );
-                        // T3 r2 review findings N1/N2: do the
-                        // coordinator-cancel and overlay-hide that used to
-                        // happen inside/after handle_error's 2s sleep WHILE
+                        // Do the coordinator-cancel and overlay-hide that
+                        // used to happen inside/after handle_error's 2s sleep WHILE
                         // STILL HOLDING stop_lock. Stage is guaranteed
                         // Recording here (stop_decision only reaches
                         // Finalize/Discard, and thus this arm, when
@@ -769,7 +801,7 @@ impl RecordingCoordinator {
                         // left to serialize against, and handle_error
                         // sleeps 2s; drop the lock first so a concurrent
                         // press/stop isn't queued behind that sleep for no
-                        // reason (T3 r1 review, finding 2).
+                        // reason.
                         drop(_guard);
                         self.handle_error(&e.to_string(), ErrorContext::Hotkey, false)
                             .await;
@@ -785,17 +817,29 @@ impl RecordingCoordinator {
             }
             StopReason::TogglePress => crate::diagnostics::breadcrumbs::sites::recording_stop_toggle(),
             StopReason::Cancel => crate::diagnostics::breadcrumbs::sites::recording_stop_cancel(),
-            // Layer 2's guard (`recording_guard.rs`) already emitted its
-            // own `recording:auto_stopped_*` breadcrumb for these two
-            // reasons before calling this function.
-            StopReason::SilenceTimeout | StopReason::MaxDuration => {}
+            // The recording guard (`recording_guard.rs`) already emitted
+            // its own `recording:auto_stopped_*` breadcrumb for these
+            // three reasons before calling this function.
+            StopReason::SilenceTimeout
+            | StopReason::SilenceTimeoutNoSpeech
+            | StopReason::MaxDuration => {}
+            // `StreamDied` always resolves to `StopDecision::Recover`,
+            // which returns before `recorder.stop()` is ever attempted —
+            // this arm only exists so the match stays exhaustive; it
+            // should be unreachable in practice.
+            StopReason::StreamDied => {
+                tracing::debug!(
+                    "stop_recording(StreamDied) unexpectedly reached the Finalize/Discard \
+                     breadcrumb path — expected to always resolve via StopDecision::Recover"
+                );
+            }
         }
 
         if matches!(decision, StopDecision::Discard) {
             // Cancel path: throw the audio away, no queue.push. Stage is
-            // still `Recording` here (never flipped before `recorder.stop()`
-            // returned, plan §3 Layer 1 rationale) so `coordinator.cancel()`
-            // is guaranteed to actually apply — see
+            // still `Recording` here (stage is never flipped before
+            // `recorder.stop()` returns) so `coordinator.cancel()` is
+            // guaranteed to actually apply — see
             // `test_cancel_ordering_assumption_matches_coordinator_semantics`.
             self.coordinator.cancel();
             self.await_stage(Stage::Idle).await;
@@ -875,8 +919,8 @@ impl RecordingCoordinator {
     /// `cancel_coordinator`: whether this call should itself run
     /// `coordinator.cancel()`. Callers that have *already* cancelled (and
     /// awaited the resulting stage transition) while still holding
-    /// `stop_lock` pass `false` (T3 r2 review findings N1/N2) so this
-    /// doesn't cancel a second time — harmless in isolation
+    /// `stop_lock` pass `false` so this doesn't cancel a second time —
+    /// harmless in isolation
     /// (`coordinator.cancel()` is a no-op outside `Recording`), but doing
     /// it here, after the lock is dropped and after a 2s sleep, is
     /// precisely the window a concurrent press's *new* recording could be
@@ -1046,6 +1090,17 @@ mod stop_decision_tests {
     }
 
     #[test]
+    fn test_stop_decision_silence_timeout_no_speech_discards() {
+        // Same Discard treatment as Cancel: never send a take that had no
+        // detectable speech at all to transcription (silence-hallucination
+        // safety valve).
+        assert_eq!(
+            stop_decision(Stage::Recording, true, StopReason::SilenceTimeoutNoSpeech),
+            StopDecision::Discard
+        );
+    }
+
+    #[test]
     fn test_stop_decision_idle_always_skips() {
         for reason in [StopReason::Release, StopReason::Cancel, StopReason::TogglePress] {
             assert_eq!(
@@ -1072,8 +1127,8 @@ mod stop_decision_tests {
 
     #[test]
     fn test_stop_decision_recording_but_not_actually_recording_recovers() {
-        // Abnormal, NOT a benign race-loser (T3 r1 review, finding 1):
-        // under `stop_lock`, the winner of any real race holds the lock
+        // Abnormal, NOT a benign race-loser: under `stop_lock`, the
+        // winner of any real race holds the lock
         // through its own stage transition (on_release/cancel +
         // await_stage), so a loser can only ever observe
         // Processing/Idle — never `Recording` with a dead recorder. This
@@ -1101,10 +1156,21 @@ mod stop_decision_tests {
     }
 
     #[test]
+    fn test_stop_decision_stream_died_recovers() {
+        // The recording guard's dedicated reason for "is_recording flipped
+        // false on its own" — must recover exactly like every other reason
+        // does whenever is_recording disagrees with the coordinator.
+        assert_eq!(
+            stop_decision(Stage::Recording, false, StopReason::StreamDied),
+            StopDecision::Recover
+        );
+    }
+
+    #[test]
     fn test_cancel_ordering_assumption_recover_path_via_real_coordinator() {
-        // Coordinator-level regression test for the Recover fix (T3 r1
-        // review, finding 1): drive the REAL TranscriptionCoordinator into
-        // Recording, then prove (a) stop_decision agrees the abnormal
+        // Coordinator-level regression test for the Recover fix: drive
+        // the REAL TranscriptionCoordinator into Recording, then prove
+        // (a) stop_decision agrees the abnormal
         // is_recording=false state must Recover, not Skip, and (b) the
         // Recover branch's own recovery mechanism — coordinator.cancel()
         // from Stage::Recording — actually reaches Idle (the same
@@ -1117,7 +1183,7 @@ mod stop_decision_tests {
             stop_decision(coord.current_stage(), false, StopReason::Release),
             StopDecision::Recover,
             "stage Recording + is_recording=false must Recover, not Skip — \
-             this is the exact combination that pinned the T3 r1 regression"
+             this is the exact combination that used to regress to a silent Skip"
         );
 
         // What stop_recording's Recover arm actually does with the stage:
@@ -1245,8 +1311,8 @@ mod stop_decision_tests {
     #[test]
     fn test_cancel_ordering_assumption_matches_coordinator_semantics() {
         // `stop_recording` deliberately does NOT flip the coordinator's
-        // stage to `Processing` before calling `recorder.stop()` (plan §3
-        // Layer 1): `Command::Cancel` is a no-op once the stage has already
+        // stage to `Processing` before calling `recorder.stop()`:
+        // `Command::Cancel` is a no-op once the stage has already
         // moved to `Processing` (proven directly against the real
         // `TranscriptionCoordinator` — same invariant
         // `coordinator::tests::test_cancel_during_processing_ignored`

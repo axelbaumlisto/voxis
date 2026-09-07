@@ -1,21 +1,20 @@
-//! Press/release ordering state machine (plan §3 Layer 0(a)).
+//! Press/release ordering state machine.
 //!
-//! Root cause (plan §1.1): `on_hotkey_pressed` can block for 0.3-5.4s in a
-//! synchronous microphone permission check (and, more generally, anywhere
-//! between "the debounce hold-timer resolved" and "the coordinator's stage
-//! actually became `Recording`"). Press and release are independently
-//! spawned tasks, so a release arriving during that window used to be
-//! silently dropped by the stage guard in `on_hotkey_released`
-//! (`stage != Recording` → no-op) — the recorder then started anyway, with
-//! no future event left to stop it (until the *next* press's release
-//! caught it, sometimes hours later).
+//! Root cause: `on_hotkey_pressed` can block for 0.3-5.4s in a synchronous
+//! microphone permission check (and, more generally, anywhere between "the
+//! debounce hold-timer resolved" and "the coordinator's stage actually
+//! became `Recording`"). Press and release are independently spawned
+//! tasks, so a release arriving during that window used to be silently
+//! dropped by the stage guard in `on_hotkey_released` (`stage !=
+//! Recording` → no-op) — the recorder then started anyway, with no future
+//! event left to stop it (until the *next* press's release caught it,
+//! sometimes hours later).
 //!
-//! This module is the single source of truth for that ordering — plan §9:
-//! "the machine is the single source of truth for ordering, no duplicated
-//! ordering logic in the drivers". `RecordingCoordinator::on_hotkey_pressed`
-//! / `on_hotkey_released` (in `recording.rs`) are thin drivers: they feed
-//! this machine events at named checkpoints and act on the actions it
-//! returns; none of them re-derive the ordering decision themselves.
+//! This module is the single source of truth for that ordering.
+//! `RecordingCoordinator::on_hotkey_pressed` / `on_hotkey_released` (in
+//! `recording.rs`) are thin drivers: they feed this machine events at
+//! named checkpoints and act on the actions it returns; none of them
+//! re-derive the ordering decision themselves.
 //!
 //! # State
 //!
@@ -25,9 +24,8 @@
 //!   will be) sleeping on during its debounce hold-timer. At most one
 //!   press is ever in flight — a second `press_enter` call while one is
 //!   outstanding is refused (`IgnorePress`), which is this module's
-//!   single-flight-start guarantee (plan §1.4 "нет single-flight старта";
-//!   plan §4 test 9). The token exists purely to let `release_arrived`
-//!   wake a sleeping press early (T4a r1 review finding 1) — it carries no
+//!   single-flight-start guarantee. The token exists purely to let
+//!   `release_arrived` wake a sleeping press early — it carries no
 //!   ordering decision of its own; the checkpoint the woken press falls
 //!   through to (`post_debounce`) is unchanged and remains the single
 //!   decision point.
@@ -42,93 +40,87 @@
 //! becomes `None` again, `release_pending` is already `false` too (see
 //! `test_invariant_release_pending_implies_in_flight_across_full_lifecycle`).
 //!
-//! # Disclosed deviations from the plan's literal sketch
+//! # Design choices worth explaining
 //!
 //! 1. **One `std::sync::Mutex<PressReleaseMachine>`, not two separate
-//!    primitives** (`Arc<Mutex<Option<u64>>>` + `AtomicBool`) as the plan's
-//!    §3 Layer 0(a) bullet literally lists them. Both pieces of state are
+//!    primitives** (a slot + an atomic flag). Both pieces of state are
 //!    read-then-written together at every checkpoint; one lock makes the
-//!    "Dekker order" the plan calls for trivially atomic (one critical
-//!    section) instead of relying on getting two independent atomics'
+//!    Dekker-style ordering trivially atomic (one critical section)
+//!    instead of relying on getting two independent atomics'
 //!    acquire/release orderings exactly right, and gives the ordering
-//!    logic exactly one place to live (the stated goal of plan §9). A
-//!    plain `std::sync::Mutex` (not `tokio::sync::Mutex`) is used
-//!    deliberately: no method here ever awaits while holding the lock, so
-//!    there is no reason to pay for the async-aware variant, and it lets
-//!    `PressExitGuard`'s `Drop` clean up synchronously (see below).
+//!    logic exactly one place to live. A plain `std::sync::Mutex` (not
+//!    `tokio::sync::Mutex`) is used deliberately: no method here ever
+//!    awaits while holding the lock, so there is no reason to pay for the
+//!    async-aware variant, and it lets `PressExitGuard`'s `Drop` clean up
+//!    synchronously (see below).
 //!
-//! 2. **Admission (`press_enter`) happens at the very top of
-//!    `on_hotkey_pressed`, before the debounce sleep** — not "right after
-//!    the debounce block" as the plan's §3 Layer 0(a) bullet says. Reason:
-//!    placing admission after the debounce block reopens exactly the
-//!    "micro-window" the plan's own checkpoint (i) is trying to close —
-//!    between the debounce sleep resolving and the (now-eliminated, see
-//!    deviation 3) `pending_press` slot being cleared, a release could
-//!    still slip through unseen. Admitting immediately (no `.await` runs
-//!    between the `press_action` match and `press_enter()`, so there is no
-//!    scheduler-preemptable gap for a same-cycle release to land in)
-//!    closes that window structurally instead of by careful sequencing.
+//! 2. **Admission (`press_enter`) happens as soon as the driver knows this
+//!    press will try to start a recording** (`PressAction::Start`) — a
+//!    press that will instead stop an existing recording (toggle mode) or
+//!    be ignored (hold mode, already `Recording`) never calls
+//!    `press_enter` at all, so it can never occupy `in_flight` and
+//!    misdirect a release meant for that OTHER, already-running
+//!    recording (see `recording.rs::on_hotkey_pressed`'s comment at the
+//!    `press_action` match for the failure mode this avoids). For a press
+//!    that IS admitted, this happens before the debounce sleep and before
+//!    any further `.await`, so `in_flight` stays occupied continuously
+//!    from there through every checkpoint below.
 //!
 //! 3. **`pending_press` (the old debounce-phase cancellation-token slot) is
 //!    eliminated, folded into this machine.** It covered only the
 //!    "sleeping in the hold-timer" sub-window, leaving a seam with the new
 //!    `in_flight`/`release_pending` pair covering the *next* sub-window
 //!    (post-debounce through `Stage::Recording`) — two overlapping
-//!    ordering mechanisms with a gap between them is itself "duplicated
-//!    ordering logic" (plan §9). The old instant-wake behaviour is
-//!    preserved, not lost: `press_enter` hands the caller a
-//!    `CancellationToken` (returned inside `PressEnterAction::Proceed`),
-//!    and `release_arrived` cancels that SAME token (in addition to
-//!    setting `release_pending`) when it finds a press in flight. The
-//!    driver races this token against its debounce sleep
-//!    (`select! { sleep(hold_ms), token.cancelled() }`) and falls through
-//!    to the *same*, unchanged `post_debounce` checkpoint either way —
-//!    the token is only a wake-up, never a second decision point.
-//!    (T4a r1 review finding 1: an earlier revision of this module used a
-//!    plain, uncancellable `sleep`, which left `in_flight` occupied for up
-//!    to the full `hold_ms` after a release, silently dropping a
-//!    legitimate follow-on press admitted in that window —
-//!    `hotkey/mod.rs`'s press/release alternation filter guarantees such a
-//!    follow-on press always means the first press's key was already
-//!    released, never a real single-flight conflict. See
+//!    ordering mechanisms with a gap between them is itself duplicated
+//!    ordering logic. The old instant-wake behaviour is preserved, not
+//!    lost: `press_enter` hands the caller a `CancellationToken` (returned
+//!    inside `PressEnterAction::Proceed`), and `release_arrived` cancels
+//!    that SAME token (in addition to setting `release_pending`) when it
+//!    finds a press in flight. The driver races this token against its
+//!    debounce sleep (`select! { sleep(hold_ms), token.cancelled() }`) and
+//!    falls through to the *same*, unchanged `post_debounce` checkpoint
+//!    either way — the token is only a wake-up, never a second decision
+//!    point. (An earlier revision of this module used a plain,
+//!    uncancellable `sleep`, which left `in_flight` occupied for up to the
+//!    full `hold_ms` after a release, silently dropping a legitimate
+//!    follow-on press admitted in that window — `hotkey/mod.rs`'s
+//!    press/release alternation filter guarantees such a follow-on press
+//!    always means the first press's key was already released, never a
+//!    real single-flight conflict. See
 //!    `test_release_during_debounce_cancels_token_and_frees_slot`.)
 //!
 //! 4. **`release_arrived` only arms `release_pending` (and cancels the
 //!    wake token) when `in_flight` is `Some`** (conditional set), not
-//!    unconditionally as the plan's bullet literally reads
-//!    ("`release_pending.store(true)` до проверки stage"). An
-//!    unconditional store, combined with `press_enter` never resetting it
-//!    (needed so a press racing its *own* matching release isn't wiped by
-//!    admission — see deviation 2), would leave `release_pending=true`
-//!    dangling after every *normal* release of a fully-started recording
-//!    (`in_flight` is already `None` there, `post_stage_recording` already
-//!    cleared it) — poisoning the *next* press's first checkpoint (every
-//!    second recording would silently fail to start). The conditional
-//!    version preserves the invariant above and is the only correct
-//!    choice given press and release run as independent tasks (T4a r1
-//!    review, D4 ruling) — **do not change this arm to unconditional.**
+//!    unconditionally. An unconditional store, combined with `press_enter`
+//!    never resetting it (needed so a press racing its *own* matching
+//!    release isn't wiped by admission — see point 2), would leave
+//!    `release_pending=true` dangling after every *normal* release of a
+//!    fully-started recording (`in_flight` is already `None` there,
+//!    `post_stage_recording` already cleared it) — poisoning the *next*
+//!    press's first checkpoint (every second recording would silently
+//!    fail to start). The conditional version preserves the invariant
+//!    above and is the only correct choice given press and release run as
+//!    independent tasks — **do not change this arm to unconditional.**
 //!
 //!    The residual (unclosed) race this leaves is a release that arrives
 //!    and is fully processed (`release_arrived` sees `in_flight == None`
 //!    → `ProceedRelease` → `stop_recording` → `Skip`, since
 //!    `coordinator.on_press()` hasn't run yet) *before* the matching
-//!    press's task ever reaches `press_enter()` — i.e. the press task is
-//!    starved for the entire hold/tap duration (≥`hotkey_hold_ms` for the
-//!    keyboard path) while the release task runs to completion. Since T4a
-//!    r2 moved `press_enter()` to the very first line of
-//!    `on_hotkey_pressed` (ahead of the stage read and config load that an
-//!    earlier revision of this note placed before it), there is no longer
-//!    any synchronous work of our own in this window: the window IS the
-//!    scheduler gap between the press task being *spawned* (by the hotkey
-//!    listener / overlay tap handler) and that task actually getting its
-//!    first poll on a tokio worker — the release task must run
-//!    `release_arrived` to completion inside that gap for this race to
-//!    manifest. Still orders of magnitude narrower than the observed bug
-//!    (a 0.3-5.4s permission check) and not a pattern seen in any of the
-//!    ~121 historical incidents analysed for the plan. Structurally
-//!    closing it requires in-order delivery between the independent
-//!    press/release tasks (e.g. a single ordered event channel or
-//!    per-event sequence numbers) — carried forward past this step.
+//!    press's task ever reaches `press_enter()`. Honestly, this window is
+//!    no longer JUST the scheduler gap between the press task being
+//!    spawned and its first poll: the driver now also reads
+//!    `current_stage()` and loads config (to decide `press_action`, point
+//!    2 above) before ever calling `press_enter()`, and that config load
+//!    can itself take low-single-digit milliseconds on another OS thread
+//!    while a release task runs concurrently. Moving admission earlier
+//!    (before that decision) would close this window but reopen the
+//!    worse one point 2 exists to prevent, so this trade is deliberate,
+//!    not an oversight. Still orders of magnitude narrower than the
+//!    observed bug (a 0.3-5.4s permission check) and not a pattern seen in
+//!    any of the ~121 historical incidents this fix was based on.
+//!    Structurally closing it requires in-order delivery between the
+//!    independent press/release tasks (e.g. a single ordered event
+//!    channel or per-event sequence numbers) — left for a future change.
 //!    See `test_release_with_no_press_in_flight_is_proceed_release` for
 //!    why the conditional arm, not this residual, is the load-bearing
 //!    correctness property here.
@@ -158,13 +150,12 @@ pub(crate) enum PressEnterAction {
     /// `CancellationToken` the caller should race against its debounce
     /// sleep (`select! { sleep(hold_ms), token.cancelled() }`) —
     /// `release_arrived` cancels this same token if a release arrives
-    /// while this press is in flight, waking the sleep early (T4a r1
-    /// review finding 1). The token is only a wake-up: the caller falls
-    /// through to the unchanged `post_debounce` checkpoint either way.
+    /// while this press is in flight, waking the sleep early. The token
+    /// is only a wake-up: the caller falls through to the unchanged
+    /// `post_debounce` checkpoint either way.
     Proceed(u64, CancellationToken),
-    /// Another press is already in flight — plan §1.4 "нет single-flight
-    /// старта" / plan §4 test 9 (six concurrent presses admit exactly
-    /// one).
+    /// Another press is already in flight — the single-flight-start
+    /// guarantee (six concurrent presses admit exactly one).
     IgnorePress,
 }
 
@@ -186,17 +177,14 @@ pub(crate) enum ReleaseAction {
 }
 
 /// Outcome of `post_debounce` / `pre_start` — identical shape at both
-/// checkpoints (see plan §3 Layer 0(a) checkpoints i/ii), kept as one
-/// type rather than two near-duplicates.
+/// checkpoints, kept as one type rather than two near-duplicates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ContinueOrAbort {
     /// No release recorded yet — proceed toward `recorder.start()`.
     Continue,
     /// A release was recorded before this checkpoint. The caller must
     /// never call `recorder.start()` for this press: no beep, no
-    /// `coordinator.on_press()`, just a silent return (plan §3 Layer
-    /// 0(a): "перед `recorder.start()` → не стартовать (без beep, без
-    /// on_press)").
+    /// `coordinator.on_press()`, just a silent return.
     NeverStart,
 }
 
@@ -210,13 +198,13 @@ pub(crate) enum PostStageAction {
     /// .start()` returning `Ok` and the coordinator's stage actually
     /// becoming `Recording`. The caller must immediately call
     /// `stop_recording(StopReason::ReleasePending)` instead of showing
-    /// the overlay (plan §3 Layer 0(a) checkpoint iii).
+    /// the overlay.
     StopReleasePending,
 }
 
 /// Single source of truth for press/release ordering. See module docs for
-/// the state, the invariant it maintains, and disclosed deviations from
-/// the plan's literal two-primitive sketch.
+/// the state, the invariant it maintains, and the design choices behind
+/// this one-mutex shape.
 #[derive(Debug, Default)]
 pub(crate) struct PressReleaseMachine {
     next_id: u64,
@@ -249,10 +237,10 @@ impl PressReleaseMachine {
     /// A release event arrived. Called unconditionally from
     /// `on_hotkey_released` (hold mode only — toggle mode never calls
     /// this at all, releases are meaningless there). Cancelling the
-    /// in-flight press's token here (T4a r1 review finding 1) is what lets
-    /// a press sleeping in its debounce hold-timer wake within µs of the
-    /// matching release, instead of occupying `in_flight` for the rest of
-    /// `hold_ms` and silently dropping a legitimate follow-on press.
+    /// in-flight press's token here is what lets a press sleeping in its
+    /// debounce hold-timer wake within µs of the matching release,
+    /// instead of occupying `in_flight` for the rest of `hold_ms` and
+    /// silently dropping a legitimate follow-on press.
     pub(crate) fn release_arrived(&mut self) -> ReleaseAction {
         if let Some((_, token)) = self.in_flight.as_ref() {
             self.release_pending = true;
@@ -266,10 +254,9 @@ impl PressReleaseMachine {
     /// Shared implementation for checkpoints (i) and (ii) — both check
     /// `release_pending` and, if set, clear state and report
     /// `NeverStart`; the logic does not differ between them, only *when*
-    /// each is called (T4a r1 review finding 3: kept as one body with two
-    /// named, thin call sites below rather than two independent copies —
-    /// the two names carry real documentation value about which
-    /// checkpoint fired).
+    /// each is called (kept as one body with two named, thin call sites
+    /// below rather than two independent copies — the two names carry
+    /// real documentation value about which checkpoint fired).
     fn checkpoint(&mut self, id: u64) -> ContinueOrAbort {
         if self.release_pending {
             self.clear(id);
@@ -280,20 +267,20 @@ impl PressReleaseMachine {
 
     /// Checkpoint (i): right after the debounce sleep resolves (or
     /// immediately, for `skip_debounce`/`hotkey_hold_ms == 0`, since that
-    /// path never sleeps at all) — plan §3 Layer 0(a).
+    /// path never sleeps at all).
     pub(crate) fn post_debounce(&mut self, id: u64) -> ContinueOrAbort {
         self.checkpoint(id)
     }
 
     /// Checkpoint (ii): immediately before `recorder.start()` (after the
-    /// permission check) — plan §3 Layer 0(a), the checkpoint that closes
-    /// the actual observed bug (a 0.3-5.4s synchronous permission probe).
+    /// permission check) — the checkpoint that closes the actual observed
+    /// bug (a 0.3-5.4s synchronous permission probe).
     pub(crate) fn pre_start(&mut self, id: u64) -> ContinueOrAbort {
         self.checkpoint(id)
     }
 
-    /// Checkpoint (iii): `await_stage(Stage::Recording)` succeeded — plan
-    /// §3 Layer 0(a) residual-window check.
+    /// Checkpoint (iii): `await_stage(Stage::Recording)` succeeded — the
+    /// residual-window check.
     pub(crate) fn post_stage_recording(&mut self, id: u64) -> PostStageAction {
         let pending = self.release_pending;
         self.clear(id);
@@ -308,8 +295,7 @@ impl PressReleaseMachine {
     /// internal 30ms press-debounce (`coordinator::DEBOUNCE`) can drop
     /// the `Press` command after `recorder.start()` already returned
     /// `Ok`, leaving `is_recording()==true` while the stage never became
-    /// `Recording` (plan §1.4 / T3 r1 review carry-forward C1 — an
-    /// "orphan" recorder). There is only one possible response
+    /// `Recording` (an "orphan" recorder). There is only one possible response
     /// (stop the orphaned recorder directly, bypassing `stop_decision`
     /// since `stage != Recording` would make it say `Skip`) so this just
     /// clears state; the driver performs the actual stop.
@@ -319,7 +305,7 @@ impl PressReleaseMachine {
 
     /// Any other early return not covered by a named checkpoint above:
     /// permission denied, `recorder.start()` returned `Err` (including
-    /// `StopInProgress`). Reset discipline (plan §3 Layer 0(a) step 6).
+    /// `StopInProgress`). Reset discipline.
     pub(crate) fn early_return(&mut self, id: u64) {
         self.clear(id);
     }
@@ -334,10 +320,9 @@ impl PressReleaseMachine {
 
 /// RAII guard ensuring `id`'s press cycle is cleared from the machine on
 /// every exit path of `on_hotkey_pressed` after admission — mirrors
-/// `AudioRecorder::StoppingGuard` (T2): a `Drop` impl is the only way to
+/// `AudioRecorder::StoppingGuard`: a `Drop` impl is the only way to
 /// guarantee a *future* early return added by someone who doesn't re-read
-/// this whole function can't leak a stale `in_flight` (plan §3 Layer 0(a)
-/// step 6: "use a small RAII guard struct... so no path is missed").
+/// this whole function can't leak a stale `in_flight`.
 ///
 /// Explicit checkpoint calls (`post_debounce`, `pre_start`, ...) are the
 /// normal path and additionally control *when* state clears relative to
@@ -416,7 +401,7 @@ mod tests {
     }
 
     /// Like `admit`, but also returns the wake token — for tests that
-    /// exercise the early-wake mechanism itself (T4a r1 review finding 1).
+    /// exercise the early-wake mechanism itself.
     fn admit_with_token(m: &mut PressReleaseMachine) -> (u64, CancellationToken) {
         match m.press_enter() {
             PressEnterAction::Proceed(id, token) => (id, token),
@@ -425,9 +410,9 @@ mod tests {
     }
 
     // ---- t7: press → release during perm-check → never starts ---------
-    // Reproduces the Sep 5 log ordering (plan §1.1): press enters, clears
-    // the debounce checkpoint, THEN (during what would be the permission
-    // check) a release arrives, THEN pre_start (right before
+    // Reproduces the historical incident's log ordering: press enters,
+    // clears the debounce checkpoint, THEN (during what would be the
+    // permission check) a release arrives, THEN pre_start (right before
     // recorder.start()) must say NeverStart.
     #[test]
     fn test_t7_release_during_permcheck_never_starts() {
@@ -439,11 +424,9 @@ mod tests {
     }
 
     // ---- t8: release immediately after admission (before post_debounce
-    // ---- even runs) → never starts. Reframed from the plan's literal
-    // ---- "between select!-exit and pending_press slot-clear" phrasing:
-    // ---- that exact slot no longer exists (deviation 3), but the same
-    // ---- class of "released the instant the debounce window opens"
-    // ---- race is what this exercises.
+    // ---- even runs) → never starts. This exercises the same class of
+    // ---- "released the instant the debounce window opens" race as t7,
+    // ---- one checkpoint earlier.
     #[test]
     fn test_t8_release_immediately_after_admission_never_starts() {
         let mut m = PressReleaseMachine::new();
@@ -452,12 +435,11 @@ mod tests {
         assert_eq!(m.post_debounce(id), ContinueOrAbort::NeverStart);
     }
 
-    // ---- T4a r1 review finding 1 (regression fix): a release arriving
-    // ---- while a press sleeps in its debounce hold-timer must cancel
-    // ---- that press's wake token (so it wakes within µs instead of
-    // ---- occupying `in_flight` for the rest of `hold_ms`) AND free the
-    // ---- slot for the next press once the woken press clears at its
-    // ---- `post_debounce` checkpoint. --------------------------------
+    // ---- Regression coverage: a release arriving while a press sleeps
+    // ---- in its debounce hold-timer must cancel that press's wake token
+    // ---- (so it wakes within µs instead of occupying `in_flight` for
+    // ---- the rest of `hold_ms`) AND free the slot for the next press
+    // ---- once the woken press clears at its `post_debounce` checkpoint. -
     #[test]
     fn test_release_during_debounce_cancels_token_and_frees_slot() {
         let mut m = PressReleaseMachine::new();
@@ -484,9 +466,9 @@ mod tests {
         }
     }
 
-    // ---- T4a r1 review finding 1 (the exact regression): a release
-    // ---- during debounce must not leave `in_flight` occupied for the
-    // ---- rest of `hold_ms` — a legitimate follow-on press arriving in
+    // ---- Regression coverage: a release during debounce must not leave
+    // ---- `in_flight` occupied for the rest of `hold_ms` — a legitimate
+    // ---- follow-on press arriving in
     // ---- that window (e.g. AltGr tapped as a modifier, then
     // ---- press-and-held to dictate, both within 300ms) must be
     // ---- admitted, not silently dropped. Negative half: single-flight
@@ -503,7 +485,7 @@ mod tests {
             PressEnterAction::Proceed(id2, _) => assert_ne!(id1, id2),
             PressEnterAction::IgnorePress => panic!(
                 "a follow-on press after a release during debounce must be admitted, \
-                 not dropped (T4a r1 review finding 1 regression)"
+                 not dropped"
             ),
         }
 
@@ -519,24 +501,23 @@ mod tests {
         }
     }
 
-    // ---- D4 ruling (T4a r1 review): pins the CURRENT (correct)
-    // ---- semantics of the conditional `release_pending` arm so a
-    // ---- future edit doesn't "fix" it into the plan's literal
+    // ---- Pins the CURRENT (correct) semantics of the conditional
+    // ---- `release_pending` arm so a future edit doesn't "fix" it into an
     // ---- unconditional-store variant. A release arriving before the
     // ---- matching press's task ever reaches `press_enter()` (the press
     // ---- task starved for the whole hold/tap duration — the actual,
-    // ---- narrow residual window, see press_release module docs
-    // ---- deviation 4) is consumed as a plain `ProceedRelease` and must
-    // ---- NOT leave any trace that could poison the next, unrelated
-    // ---- press. The plan's "unconditional store(true) FIRST" would
-    // ---- instead leave `release_pending` dangling `true` after every
-    // ---- normal release (since `in_flight` is already `None` by then),
-    // ---- making every second press's first checkpoint report
-    // ---- `NeverStart` — i.e. every second recording would silently
-    // ---- fail to start. Structurally closing the residual window
-    // ---- itself requires in-order delivery between the independent
-    // ---- press/release tasks (single ordered event channel or
-    // ---- per-event sequence numbers) — carried forward past this step. -
+    // ---- narrow residual window, see press_release module docs point 4)
+    // ---- is consumed as a plain `ProceedRelease` and must NOT leave any
+    // ---- trace that could poison the next, unrelated press. An
+    // ---- unconditional `store(true)` FIRST would instead leave
+    // ---- `release_pending` dangling `true` after every normal release
+    // ---- (since `in_flight` is already `None` by then), making every
+    // ---- second press's first checkpoint report `NeverStart` — i.e.
+    // ---- every second recording would silently fail to start.
+    // ---- Structurally closing the residual window itself requires
+    // ---- in-order delivery between the independent press/release tasks
+    // ---- (single ordered event channel or per-event sequence numbers) —
+    // ---- left for a future change. ------------------------------------
     #[test]
     fn test_residual_pre_admission_window_is_documented() {
         let mut m = PressReleaseMachine::new();
@@ -547,7 +528,7 @@ mod tests {
         assert!(
             !m.release_pending,
             "the conditional arm must leave release_pending false when no press is in flight — \
-             an unconditional store here would poison the next press (D4 ruling)"
+             an unconditional store here would poison the next press"
         );
 
         // The next, unrelated press must be admitted and reach its first

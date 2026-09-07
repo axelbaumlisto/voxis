@@ -127,11 +127,11 @@ impl Orchestrator {
     /// Cancel any in-progress recording: stop the recorder (if one is
     /// running) and discard its audio — no `queue.push`, no transcription.
     /// Has no effect while `Processing` (the pipeline runs to completion in
-    /// that case) or while `Idle`. Routes through `stop_recording` (plan
-    /// §3 Layer 1) so this actually stops the recorder and cancels the
-    /// overlay poller — previously it only touched the coordinator's
-    /// stage, leaving the microphone recording and the spectrum poller
-    /// running for as long as 9.7h (plan §1.4).
+    /// that case) or while `Idle`. Routes through `stop_recording` so this
+    /// actually stops the recorder and cancels the overlay poller —
+    /// previously it only touched the coordinator's stage, leaving the
+    /// microphone recording and the spectrum poller running for as long
+    /// as 9.7h.
     pub async fn cancel(&self) {
         self.recording.stop_recording(StopReason::Cancel).await;
     }

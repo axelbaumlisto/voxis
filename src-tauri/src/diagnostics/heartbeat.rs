@@ -336,8 +336,8 @@ fn serialize_clean_marker(marker: &CleanShutdownMarker) -> io::Result<Vec<u8>> {
 /// destination directory, write it, then persist (rename) over the fixed
 /// target.
 ///
-/// Deliberately does NOT `sync_all()` before the rename (plan §1.3-B / §3
-/// Layer 4): this heartbeat is a best-effort liveness marker written every
+/// Deliberately does NOT `sync_all()` before the rename: this heartbeat
+/// is a best-effort liveness marker written every
 /// `HEARTBEAT_INTERVAL` (10s), not a durability-critical record — losing the
 /// last few seconds of writes to a page-cache flush on power loss is
 /// acceptable, while `fsync`ing on every single write is not free: it was

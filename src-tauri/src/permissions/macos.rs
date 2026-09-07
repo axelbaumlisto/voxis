@@ -83,8 +83,8 @@ fn map_av_authorization_status(raw: NSInteger) -> PermissionStatus {
 /// not just a symbol/class lookup, likely a round-trip to the system media
 /// daemon for the authorization decision) and ~9ms warm. Neither is
 /// literally microseconds, but both are 10–100x faster than the osascript
-/// path this replaces (measured 0.24–5.38s, see plan §1.1) — small enough
-/// that it does not reopen the press/release race the plan is fixing.
+/// path this replaces (measured 0.24–5.38s) — small enough that it does not
+/// reopen the press/release race a slow permission probe used to cause.
 ///
 /// Returns `None` if the `AVCaptureDevice` class cannot be found at runtime
 /// (would require a corrupted/ancient system install — practically never
@@ -139,12 +139,12 @@ fn wait_with_timeout(
 }
 
 /// Fallback microphone probe when the native objc2 path is unavailable.
-/// Same AppleScript this file always used, but now bounded to 1s total
-/// (plan Layer 0(b) point 3): the whole reason this used to sit on the hot
-/// path was that a plain `.output()` call can block for seconds, which is
-/// exactly the window that lets a hotkey release race past `stop_recording`
-/// (plan §1.1). A timeout that returns `Unknown` is safe because
-/// `PermissionStatus::blocks_start` only refuses to start on `Denied`.
+/// Same AppleScript this file always used, but now bounded to 1s total:
+/// the whole reason this used to sit on the hot path was that a plain
+/// `.output()` call can block for seconds, which is exactly the window
+/// that lets a hotkey release race past `stop_recording`. A timeout that
+/// returns `Unknown` is safe because `PermissionStatus::blocks_start`
+/// only refuses to start on `Denied`.
 fn check_microphone_osascript_fallback() -> PermissionStatus {
     let mut child = match Command::new("osascript")
         .args([
@@ -709,7 +709,7 @@ mod tests {
         // check_microphone_native's doc comment for why). 200ms keeps a
         // wide margin against a loaded CI runner while still failing loudly
         // if this regresses back to osascript-scale latency (0.24–5.38s
-        // measured for the fallback path, plan §1.1).
+        // measured for the fallback path).
         let start = Instant::now();
         let result = check_microphone_native();
         let elapsed = start.elapsed();

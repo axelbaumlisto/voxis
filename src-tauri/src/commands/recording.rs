@@ -11,8 +11,8 @@ use crate::permissions::PermissionStatus;
 
 /// Pure decision: does this permission status refuse to even attempt the
 /// permission-gated action? Extracted from `check_microphone_permission` so
-/// the Denied-only-blocks semantics (T4b carry-forward) are unit-testable
-/// without a platform-specific `PermissionChecker`.
+/// the Denied-only-blocks semantics are unit-testable without a
+/// platform-specific `PermissionChecker`.
 fn permission_blocks(status: PermissionStatus) -> Option<String> {
     if status.blocks_start() {
         Some("Microphone permission required. Please grant access in System Settings.".to_string())
@@ -24,13 +24,13 @@ fn permission_blocks(status: PermissionStatus) -> Option<String> {
 /// Check microphone permission before accessing audio hardware.
 /// Returns Ok(()) if granted, Err with user-friendly message otherwise.
 ///
-/// Uses `blocks_start()`, not `is_granted()` (T4b carry-forward, second
-/// half — `orchestrator/recording.rs` already gates on `blocks_start()`
-/// for the hotkey path): only an explicit `Denied` refuses outright.
-/// `Unknown`/`NotDetermined` fall through to `state.recorder.start()`,
-/// which triggers the real OS permission prompt on first use and lets
-/// cpal report the actual denial if the user declines — rather than this
-/// pre-check blocking on a status the platform hasn't determined yet.
+/// Uses `blocks_start()`, not `is_granted()` (matching
+/// `orchestrator/recording.rs`'s hotkey-path gate): only an explicit
+/// `Denied` refuses outright. `Unknown`/`NotDetermined` fall through to
+/// `state.recorder.start()`, which triggers the real OS permission prompt
+/// on first use and lets cpal report the actual denial if the user
+/// declines — rather than this pre-check blocking on a status the
+/// platform hasn't determined yet.
 fn check_microphone_permission() -> Result<(), String> {
     let checker = create_permission_checker();
     match permission_blocks(checker.check(Permission::Microphone)) {
@@ -51,15 +51,17 @@ pub fn list_audio_devices() -> Result<Vec<AudioDevice>, String> {
 /// Start audio recording.
 /// Requires microphone permission to access audio hardware.
 ///
-/// Thin wrapper over the orchestrator (T4c, plan §3 Layer 1: "единственный
-/// путь остановки"). This command used to drive `state.recorder` directly,
-/// bypassing `stop_lock`, the `PressReleaseMachine`, the coordinator and
-/// the transcription queue entirely — the last such bypass identified by
-/// the T3 r1 review (its `recorder.stop()` was the only other producer of
-/// the `Recover` recovery path besides a genuinely dead recording thread).
-/// `device_id` is accepted for API/`specta` binding compatibility with the
-/// pre-T4c signature but is otherwise unused: the orchestrator's recording
-/// path reads `audio_device` from config, not from a per-call override.
+/// Thin wrapper over the orchestrator: every recorder-starting/-stopping
+/// path funnels through `RecordingCoordinator` so `stop_lock`, the
+/// press/release ordering machine, the coordinator and the transcription
+/// queue all stay authoritative. This command used to drive
+/// `state.recorder` directly, bypassing all of that — the last such
+/// bypass in the crate, and the only other way `recorder.stop()` could
+/// run out from under the orchestrator (surfacing as a spurious
+/// `StopDecision::Recover`). `device_id` is accepted for API/`specta`
+/// binding compatibility with callers that still pass one, but is
+/// otherwise unused: the orchestrator's recording path reads
+/// `audio_device` from config, not from a per-call override.
 #[tauri::command]
 #[specta::specta]
 pub async fn start_recording(
@@ -305,8 +307,8 @@ mod tests {
         assert!(error_msg.contains("audio"));
     }
 
-    // T4c: `permission_blocks` (T4b carry-forward) — only Denied blocks;
-    // Unknown/NotDetermined must fall through to `recorder.start()`.
+    // `permission_blocks` — only Denied blocks; Unknown/NotDetermined must
+    // fall through to `recorder.start()`.
     #[test]
     fn test_permission_blocks_denied_only() {
         assert!(
