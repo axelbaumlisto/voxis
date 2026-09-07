@@ -11,3 +11,9 @@ round 2 (BLIND, re-sanitized incl. class-3; 3 critics: forensics-verifier/delega
   Under-specified: Layer 0 window/flag lifecycle + Dekker ordering + in_flight gate; 0(b) spawn_blocking does NOT close race (still awaits) → objc primary; cap in cpal cb can only stop-push+flag, active stop from guard elapsed; Layer 2 constants (window 10s/40 polls, ≥80% silent, fetch_max rms, beep at −3s); mem::take instead of shrink; absolute hard cap for max=0; max_recording_ms ceiling ~780_000; tests need tauri/test mock_app OR pure state machine; §9 order Layer1→Layer0.
   §6 Deploy WRONG: release.yml has no codesign/notarize/dmg (unsigned tar.gz, continue-on-error); v0.1.2 DMG was signed locally + uploaded manually 1 week later. Rewrite §6 with 3 explicit options.
   Convergence: (a) no NEW strategic finding ✓ (b) shifted to mechanics ✓ → STOP after applying round-2 edits. No round 3.
+
+## ado execution (2026-09-07) — 13 steps + Phase 5
+Base a5b5866 → HEAD. Steps T1,T8,T2,T8b,T3,T4b,T7,T4a,T4c,T5,T5b,T6,T9 all APPROVED (5 REJECT-FIX rounds total: T8 r1 entitlements, T8 r2 lock protocol, T3 r1 Recover, T4a r1 follow-on press; T2 r1→r2 primitive fixes). Tests 933→1036. 4 of my own briefs were wrong and caught by gate (stopping-reset-in-start, Recording&&!is_recording→Skip, pending_audio "zero readers", unconditional release_pending arm).
+Phase 5 round 1 (BLIND, 3 critics: integration/conformance/edge on sanitized full diff): GO 8/10, GO 8/10, CONDITIONAL GO 8/10. Blocking: none. → fix step P5 (A–H).
+Phase 5 round 2 (single repeat critic on P5 diff): GO 8.5/10, A–E VERIFIED, only minors. STOP.
+Follow-ups filed (out of v0.1.3): SoundType::Warning; remove transcribe_audio+pending_audio+mocks; is_stopping dead API; osascript fallback spawn_blocking; release job budget; load_config 4× per press; in-order press/release delivery (structural close of pre-admission window); dispatch finish_guard on panic; SILENCE_RMS empirical check on hardware.

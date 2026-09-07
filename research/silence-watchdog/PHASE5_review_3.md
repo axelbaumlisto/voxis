@@ -1,0 +1,66 @@
+# PHASE-5 Review 3 — Edge-Case / Safety Audit
+
+## VERDICT: CONDITIONAL GO — maturity 8/10
+
+This is an unusually self-critical change set: the authors document their own residual races, deviations from the plan, and unvalidated constants directly in code comments. I found no P0 that breaks core functionality or reopens the original stuck-recording bug. I did find several P1s where the new **defense-in-depth guard** and the **release pipeline** can surprise a user who never hit the original bug, plus one docs/CHANGELOG claim that overstates what the code actually does. None require a redesign; all have small, targeted fixes.
+
+---
+
+## 1. BLOCKING findings
+
+None. I looked specifically for regressions reachable by a user who never hit the original race (per the assigned lens) and did not find a functional break, a resource-unbounded path, or a merge-blocking correctness bug. The items below are P1/P2.
+
+---
+
+## 2. Non-blocking findings
+
+**P1 — Silence guard's window-fill delay + fraction tolerance is not disclosed to the user, and can cut off legitimate sparse dictation.**
+`src-tauri/src/orchestrator/recording_guard.rs` (`guard_step`, `SilenceWindow`): `silent_ms` only starts accumulating once the 10 s window (`SILENCE_WINDOW_MS`/`GUARD_POLL_MS` = 40 polls) is *full*, so the real first-possible-stop time is `window_ms + silence_timeout_ms` (~70 s at defaults, ~15 s at the validated minimum 5000 ms) — not the value the user typed. Separately, `silence_fraction = 0.80` means a single short word occupying ~1 poll out of 40 (`test_single_loud_poll_within_fraction_tolerance_does_not_reset`, confirms this is intentional) still reads as "≥80% silent," so `silent_ms` **keeps accumulating** through it. Concretely: a user dictating with ~50 s pauses between short utterances (slower than the 60 s default but well under any reasonable expectation of "continuous silence") will still hit the silence auto-stop, because no single word is frequent/long enough to drop the rolling window below the 80% threshold.
+Evidence: `guard_step` (FULL-clean.diff ~4760-4800), `src/i18n/locales/en.json` copy: *"Stop recording automatically after this much continuous silence. 5000-300000; 0 = off"* — no mention of the window or fraction.
+Fix: either (a) document the real trigger latency (`window_ms` + configured timeout) and the fraction tolerance in the settings description, or (b) treat elapsed *wall time since last poll classified non-silent* as the reset signal instead of a fractional window, so any speech resets fully. (a) is the minimal, low-risk fix for this release.
+
+**P1 — CHANGELOG/UX claim "dead audio stream mid-recording recovers to idle" is stronger than what the code does; actual recovery path and latency depend on which failure mode occurs.**
+`src-tauri/src/audio/stream.rs:262`: `let err_fn = |err| eprintln!("Audio stream error: {}", err);` — a cpal stream error does **not** flip `is_recording` to `false`; only the recording thread's own `Pause` command loop does that (per `AudioRecorder::stopping`/`is_recording` doc comments in `recorder.rs`). So the literal "mic unplugged, stream stops delivering callbacks" scenario most likely manifests as **continued `is_recording()==true` with all-zero/absent samples**, which is caught by the *silence guard* (~70 s at defaults per finding above), not by the new `StopDecision::Recover` branch in `recording.rs` (which targets a narrower case: the recording thread itself dying/panicking with a stale flag state). The `Recover` branch is real and correctly wired (verified: `stop_decision` → `Recover` → error beep + `emit_error` + `coordinator.cancel()` + `await_stage(Idle)` + overlay hide, no 2 s cooldown — good design), but it is reached only when some caller (hotkey release / toggle / cancel) invokes `stop_recording` afterward — it is **reactive**, not a proactive device-health watchdog. In hold mode this is fine (user's own release triggers it); in an edge case where the app is recording unattended (e.g., toggle mode left on) it can sit stuck until the silence guard's ~70 s elapses.
+Mitigation: reword the CHANGELOG bullet to be accurate about which mechanism (silence guard vs. Recover) handles which failure mode and its latency, and add "unplug mic mid-recording, time-to-idle" to the manual hardware checklist (see §4).
+
+**P1 — CI's missing-signed-DMG signal is not loud.**
+`.forgejo/workflows/release.yml`: the `.deb`/`.rpm` presence checks hard-fail the job (`grep -q '\.rpm$' || { echo "ERROR..."; exit 1; }`), but the DMG check only prints `"NOTE: no signed macOS DMG in this release (advisory...)"` with no non-zero exit, no `::warning::`/job-summary annotation, and `continue-on-error: true` on the whole macOS step. Given this project's own incident history (silently-degraded/skipped steps being the root cause of several of the described incidents), a maintainer who doesn't read full logs could ship a release advertised as "code-signed & notarized" (per the CHANGELOG bullet added in this same diff) without the DMG actually present, and get no CI-visible signal.
+Fix: emit a highly visible annotation (`echo "::warning::no signed macOS DMG in this release"` or a Forgejo/GitHub job-summary line) when the DMG is absent from a tagged release, without hard-failing the advisory step.
+
+**P2 — Hand-edited `silence_timeout_ms` below `PRE_CUTOFF_BEEP_MS` (e.g. `1`) skips the warning beep entirely.**
+`guard_step` checks `Stop(SilenceTimeout)` before the beep condition; with `silence_timeout_ms < PRE_CUTOFF_BEEP_MS`, `beep_at_ms` saturates toward the stop threshold and the stop fires on the same poll the beep would have. Only reachable via a hand-edited config row (UI validation enforces `[5000, 300000]`), consistent with the project's existing "unvalidated load, like `hotkey_hold_ms`" pattern — low severity, but worth a one-line note in `config/validation.rs` doc comments since it's a slightly different failure shape than "falls back to default."
+
+**P2 — `press_release.rs`'s disclosed residual race (deviation 4).**
+A release that is fully processed (`release_arrived` → `ProceedRelease` → `stop_recording` → `Skip`) *before* the matching press task ever calls `press_enter()` is not caught by the machine — the authors document this themselves as a scheduler-gap window (spawn-to-first-poll), several orders of magnitude narrower than the original bug (0.3–5.4 s) and not observed in the historical incident set. No action required for this release; flagged only so it isn't rediscovered as "new."
+
+**P2 — Notarization operational path (`notary-finish`) depends on the VM's `~/voxis` working tree surviving until manually re-run; the doc says so explicitly** (`build`/`build-gui` wipe `~/voxis` on next invocation, destroying the `.app` `notary-finish` needs). This is documented and by design (an operational runbook step, not a code bug) — included here only because it's a real "silent data loss of the pending artifact" trap for whoever runs the next release before finishing a pending notarization.
+
+---
+
+## 3. What is right (why the blocking list is short)
+
+- **Root-cause fix (press/release race) is a genuinely deterministic state machine** (`press_release.rs`), not a heuristic: single-flight admission, three explicitly-named checkpoints, an RAII exit guard mirroring `AudioRecorder`'s `StoppingGuard`, and an invariant (`release_pending ⟹ in_flight.is_some()`) that's unit-tested across the full lifecycle. The historical bug scenario (release during a multi-second permission check) is directly reproduced as a test and fixed at the correct checkpoint.
+- **Single-flight `stop()`** (`AudioRecorder::stopping` + `StoppingGuard`) correctly avoids CASing `is_recording` (which the pause-wait depends on) and is tested under real concurrent threads (`test_concurrent_stop_is_single_flight`), with a documented CI/headless fallback.
+- **`stop_decision`/`press_action`/`map_stop_error`/`guard_step` are all pure, exhaustively unit-tested decision functions**, isolated from `AppHandle`/locks — a deliberate, consistently-applied harness choice (option B from the plan) that makes this reviewable at all.
+- **Buffer cap is computed from the *current* recording's native rate**, read after `recorder.start()` returns `Ok` — the "stale rate from a previous device" edge case in the task brief does **not** reproduce; confirmed by reading the call site in `recording.rs`.
+- **`effective_max_recording_ms` clamps `max_recording_ms` (0, huge, or otherwise) to `ABS_MAX_RECORDING_MS`** before it ever reaches `native_cap_samples` or `guard_step` — a hand-edited out-of-range DB value cannot produce an unbounded buffer, unlike the pre-fix behavior.
+- **Oversize-audio gate moved before any disk write**, with a single `exceeds_size_limit` predicate shared by the client, the pipeline gate, and `save_failed_audio`'s defense-in-depth refusal — closes the documented double-dump-of-multi-GB-WAV bug.
+- **macOS entitlements are minimal and correctly reasoned**: only `audio-input` and `automation.apple-events` are added; Accessibility (`AXIsProcessTrusted`) is correctly left out since it's TCC-gated, not an entitlement; ad-hoc builds get the same entitlements via `tauri.conf.json`'s unconditional `entitlements: "Entitlements.plist"`; the Developer-ID re-sign explicitly re-supplies `--entitlements` (since `--force` would otherwise discard them) — this exact gotcha is called out in a comment.
+- **Cross-arch notarization concern is handled correctly**: verification uses `lipo -archs`/`codesign -dv` rather than executing the arm64 binary on the x86_64 VM (no Rosetta); notarization/stapling never requires execution.
+- **VM host-reboot self-healing**: `cmd_build`/`cmd_build_gui` both do `ssh_vm 'echo ok' || cmd_naked`, so a host reboot does **not** require a human to manually start the VM before the next CI run — contrary to what the task brief's phrasing implies, this is already handled.
+- **`Orchestrator::cancel()` now correctly routes through `stop_recording`**, actually stopping the recorder and cancelling the poller/guard tokens (previously it left the mic recording for up to 9.7 h) — verified end-to-end through `commands/recording.rs`.
+- 1031 passing Rust tests / clean clippy / clean vitest (pre-verified) is consistent with what I read: the diff's own test additions are dense and target exactly the boundary conditions this brief asks about (t7–t18, cap tests, validation boundary tests, config round-trip with `0`).
+
+---
+
+## 4. Residual risks for the manual Phase-5 checklist
+
+1. **Unplug the microphone mid-recording on real hardware** (both hold and toggle mode) and time how long it takes to return to `Idle`. Confirm which mechanism actually fires (silence guard vs. `Recover`) and whether the ~70 s default silence-guard latency is acceptable UX for this case, or whether the CHANGELOG bullet needs rewording.
+2. **Measure `SILENCE_RMS` (0.005 ≈ −46 dBFS) against the actual built-in mic idle noise floor**, as the plan's own §5 explicitly calls for ("один замер... до фиксации константы") — the diff does not show evidence this measurement was performed; confirm before shipping the default enabled-by-default guard.
+3. **Dictate with long (~50 s) pauses between short phrases** and confirm whether the silence guard fires despite ongoing (sparse) speech — per finding above, this is expected to trigger; verify it matches product intent.
+4. **BT headset in standby as both input and output device**: confirm the pre-cutoff/error beep (`audio_feedback::play`) is actually audible on a standby BT device before the silence cutover, or whether the beep is silently lost because the peripheral itself is asleep.
+5. **8 kHz / 96 kHz native-rate devices**: confirm `native_cap_samples` produces a sane, not-OOM-risking buffer size at the `ABS_MAX_RECORDING_MS` (30 min) ceiling on a 96 kHz device (~691 MB raw f32 buffer) on a memory-constrained machine.
+6. **Toggle mode double/triple rapid press**, and **hold hotkey exactly at `hotkey_hold_ms`**, on real hardware/rdev (not just the pure-function unit tests) — the state-machine tests are strong but don't exercise real OS-level key-repeat/bounce timing.
+7. **Runner-user / lock-file-permission mismatch**: if the Forgejo runner ever executes as a user other than `spex`, `MACOS_VM_LOCK=/home/spex/.macos-vm.lock` will fail to open — confirm current CI topology guarantees same-user execution, or parameterize the lock path.
+8. **First real release cut**: confirm `scripts/macos-vm.sh clone-image` has actually been run once on `spex` before the tag is pushed — otherwise the (correctly non-blocking) skip path will silently ship without a DMG, and per finding P1 above there's no loud CI signal for that yet.
+9. **Press during the ~2 s post-error cooldown from an unrelated prior failure**: confirm no visual flicker/incorrect banner when a brand-new recording starts inside the old failure's `handle_error` 2 s sleep window (the code paths I traced look correctly ordered/idempotent, but I did not get to execute this interleaving).

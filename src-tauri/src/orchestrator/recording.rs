@@ -841,6 +841,10 @@ impl RecordingCoordinator {
             // `recorder.stop()` returns) so `coordinator.cancel()` is
             // guaranteed to actually apply — see
             // `test_cancel_ordering_assumption_matches_coordinator_semantics`.
+            // A silently vanishing recording is indistinguishable from a bug; the user already heard the pre-cutoff beep, this names the cause.
+            if matches!(reason, StopReason::SilenceTimeoutNoSpeech) {
+                self.emit_error("No speech detected — recording discarded");
+            }
             self.coordinator.cancel();
             self.await_stage(Stage::Idle).await;
             self.overlay.lock().await.hide();
