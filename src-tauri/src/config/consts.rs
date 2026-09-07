@@ -158,10 +158,36 @@ pub const MAX_RECORDING_MS_CEILING: u32 = 780_000;
 pub const ABS_MAX_RECORDING_MS: u32 = 1_800_000;
 
 /// Recording guard (Layer 5): peak-RMS threshold (linear amplitude,
-/// pre-boost) below which a poll counts as "silent". ≈ -46 dBFS.
-/// Tunable; not empirically validated against real hardware noise
-/// floors yet.
-pub const SILENCE_RMS: f32 = 0.005;
+/// pre-boost) below which a poll counts as "silent". ≈ -34 dBFS.
+///
+/// Calibrated 2026-09-07 against a REAL failed take on a MacBook Air M3
+/// built-in mic, quiet room, v0.1.4 installed: an 87s silent recording's
+/// actual per-250ms peak-RMS (exactly what `AudioRecorder::take_rms_peak`
+/// feeds the guard) measured a room floor of median 0.0061 (-44 dBFS),
+/// p90 0.0104 (-40 dBFS), max 0.0156 (-36 dBFS) — all ABOVE the previous
+/// 0.005 (-46 dBFS) constant. Result: only 34.5% of polls read "silent",
+/// `SILENCE_FRACTION` (0.80) was never reached, the guard never armed in
+/// 87s of silence, `GuardState::ever_loud` stayed `true` from room noise
+/// alone, and the whole silent take was sent to Whisper — its
+/// hallucinated output ("Продолжение следует... Субтитры создавал
+/// DimaTorzok") was auto-typed into the focused app with no human in the
+/// loop. This is the exact hazard the guard exists to prevent; the
+/// constant had been below the reference hardware's noise floor since it
+/// was introduced (flagged "not empirically validated" by three prior
+/// reviews).
+///
+/// 0.02 gives ~2 dB of margin above the measured floor's max (0.0156) and
+/// ~7 dB of margin below a modest -26 dBFS test signal played through the
+/// laptop speakers into the same mic (0.047); normal dictation speech is
+/// -30..-12 dBFS (0.03-0.25), comfortably clear on the loud side.
+///
+/// Trade-off, stated honestly: a very quiet or distant speaker whose
+/// voice stays below -34 dBFS in EVERY 10ms chunk of a given 250ms poll
+/// will have that poll counted as silent. `SILENCE_FRACTION`'s
+/// 80%-of-window tolerance absorbs isolated dips like this (a pause, a
+/// soft word) — it does not help a speaker who is consistently this
+/// quiet for the whole `SILENCE_WINDOW_MS` window.
+pub const SILENCE_RMS: f32 = 0.02;
 
 /// Recording guard (Layer 5): how often the guard polls the recorder's
 /// peak-RMS signal.

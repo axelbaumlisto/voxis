@@ -229,6 +229,20 @@ struct GuardState {
     /// a Whisper silence hallucination being auto-typed with no human in
     /// the loop.
     ever_loud: bool,
+    /// Whole-take maximum `rms_peak` ever observed (before any threshold
+    /// comparison), never reset. Pure observability: the 2026-09-07
+    /// `SILENCE_RMS` recalibration (see its doc comment) required pulling
+    /// this exact number out of an offline WAV analysis because nothing
+    /// logged it — logged in both the auto-stop `warn!` and the
+    /// normal-release `Recording guard cancelled` debug so every take's
+    /// peak is visible in the log for the NEXT calibration, on whatever
+    /// hardware needs it.
+    max_rms_peak: f32,
+    /// The most recent `SilenceWindow::silent_fraction()` computed once
+    /// the window became full (`0.0` before that) — same observability
+    /// purpose as `max_rms_peak`: lets a future calibration see how close
+    /// a take came to arming the guard without needing offline analysis.
+    last_window_silent_fraction: f32,
 }
 
 impl GuardState {
@@ -240,6 +254,8 @@ impl GuardState {
             elapsed_ms: 0,
             beeped: false,
             ever_loud: false,
+            max_rms_peak: 0.0,
+            last_window_silent_fraction: 0.0,
         }
     }
 }
@@ -316,6 +332,7 @@ pub(crate) fn native_cap_samples(max_recording_ms: u32, native_rate: u32) -> usi
 /// last poll.
 fn guard_step(state: &mut GuardState, rms_peak: f32, cap_hit: bool, cfg: &GuardCfg) -> GuardEvent {
     state.elapsed_ms = state.elapsed_ms.saturating_add(cfg.poll_ms);
+    state.max_rms_peak = state.max_rms_peak.max(rms_peak);
     let is_silent = rms_peak < cfg.silence_rms;
     if !is_silent {
         // Whole-recording flag, independent of the window/fraction gate
@@ -350,7 +367,8 @@ fn guard_step(state: &mut GuardState, rms_peak: f32, cap_hit: bool, cfg: &GuardC
         return GuardEvent::None;
     }
 
-    if state.window.silent_fraction() >= cfg.silence_fraction {
+    state.last_window_silent_fraction = state.window.silent_fraction();
+    if state.last_window_silent_fraction >= cfg.silence_fraction {
         state.silent_ms = state.silent_ms.saturating_add(cfg.poll_ms);
     } else {
         // A real un-silence (not just one loud poll among many — the
@@ -408,7 +426,13 @@ pub(crate) fn spawn_recording_guard(
             // out the sleep.
             tokio::select! {
                 _ = token.cancelled() => {
-                    tracing::debug!("Recording guard cancelled");
+                    tracing::debug!(
+                        "Recording guard cancelled (elapsed={}ms, max_rms_peak={:.4}, \
+                         last_window_silent_fraction={:.2})",
+                        state.elapsed_ms,
+                        state.max_rms_peak,
+                        state.last_window_silent_fraction
+                    );
                     break;
                 }
                 _ = tokio::time::sleep(poll) => {}
@@ -486,9 +510,12 @@ pub(crate) fn spawn_recording_guard(
                     }
                     tracing::warn!(
                         "recording guard: auto-stopping ({reason:?}) after {}ms elapsed \
-                         ({}ms accumulated silence)",
+                         ({}ms accumulated silence, max_rms_peak={:.4}, \
+                         last_window_silent_fraction={:.2})",
                         state.elapsed_ms,
-                        state.silent_ms
+                        state.silent_ms,
+                        state.max_rms_peak,
+                        state.last_window_silent_fraction
                     );
                     // The decision-to-stop above was made OUTSIDE
                     // `stop_lock`. A release that already took the lock
@@ -670,11 +697,19 @@ mod tests {
 
         assert_eq!(loud_step(&mut state, &cfg), GuardEvent::None); // the user's speech
         assert!(state.ever_loud);
+        assert_eq!(
+            state.max_rms_peak, 1.0,
+            "max_rms_peak must equal the max of pushed peaks (loud_step pushes 1.0)"
+        );
 
         for _ in 0..10 {
             match silent_step(&mut state, &cfg) {
                 GuardEvent::Stop(reason) => {
                     assert_eq!(reason, StopReason::SilenceTimeout);
+                    assert_eq!(
+                        state.max_rms_peak, 1.0,
+                        "max_rms_peak must never decrease once set, even through later silent polls"
+                    );
                     assert_eq!(
                         stop_decision(Stage::Recording, true, reason),
                         StopDecision::Finalize,
@@ -1026,6 +1061,62 @@ mod tests {
         assert_eq!(guard_max_recording_ms(MAX_RECORDING_MS_CEILING), MAX_RECORDING_MS_CEILING);
         assert_eq!(guard_max_recording_ms(ABS_MAX_RECORDING_MS), MAX_RECORDING_MS_CEILING);
         assert_eq!(guard_max_recording_ms(0), MAX_RECORDING_MS_CEILING);
+    }
+
+    // ---- SILENCE_RMS hardware calibration (2026-09-07) --------------------
+
+    #[test]
+    fn test_reference_room_floor_reads_silent_at_calibrated_threshold() {
+        // Replays the exact 40-poll peak-RMS distribution measured from a
+        // REAL 87s silent recording (MacBook Air M3, built-in mic, quiet
+        // room, v0.1.4, 2026-09-07): p10=0.0035, median=0.0061,
+        // p90=0.0104, max=0.0156 — the same numbers `SILENCE_RMS`'s doc
+        // comment cites, and `SILENCE_WINDOW_MS`/`GUARD_POLL_MS`'s shipped
+        // ratio (40) as the window capacity.
+        let peaks: Vec<f32> = [0.0035_f32; 4]
+            .iter()
+            .chain([0.0061_f32; 20].iter())
+            .chain([0.0104_f32; 12].iter())
+            .chain([0.0156_f32; 4].iter())
+            .copied()
+            .collect();
+        assert_eq!(
+            peaks.len(),
+            (SILENCE_WINDOW_MS / GUARD_POLL_MS) as usize,
+            "the replayed distribution must match the shipped window capacity"
+        );
+
+        let fraction_at = |threshold: f32| {
+            let mut window = SilenceWindow::new(peaks.len());
+            for &p in &peaks {
+                window.push(p < threshold);
+            }
+            window.silent_fraction()
+        };
+
+        // Calibrated threshold (this change, 0.02): the reference room
+        // floor reads silent often enough to arm the guard — every
+        // measured peak (max 0.0156) is below it, so the window is fully
+        // silent (fraction 1.0).
+        let calibrated = fraction_at(SILENCE_RMS);
+        assert_eq!(
+            calibrated, 1.0,
+            "calibrated SILENCE_RMS ({SILENCE_RMS}) must read every measured room-floor peak as silent"
+        );
+        assert!(calibrated >= SILENCE_FRACTION);
+
+        // The OLD constant (0.005, -46 dBFS): documents why v0.1.4's guard
+        // never armed in 87s of real silence — only the 4 quietest polls
+        // (p10=0.0035) were ever below it; fraction 4/40 = 0.10.
+        let pre_calibration = fraction_at(0.005);
+        assert_eq!(
+            pre_calibration, 0.10,
+            "the pre-calibration constant (0.005) must read most of the measured room floor as loud"
+        );
+        assert!(
+            pre_calibration < SILENCE_FRACTION,
+            "documents the bug: 0.005 never reaches the 80% window fraction on this hardware"
+        );
     }
 
     // Runtime behavior NOT automatable without a `tauri/test` harness

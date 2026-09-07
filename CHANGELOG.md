@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.5
+
+Silence guard calibrated on hardware: threshold −46 → −34 dBFS (room floor on a
+MacBook Air built-in mic measured −44…−36 dBFS, so v0.1.4's guard never armed and a
+silent take could still be transcribed and auto-typed as a Whisper hallucination).
+Guard logs per-take peak RMS for future calibration. No other changes.
+
 ## v0.1.4
 
 macOS release lane: sign every bundled executable (voice AND typing_bench) with

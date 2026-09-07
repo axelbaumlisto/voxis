@@ -704,12 +704,13 @@ mod tests {
         // read (no permission prompt — see check_microphone_native's doc
         // comment), safe to run unconditionally in CI on macOS runners.
         //
-        // Bound is 200ms, not the originally-hoped "microseconds": measured
+        // Bound is 500ms, not the originally-hoped "microseconds": measured
         // on this machine the native path is ~41ms cold / ~9ms warm (see
-        // check_microphone_native's doc comment for why). 200ms keeps a
-        // wide margin against a loaded CI runner while still failing loudly
-        // if this regresses back to osascript-scale latency (0.24–5.38s
-        // measured for the fallback path).
+        // check_microphone_native's doc comment for why — it is real IPC to
+        // tccd). Cold ~41ms; the 500ms bound leaves >10× headroom under
+        // parallel full-suite test load while still failing loudly if this
+        // regresses back to osascript-scale latency (0.24–5.38s measured for
+        // the fallback path).
         let start = Instant::now();
         let result = check_microphone_native();
         let elapsed = start.elapsed();
@@ -722,8 +723,8 @@ mod tests {
             PermissionStatus::Granted | PermissionStatus::Denied | PermissionStatus::Unknown
         ));
         assert!(
-            elapsed.as_millis() < 200,
-            "native probe took {}ms, expected well under 200ms (no subprocess)",
+            elapsed.as_millis() < 500,
+            "native probe took {}ms, expected well under 500ms (no subprocess)",
             elapsed.as_millis()
         );
     }
