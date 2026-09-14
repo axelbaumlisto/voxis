@@ -1,7 +1,7 @@
 # tauri-plugin-voxis — диктовка Voxis как встраиваемый плагин (desktop + iOS), первый хост: naked
 
-> **Ревизия v2 (2026-09-07)** после blind-раунда 1 (`research/plugin-plan/BLIND_review_{1,3,4}_*.md`:
-> architecture / safety-security / migration-ordering; iOS-platform — отдельно). Все три —
+> **Ревизия v2 (2026-09-07)** после blind-раунда 1 (`research/plugin-plan/BLIND_review_{1,2,3,4}_*.md`:
+> architecture / safety-security / migration-ordering / iOS-platform). Все четыре —
 > GO-WITH-CHANGES. Изменения помечены `[R1-<роль> <id>]` со ссылкой на находку.
 
 ## Context
@@ -395,9 +395,17 @@ Sources/AudioCapture.swift}`, `…/src/mobile.rs`
 `[R1-Safety S5]`, **self-cap** по `capSamples` в tap-callback `[R1-Arch S2]`, шлёт `level`
 через `Channel` каждые 250 мс (его прекращение = liveness-сигнал `[R1-Arch S3]`); `stopCapture`
 возвращает `{durationMs, samples, peakRms}`; Keychain-реализация `SecretStore`
-(`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`) `[R1-Safety S2]`; `AVAudioSession` category `.record`/`.playAndRecord` с
-`.duckOthers`, активация/деактивация симметричны; прерывание (звонок) → `interrupted` событие
-→ pipeline финализирует как `StreamDied → Recover` (как на desktop); отсутствие разрешения →
+(`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`) `[R1-Safety S2]`; `AVAudioSession` category
+**`.record`** (не `.playAndRecord`: без переговоров output-route; haptics работают без аудио-выхода)
+`[R1-iOS tactical]`; сессия **не деактивируется** на `didEnterBackground`/`willResignActive` — иначе
+фон-запись (9a/9b) невозможна; прерывание (`.began`: звонок, системный alert, **закрытая Smart Folio
+на iPad — hardware-mute как interruption**) → финализировать как `StreamDied → Recover`, на
+`.ended && shouldResume` **не** автоперезапускать (диктовка — не музыка) `[R1-iOS C2]`;
+`Package.swift` `platforms: [.iOS(.v17)]` (минимум из `AVAudioApplication`/`LiveActivityIntent` = 17;
+`AudioRecordingIntent` за `#available(iOS 18, *)`) `[R1-iOS S5]`; `run_mobile_plugin` **блокирующий**
+(Tauri `plugin/mobile.rs`: `rx.recv()`), Swift-команды идут на серийной `ipcDispatchQueue` →
+вызывать из `spawn_blocking`, Swift-обработчики короткие; `Channel` уровней создаётся **Rust-side**
+(`Channel::new(closure)`), не из JS `[R1-iOS C5]`; отсутствие разрешения →
 явная ошибка `MicrophoneDenied` с деep-link в Settings; `NSMicrophoneUsageDescription`
 документирован для хоста. Проверка на реальном iPad (skill `ipad-physical-testing`): запись
 5 с речи → WAV валидный, транскрипт непустой.
@@ -412,7 +420,10 @@ Sources/AudioCapture.swift}`, `…/src/mobile.rs`
    пишущего приложения): наблюдать `AVAudioApplication.inputMuteStateChangeNotification`
    (`AVAudioApplicationMuteStateKey`), `#available(iOS 17, *)`; `muted: bool` → **немедленное**
    состояние `Muted` в оверлее/событии `level` (не «60 с тишины до реакции») `[R1-Safety T3]`;
-   guard трактует muted как тишину; иначе запишем нули и получим галлюцинацию.
+   guard трактует muted как тишину; иначе запишем нули и получим галлюцинацию. Fallback: если
+   системная mute-кнопка iOS 26 **не** шлёт notification для `.record`-сессии (Apple-док нет —
+   измерить в T8.5), детектировать RMS≈0 (не просто < `SILENCE_RMS`) ≥ 500 мс → `muted` эвристически
+   `[R1-iOS C3]`.
 6. Haptics (`UIImpactFeedbackGenerator`) на start/stop — как у Wispr Flow.
 
 ### Task 8.5: Tracer bullet (iOS) — `host-min` на iPad-стенде с реальным микрофоном
@@ -427,8 +438,11 @@ Sources/AudioCapture.swift}`, `…/src/mobile.rs`
 **Verify:** протокол прогона + WAV + лог как evidence в `research/plugin-ios/`
 **Steps:**
 1. `tauri ios init` для host-min, `NSMicrophoneUsageDescription`, dev-подпись.
-2. Прогоны речь/тишина/mute; сбор WAV с устройства.
-3. Калибровка порога при расхождении.
+2. Прогоны речь/тишина/mute (системная кнопка → приходит ли notification) / **закрытая Smart Folio**
+   (ожидание: interruption, не «тишина») / фон: свернуть хост с идущей записью и измерить, сколько
+   iOS держит `.record`-сессию (цель 10 мин) `[R1-iOS C2/C3]`; сбор WAV с устройства.
+3. Калибровка порога при расхождении. Одной строкой в лог: `SpeechTranscriber.supportedLocales`
+   на iOS (на macOS 26.6.2 `ru_RU` отсутствует — подтвердить).
 
 ### Task 9a: iOS Live Activity — Swift-реализация + `docs/PLUGIN_IOS_HOST.md`
 **Files:** `crates/tauri-plugin-voxis/ios/Sources/LiveActivity.swift`,
@@ -483,8 +497,17 @@ Widget-код поставляется хосту для его WidgetBundle (и
      `ShareMemoryProbe.swift` — методика измерения jetsam в расширении на железе.
    Альтернатива для генерации — `npx @choochmeque/tauri-apple-extensions ios add …` (тот же
    XcodeGen под капотом); референс App Group — `tauri-plugin-widgets` `init-ios`.
-1. `ActivityAttributes` + состояние; запуск/обновление/финиш из Swift-стороны плагина.
-2. `StopDictationIntent: LiveActivityIntent` (in-process) → `stop` в плагине.
+1. `ActivityAttributes` + состояние; запуск/обновление/финиш из Swift-стороны плагина;
+   `activity.end(content, dismissalPolicy: .immediate)` (default оставляет активность на Lock Screen
+   до 4 ч) `[R1-iOS tactical]`.
+2. `StopDictationIntent: LiveActivityIntent` — **подтверждено Apple-доком** `[R1-iOS C1]`: система
+   выполняет его в процессе приложения (запускает/поднимает его в фоне, если suspended). Два
+   следствия: (a) **тип интента компилируется в оба таргета** — app (через SwiftPM плагина) и
+   widget (через `sources:` расширения) — либо `AppIntentsPackage` (хост объявляет
+   `includedPackages = [VoxisIntentsPackage.self]`), иначе кнопка в острове не резолвится;
+   (b) путь Stop **Swift → Rust напрямую** (plugin state / Rust-side `Channel` closure), **не через
+   JS-событие** — WebView при suspended-хосте может быть мёртв, и stop молча не сработает до
+   возврата пользователя `[R1-iOS S2/S3]`.
 3. Инструкция хосту (`docs/PLUGIN_IOS_HOST.md`): блок для `project.yml` (таргет + embed +
    DEVELOPMENT_TEAM + Info.plist properties: `NSExtensionPointIdentifier
    com.apple.widgetkit-extension`), `UIBackgroundModes: audio`, `NSSupportsLiveActivities: true`,
@@ -552,21 +575,25 @@ guard: 75 с тишины → Discard + сообщение, ничего не в
 
 ### Task 11b: iOS Siri / Action Button / Control Center → диктовка в naked (App Intents)
 **Files (naked-cli):** `src-tauri/gen/apple/Sources/naked/VoxisIntents.swift` (AppIntent +
-AppShortcutsProvider), `src-tauri/gen/apple/naked_iOS/naked_iOS.entitlements`
-(`com.apple.developer.siri`), `crates/tauri-plugin-voxis/ios/Sources/IntentBridge.swift`
-**Depends:** Task 11
+AppShortcutsProvider; XcodeGen `sources: - path: Sources` компилирует всё под папкой —
+`project.yml:51`), `crates/tauri-plugin-voxis/ios/Sources/IntentBridge.swift`.
+`[R1-iOS C6]` **Entitlement `com.apple.developer.siri` НЕ нужен**: Apple требует его только для
+SiriKit Intents-**extensions**; App Intents / App Shortcuts работают без него («available as soon as
+someone installs your app»). Файл `naked_iOS.entitlements` генерируется xcodegen из `project.yml` и
+руками не правится.
+**Depends:** Task 11 (фоновой вариант `AudioRecordingIntent & LiveActivityIntent`, iOS 18 — только
+после Task 9a: без Live Activity в `perform()` «the audio recording stops»)
 **Acceptance:** `StartDictationIntent: AppIntent` с `openAppWhenRun = true` (хост должен быть в
 foreground для микрофона — это правило iOS, не наш выбор); `AppShortcutsProvider` с фразами
 `"Диктуй в \(.applicationName)"`, `"Start dictation in \(.applicationName)"` (токен имени
-обязателен — иначе Siri молча не регистрирует); entitlement Siri включён; после установки без
+обязателен — иначе Siri молча не регистрирует); после установки без
 настройки: «Привет Siri, диктуй в naked» → хост открывается → плагин стартует запись → оверлей;
 тот же интент назначается на Action Button / Back Tap / Control Center (iOS 18 `ControlWidget`
 — опционально); `AppShortcutsProvider.updateAppShortcutParameters()` на запуске; интент во
 время активной записи → игнор (single-flight). Проверка на устройстве: Siri-фраза, Action Button.
 **Verify:** прогон на iPad/iPhone; Settings → Apps → naked → Siri & Search показывает шорткаты
 **Steps:**
-1. Entitlement `com.apple.developer.siri` — в `project.yml` `entitlements.properties`
-   app-таргета (xcodegen перезаписывает файл, см. Task 9), затем `xcodegen generate`.
+1. `VoxisIntents.swift` в `gen/apple/Sources/naked/`; `xcodegen generate`; entitlement не нужен.
 2. Intent (`openAppWhenRun = true`) выполняется в процессе приложения → `NotificationCenter`
    → Swift-сторона плагина → `start`. App Group не нужен.
 3. Provider + фразы (ru/en в String Catalog).
@@ -609,9 +636,12 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
     приходить → переключать категорию); Shortcuts «Dictate Text» (Siri STT, язык задавать
     явно); `requestValue()` (Siri спрашивает и отдаёт текст, приложение не открывается);
     Apple Watch companion.
-  - Транскрипция on-device: `SpeechTranscriber` — русского в `supportedLocales` по одним данным
-    нет → для ru использовать `DictationTranscriber` (+ `AnalysisContext.contextualStrings` до
-    100 фраз = наш словарь на этапе распознавания). Проверять `supportedLocales` на устройстве.
+  - Транскрипция on-device: **`ru_RU` в `SpeechTranscriber.supportedLocales` НЕТ** — проверено
+    Swift-пробой на macOS 26.6.2 (30 локалей: de/en/es/fr/it/ja/ko/pt/yue/zh); есть в
+    `DictationTranscriber.supportedLocales` (54). Для ru → `DictationTranscriber` +
+    `AnalysisContext.contextualStrings` (до 100 фраз = наш словарь). Бенчмарк «WER 2.12 %» относится
+    к `SpeechTranscriber` и на `DictationTranscriber` (движок старой системной диктовки) **не
+    переносится** — качество для ru измерять отдельно `[R1-iOS C4]`.
   - Пост-обработка on-device: **Foundation Models** (iOS 26, `LanguageModelSession`,
     `@Generable`) для пунктуации/чистки вместо облачного LLM — измерить качество на ru.
   - Мост iPhone → Mac без сервера: **Universal Clipboard** (Continuity) — скопировано на iPhone,
@@ -619,8 +649,8 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
   - Не работает для нас: `AVCaptureEventInteraction` (только камера), автовозврат (26.4),
     замена системной диктовки Siri.
 
-- `TranscriptionEngine` trait + on-device iOS 26 `DictationTranscriber` (WER 2.12 %, офлайн;
-  проверить `supportedLocales` для ru-RU) и WhisperKit-fallback.
+- `TranscriptionEngine` trait + on-device iOS 26 `DictationTranscriber` для ru (офлайн; качество
+  измерить — WER-бенчмарки `SpeechTranscriber` не применимы) и WhisperKit-fallback.
 - Живой двусторонний синк профиля и словаря через сервер-хаб на spex (Voxis-server =
   `TranscriptionClient + dictionary + LLM` за `/v1/audio/transcriptions` + `/profile`).
 - Android (Kotlin `AudioRecord`, тот же контракт).
@@ -633,7 +663,7 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
     (открыть приложение один раз, дальше держать сессию audio background mode). Требует
     `com.apple.developer.siri` entitlement.
   - «Оверлей» = Live Activity в Dynamic Island / Lock Screen с кнопками Stop/Save
-    (`LiveActivityIntent`).
+    (`LiveActivityIntent`, iOS 17+; `ControlWidget` в Control Center — iOS 18+).
   - Вывод текста в чужое приложение: keyboard extension (без микрофона, ~30–60 МБ) читает
     результат из App Group и вставляет `insertText`; либо буфер обмена; либо
     `requestValue()` — Siri сама диктует своим STT и отдаёт текст в `perform()` без открытия
