@@ -181,7 +181,14 @@ HUMAN GATE проходит **на реальном микрофоне и реа
 ### Task 1a: `voxis-core` — workspace + `config` + `storage` (механика, много тестов, низкий риск)
 **Files:** `src-tauri/Cargo.toml` (workspace), `crates/voxis-core/{Cargo.toml,src/**}`,
 `src-tauri/src/config/**` (кроме `change_handler.rs`), `src-tauri/src/storage/**` (кроме
-`debug_storage.rs`, `failed_audio.rs`), `src-tauri/src/lib.rs`, `scripts/check-ios-build.sh`
+`debug_storage.rs`, `failed_audio.rs`), `src-tauri/src/lib.rs`, `scripts/check-ios-build.sh`,
+**+ pure-split листовых типов, от которых зависит `AppConfig`** `[ADO-1a amendment 2026-09-07]`:
+`src-tauri/src/output/auto_submit/mod.rs` (`AutoSubmitKey`), `src-tauri/src/audio_feedback/mod.rs`
+(`AudioFeedbackSettings`), `src-tauri/src/shortcut/binding/**` (`ShortcutBinding`, `ShortcutAction`,
+`default_bindings`), `src-tauri/src/llm/prompts.rs` (+`llm/mod.rs`) (`LlmPrompt`, `default_prompts` — нужны
+`prompts_sqlite`). Переезжают **только** serde-типы + default-функции (они чистые: serde+specta),
+enigo/rodio/исполнение остаются в voice_lib и `pub use`-ят тип обратно — тот же паттерн, что `paths.rs`.
+Обнаружено worker'ом до первой правки; план этого не предусмотрел.
 **Acceptance:** `voxis-core` не зависит от `tauri`, `cpal`, `rdev`, `enigo`, `arboard`, `objc2*`,
 `core-foundation`; `scripts/check-ios-build.sh` проходит; `[R1-Arch S1 / Migration S2]`
 `storage/{mod.rs,paths.rs}` **разделены явно**: в core — чистая часть (`AppPaths::from_config_dir`,
