@@ -136,11 +136,19 @@ voice_lib (Voxis desktop, без изменений     tauri-plugin-voxis  (cra
 
 ## Гейты консистентности (чтобы не выяснить в конце, что не работает)
 
+**Ресурсы для реальных прогонов (2026-09-07)**: Apple Developer team `GZL949D756` (общий с clipshot,
+Developer ID + iOS dev-подпись), **iOS Simulator на этом Mac** (микрофон Mac пробрасывается),
+живой iPad-стенд (skill `~/.pi/agent/skills/ipad-physical-testing/SKILL.md`), Groq-ключ Voxis desktop.
+**Правило «E2E без моков»** (как hardware-прогоны A/B/C для v0.1.5): каждый tracer bullet и каждый
+HUMAN GATE проходит **на реальном микрофоне и реальном STT (Groq)**; `MockCapture` и `voxis-fake-stt`
+— только для детерминированного CI и unit-тестов, они **не заменяют** реальный прогон в Acceptance.
+
 Вертикальная сборка происходит **дважды до naked**, а не один раз в T10:
 
-1. **Tracer bullets**: T3.5 (desktop, `examples/host-min` + `MockCapture` + fake-STT, Playwright в
-   CI) блокирует T4/T6/T7; T8.5 (iOS, `host-min` на iPad-стенде, реальный микрофон + fake-STT по
-   LAN) блокирует T9/T11.
+1. **Tracer bullets**: T3.5 (desktop, `examples/host-min`: CI-путь на MockCapture + fake-STT, **и
+   реальный путь — встроенный микрофон Mac + Groq → текст**; поэтому T3.5 зависит и от T4) блокирует
+   T6/T7/T8; T8.5 (iOS: сначала **iOS Simulator на этом Mac** с реальным микрофоном + Groq, затем
+   iPad-стенд) блокирует T9a/T11.
 2. **Один контракт — одни фикстуры**: `crates/tauri-plugin-voxis/contract/fixtures/*.json`
    (команды, события, `DictationResult`, `VoxisProfile`, `profile-qr`) создаются в Task 3.5 и
    читаются его Rust- и vitest-тестами-снапшотами с обеих сторон, позже — обёрткой naked (Task 10)
@@ -304,7 +312,7 @@ lease не требует; Tauri-хуки `on_page_load` / web-content-process-t
 ### Task 4: Desktop-реализация: cpal capture + rdev hotkey
 **Files:** `crates/tauri-plugin-voxis/src/{desktop.rs,hotkey_desktop.rs}`, `…/Cargo.toml`,
 `…/examples/host-min/src-tauri/src/main.rs` (вариант `VOXIS_CAPTURE=cpal`) `[R2-Coherence contradiction]`
-**Depends:** Task 3.5
+**Depends:** Task 3b (T3.5 теперь зависит от T4: реальный микрофон в tracer bullet)
 **Acceptance:** `CpalCapture` пишет 16 kHz mono WAV через `voxis_core::audio_wav` в `rec/`,
 `level_rx` RMS каждые 250 мс, **self-cap** по `cap_samples` в cpal-callback `[R1-Arch S2]`;
 `[R1-Migration S6]` hotkey через `voxis_core::hotkey` (rdev): одиночные модификаторы
@@ -355,9 +363,11 @@ naked** (jsdom + CSP meta), lease-тик.
 `fixtures/audio/*.wav`, `.forgejo/workflows/ci.yml`, корневой `package.json` (forwarding-скрипт
 `"e2e:host-min": "cd crates/tauri-plugin-voxis/examples/host-min && bun run e2e"` — иначе Verify
 неисполним `[R2-Exec F2]`)
-**Depends:** Task 3b, Task 5
+**Depends:** Task 3b, Task 4, Task 5
 **Acceptance:** `host-min` (одна страница: `<voxis-overlay>`, кнопка, `<pre id=result>`) собирается и
-запускается на macOS/Linux; `voxis-fake-stt` отдаёт фиксированный текст на `fixtures/audio/speech.wav`
+запускается на macOS/Linux; **HUMAN GATE (реальный E2E, без моков)**: `VOXIS_CAPTURE=cpal` + Groq-ключ
+из Voxis desktop → сказать фразу в встроенный микрофон Mac → текст в `#result`; 17 с тишины → `NoSpeech`,
+ничего не показано (как прогоны A/C для v0.1.5); hold `alt_r` → запись → текст; `voxis-fake-stt` отдаёт фиксированный текст на `fixtures/audio/speech.wav`
 и галлюцинацию на `silence.wav`; Playwright: клик → state Recording → Transcribing → текст в
 `#result`; сценарий тишины → `NoSpeech`, `#result` пуст, toast показан; **reload webview во время Hold →
 запись остановлена ≤ 3 с** (lease) `[R1-Safety S4]`; оверлей рендерится под CSP naked; контрактные фикстуры
@@ -367,7 +377,8 @@ Docker `voxis-ci`). **Гейт**: до зелёного T4/T6/T7 не старт
 **Steps:**
 1. `voxis-fake-stt`: axum, multipart как у Groq, маппинг по sha256 WAV → текст, иначе 400.
 2. `host-min`: Tauri-хост с плагином; выбор бэкенда захвата через env `VOXIS_CAPTURE=mock:<wav>|cpal|ios`
-   (переключатель живёт в host-min, T4/T8 только добавляют варианты) `[R2-Coherence contradiction]`.
+   (переключатель живёт в host-min; `cpal` приходит из T4, `ios` добавит T8); STT: `VOXIS_STT_URL`
+   (fake-stt для CI) либо Groq-ключ из профиля для реального прогона.
 3. Контрактные фикстуры + тесты-снапшоты Rust/TS.
 4. Playwright-сценарии речь/тишина; CI job.
 
@@ -460,8 +471,10 @@ Sources/AudioCapture.swift}`, `…/src/mobile.rs`, `…/examples/host-min/src-ta
 ### Task 8.5: Tracer bullet (iOS) — `host-min` на iPad-стенде с реальным микрофоном
 **Files:** `crates/tauri-plugin-voxis/examples/host-min/src-tauri/gen/apple/**`, `docs/PLUGIN_IOS_HOST.md` (черновик)
 **Depends:** Task 8, Task 3.5
-**Acceptance:** `host-min` собирается под iOS и ставится на стенд (skill `ipad-physical-testing`);
-`voxis-fake-stt` на Маке по LAN (`api_url_override`); тап на оверлее → реальная запись → WAV
+**Acceptance:** `host-min` собирается под iOS; **этап 1 — iOS Simulator на этом Mac** (микрофон Mac,
+реальный Groq): тап → речь → текст в `#result`, тишина → `NoSpeech`; **этап 2 — iPad-стенд** (skill
+`ipad-physical-testing`, подпись team `GZL949D756`), реальный микрофон iPad + Groq; `voxis-fake-stt`
+по LAN — только для повторяемых guard-замеров; тап на оверлее → реальная запись → WAV
 проходит те же guard-тесты, что desktop (`take_rms_peak` окна на фикстуре тишины с iPad) → текст
 в `#result`; тишина 75 с → `NoSpeech`, ничего не показано; системная mute-кнопка → guard;
 измерен шумовой пол iPad-микрофона (median/p90/max per-250ms RMS) и записан в `consts.rs`
