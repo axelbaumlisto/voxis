@@ -3,6 +3,8 @@
 > **Ревизия v2 (2026-09-07)** после blind-раунда 1 (`research/plugin-plan/BLIND_review_{1,2,3,4}_*.md`:
 > architecture / safety-security / migration-ordering / iOS-platform). Все четыре —
 > GO-WITH-CHANGES. Изменения помечены `[R1-<роль> <id>]` со ссылкой на находку.
+> **v2.2** после blind-раунда 2 (`R2_review_{1,2}_*.md`: coherence / executability) — только
+> механические правки (`[R2-…]`), стратегических несогласованностей не осталось → план сошёлся.
 
 ## Context
 
@@ -140,8 +142,9 @@ voice_lib (Voxis desktop, без изменений     tauri-plugin-voxis  (cra
    CI) блокирует T4/T6/T7; T8.5 (iOS, `host-min` на iPad-стенде, реальный микрофон + fake-STT по
    LAN) блокирует T9/T11.
 2. **Один контракт — одни фикстуры**: `crates/tauri-plugin-voxis/contract/fixtures/*.json`
-   (команды, события, `DictationResult`, `VoxisProfile`) читают Rust-тесты плагина, vitest guest-js
-   и позже обёртка naked. Расхождение типов = красное с обеих сторон в том же коммите.
+   (команды, события, `DictationResult`, `VoxisProfile`, `profile-qr`) создаются в Task 3.5 и
+   читаются его Rust- и vitest-тестами-снапшотами с обеих сторон, позже — обёрткой naked (Task 10)
+   `[R2-Exec F3]`. Расхождение типов = красное с обеих сторон в том же коммите.
 3. **Детерминированный STT**: `crates/voxis-fake-stt` (axum, `/v1/audio/transcriptions`): на
    фикстурный WAV речи → фиксированный текст; на тишину → реальная галлюцинация из инцидента
    («Продолжение следует… Субтитры создавал DimaTorzok»). Без Groq/сети; один бинарь для CI,
@@ -156,7 +159,7 @@ voice_lib (Voxis desktop, без изменений     tauri-plugin-voxis  (cra
    время плана; (b) в release-time macOS-VM lane (`release.yml`, Task 12 добавляет вызов
    скрипта, `continue-on-error: false` для этого шага). Не «блокирующий CI-гейт», а
    «блокирующий Verify-гейт».
-6. **Регресс-гейт Voxis desktop после T1** (блокирующий): `cargo test --lib` ≥ 1037 зелёных +
+6. **Регресс-гейт Voxis desktop после T1** (блокирующий, hardware-часть — **HUMAN GATE**): `cargo test --lib` ≥ 1037 зелёных +
    hardware-прогоны A/B/C на MacBook идентичны v0.1.5.
 7. **Профиль round-trip**: `export(desktop-fixture) → import(plugin) → get_profile()` — хэш
    совпадает; в host-min автоматизировано — **владелец: Task 6** (Files/Verify) `[R1-Migration S4]`.
@@ -203,7 +206,12 @@ tempdir → post-T1 `factory` загружает → каждое поле ра�
 `wav_duration_ms`, `TRANSCRIPTION_SAMPLE_RATE`) → `voxis_core::audio_wav` — единственный
 WAV-код для voice_lib, плагина и Swift-контракта; `[R1-Migration S6]` `hotkey` (парсинг
 `HotkeySpec`, машина press/release, rdev-listener) → `voxis_core::hotkey` за feature `rdev`
-(off по умолчанию → iOS-сборка без rdev); `[R1-Arch T2]` чистые функции `stop_decision`,
+(off по умолчанию → iOS-сборка без rdev); `[R2-Coherence F1]` **текущий модуль завязан на tauri**
+(`hotkey/mod.rs:14` `use tauri::{AppHandle, Emitter}`, `:361` `start(&self, app: AppHandle, …)`,
+`:402/:411` `app.emit("hotkey-pressed"/"hotkey-released")`) → в core уходит парсер + машина +
+rdev-listener с уведомлением через `pub trait HotkeySink { fn on_pressed(&self); fn on_released(&self); }`
+(или closure); Tauri-адаптер `impl HotkeySink for AppHandle`-обёртка с `emit` остаётся в
+`voice_lib::hotkey`; гейт `check-ios-build.sh` это проверяет; `[R1-Arch T2]` чистые функции `stop_decision`,
 `press_action`, `StopReason/StopDecision/PressAction`, `guard_step`, `SilenceWindow`,
 `native_cap_samples`, `effective_max_recording_ms` → `voxis_core::guard` с `pub`
 (было `pub(crate)`), tokio-task остаётся в voice_lib; `reqwest` уже `rustls-tls`
@@ -243,42 +251,59 @@ round-trip оба `KeySource`; тест «history не попадает»; ве�
 
 ### Phase 1 — плагин
 
-### Task 3: Каркас `tauri-plugin-voxis` (Rust) + контракт команд/событий
-**Files:** `crates/tauri-plugin-voxis/{Cargo.toml,build.rs,src/{lib.rs,commands.rs,models.rs,
-pipeline.rs,capture.rs,desktop.rs,mobile.rs},permissions/**,guest-js/**}`
+### Task 3: Каркас `tauri-plugin-voxis` (Rust) — контракт команд/событий, трейты, MockCapture
+**Files:** `crates/tauri-plugin-voxis/{Cargo.toml,build.rs,src/{lib.rs,commands.rs,models.rs,capture.rs,
+secrets.rs,consent.rs,error.rs},permissions/**}`
 **Depends:** Task 1b
-**Acceptance:** плагин регистрируется в любом Tauri-2 хосте `.plugin(tauri_plugin_voxis::init())`;
-команды: `start(mode: Hold|Toggle) -> SessionId`, `stop(id) -> DictationResult{ text,
-language?, duration_ms, guard_outcome }`, `cancel(id)`, `state() -> State`, `get_profile()`,
-`apply_profile(bytes, key_source)`, `import_profile_from_desktop()` (см. Task 6),
+**Acceptance:** плагин регистрируется в любом Tauri-2 хосте `.plugin(tauri_plugin_voxis::init())` /
+`init_with(SecretStore)`; **команды**: `start(mode: Hold|Toggle) -> SessionId`, `stop(id) ->
+DictationResult{ text, language?, duration_ms, guard_outcome }`, `cancel(id)`, `state() -> State`,
+`get_profile()`, `apply_profile(bytes, key_source)`, `import_profile_from_desktop()` (реализация в T6),
 `import_profile_from_qr(payload)`, `set_hotkey(spec)`, `set_consent(bool)` `[R1-Safety S6]`,
-`hold_lease(id)` `[R1-Safety S4]`; `init_with(SecretStore)` / default `[R1-Safety S2]`;
-события `voxis://state` (Idle|Recording|Transcribing|Error), `voxis://level {rms, peak, muted}` (≤ 20 Hz),
-`voxis://result`; `AudioCapture` trait `{ start(path, cap_samples) ; stop() -> Result<CaptureStats> ;
-level_rx }` `[R1-Arch S2/S3]` — контракт требует self-cap по `cap_samples` внутри бэкенда и
-liveness: закрытие/таймаут `level_rx` (4 опроса без тика при running) = `StreamDied → Recover`;
-`[R1-Safety S5]` владение путём и cleanup — в контракте (`rec/` dir, Drop, sweep on init);
-`MockCapture` для тестов (умеет «умереть молча»); pipeline = capture → guard-decision → `TranscriptionClient` →
-dictionary → llm(opt) → result; повторный `start` при активной сессии → `AlreadyRecording`
-(single-flight, как `PressReleaseMachine` на desktop, без гонок press/release).
-**Verify:** `cargo test -p tauri-plugin-voxis` (mockito для HTTP, MockCapture), `cargo clippy -p tauri-plugin-voxis --all-targets -- -D warnings`
+`hold_lease(id)` `[R1-Safety S4]`; **события** `voxis://state` (Idle|Recording|Transcribing|Error),
+`voxis://level {rms, peak, muted}` (≤ 20 Hz), `voxis://result`; **трейты**: `AudioCapture
+{ start(path, cap_samples); stop() -> Result<CaptureStats{duration_ms, samples, peak_rms}>; level_rx }`
+`[R1-Arch S2/S3, R2-Coherence tactical]` — к��нтракт фиксирует self-cap по `cap_samples` внутри бэкенда,
+liveness (4 опроса без тика при running = `StreamDied`), владение путём `rec/<uuid>.wav` + cleanup
+в Drop + sweep on init `[R1-Safety S5]`; `SecretStore { get/set/delete }` + default impls (desktop
+`keyring`/0600; iOS — в T8); `Secret` из core; `MockCapture` (воспроизводит RMS-окна и WAV-фикстуру,
+умеет «умереть молча», «игнорировать stop»); повторный `start` при активной сессии →
+`AlreadyRecording`. В этой задаче pipeline — **заглушка** (start/stop проходят через MockCapture без
+транскрипции), чтобы контракт и permissions были готовы для T5.
+**Verify:** `cargo test -p tauri-plugin-voxis && cargo clippy -p tauri-plugin-voxis --all-targets -- -D warnings && scripts/check-ios-build.sh`
 **Steps:**
 1. `tauri-plugin` build.rs с `COMMANDS`; `permissions/` autogen + `default.toml`.
-2. `models.rs`: типы выше, serde camelCase, `specta`/ts-rs — НЕ добавлять, типы в guest-js
-   вручную (KISS), синхронность проверяется тестом-снапшотом JSON.
-3. `pipeline.rs`: async, tokio; guard как на desktop: тишина ≥ `silence_timeout_ms` →
-   `SilenceTimeout` (при `ever_loud=false` → Discard + `NoSpeech`), `max_recording_ms` → стоп.
-4. `capture.rs`: trait + `MockCapture` (воспроизводит заданные RMS-окна и WAV-фикстуру).
-5. `secrets.rs`: `SecretStore` trait + default impls (desktop `keyring`/0600; iOS Keychain — Swift в
-   Task 8); `consent.rs`.
-6. Тесты: happy-path, NoSpeech-discard, AlreadyRecording, cancel во время Transcribing,
-   HTTP 5xx → `Error` + файл удалён; **capture умер молча → Recover ≤ 1 с**; **guard-task убит →
-   capture self-cap срабатывает**; **Hold без heartbeat 3 с → LeaseLost, файл удалён**;
-   **SIGKILL хоста во время Recording → relaunch → `rec/` пуст**; `dictate` без consent → отказ;
-   `grep -c sk- <plugin-config>/*.db == 0` после apply_profile.
+2. `models.rs`: типы выше, serde camelCase; `specta`/ts-rs — НЕ добавлять, типы в guest-js вручную
+   (KISS), синхронность — снапшоты в T3.5.
+3. `capture.rs`: trait + `MockCapture` + `rec/`-каталог и cleanup-хелперы.
+4. `secrets.rs`, `consent.rs`, `error.rs`.
+5. Тесты контракта: сериализация команд/событий, AlreadyRecording, `rec/` sweep on init, consent-отказ.
+
+### Task 3b: Pipeline и режимы отказа `[R2-Exec F4]`
+**Files:** `crates/tauri-plugin-voxis/src/{pipeline.rs,session.rs,lease.rs,guard_adapter.rs}`
+**Depends:** Task 3
+**Acceptance:** pipeline = capture → guard-decision (`voxis_core::guard`) → `TranscriptionClient` →
+dictionary → llm(opt) → result; single-flight как `PressReleaseMachine` на desktop; guard как на desktop:
+тишина ≥ `silence_timeout_ms` → `SilenceTimeout` (при `ever_loud=false` → Discard + `NoSpeech`),
+`max_recording_ms` → стоп, Hold-режим дополнительно ≤ 120 с `[R1-Safety T4]`; **lease** `[R1-Safety S4 /
+R2-Coherence F-lease]`: per-session watcher (session-id-scoped), 3 пропущенных heartbeat → `cancel(LeaseLost)`,
+watcher **снимается на любом `stop()`/`cancel()`** (никакого ABA при быстром hold-release-hold), Toggle-режим
+lease не требует; Tauri-хуки `on_page_load` / web-content-process-terminated → `cancel_all(Hold)`; `muted`
+→ немедленное состояние + трактуется guard как тишина.
+**Verify:** `cargo test -p tauri-plugin-voxis pipeline:: lease::` (mockito для HTTP, MockCapture)
+**Steps:**
+1. `pipeline.rs` (async, tokio), `session.rs` (single-flight), `guard_adapter.rs` (RMS-окна → `guard_step`).
+2. `lease.rs`: watcher per session, teardown на stop/cancel.
+3. Тесты: happy-path, NoSpeech-discard, AlreadyRecording, cancel во время Transcribing, HTTP 5xx →
+   `Error` + файл удалён; **capture умер молча → Recover ≤ 1 с**; **guard-task убит → self-cap
+   срабатывает**; **Hold без heartbeat 3 с → LeaseLost, файл удалён**; **stop на 2.9 с без heartbeat →
+   Finalize, не LeaseLost (гонка)**; **hold-release-hold ×5 за 2 с → ни одной ложной отмены**;
+   **SIGKILL хоста во время Recording → relaunch → `rec/` пуст**; `grep -c sk- <plugin-config>/*.db == 0`
+   после apply_profile.
 
 ### Task 4: Desktop-реализация: cpal capture + rdev hotkey
-**Files:** `crates/tauri-plugin-voxis/src/desktop.rs`, `…/src/hotkey.rs`, `…/Cargo.toml`
+**Files:** `crates/tauri-plugin-voxis/src/{desktop.rs,hotkey_desktop.rs}`, `…/Cargo.toml`,
+`…/examples/host-min/src-tauri/src/main.rs` (вариант `VOXIS_CAPTURE=cpal`) `[R2-Coherence contradiction]`
 **Depends:** Task 3.5
 **Acceptance:** `CpalCapture` пишет 16 kHz mono WAV через `voxis_core::audio_wav` в `rec/`,
 `level_rx` RMS каждые 250 мс, **self-cap** по `cap_samples` в cpal-callback `[R1-Arch S2]`;
@@ -294,10 +319,13 @@ dictionary → llm(opt) → result; повторный `start` при актив
 3. Тесты `HotkeySpec` ↔ строка (`"alt_r"`, `"Ctrl+Shift+V"`).
 
 ### Task 5: guest-js: `@voxis/tauri-plugin-voxis` — API, `<voxis-overlay>`, in-app hotkey
-**Files:** `crates/tauri-plugin-voxis/guest-js/{package.json,src/{index.ts,overlay.ts,drag.ts,
-hotkey.ts,lease.ts,theme-bridge.ts,themes/registry.ts},__tests__/**}`, `src/theme-engine/builtin/**`
-(build-time копирование в guest-js как статические ES-модули; `loader.ts`/`fetchModule.ts` **не**
-экспортируются) `[R1-Safety S3]`
+**Files:** `crates/tauri-plugin-voxis/guest-js/{package.json,vite.config.ts,src/{index.ts,overlay.ts,drag.ts,
+hotkey.ts,lease.ts,theme-bridge.ts,themes/registry.ts},__tests__/**}`, `scripts/build-themes.ts`
+(добавить второй output в guest-js), корневой `package.json` (`"harness:overlay"`) `[R2-Exec F6]`.
+`[R1-Safety S3 / R2-Coherence F2]` Источник тем — **не** `src/theme-engine/builtin/**` (это TS с
+относительными импортами `../../renderers/bars`, `../../contract`), а **вывод `scripts/build-themes.ts`**
+(`Bun.build` → самодостаточный ESM `theme.js` на тему); `ThemeRegistry` статически импортирует
+собранные `theme.js`; `loader.ts`/`fetchModule.ts` не экспортируются.
 **Depends:** Task 3
 **Acceptance:** `dictate({mode}) : Promise<DictationResult>`; `onState/onLevel/onResult`;
 `mountOverlay(container?, {theme, draggable: true, storageKey})` — веб-компонент, берёт тему из
@@ -311,7 +339,7 @@ drag: pointer events (mouse+touch+pen), позиция в `localStorage[storageK
 `lease.ts`: heartbeat `hold_lease` 1 Гц пока Hold активен `[R1-Safety S4]`;
 vitest: drag-persist, safe-area clamp, pointercancel→stop, keyup-lost→stop, theme mount **под CSP
 naked** (jsdom + CSP meta), lease-тик.
-**Verify:** `bun run test:run` в guest-js; harness `bun run harness` показывает оверлей с mock-level
+**Verify:** `bun run test:run` в guest-js; `bun run harness:overlay` (новый скрипт; корневой `harness` — theme-engine harness, не трогать) показывает оверлей с mock-level
 **Steps:**
 1. Па��ет ESM + d.ts; `@tauri-apps/api` peer.
 2. `overlay.ts`: custom element `voxis-overlay`, shadow DOM, слоты для темы.
@@ -324,8 +352,10 @@ naked** (jsdom + CSP meta), lease-тик.
 **Files:** `crates/voxis-fake-stt/**`, `crates/tauri-plugin-voxis/examples/host-min/**` (в т.ч.
 `src-tauri/tauri.conf.json` с **CSP, идентичной naked** `[R1-Safety S3]`),
 `crates/tauri-plugin-voxis/contract/fixtures/*.json` (включая `profile-qr.json` `[R1-Safety T1]`),
-`fixtures/audio/*.wav`, `.forgejo/workflows/ci.yml`
-**Depends:** Task 3, Task 5
+`fixtures/audio/*.wav`, `.forgejo/workflows/ci.yml`, корневой `package.json` (forwarding-скрипт
+`"e2e:host-min": "cd crates/tauri-plugin-voxis/examples/host-min && bun run e2e"` — иначе Verify
+неисполним `[R2-Exec F2]`)
+**Depends:** Task 3b, Task 5
 **Acceptance:** `host-min` (одна страница: `<voxis-overlay>`, кнопка, `<pre id=result>`) собирается и
 запускается на macOS/Linux; `voxis-fake-stt` отдаёт фиксированный текст на `fixtures/audio/speech.wav`
 и галлюцинацию на `silence.wav`; Playwright: клик → state Recording → Transcribing → текст в
@@ -336,7 +366,8 @@ Docker `voxis-ci`). **Гейт**: до зелёного T4/T6/T7 не старт
 **Verify:** `cargo test -p tauri-plugin-voxis && bun run test:run && bun run e2e:host-min` локально и в CI
 **Steps:**
 1. `voxis-fake-stt`: axum, multipart как у Groq, маппинг по sha256 WAV → текст, иначе 400.
-2. `host-min`: Tauri-хост с плагином, `MockCapture` подключается через env `VOXIS_CAPTURE=mock:<wav>`.
+2. `host-min`: Tauri-хост с плагином; выбор бэкенда захвата через env `VOXIS_CAPTURE=mock:<wav>|cpal|ios`
+   (переключатель живёт в host-min, T4/T8 только добавляют варианты) `[R2-Coherence contradiction]`.
 3. Контрактные фикстуры + тесты-снапшоты Rust/TS.
 4. Playwright-сценарии речь/тишина; CI job.
 
@@ -388,8 +419,8 @@ CSPRNG), одноразовый токен, 6-значный код; HTTP (`axum
 
 ### Task 8: iOS Swift-сторона: `AVAudioEngine` capture + разрешения
 **Files:** `crates/tauri-plugin-voxis/ios/{Package.swift,Sources/VoxisPlugin.swift,
-Sources/AudioCapture.swift}`, `…/src/mobile.rs`
-**Depends:** Task 3
+Sources/AudioCapture.swift}`, `…/src/mobile.rs`, `…/examples/host-min/src-tauri/src/main.rs` (вариант `ios`)
+**Depends:** Task 3b
 **Acceptance:** `startCapture(path, capSamples)` пишет 16 kHz mono PCM WAV (AVAudioConverter из
 `inputNode` формата) в `rec/` с `FileProtectionType.completeUnlessOpen` + `isExcludedFromBackup`
 `[R1-Safety S5]`, **self-cap** по `capSamples` в tap-callback `[R1-Arch S2]`, шлёт `level`
@@ -409,7 +440,7 @@ Sources/AudioCapture.swift}`, `…/src/mobile.rs`
 явная ошибка `MicrophoneDenied` с деep-link в Settings; `NSMicrophoneUsageDescription`
 документирован для хоста. Проверка на реальном iPad (skill `ipad-physical-testing`): запись
 5 с речи → WAV валидный, транскрипт непустой.
-**Verify:** `cargo build -p tauri-plugin-voxis --target aarch64-apple-ios`; прогон на устройстве
+**Verify:** `cargo build -p tauri-plugin-voxis --target aarch64-apple-ios`; **HUMAN GATE:** прогон на устройстве `[R2-Exec F5]`
 **Steps:**
 1. Скопировать структуру из `naked-plugin-capture/ios` (Package.swift, `Plugin` subclass,
    `@objc func … (_ invoke: Invoke)`).
@@ -435,7 +466,7 @@ Sources/AudioCapture.swift}`, `…/src/mobile.rs`
 в `#result`; тишина 75 с → `NoSpeech`, ничего не показано; системная mute-кнопка → guard;
 измерен шумовой пол iPad-микрофона (median/p90/max per-250ms RMS) и записан в `consts.rs`
 рядом с MacBook. **Гейт**: до зелёного T9/T11 не стартуют.
-**Verify:** протокол прогона + WAV + лог как evidence в `research/plugin-ios/`
+**Verify:** **HUMAN GATE:** протокол прогона + WAV + лог как evidence в `research/plugin-ios/`
 **Steps:**
 1. `tauri ios init` для host-min, `NSMicrophoneUsageDescription`, dev-подпись.
 2. Прогоны речь/тишина/mute (системная кнопка → приходит ли notification) / **закрытая Smart Folio**
@@ -523,7 +554,7 @@ Widget-код поставляется хосту для его WidgetBundle (и
 острова → текст в терминале после возврата; `stop`/`cancel` завершает активность ≤ 1 с; подтверждено,
 что `LiveActivityIntent.perform()` идёт в процессе приложения (лог pid), иначе — включить fallback
 App Group + Darwin notification (App Group у naked уже есть: `project.yml:93,155`).
-**Verify:** прогон на iPad/iPhone, evidence в `research/plugin-ios/`
+**Verify:** **HUMAN GATE:** прогон на iPad/iPhone, evidence в `research/plugin-ios/`
 
 ### Phase 3 — интеграция в naked
 
@@ -563,7 +594,7 @@ mock-плагин → кнопка → текст в pane.
 hold → запись; QR-импорт профиля с Voxis desktop (Task 7) → те же провайдер/словарь/тема;
 guard: 75 с тишины → Discard + сообщение, ничего не вставлено (`SILENCE_RMS` при необходимости
 перекалибровать по WAV с iPad-микрофона, зафиксировать числа в `consts.rs`).
-**Verify:** протокол прогона в `docs/IPHONE_STAND.md`, скриншоты/лог как evidence
+**Verify:** **HUMAN GATE:** протокол прогона в `docs/IPHONE_STAND.md`, скриншоты/лог как evidence
 **Steps:**
 1. Info.plist + capabilities iOS.
 2. Сборка и установка по skill.
@@ -581,8 +612,9 @@ AppShortcutsProvider; XcodeGen `sources: - path: Sources` компилирует
 SiriKit Intents-**extensions**; App Intents / App Shortcuts работают без него («available as soon as
 someone installs your app»). Файл `naked_iOS.entitlements` генерируется xcodegen из `project.yml` и
 руками не правится.
-**Depends:** Task 11 (фоновой вариант `AudioRecordingIntent & LiveActivityIntent`, iOS 18 — только
-после Task 9a: без Live Activity в `perform()` «the audio recording stops»)
+**Depends:** Task 11, Task 9a
+(фоновой вариант `AudioRecordingIntent & LiveActivityIntent`, iOS 18: без Live Activity в `perform()`
+«the audio recording stops» — поэтому 9a в Depends, не только в прозе `[R2-Exec F1]`)
 **Acceptance:** `StartDictationIntent: AppIntent` с `openAppWhenRun = true` (хост должен быть в
 foreground для микрофона — это правило iOS, не наш выбор); `AppShortcutsProvider` с фразами
 `"Диктуй в \(.applicationName)"`, `"Start dictation in \(.applicationName)"` (токен имени
@@ -591,7 +623,7 @@ foreground для микрофона — это правило iOS, не наш 
 тот же интент назначается на Action Button / Back Tap / Control Center (iOS 18 `ControlWidget`
 — опционально); `AppShortcutsProvider.updateAppShortcutParameters()` на запуске; интент во
 время активной записи → игнор (single-flight). Проверка на устройстве: Siri-фраза, Action Button.
-**Verify:** прогон на iPad/iPhone; Settings → Apps → naked → Siri & Search показывает шорткаты
+**Verify:** **HUMAN GATE:** прогон на iPad/iPhone; Settings → Apps → naked → Siri & Search показывает шорткаты
 **Steps:**
 1. `VoxisIntents.swift` в `gen/apple/Sources/naked/`; `xcodegen generate`; entitlement не нужен.
 2. Intent (`openAppWhenRun = true`) выполняется в процессе приложения → `NotificationCenter`
