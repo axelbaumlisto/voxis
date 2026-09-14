@@ -35,8 +35,7 @@ impl LlmPromptsStorage {
     /// Idempotent — calling this on a populated table is a no-op.
     pub fn seed_defaults_if_empty(&self) -> Result<(), Box<dyn std::error::Error>> {
         let conn = self.connect()?;
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM llm_prompts", [], |r| r.get(0))?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM llm_prompts", [], |r| r.get(0))?;
         if count == 0 {
             for p in default_prompts() {
                 conn.execute(
@@ -50,8 +49,8 @@ impl LlmPromptsStorage {
 
     pub fn list(&self) -> Result<Vec<LlmPrompt>, Box<dyn std::error::Error>> {
         let conn = self.connect()?;
-        let mut stmt = conn
-            .prepare("SELECT id, name, prompt FROM llm_prompts ORDER BY created_at ASC")?;
+        let mut stmt =
+            conn.prepare("SELECT id, name, prompt FROM llm_prompts ORDER BY created_at ASC")?;
         let rows = stmt.query_map([], |row| {
             Ok(LlmPrompt {
                 id: row.get(0)?,
@@ -151,10 +150,7 @@ impl LlmPromptsStorage {
         Ok(id)
     }
 
-    pub fn set_active_id(
-        &self,
-        id: Option<&str>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn set_active_id(&self, id: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
         let conn = self.connect()?;
         match id {
             Some(v) => {
@@ -165,10 +161,7 @@ impl LlmPromptsStorage {
                 )?;
             }
             None => {
-                conn.execute(
-                    "DELETE FROM llm_prompts_state WHERE key = 'active_id'",
-                    [],
-                )?;
+                conn.execute("DELETE FROM llm_prompts_state WHERE key = 'active_id'", [])?;
             }
         }
         Ok(())

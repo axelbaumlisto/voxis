@@ -6,19 +6,29 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use tauri::AppHandle;
 
 /// Name of the application data directory within the OS config directory.
 pub const APP_CONFIG_DIR: &str = "voxis";
 /// Legacy application data directory used for one-time migration.
 pub const LEGACY_CONFIG_DIR: &str = "soupawhisper";
 
+/// Resolve the canonical Voxis **desktop** application data directory
+/// (`~/Library/Application Support/voxis` on macOS, XDG on Linux, AppData on
+/// Windows) — independent of any Tauri app identifier.
+///
+/// This is the pure, host-agnostic building block other consumers (a future
+/// `tauri-plugin-voxis` reading the desktop install's profile, this crate's
+/// data-gate test) can call without a `tauri::AppHandle`.
+pub fn voxis_desktop_config_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join(APP_CONFIG_DIR))
+}
+
 /// Resolve the canonical application data directory.
 ///
 /// Storage, logging, themes, and the debug socket must all use this resolver
 /// rather than Tauri's identifier-derived `app_config_dir()`.
 pub fn app_config_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|dir| dir.join(APP_CONFIG_DIR))
+    voxis_desktop_config_dir()
 }
 
 /// Migrate the legacy application data directory to the canonical location.
@@ -147,17 +157,6 @@ impl AppPaths {
         Self { config_dir }
     }
 
-    /// Create AppPaths from Tauri AppHandle.
-    pub fn new(_app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
-        // Use the canonical application data directory.
-        let config_dir = app_config_dir().ok_or("Cannot find config directory")?;
-
-        // Ensure directory exists
-        std::fs::create_dir_all(&config_dir)?;
-
-        Ok(Self { config_dir })
-    }
-
     /// Path to config.ini file (legacy, for migration).
     pub fn config_file(&self) -> PathBuf {
         self.config_dir.join("config.ini")
@@ -233,9 +232,54 @@ impl AppPaths {
     }
 }
 
+// `AppPaths::new(&AppHandle)` is the one Tauri-coupled constructor. It must
+// be an *inherent* impl on this exact `AppPaths` type (not a trait, not a
+// wrapper) so `voice_lib`'s re-exported `storage::AppPaths::new(app_handle)`
+// call sites (`setup/mod.rs`, `commands/overlay.rs`) keep compiling
+// unchanged — Rust's orphan rule (E0116) forbids adding an inherent impl for
+// a foreign type from voice_lib itself, and a trait method would require
+// those call sites to add a `use` import, which the plan requires stay
+// untouched. Feature-gating instead of unconditionally depending on `tauri`
+// keeps `voxis-core` iOS-buildable and dependency-clean by default (mirrors
+// Task 1b's plan to gate `hotkey` behind the `rdev` feature).
+#[cfg(feature = "tauri-support")]
+impl AppPaths {
+    /// Create AppPaths from Tauri AppHandle.
+    pub fn new(_app: &tauri::AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
+        // Use the canonical application data directory.
+        let config_dir = voxis_desktop_config_dir().ok_or("Cannot find config directory")?;
+
+        // Ensure directory exists
+        std::fs::create_dir_all(&config_dir)?;
+
+        Ok(Self { config_dir })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Data-gate (Task 1a Acceptance #7, partial): locks the desktop config
+    // dir to the same value shipped in v0.1.5 (`APP_CONFIG_DIR` = "voxis"),
+    // independent of any Tauri AppHandle/identifier.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn voxis_desktop_config_dir_matches_v0_1_5_on_macos() {
+        let dir = voxis_desktop_config_dir().expect("config_dir resolvable");
+        assert!(
+            dir.ends_with("Library/Application Support/voxis"),
+            "expected .../Library/Application Support/voxis, got {dir:?}"
+        );
+    }
+
+    #[test]
+    fn voxis_desktop_config_dir_matches_app_config_dir() {
+        // `app_config_dir()` is kept as a thin alias for existing callers
+        // (setup/logging, diagnostics/fatal, diagnostics/heartbeat); both
+        // must resolve to the identical path.
+        assert_eq!(voxis_desktop_config_dir(), app_config_dir());
+    }
 
     #[test]
     fn test_paths_structure() {

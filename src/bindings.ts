@@ -950,16 +950,16 @@ always_on_microphone?: boolean; paste_shortcuts?: string; api_url_override?: str
 export type AudioDevice = { id: string; name: string; is_default: boolean }
 /**
  * User-facing settings for the audio feedback feature. Live in
- * `AppConfig` (added in T-B6.3 wiring) and flow through to `play()`.
+ * `AppConfig` and flow through to `voice_lib::audio_feedback::play()`.
  */
 export type AudioFeedbackSettings = { enabled: boolean; 
 /**
  * Linear volume in [0.0, 1.0]. Values outside that range are
- * clamped at call time \u2014 see `clamp_volume`.
+ * clamped at call time — see `voice_lib::audio_feedback::clamp_volume`.
  */
 volume: number }
 /**
- * Which key combo to fire after typing. `Off` skips entirely \u2014 this
+ * Which key combo to fire after typing. `Off` skips entirely — this
  * is the safe default for users who don't want their messages
  * auto-sent.
  */

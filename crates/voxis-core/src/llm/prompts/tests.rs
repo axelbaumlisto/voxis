@@ -59,7 +59,6 @@ fn find_by_id_returns_none_for_unknown() {
 fn serde_roundtrip_preserves_fields() {
     let prompts = default_prompts();
     let json = serde_json::to_string(&prompts).expect("serialize");
-    let restored: Vec<LlmPrompt> =
-        serde_json::from_str(&json).expect("deserialize");
+    let restored: Vec<LlmPrompt> = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(prompts, restored);
 }

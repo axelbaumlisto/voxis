@@ -239,10 +239,7 @@ mod tests {
             &self.db_path
         }
 
-        fn init_schema(
-            &self,
-            conn: &Connection,
-        ) -> Result<(), Box<dyn std::error::Error>> {
+        fn init_schema(&self, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)",
                 [],
@@ -270,9 +267,7 @@ mod tests {
         conn.execute("INSERT INTO notes (body) VALUES ('hello')", [])
             .unwrap();
         let body: String = conn
-            .query_row("SELECT body FROM notes LIMIT 1", [], |row| {
-                row.get(0)
-            })
+            .query_row("SELECT body FROM notes LIMIT 1", [], |row| row.get(0))
             .unwrap();
         assert_eq!(body, "hello");
     }

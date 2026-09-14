@@ -62,22 +62,15 @@ fn shift_enter_emits_chord_in_canonical_order() {
     emit(AutoSubmitKey::ShiftEnter, &rec).unwrap();
     assert_eq!(
         rec.transcript(),
-        ["press:Shift", "press:Enter", "release:Enter", "release:Shift"]
+        [
+            "press:Shift",
+            "press:Enter",
+            "release:Enter",
+            "release:Shift"
+        ]
     );
 }
 
-#[test]
-fn default_value_is_off() {
-    // Locks the default so silent-by-default privacy is preserved
-    // when a fresh config rolls out.
-    assert_eq!(AutoSubmitKey::default(), AutoSubmitKey::Off);
-}
-
-#[test]
-fn serde_roundtrip_uses_snake_case() {
-    // Stable string form for the SQLite kv table.
-    let json = serde_json::to_string(&AutoSubmitKey::CmdEnter).unwrap();
-    assert_eq!(json, "\"cmd_enter\"");
-    let back: AutoSubmitKey = serde_json::from_str(&json).unwrap();
-    assert_eq!(back, AutoSubmitKey::CmdEnter);
-}
+// `default_value_is_off` and `serde_roundtrip_uses_snake_case` moved with
+// the `AutoSubmitKey` type itself to `voxis_core::output_types::tests`
+// (Task 1a pure-split).

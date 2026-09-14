@@ -1,0 +1,50 @@
+[package]
+name = "voxis-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+description = "Pure-Rust core (config + storage) for Voxis, buildable for iOS with no Tauri/desktop deps"
+license = "MIT"
+
+[lib]
+# rlib only: this crate is a plain Rust dependency of voice_lib (and later
+# tauri-plugin-voxis), not a cdylib/staticlib target itself.
+name = "voxis_core"
+doctest = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+rust-ini = "0.21"
+regex = "1"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+libc = "0.2"
+tracing = "0.1"
+specta = { version = "=2.0.0-rc.22", features = ["derive"] }
+
+# Optional: `storage::test_utils::create_temp_paths` is a normal
+# (non-`#[cfg(test)]`) public helper so voice_lib's own tests can use it too
+# — `#[cfg(test)]` never crosses the crate boundary (it would only activate
+# when *building voxis-core's own* test target, not when voice_lib depends
+# on it normally). Gated behind `test-utils` (off by default) so release/iOS
+# builds don't ship tempfile; this crate's own tests get it unconditionally
+# via [dev-dependencies] below.
+tempfile = { version = "3", optional = true }
+
+# Optional: only the `AppPaths::new(&AppHandle)` constructor needs Tauri, and
+# only when built as voice_lib's dependency (desktop). Off by default so
+# `cargo build -p voxis-core --target aarch64-apple-ios` (no feature flags)
+# never touches Tauri. See `storage::paths` for the feature-gated impl block.
+tauri = { version = "2", optional = true }
+
+[features]
+tauri-support = ["dep:tauri"]
+test-utils = ["dep:tempfile"]
+
+[dev-dependencies]
+# Unconditional here so voxis-core's own `cargo test` always has it,
+# regardless of the `test-utils` feature (which only matters for downstream
+# consumers like voice_lib — see the `[dependencies]` comment above).
+tempfile = "3"

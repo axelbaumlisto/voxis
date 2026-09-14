@@ -250,8 +250,6 @@ impl ConfigIniStorage {
 
         Ok(config)
     }
-
-
 }
 
 #[cfg(test)]
@@ -259,8 +257,6 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
-
-
 
     #[test]
     fn test_load_nonexistent_returns_default() {
@@ -378,8 +374,6 @@ mod tests {
         assert_eq!(config.typing_delay, 12);
     }
 
-
-
     #[test]
     fn test_load_overlay_section() {
         let mut file = NamedTempFile::new().unwrap();
@@ -495,8 +489,6 @@ mod tests {
         // Should return error for invalid UTF-8
         assert!(result.is_err());
     }
-
-
 
     #[test]
     fn test_partial_section_parsing() {

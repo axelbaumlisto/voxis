@@ -6,14 +6,14 @@
 //! - LlmConfig: LLM post-processing
 //! - DictionaryConfig: Dictionary and learning
 
-mod change_handler;
 mod consts;
 mod validation;
 
+// `change_handler` is Tauri-state coupled (AppHandle, HotkeyState,
+// OrchestratorState) and stays in `voice_lib::config`; voice_lib re-exports
+// it alongside this module's `pub use voxis_core::config::*;`.
+
 // Re-export constants for backward compatibility
-pub use change_handler::{
-    apply_config_changes, ConfigChangeHandler, HotkeyChangeHandler, OverlayChangeHandler,
-};
 pub use consts::*;
 pub use validation::{is_valid_hotkey, validate_config};
 
@@ -343,20 +343,20 @@ pub struct AppConfig {
     /// ChatGPT, etc.) send the typed message without the user touching
     /// the keyboard. See `output::auto_submit`.
     #[serde(default)]
-    pub auto_submit_key: crate::output::auto_submit::AutoSubmitKey,
+    pub auto_submit_key: crate::output_types::AutoSubmitKey,
 
     /// Audio feedback beeps on recording start / stop / error.
     /// Off by default. See `audio_feedback`.
     #[serde(default)]
-    pub audio_feedback: crate::audio_feedback::AudioFeedbackSettings,
+    pub audio_feedback: crate::audio_feedback_types::AudioFeedbackSettings,
 
     /// Multi-binding shortcut list (#2). Lives in config alongside the
     /// legacy single `hotkey` string so callers can opt in gradually.
     /// Empty by default — fresh installs go through
     /// `storage::shortcut_bindings_sqlite::seed_defaults_if_empty()`
     /// (T-B2.3) on first run.
-    #[serde(default = "crate::shortcut::default_bindings")]
-    pub shortcut_bindings: Vec<crate::shortcut::ShortcutBinding>,
+    #[serde(default = "crate::shortcut::binding::default_bindings")]
+    pub shortcut_bindings: Vec<crate::shortcut::binding::ShortcutBinding>,
 
     /// `true` once the user has completed the onboarding flow (#10).
     /// The frontend gates `/onboarding` redirect on this flag.
@@ -444,9 +444,9 @@ impl Default for AppConfig {
             text_processing: true,
             append_trailing_space: false,
             translate_to_english: false,
-            auto_submit_key: crate::output::auto_submit::AutoSubmitKey::Off,
-            audio_feedback: crate::audio_feedback::AudioFeedbackSettings::default(),
-            shortcut_bindings: crate::shortcut::default_bindings(),
+            auto_submit_key: crate::output_types::AutoSubmitKey::Off,
+            audio_feedback: crate::audio_feedback_types::AudioFeedbackSettings::default(),
+            shortcut_bindings: crate::shortcut::binding::default_bindings(),
             first_run_completed: false,
             hotkey_mode: default_hotkey_mode(),
             retention_period: default_retention_period(),
@@ -622,7 +622,7 @@ mod tests {
         // T-A4 · auto-submit defaults to Off (privacy lock).
         assert_eq!(
             config.auto_submit_key,
-            crate::output::auto_submit::AutoSubmitKey::Off
+            crate::output_types::AutoSubmitKey::Off
         );
         // T-A7 · append_trailing_space defaults to false (no surprise spaces).
         assert!(!config.append_trailing_space);

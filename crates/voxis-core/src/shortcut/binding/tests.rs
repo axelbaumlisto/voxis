@@ -49,7 +49,10 @@ fn shortcut_action_serializes_with_kind_tag() {
     // Tagged serialization makes the JSON stable when new variants
     // are added (no positional surprises).
     let raw = ShortcutAction::Transcribe;
-    assert_eq!(serde_json::to_string(&raw).unwrap(), r#"{"kind":"transcribe"}"#);
+    assert_eq!(
+        serde_json::to_string(&raw).unwrap(),
+        r#"{"kind":"transcribe"}"#
+    );
     let pp = ShortcutAction::TranscribePostProcess { prompt_id: None };
     assert_eq!(
         serde_json::to_string(&pp).unwrap(),

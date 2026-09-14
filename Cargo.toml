@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+# Task 1a (tauri-plugin-voxis plan): real repo-root workspace, matching the
+# naked host's layout (`[workspace] members = ["crates/…", …]` + a single
+# root Cargo.lock, no `src-tauri/Cargo.lock`). `src-tauri` (package
+# `voice`/`voice_lib`) is the desktop app; `crates/voxis-core` is the
+# pure-Rust core it now depends on (path dep, `src-tauri/Cargo.toml`).
+# Later tasks add `crates/tauri-plugin-voxis`, `crates/voxis-fake-stt`, etc.
+# as siblings of `crates/voxis-core` under this same workspace.
+members = ["src-tauri", "crates/voxis-core"]
+
+# Moved here (verbatim) from `src-tauri/Cargo.toml` when the workspace root
+# moved to this repo-root manifest: Cargo only honours `[profile.*]` tables
+# declared at the workspace root — leaving this in `src-tauri/Cargo.toml`
+# made it silently ignored (`cargo build` warned "profiles for the non root
+# package will be ignored"), so release builds were shipping the Cargo
+# default profile instead (unoptimized, no `panic = "abort"`), which the
+# crash-safety work (`panic = "abort"` → SIGABRT → fatal-signal handler)
+# depends on. Do NOT move this back to `src-tauri/Cargo.toml`.
+#
+# Crash diagnostics release-profile decisions:
+# - Keep the symbol table by stripping only debuginfo. `strip = "debuginfo"`
+#   preserves function names for backtraces with the clipshot-measured tradeoff
+#   of roughly +31% binary size. Voxis measured (2026-07-28, release build
+#   before/after this change): 31,480,528 -> 38,110,792 bytes = +21.06%
+#   (+6,630,264 bytes), under the plan's ~35% stop threshold. Function names
+#   verified present: file => "not stripped", nm -C | grep -c voice = 785.
+#   Full DWARF/file-line support (`strip = "none"` plus line-table debug info)
+#   was rejected after clipshot measured about +329%.
+# - Keep `panic = "abort"` for this diagnostics-only change so runtime semantics
+#   and release size stay unchanged. Panics therefore become SIGABRT; Task 2 of
+#   CRASH_DIAGNOSTICS_PLAN.md must install the fatal-signal handler that records
+#   SIGABRT evidence.
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = "debuginfo"

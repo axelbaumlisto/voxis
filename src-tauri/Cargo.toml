@@ -37,17 +37,20 @@ tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-os = "2.0.0-rc.1"
 
-# SQLite for history (compatible with Python soupawhisper)
-rusqlite = { version = "0.32", features = ["bundled"] }
-
 # Type-safe Tauri command bindings — autogenerates src/bindings.ts
 specta = { version = "=2.0.0-rc.22", features = ["chrono"] }
 specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 
+# Pure core (config + storage — Task 1a; transcription/llm/learning/hotkey
+# follow in Task 1b). `tauri-support` enables the one Tauri-coupled
+# constructor, `storage::paths::AppPaths::new(&AppHandle)` — see
+# `crates/voxis-core/src/storage/paths.rs`.
+voxis-core = { path = "../crates/voxis-core", features = ["tauri-support"] }
+
 # Parsing
-rust-ini = "0.21"
-regex = "1"
+# (rusqlite/rust-ini/regex moved to voxis-core with config/storage in Task
+# 1a; voice_lib no longer uses them directly, only transitively.)
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
@@ -139,27 +142,18 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_
 [dev-dependencies]
 pretty_assertions = "1"
 mockito = "1"
+# Activates voxis-core's `test-utils` feature (tempfile-gated) only for
+# voice_lib's own test builds, so `crate::storage::test_utils::create_temp_paths`
+# keeps working without tempfile shipping in release/iOS builds of voxis-core.
+voxis-core = { path = "../crates/voxis-core", features = ["test-utils"] }
 
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
-# Crash diagnostics release-profile decisions:
-# - Keep the symbol table by stripping only debuginfo. `strip = "debuginfo"`
-#   preserves function names for backtraces with the clipshot-measured tradeoff
-#   of roughly +31% binary size. Voxis measured (2026-07-28, release build
-#   before/after this change): 31,480,528 -> 38,110,792 bytes = +21.06%
-#   (+6,630,264 bytes), under the plan's ~35% stop threshold. Function names
-#   verified present: file => "not stripped", nm -C | grep -c voice = 785.
-#   Full DWARF/file-line support (`strip = "none"` plus line-table debug info)
-#   was rejected after clipshot measured about +329%.
-# - Keep `panic = "abort"` for this diagnostics-only change so runtime semantics
-#   and release size stay unchanged. Panics therefore become SIGABRT; Task 2 of
-#   CRASH_DIAGNOSTICS_PLAN.md must install the fatal-signal handler that records
-#   SIGABRT evidence.
-[profile.release]
-panic = "abort"
-codegen-units = 1
-lto = true
-opt-level = "s"
-strip = "debuginfo"
+# Crash diagnostics release-profile decisions: see `[profile.release]` in the
+# repo-root `/Cargo.toml`. Cargo only honours profile tables declared at the
+# workspace root (`cargo build` warns "profiles for the non root package will
+# be ignored" otherwise) — this table moved there when the workspace root
+# moved out of this manifest (Task 1a repo-root-workspace amendment). Do NOT
+# re-add `[profile.*]` here; it would silently be ignored again.

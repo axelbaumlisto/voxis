@@ -118,8 +118,7 @@ impl ConfigSqliteStorage {
 
         // Hotkey
         config.hotkey = self.get_str(&conn, "hotkey", &config.hotkey);
-        config.hotkey_hold_ms =
-            self.get_typed(&conn, "hotkey_hold_ms", config.hotkey_hold_ms);
+        config.hotkey_hold_ms = self.get_typed(&conn, "hotkey_hold_ms", config.hotkey_hold_ms);
 
         // Recording guard (Layer 5)
         config.silence_timeout_ms =
@@ -130,47 +129,31 @@ impl ConfigSqliteStorage {
         // Behavior
         config.auto_type = self.get_bool(&conn, "auto_type", config.auto_type);
         config.auto_enter = self.get_bool(&conn, "auto_enter", config.auto_enter);
-        config.append_trailing_space = self.get_bool(
-            &conn,
-            "append_trailing_space",
-            config.append_trailing_space,
-        );
-        config.translate_to_english = self.get_bool(
-            &conn,
-            "translate_to_english",
-            config.translate_to_english,
-        );
+        config.append_trailing_space =
+            self.get_bool(&conn, "append_trailing_space", config.append_trailing_space);
+        config.translate_to_english =
+            self.get_bool(&conn, "translate_to_english", config.translate_to_english);
         // auto_submit_key serialized as JSON (e.g. "off", "cmd_enter")
         // — stored with the quotes via set_json so get_json reads it
         // back symmetrically.
-        config.auto_submit_key = self.get_json(
-            &conn,
-            "auto_submit_key",
-            config.auto_submit_key,
-        );
+        config.auto_submit_key = self.get_json(&conn, "auto_submit_key", config.auto_submit_key);
         config.audio_feedback.enabled = self.get_bool(
             &conn,
             "audio_feedback_enabled",
             config.audio_feedback.enabled,
         );
-        config.audio_feedback.volume = self.get_typed(
-            &conn,
-            "audio_feedback_volume",
-            config.audio_feedback.volume,
-        );
+        config.audio_feedback.volume =
+            self.get_typed(&conn, "audio_feedback_volume", config.audio_feedback.volume);
         // shortcut_bindings: single JSON column (DRY storage pattern).
         // Empty array on disk still overrides the default if we let it;
         // we keep the seeded defaults via the only-when-non-empty guard.
-        let stored_bindings: Vec<crate::shortcut::ShortcutBinding> = self
-            .get_json(&conn, "shortcut_bindings", Vec::new());
+        let stored_bindings: Vec<crate::shortcut::binding::ShortcutBinding> =
+            self.get_json(&conn, "shortcut_bindings", Vec::new());
         if !stored_bindings.is_empty() {
             config.shortcut_bindings = stored_bindings;
         }
-        config.first_run_completed = self.get_bool(
-            &conn,
-            "first_run_completed",
-            config.first_run_completed,
-        );
+        config.first_run_completed =
+            self.get_bool(&conn, "first_run_completed", config.first_run_completed);
         if let Some(v) = self.get(&conn, "hotkey_mode") {
             // Forward-compat: only accept known values, otherwise keep default.
             if matches!(v.as_str(), "hold" | "toggle") {
@@ -185,16 +168,9 @@ impl ConfigSqliteStorage {
                 config.retention_period = v;
             }
         }
-        config.retention_limit = self.get_typed(
-            &conn,
-            "retention_limit",
-            config.retention_limit,
-        );
-        config.always_on_microphone = self.get_bool(
-            &conn,
-            "always_on_microphone",
-            config.always_on_microphone,
-        );
+        config.retention_limit = self.get_typed(&conn, "retention_limit", config.retention_limit);
+        config.always_on_microphone =
+            self.get_bool(&conn, "always_on_microphone", config.always_on_microphone);
         config.typing_delay = self.get_typed(&conn, "typing_delay", config.typing_delay);
         config.notifications = self.get_bool(&conn, "notifications", config.notifications);
         config.backend = self.get_str(&conn, "backend", &config.backend);
@@ -224,7 +200,11 @@ impl ConfigSqliteStorage {
             backend: self.get_str(&conn, "vad_backend", &config.vad.backend),
             threshold: self.get_typed(&conn, "vad_threshold", config.vad.threshold),
             onset_frames: self.get_typed(&conn, "vad_onset_frames", config.vad.onset_frames),
-            hangover_frames: self.get_typed(&conn, "vad_hangover_frames", config.vad.hangover_frames),
+            hangover_frames: self.get_typed(
+                &conn,
+                "vad_hangover_frames",
+                config.vad.hangover_frames,
+            ),
             prefill_frames: self.get_typed(&conn, "vad_prefill_frames", config.vad.prefill_frames),
         };
 
@@ -488,7 +468,7 @@ mod tests {
         let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
 
         let mut config = AppConfig {
-            auto_submit_key: crate::output::auto_submit::AutoSubmitKey::CmdEnter,
+            auto_submit_key: crate::output_types::AutoSubmitKey::CmdEnter,
             ..AppConfig::default()
         };
         config.audio_feedback.enabled = true;
@@ -500,7 +480,7 @@ mod tests {
 
         assert_eq!(
             loaded.auto_submit_key,
-            crate::output::auto_submit::AutoSubmitKey::CmdEnter
+            crate::output_types::AutoSubmitKey::CmdEnter
         );
         assert!(loaded.audio_feedback.enabled);
         assert!((loaded.audio_feedback.volume - 0.42).abs() < 1e-6);
@@ -527,7 +507,7 @@ mod tests {
         let loaded = storage.load().unwrap();
         assert_eq!(
             loaded.auto_submit_key,
-            crate::output::auto_submit::AutoSubmitKey::Off
+            crate::output_types::AutoSubmitKey::Off
         );
     }
 

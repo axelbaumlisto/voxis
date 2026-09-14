@@ -5914,11 +5914,8 @@ dependencies = [
  "png 0.17.16",
  "pretty_assertions",
  "rdev",
- "regex",
  "reqwest 0.12.28",
  "rodio",
- "rusqlite",
- "rust-ini",
  "rustfft",
  "serde",
  "serde_json",
@@ -5940,10 +5937,29 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "vad-rs",
+ "voxis-core",
  "webkit2gtk",
  "windows-sys 0.59.0",
  "x11",
  "x11rb",
+]
+
+[[package]]
+name = "voxis-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs 5.0.1",
+ "libc",
+ "regex",
+ "rusqlite",
+ "rust-ini",
+ "serde",
+ "serde_json",
+ "specta",
+ "tauri",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

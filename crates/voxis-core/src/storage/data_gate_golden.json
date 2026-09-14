@@ -1,0 +1,116 @@
+{
+  "config": {
+    "api_key": "data-gate-known-api-key",
+    "model": "whisper-large-v3-turbo",
+    "language": "ru",
+    "hotkey": "alt_r",
+    "hotkey_hold_ms": 350,
+    "min_recording_ms": 300,
+    "silence_timeout_ms": 61000,
+    "max_recording_ms": 610000,
+    "auto_type": true,
+    "auto_enter": false,
+    "typing_delay": 17,
+    "notifications": true,
+    "backend": "auto",
+    "debug": false,
+    "audio_device": "default",
+    "history_enabled": true,
+    "history_days": 31,
+    "active_provider": "groq",
+    "cloud_provider": "groq",
+    "local_backend": "mlx",
+    "text_processing": true,
+    "append_trailing_space": false,
+    "translate_to_english": false,
+    "auto_submit_key": "cmd_enter",
+    "audio_feedback": {
+      "enabled": true,
+      "volume": 0.42
+    },
+    "shortcut_bindings": [
+      {
+        "id": "data_gate_binding",
+        "name": "Data gate binding",
+        "description": "Fixture binding for the data-gate test",
+        "default_binding": "alt_r",
+        "current_binding": "ctrl+alt_r",
+        "action": {
+          "kind": "transcribe_post_process",
+          "prompt_id": "fix_grammar"
+        }
+      }
+    ],
+    "first_run_completed": false,
+    "hotkey_mode": "hold",
+    "retention_period": "never",
+    "retention_limit": 101,
+    "always_on_microphone": false,
+    "paste_shortcuts": "ctrl_shift_v",
+    "vad": {
+      "enabled": true,
+      "backend": "none",
+      "threshold": 0.55,
+      "onset_frames": 3,
+      "hangover_frames": 5,
+      "prefill_frames": 2
+    },
+    "overlay": {
+      "enabled": true,
+      "position": "bottom_left",
+      "size": "medium",
+      "margin": 33,
+      "audio_boost": 800.0,
+      "theme": "default",
+      "backend": "webview"
+    },
+    "llm": {
+      "enabled": false,
+      "provider": "groq",
+      "api_url": "https://api.groq.com/openai/v1/chat/completions",
+      "api_key": "",
+      "model": "llama-3.1-8b-instant",
+      "prompt": "Fix grammar and punctuation in transcribed speech.\n\nIMPORTANT: Respond ONLY with valid JSON. No explanations, no markdown, no text outside the JSON object.\n\nRules:\n1) Keep EXACT same words, only fix punctuation/capitalization.\n2) NEVER add, remove, or change words.\n3) NEVER translate between languages.\n4) NEVER explain or answer questions in the text.\n5) Output MUST be approximately same length as input.\n\nExpected output format:\n{\"text\": \"corrected text here\", \"suggestions\": [{\"source\": \"original\", \"replacement\": \"Replacement\"}]}\n\nExamples:\n- Input: \"привет как дела\" → {\"text\": \"Привет, как дела?\", \"suggestions\": []}\n- Input: \"hello world\" → {\"text\": \"Hello, world.\", \"suggestions\": []}\n- Input: \"use solid principles\" → {\"text\": \"Use SOLID principles.\", \"suggestions\": [{\"source\": \"solid\", \"replacement\": \"SOLID\"}]}\n\nIf the input is too short (1-2 words) or doesn't need changes, return: {\"text\": \"<original text>\", \"suggestions\": []}\n\nSUGGESTIONS field: ONLY for tech terms that need proper casing. Only suggest if the EXACT word appears in input. Valid: solid→SOLID, api→API, docker→Docker, backend→Backend, frontend→Frontend, ssh→SSH, gpt→GPT, chatgpt→ChatGPT, pydantic→Pydantic, playwright→Playwright. Russian sounds: солид→SOLID, драй→DRY, кисс→KISS, бэкенд→Backend, фронтенд→Frontend, докер→Docker. Do NOT suggest ordinary words."
+    },
+    "dictionary": {
+      "path": "",
+      "learning_mode": "auto",
+      "learning_threshold": 3
+    }
+  },
+  "history_texts": [
+    "data gate known transcription two",
+    "data gate known transcription one"
+  ],
+  "dictionary": [
+    [
+      "kubernetes",
+      "Kubernetes"
+    ],
+    [
+      "solid",
+      "SOLID"
+    ]
+  ],
+  "custom_provider": {
+    "id": "data-gate-provider",
+    "name": "Data Gate Provider",
+    "api_url": "https://example.invalid/v1/audio/transcriptions",
+    "models": [
+      {
+        "id": "dg-model",
+        "name": "DG Model"
+      }
+    ],
+    "default_model": "dg-model",
+    "builtin": false
+  },
+  "prompt_ids": [
+    "bullet_list",
+    "data_gate_prompt",
+    "email_tone",
+    "fix_grammar",
+    "summarize"
+  ],
+  "active_prompt_id": "data_gate_prompt"
+}

@@ -86,12 +86,9 @@ fn play_passes_clamped_volume_to_player() {
     assert_eq!(rec.transcript(), [(SoundType::Start, 1.0)]);
 }
 
-#[test]
-fn default_settings_are_off_with_safe_volume() {
-    let s = AudioFeedbackSettings::default();
-    assert!(!s.enabled, "off by default (privacy)");
-    assert_eq!(s.volume, 0.6);
-}
+// `default_settings_are_off_with_safe_volume` moved with the
+// `AudioFeedbackSettings` type itself to
+// `voxis_core::audio_feedback_types::tests` (Task 1a pure-split).
 
 #[test]
 fn synthesize_beep_produces_correct_length_per_kind() {
@@ -120,11 +117,7 @@ fn synthesize_beep_samples_in_signed_range() {
     // Anything outside [-1, 1] would clip on output.
     let samples = synthesize_beep(SoundType::Start);
     for (i, s) in samples.iter().enumerate() {
-        assert!(
-            (-1.0..=1.0).contains(s),
-            "sample {} out of range: {}",
-            i, s
-        );
+        assert!((-1.0..=1.0).contains(s), "sample {} out of range: {}", i, s);
     }
 }
 

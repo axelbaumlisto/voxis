@@ -39,34 +39,30 @@ pub fn default_prompts() -> Vec<LlmPrompt> {
         LlmPrompt {
             id: "fix_grammar".to_string(),
             name: "Fix grammar".to_string(),
-            prompt:
-                "Fix grammar and punctuation in transcribed speech. \
+            prompt: "Fix grammar and punctuation in transcribed speech. \
                  Return ONLY the corrected text, no commentary."
-                    .to_string(),
+                .to_string(),
         },
         LlmPrompt {
             id: "email_tone".to_string(),
             name: "Email tone".to_string(),
-            prompt:
-                "Rewrite the transcribed speech as a polite professional email body. \
+            prompt: "Rewrite the transcribed speech as a polite professional email body. \
                  Preserve the user's intent. Return ONLY the rewritten text."
-                    .to_string(),
+                .to_string(),
         },
         LlmPrompt {
             id: "bullet_list".to_string(),
             name: "Bullet list".to_string(),
-            prompt:
-                "Turn the transcribed speech into a concise bullet list \
+            prompt: "Turn the transcribed speech into a concise bullet list \
                  (one '- ' per point). Preserve the order. Return ONLY the list."
-                    .to_string(),
+                .to_string(),
         },
         LlmPrompt {
             id: "summarize".to_string(),
             name: "Summarize".to_string(),
-            prompt:
-                "Summarize the transcribed speech in 1–3 sentences. \
+            prompt: "Summarize the transcribed speech in 1–3 sentences. \
                  Return ONLY the summary."
-                    .to_string(),
+                .to_string(),
         },
     ]
 }

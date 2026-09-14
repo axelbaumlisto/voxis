@@ -36,24 +36,12 @@ pub enum SoundType {
     Error,
 }
 
-/// User-facing settings for the audio feedback feature. Live in
-/// `AppConfig` (added in T-B6.3 wiring) and flow through to `play()`.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
-pub struct AudioFeedbackSettings {
-    pub enabled: bool,
-    /// Linear volume in [0.0, 1.0]. Values outside that range are
-    /// clamped at call time \u2014 see `clamp_volume`.
-    pub volume: f32,
-}
-
-impl Default for AudioFeedbackSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            volume: 0.6,
-        }
-    }
-}
+/// Task 1a moved `AudioFeedbackSettings` itself into
+/// `voxis_core::audio_feedback_types` (pure data, no rodio) since
+/// `AppConfig` (also moved to voxis-core) embeds it; re-exported here under
+/// its original path so every existing `audio_feedback::AudioFeedbackSettings`
+/// reference keeps resolving to the same type.
+pub use voxis_core::audio_feedback_types::AudioFeedbackSettings;
 
 /// Clamp the volume into the safe [0.0, 1.0] range. Public so the
 /// settings UI can show the same number it actually plays at.
@@ -156,11 +144,7 @@ impl SoundPlayer for RodioPlayer {
                 }
             };
             sink.set_volume(volume);
-            sink.append(rodio::buffer::SamplesBuffer::new(
-                1,
-                SAMPLE_RATE,
-                samples,
-            ));
+            sink.append(rodio::buffer::SamplesBuffer::new(1, SAMPLE_RATE, samples));
             // Hold the thread until playback completes; otherwise the
             // stream gets dropped mid-beep and the user hears nothing.
             std::thread::sleep(std::time::Duration::from_millis(duration_ms));

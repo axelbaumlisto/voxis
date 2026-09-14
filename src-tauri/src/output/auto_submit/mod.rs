@@ -19,21 +19,14 @@
 //! Wiring (separate file): `orchestrator::transcription::output`
 //! calls `auto_submit::emit(config.auto_submit_key, &real_emitter)`
 //! at the end of the output pipeline.
-use serde::{Deserialize, Serialize};
-use specta::Type;
+//!
+//! Task 1a moved the `AutoSubmitKey` enum itself into
+//! `voxis_core::output_types` (pure data, no enigo) since `AppConfig`
+//! (also moved to voxis-core) embeds it; re-exported here under its
+//! original path so every existing `output::auto_submit::AutoSubmitKey`
+//! reference keeps resolving to the same type.
 
-/// Which key combo to fire after typing. `Off` skips entirely \u2014 this
-/// is the safe default for users who don't want their messages
-/// auto-sent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum AutoSubmitKey {
-    #[default]
-    Off,
-    Enter,
-    CmdEnter,
-    ShiftEnter,
-}
+pub use voxis_core::output_types::AutoSubmitKey;
 
 /// Minimal abstraction over a keyboard backend. Concrete impl uses
 /// enigo (already a dep); tests use an in-memory recorder.
