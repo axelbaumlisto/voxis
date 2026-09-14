@@ -87,6 +87,32 @@ voice_lib (Voxis desktop, без изменений     tauri-plugin-voxis  (cra
 Что НЕ входит: standalone iOS-приложение Voxis (keyboard extension), Android (Kotlin-сторона
 плагина — отдельный план после iOS), кнопки громкости, сервер-хаб.
 
+## Гейты консистентности (чтобы не выяснить в конце, что не работает)
+
+Вертикальная сборка происходит **дважды до naked**, а не один раз в T10:
+
+1. **Tracer bullets**: T3.5 (desktop, `examples/host-min` + `MockCapture` + fake-STT, Playwright в
+   CI) блокирует T4/T6/T7; T8.5 (iOS, `host-min` на iPad-стенде, реальный микрофон + fake-STT по
+   LAN) блокирует T9/T11.
+2. **Один контракт — одни фикстуры**: `crates/tauri-plugin-voxis/contract/fixtures/*.json`
+   (команды, события, `DictationResult`, `VoxisProfile`) читают Rust-тесты плагина, vitest guest-js
+   и позже обёртка naked. Расхождение типов = красное с обеих сторон в том же коммите.
+3. **Детерминированный STT**: `crates/voxis-fake-stt` (axum, `/v1/audio/transcriptions`): на
+   фикстурный WAV речи → фиксированный текст; на тишину → реальная галлюцинация из инцидента
+   («Продолжение следует… Субтитры создавал DimaTorzok»). Без Groq/сети; один бинарь для CI,
+   desktop и iPad (по LAN).
+4. **Золотые WAV из hardware-сессии 2026-09-07** (`fixtures/audio/`: речь через динамики 5 с;
+   тишина 17 с; шумовой пол 87 с MacBook Air) — фикстуры guard/pipeline на всех слоях; iOS-захват
+   (T8) обязан проходить те же guard-тесты на своём выходе.
+5. **iOS cross-build в CI с T1** (`cargo build -p voxis-core -p tauri-plugin-voxis --target
+   aarch64-apple-ios`) — утечка desktop-зависимости ловится в коммите, не в T8.
+6. **Регресс-гейт Voxis desktop после T1** (блокирующий): `cargo test --lib` ≥ 1037 зелёных +
+   hardware-прогоны A/B/C на MacBook идентичны v0.1.5.
+7. **Профиль round-trip**: `export(desktop-fixture) → import(plugin) → get_profile()` — хэш
+   совпадает; в host-min автоматизировано.
+8. **naked** интегрируется против **тега** плагина; Playwright naked с mock-плагином на тех же
+   фикстурах контракта.
+
 ## Tasks
 
 ### Phase 0 — ядро
@@ -161,7 +187,7 @@ dictionary → llm(opt) → result; повторный `start` при актив
 
 ### Task 4: Desktop-реализация: cpal capture + global-shortcut hotkey
 **Files:** `crates/tauri-plugin-voxis/src/desktop.rs`, `…/src/hotkey.rs`, `…/Cargo.toml`
-**Depends:** Task 3
+**Depends:** Task 3.5
 **Acceptance:** `CpalCapture` пишет 16 kHz mono WAV (ресемплинг как в `voice_lib::audio`),
 `level_rx` даёт RMS каждые 250 мс; `HotkeySpec { key, modifiers, mode }` → регистрация через
 `tauri-plugin-global-shortcut` с `ShortcutState::{Pressed,Released}` (hold) или Pressed (toggle);
@@ -197,9 +223,26 @@ vitest: drag-persist, safe-area clamp, pointercancel→stop, keyup-lost→stop, 
 5. `theme-bridge.ts`: адаптер ThemeApi (уровень, состояние) → существующий контракт тем.
 6. Тесты + harness-страница.
 
+### Task 3.5: Tracer bullet (desktop) — `examples/host-min` + `voxis-fake-stt` + Playwright
+**Files:** `crates/voxis-fake-stt/**`, `crates/tauri-plugin-voxis/examples/host-min/**`,
+`crates/tauri-plugin-voxis/contract/fixtures/*.json`, `fixtures/audio/*.wav`, `.forgejo/workflows/ci.yml`
+**Depends:** Task 3, Task 5
+**Acceptance:** `host-min` (одна страница: `<voxis-overlay>`, кнопка, `<pre id=result>`) собирается и
+запускается на macOS/Linux; `voxis-fake-stt` отдаёт фиксированный текст на `fixtures/audio/speech.wav`
+и галлюцинацию на `silence.wav`; Playwright: клик → state Recording → Transcribing → текст в
+`#result`; сценарий тишины → `NoSpeech`, `#result` пуст, toast показан; контрактные фикстуры
+парсятся Rust-тестами и vitest (тест-снапшот с обеих сторон); всё это — job в `ci.yml` (Linux,
+Docker `voxis-ci`). **Гейт**: до зелёного T4/T6/T7 не стартуют.
+**Verify:** `cargo test -p tauri-plugin-voxis && bun run test:run && bun run e2e:host-min` локально и в CI
+**Steps:**
+1. `voxis-fake-stt`: axum, multipart как у Groq, маппинг по sha256 WAV → текст, иначе 400.
+2. `host-min`: Tauri-хост с плагином, `MockCapture` подключается через env `VOXIS_CAPTURE=mock:<wav>`.
+3. Контрактные фикстуры + тесты-снапшоты Rust/TS.
+4. Playwright-сценарии речь/тишина; CI job.
+
 ### Task 6: Desktop-источник профиля для «той же машины» + `import_profile_from_desktop`
 **Files:** `crates/tauri-plugin-voxis/src/profile_source.rs`, `crates/voxis-core/src/storage/paths.rs`
-**Depends:** Task 2, Task 3
+**Depends:** Task 2, Task 3.5
 **Acceptance:** на desktop `import_profile_from_desktop()` находит config-dir установленного Voxis
 (macOS `~/Library/Application Support/voxis`, Linux XDG, Windows AppData), открывает базы
 **read-only** (`SQLITE_OPEN_READ_ONLY`, никакой записи в базы Voxis), строит `VoxisProfile`,
@@ -255,10 +298,25 @@ Sources/AudioCapture.swift}`, `…/src/mobile.rs`
    mute как тишину и показывает состояние в оверлее; иначе запишем нули и получим галлюцинацию.
 6. Haptics (`UIImpactFeedbackGenerator`) на start/stop — как у Wispr Flow.
 
+### Task 8.5: Tracer bullet (iOS) — `host-min` на iPad-стенде с реальным микрофоном
+**Files:** `crates/tauri-plugin-voxis/examples/host-min/src-tauri/gen/apple/**`, `docs/PLUGIN_IOS_HOST.md` (черновик)
+**Depends:** Task 8, Task 3.5
+**Acceptance:** `host-min` собирается под iOS и ставится на стенд (skill `ipad-physical-testing`);
+`voxis-fake-stt` на Маке по LAN (`api_url_override`); тап на оверлее → реальная запись → WAV
+проходит те же guard-тесты, что desktop (`take_rms_peak` окна на фикстуре тишины с iPad) → текст
+в `#result`; тишина 75 с → `NoSpeech`, ничего не показано; системная mute-кнопка → guard;
+измерен шумовой пол iPad-микрофона (median/p90/max per-250ms RMS) и записан в `consts.rs`
+рядом с MacBook. **Гейт**: до зелёного T9/T11 не стартуют.
+**Verify:** протокол прогона + WAV + лог как evidence в `research/plugin-ios/`
+**Steps:**
+1. `tauri ios init` для host-min, `NSMicrophoneUsageDescription`, dev-подпись.
+2. Прогоны речь/тишина/mute; сбор WAV с устройства.
+3. Калибровка порога при расхождении.
+
 ### Task 9: iOS Live Activity (Dynamic Island) при записи в фоне
 **Files:** `crates/tauri-plugin-voxis/ios/Sources/LiveActivity.swift`,
 `crates/tauri-plugin-voxis/ios/WidgetExtension/**` (шаблон для хоста), `docs/PLUGIN_IOS_HOST.md`
-**Depends:** Task 8
+**Depends:** Task 8.5
 **Acceptance:** при `start` из foreground плагин запускает Live Activity (`ActivityKit`);
 при уходе хоста в фон запись продолжается (хост включает `audio` background mode — документировано)
 и в Dynamic Island видны состояние/таймер и кнопка **Stop** (интент → `stop` через App Group
@@ -335,7 +393,7 @@ mock-плагин → кнопка → текст в pane.
 ### Task 11: naked iOS: сборка с плагином, разрешения, прогон на живом iPad
 **Files (naked-cli):** `src-tauri/gen/apple/**` (Info.plist: `NSMicrophoneUsageDescription`,
 `UIBackgroundModes: audio`), `src-tauri/Cargo.toml` (ios target dep), `docs/IPHONE_STAND.md`
-**Depends:** Task 8, Task 10 (Task 9 — опционально в этом релизе)
+**Depends:** Task 8.5, Task 10 (Task 9 — опционально в этом релизе)
 **Acceptance:** iOS-сборка naked с плагином собирается и устанавливается на стенд
 (skill `ipad-physical-testing`); тач-оверлей: hold на пилюле → запись → текст в терминал;
 перемещение оверлея пальцем с персистом позиции между запусками; внешняя клавиатура iPad: hotkey
