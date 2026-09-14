@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "config": {
+    "provider": "groq",
+    "model": "whisper-large-v3",
+    "apiKeyRef": "api_key",
+    "language": "en",
+    "translateToEnglish": false,
+    "minRecordingMs": 300,
+    "silenceTimeoutMs": 60000,
+    "maxRecordingMs": 600000,
+    "hotkeyHoldMs": 300,
+    "llmEnabled": true,
+    "llmProvider": "groq",
+    "llmApiUrl": "https://api.groq.com/openai/v1/chat/completions",
+    "llmApiKeyRef": "llm_api_key",
+    "llmModel": "llama-3.1-8b-instant",
+    "llmPrompt": "fix_grammar"
+  },
+  "dictionary": [
+    ["солид", "SOLID"],
+    ["докер", "Docker"]
+  ],
+  "llm": {
+    "providers": [
+      {
+        "id": "groq",
+        "name": "Groq",
+        "api_url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "models": [
+          { "id": "whisper-large-v3", "name": "Whisper Large v3" }
+        ],
+        "default_model": "whisper-large-v3",
+        "builtin": true
+      }
+    ],
+    "prompts": [
+      {
+        "id": "fix_grammar",
+        "name": "Fix grammar",
+        "prompt": "Fix grammar and punctuation in transcribed speech."
+      }
+    ],
+    "activePromptId": "fix_grammar"
+  },
+  "theme": "waveform",
+  "hotkey": "alt_r"
+}

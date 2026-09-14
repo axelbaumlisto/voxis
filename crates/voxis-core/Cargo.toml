@@ -52,6 +52,32 @@ tempfile = { version = "3", optional = true }
 # used (macOS main-thread fix, PR #147).
 rdev = { git = "https://github.com/Narsil/rdev", rev = "73123959276f0f29972b94e654f04614ba3826d2", optional = true }
 
+# `profile` module (Task 2): VoxisProfile export/import + sealing. All
+# pure-Rust, no OpenSSL (rustls-equivalent for symmetric crypto — these are
+# the RustCrypto crates, no C dependency at all), and all pinned to the
+# newest version still compatible with this crate's `rust-version = 1.77.2`
+# (verified via `cargo add --dry-run`: 0.13/0.11/0.6/0.11 lines require
+# rustc 1.85 and were rejected in favour of these).
+hkdf = "0.12"
+sha2 = "0.10"
+# Argon2id key derivation for `KeySource::Passphrase`. Default features
+# (`alloc`, `password-hash`, `rand`) kept — we only use the low-level
+# `Argon2::hash_password_into` (not the `password-hash` trait API), but
+# disabling default features isn't worth the risk of a subtle no_std gap
+# for a one-shot KDF call.
+argon2 = "0.5"
+# ChaCha20-Poly1305 AEAD for `seal`/`open`. Default features (`alloc`,
+# `getrandom`, `rand_core`) kept.
+chacha20poly1305 = "0.10"
+# CSPRNG bytes for salt/nonce generation (`getrandom::getrandom`).
+getrandom = "0.2"
+# base64url encoding helper (`profile::crypto::{encode_base64url,
+# decode_base64url}`) for embedding sealed/keying bytes in text contexts
+# (e.g. Task 7's QR payload `k: base64url(k_qr)`) — not exercised by this
+# task's own fixtures, but the dependency + helper are added here per the
+# step's dependency list so downstream tasks don't need to re-pin it.
+base64 = "0.23"
+
 [features]
 rdev = ["dep:rdev"]
 test-utils = ["dep:tempfile"]

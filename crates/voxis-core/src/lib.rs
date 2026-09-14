@@ -33,6 +33,7 @@ pub mod hotkey;
 pub mod learning;
 pub mod llm;
 pub mod output_types;
+pub mod profile;
 pub mod shortcut;
 pub mod storage;
 pub mod transcription;
