@@ -270,12 +270,37 @@ Widget-extension в Tauri-генерируемый Xcode-проект добав
 хост → остров показывает запись → Stop из острова → текст пришёл в хост после возврата.
 **Verify:** прогон на iPad/iPhone по скрипту из `docs/PLUGIN_IOS_HOST.md`
 **Steps:**
-0. Widget-таргет добавлять через `npx @choochmeque/tauri-apple-extensions ios add …` (XcodeGen,
-   идемпотентно, переживает регенерацию `gen/apple`); референс App Group/entitlements —
-   `tauri-plugin-widgets` (`init-ios`). App Group регистрируется на портале Apple руками.
-1. `ActivityAttributes` + состояние; запуск/обновление/финиш.
-2. `StopDictationIntent: LiveActivityIntent` в extension; App Group + `CFNotificationCenter`.
-3. Инструкция хосту: bundle id extension, App Group, background modes, entitlements.
+0. **Делать как Share Extension в clipshot** (`~/work/clipshot/gen/apple/project.yml`, таргет
+   `ClipshotShare`, + `scripts/ios-build.sh`) — там уже оплачены все грабли Tauri-iOS-расширений:
+   - Таргет объявляется в `gen/apple/project.yml` (XcodeGen): `type: app-extension`, а у
+     app-таргета `dependencies: - target: VoxisWidget, embed: true`. `gen/apple` под git.
+   - **`cargo tauri ios build` НЕ запускает xcodegen** — он правит существующий `.xcodeproj`.
+     Правка `project.yml` молча не доезжает до сборки → перед сборкой всегда
+     `(cd gen/apple && xcodegen generate)` (clipshot `ios-build.sh:59-70`, инцидент 2026-09-01).
+   - **xcodegen ПЕРЕПИСЫВАЕТ `Info.plist` и `.entitlements` расширения** из `info.properties` /
+     `entitlements.properties` — ручные правки файлов стираются; `NSExtension`-словарь и
+     entitlements живут только в `project.yml` (иначе на устройстве `installd`:
+     «extensionDictionary must be set in placeholder attributes»).
+   - Расширению нужен **свой `DEVELOPMENT_TEAM`** — `tauri.conf.json` инжектит team только в
+     app-таргет («Signing for … requires a development team»).
+   - Если расширение линкует Rust (`libapp.a`): **оно** владеет `outputFiles` скрипта сборки
+     Rust и собирается первым; app-таргет своих `outputFiles` не объявляет — иначе «Multiple
+     commands produce libapp.a» / «Cycle in dependencies» (2026-09-11). Наш widget Rust
+     **не линкует** (только SwiftUI-рендер) → проще: без preBuildScripts вовсе.
+   - clipshot **избежал App Group** (нужна регистрация идентификатора на портале, wildcard-профиль
+     его не даёт) — шарит через `keychain-access-groups`. Нам App Group **тоже не нужен**:
+     Live Activity стартует/обновляется из приложения через ActivityKit, а `LiveActivityIntent`
+     (Stop) система выполняет **в процессе приложения**, не в расширении → флаг Stop доходит
+     напрямую в плагин. (Проверить на устройстве, что `perform()` идёт в app-процессе;
+     если нет — тогда App Group + Darwin notification как fallback.)
+   Альтернатива для генерации — `npx @choochmeque/tauri-apple-extensions ios add …` (тот же
+   XcodeGen под капотом); референс App Group — `tauri-plugin-widgets` `init-ios`.
+1. `ActivityAttributes` + состояние; запуск/обновление/финиш из Swift-стороны плагина.
+2. `StopDictationIntent: LiveActivityIntent` (in-process) → `stop` в плагине.
+3. Инструкция хосту (`docs/PLUGIN_IOS_HOST.md`): блок для `project.yml` (таргет + embed +
+   DEVELOPMENT_TEAM + Info.plist properties: `NSExtensionPointIdentifier
+   com.apple.widgetkit-extension`), `UIBackgroundModes: audio`, `NSSupportsLiveActivities: true`,
+   команда `xcodegen generate` перед сборкой.
 4. Fallback-путь без ActivityKit.
 
 ### Phase 3 — интеграция в naked
@@ -335,8 +360,10 @@ foreground для микрофона — это правило iOS, не наш 
 время активной записи → игнор (single-flight). Проверка на устройстве: Siri-фраза, Action Button.
 **Verify:** прогон на iPad/iPhone; Settings → Apps → naked → Siri & Search показывает шорткаты
 **Steps:**
-1. Entitlement + Info.plist.
-2. Intent → `NotificationCenter`/App Group флаг → Swift-сторона плагина → `start`.
+1. Entitlement `com.apple.developer.siri` — в `project.yml` `entitlements.properties`
+   app-таргета (xcodegen перезаписывает файл, см. Task 9), затем `xcodegen generate`.
+2. Intent (`openAppWhenRun = true`) выполняется в процессе приложения → `NotificationCenter`
+   → Swift-сторона плагина → `start`. App Group не нужен.
 3. Provider + фразы (ru/en в String Catalog).
 4. Прогон.
 
