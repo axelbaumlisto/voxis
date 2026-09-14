@@ -287,12 +287,19 @@ Widget-extension в Tauri-генерируемый Xcode-проект добав
      Rust и собирается первым; app-таргет своих `outputFiles` не объявляет — иначе «Multiple
      commands produce libapp.a» / «Cycle in dependencies» (2026-09-11). Наш widget Rust
      **не линкует** (только SwiftUI-рендер) → проще: без preBuildScripts вовсе.
-   - clipshot **избежал App Group** (нужна регистрация идентификатора на портале, wildcard-профиль
-     его не даёт) — шарит через `keychain-access-groups`. Нам App Group **тоже не нужен**:
-     Live Activity стартует/обновляется из приложения через ActivityKit, а `LiveActivityIntent`
-     (Stop) система выполняет **в процессе приложения**, не в расширении → флаг Stop доходит
-     напрямую в плагин. (Проверить на устройстве, что `perform()` идёт в app-процессе;
-     если нет — тогда App Group + Darwin notification как fallback.)
+   - **App Group** `group.io.clipshot.desktop` у clipshot уже зарегистрирован и работает на этом же
+     team `GZL949D756` (коммиты 09.2026, `com.apple.security.application-groups` в обоих
+     таргетах через `entitlements.properties` в `project.yml`) — регистрация на портале для
+     `group.top.voxis.*` — 5 минут по тому же пути. Для Live Activity он всё равно не обязателен:
+     ActivityKit стартует из приложения, а `LiveActivityIntent` (Stop) система выполняет
+     **в процессе приложения** → флаг доходит напрямую в плагин (проверить на устройстве;
+     fallback — App Group + Darwin notification).
+   - **Hand-off расширение → приложение** (для standalone-follow-up, образец
+     `gen/apple/ClipshotShare/ShareHandoff.swift` + `ContainingAppOpener`): URL-схема в
+     `project.yml` `CFBundleURLTypes` (без неё `open` молча фейлится), payload — заметка в App
+     Group, а `UIApplication.open` через responder chain работает **только после
+     `viewDidAppear`** (из `viewDidLoad` — false за 2 мс, измерено 2026-09-13).
+     `ShareMemoryProbe.swift` — методика измерения jetsam в расширении на железе.
    Альтернатива для генерации — `npx @choochmeque/tauri-apple-extensions ios add …` (тот же
    XcodeGen под капотом); референс App Group — `tauri-plugin-widgets` `init-ios`.
 1. `ActivityAttributes` + состояние; запуск/обновление/финиш из Swift-стороны плагина.
