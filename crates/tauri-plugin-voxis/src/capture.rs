@@ -1,0 +1,462 @@
+//! `AudioCapture` trait (desktop `CpalCapture`/Task 4 and iOS Swift
+//! bridge/Task 8 both implement this), the `rec/` scratch-directory
+//! helpers every capture backend writes into, and `MockCapture` — the
+//! only implementation this task ships.
+
+use std::collections::VecDeque;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use tokio::sync::watch;
+
+/// One RMS/peak measurement of the input signal, pushed onto
+/// `AudioCapture::level_rx` roughly every 250 ms while a capture runs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LevelSample {
+    pub rms: f32,
+    pub peak: f32,
+}
+
+/// `stop()`'s result — enough for the (stub, Task 3; real, Task 3b)
+/// pipeline to build a `DictationResult` without re-reading the WAV file.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CaptureStats {
+    pub duration_ms: u64,
+    pub samples: usize,
+    pub peak_rms: f32,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CaptureError {
+    #[error("capture already running")]
+    AlreadyRunning,
+    #[error("capture not running")]
+    NotRunning,
+    #[error("capture backend error: {0}")]
+    Backend(String),
+}
+
+/// Desktop `cpal` (Task 4) / iOS `AVAudioEngine` (Task 8) capture bridge.
+/// Contract fixed here so both backends and the pipeline (Task 3b) share
+/// one shape:
+///
+/// - `start`/`stop` write/finish a single WAV file at a caller-chosen path
+///   (plan decision 3: file, not stream); `cap_samples` is the backend's
+///   own **self-cap**, independent of any guard task above it — the
+///   audio callback must stop writing on its own once it reaches this
+///   many samples even if `stop()` is never called (`[R1-Arch S2]`,
+///   mirrors desktop Voxis's `native_cap_samples`).
+/// - `level_rx` returns a `tokio::sync::watch::Receiver` rather than an
+///   `mpsc` one: level updates are a *current value* the overlay reads at
+///   its own pace, not an ordered queue the pipeline must fully drain —
+///   `watch` naturally coalesces bursts instead of piling up an unbounded
+///   backlog behind a slow consumer. It doubles as this contract's
+///   **liveness** signal (`[R1-Arch S3]`): the plan defines "no tick for
+///   4 polls while running" as `StreamDied` — with `watch`, that means
+///   `Receiver::changed()` not resolving within ~4 poll intervals
+///   (~1s at the 250ms cadence above) while the session is still
+///   `Recording`. Task 3b's `guard_adapter.rs` implements that poll; this
+///   trait only fixes the channel type it polls.
+pub trait AudioCapture: Send + Sync {
+    /// Start writing 16 kHz mono WAV samples to `path`.
+    fn start(&self, path: &Path, cap_samples: usize) -> Result<(), CaptureError>;
+    /// Stop and finalize the WAV file, returning capture statistics.
+    fn stop(&self) -> Result<CaptureStats, CaptureError>;
+    /// Current level channel — `None` until the first sample after `start`.
+    fn level_rx(&self) -> watch::Receiver<Option<LevelSample>>;
+}
+
+/// `<host-cache>/voxis-plugin/rec/` — the plugin's dedicated scratch
+/// directory for in-flight WAV recordings (plan decision 3). Every file
+/// directly inside it is either the one `RecFile` an active session
+/// currently owns, or an orphan left by a crash/SIGKILL mid-recording —
+/// `sweep()` (called unconditionally from `lib.rs`'s plugin `setup`,
+/// `[R1-Safety S5]`) treats it as such and deletes it.
+pub struct RecDir {
+    dir: PathBuf,
+}
+
+impl RecDir {
+    pub fn new(base: PathBuf) -> Self {
+        Self { dir: base.join("voxis-plugin").join("rec") }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Delete every file directly inside the rec dir (subdirectories, if
+    /// any ever appear, are left alone — nothing in this contract creates
+    /// one). Creates the directory if it doesn't exist yet (first run);
+    /// never errors just because there was nothing to sweep.
+    pub fn sweep(&self) -> std::io::Result<()> {
+        match fs::read_dir(&self.dir) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        let _ = fs::remove_file(&path);
+                    }
+                }
+                Ok(())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => fs::create_dir_all(&self.dir),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// A fresh `<uuid>.wav` path inside the rec dir for a new session.
+    /// Does not create the file — pass the result to `RecFile::create`.
+    pub fn new_session_path(&self) -> PathBuf {
+        self.dir.join(format!("{}.wav", uuid::Uuid::new_v4()))
+    }
+}
+
+/// Owns exactly one path inside a `RecDir`; deletes it on `Drop`
+/// regardless of outcome (successful result, cancel, `NoSpeech` discard,
+/// error) — plan decision 3 / `[R1-Safety S5]`. Capture backends write
+/// through `RecFile::path()`; the WAV file itself is created (and, on
+/// `cfg(unix)`, chmod'd 0600) up front so the permission is in place
+/// before any audio is written to it, not applied after the fact.
+pub struct RecFile {
+    path: PathBuf,
+}
+
+impl RecFile {
+    /// Creates the parent directory (if missing) and an empty 0600
+    /// (desktop `unix`) file at `path`. On unix the 0600 mode is applied
+    /// atomically as part of `open(2)`'s `O_CREAT` (`OpenOptions::mode`),
+    /// not via a separate `create()` + `set_permissions()` pair — the
+    /// latter leaves a window, however brief, where the (about to hold a
+    /// user's dictation audio) file exists with the process's default
+    /// umask-derived permissions before the chmod lands.
+    pub fn create(path: PathBuf) -> std::io::Result<Self> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&path)?;
+        }
+        #[cfg(not(unix))]
+        {
+            fs::File::create(&path)?;
+        }
+        Ok(Self { path })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for RecFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MockCaptureState {
+    running: bool,
+    script: VecDeque<LevelSample>,
+    fixture_wav: Option<PathBuf>,
+    die_silently: bool,
+    ignore_stop: bool,
+    started_path: Option<PathBuf>,
+    peak_rms: f32,
+    samples_written: usize,
+}
+
+impl Default for MockCaptureState {
+    fn default() -> Self {
+        Self {
+            running: false,
+            script: VecDeque::new(),
+            fixture_wav: None,
+            die_silently: false,
+            ignore_stop: false,
+            started_path: None,
+            peak_rms: 0.0,
+            samples_written: 0,
+        }
+    }
+}
+
+/// Test/tracer-bullet double for `AudioCapture`.
+///
+/// - Replays a scripted sequence of RMS/peak windows over `level_rx`, one
+///   window per explicit `tick()` call (deterministic — no background
+///   thread/timer, unlike the real backends) so tests control exactly
+///   when each sample lands.
+/// - `stop()` copies a fixture WAV to the requested path if one was set
+///   via `set_fixture_wav`, so downstream pipeline code (Task 3b) can
+///   read a real, playable file back.
+/// - `set_die_silently(true)` makes `tick()` a no-op while `is_running()`
+///   still reports `true` — the liveness/`StreamDied` test double
+///   (`[R1-Arch S3]`).
+/// - `set_ignore_stop(true)` makes `stop()` return a `Backend` error
+///   instead of actually stopping — the "capture ignores stop"
+///   single-flight/lease test double.
+pub struct MockCapture {
+    state: Mutex<MockCaptureState>,
+    tx: watch::Sender<Option<LevelSample>>,
+    rx: watch::Receiver<Option<LevelSample>>,
+}
+
+impl MockCapture {
+    pub fn new() -> Self {
+        let (tx, rx) = watch::channel(None);
+        Self { state: Mutex::new(MockCaptureState::default()), tx, rx }
+    }
+
+    /// Sets the RMS/peak windows `tick()` will replay in order.
+    pub fn set_script(&self, samples: Vec<LevelSample>) {
+        self.state.lock().unwrap().script = samples.into_iter().collect();
+    }
+
+    /// Sets a WAV fixture path `stop()` copies to the requested output
+    /// path. Without one, `stop()` leaves the (already-created, via
+    /// `RecFile`) output file as-is — an empty/zero-byte WAV.
+    pub fn set_fixture_wav(&self, path: PathBuf) {
+        self.state.lock().unwrap().fixture_wav = Some(path);
+    }
+
+    pub fn set_die_silently(&self, die: bool) {
+        self.state.lock().unwrap().die_silently = die;
+    }
+
+    pub fn set_ignore_stop(&self, ignore: bool) {
+        self.state.lock().unwrap().ignore_stop = ignore;
+    }
+
+    /// Pushes the next scripted sample onto `level_rx`. No-op (and, in
+    /// particular, no tick observed by watchers) once `die_silently` is
+    /// set or the script is exhausted or the capture isn't running —
+    /// mirroring a backend whose callback stopped firing while
+    /// `is_recording()` still returns `true`.
+    pub fn tick(&self) {
+        let mut state = self.state.lock().unwrap();
+        if !state.running || state.die_silently {
+            return;
+        }
+        if let Some(sample) = state.script.pop_front() {
+            state.peak_rms = state.peak_rms.max(sample.peak);
+            state.samples_written += 1;
+            let _ = self.tx.send(Some(sample));
+        }
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.state.lock().unwrap().running
+    }
+}
+
+impl Default for MockCapture {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AudioCapture for MockCapture {
+    fn start(&self, path: &Path, _cap_samples: usize) -> Result<(), CaptureError> {
+        let mut state = self.state.lock().unwrap();
+        if state.running {
+            return Err(CaptureError::AlreadyRunning);
+        }
+        state.running = true;
+        state.started_path = Some(path.to_path_buf());
+        state.peak_rms = 0.0;
+        state.samples_written = 0;
+        let _ = self.tx.send(None);
+        Ok(())
+    }
+
+    fn stop(&self) -> Result<CaptureStats, CaptureError> {
+        let mut state = self.state.lock().unwrap();
+        if state.ignore_stop {
+            return Err(CaptureError::Backend("stop ignored (test double)".to_string()));
+        }
+        if !state.running {
+            return Err(CaptureError::NotRunning);
+        }
+        state.running = false;
+        if let (Some(fixture), Some(dest)) = (state.fixture_wav.clone(), state.started_path.clone()) {
+            fs::copy(&fixture, &dest)
+                .map_err(|e| CaptureError::Backend(format!("copying fixture wav: {e}")))?;
+        }
+        Ok(CaptureStats {
+            duration_ms: state.samples_written as u64 * 250,
+            samples: state.samples_written,
+            peak_rms: state.peak_rms,
+        })
+    }
+
+    fn level_rx(&self) -> watch::Receiver<Option<LevelSample>> {
+        self.rx.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rec_dir_path_is_scoped_under_voxis_plugin_rec() {
+        let rec_dir = RecDir::new(PathBuf::from("/tmp/host-cache"));
+        assert_eq!(rec_dir.path(), Path::new("/tmp/host-cache/voxis-plugin/rec"));
+    }
+
+    #[test]
+    fn sweep_creates_missing_dir() {
+        let base = tempfile::tempdir().unwrap();
+        let rec_dir = RecDir::new(base.path().to_path_buf());
+        assert!(!rec_dir.path().exists());
+        rec_dir.sweep().unwrap();
+        assert!(rec_dir.path().is_dir());
+    }
+
+    #[test]
+    fn sweep_deletes_orphan_files() {
+        let base = tempfile::tempdir().unwrap();
+        let rec_dir = RecDir::new(base.path().to_path_buf());
+        fs::create_dir_all(rec_dir.path()).unwrap();
+        let orphan = rec_dir.path().join("orphan.wav");
+        fs::write(&orphan, b"leftover").unwrap();
+        assert!(orphan.exists());
+
+        rec_dir.sweep().unwrap();
+
+        assert!(!orphan.exists());
+        assert!(rec_dir.path().is_dir(), "sweep must not remove the dir itself");
+    }
+
+    #[test]
+    fn new_session_path_is_unique_wav_under_rec_dir() {
+        let rec_dir = RecDir::new(PathBuf::from("/tmp/host-cache"));
+        let a = rec_dir.new_session_path();
+        let b = rec_dir.new_session_path();
+        assert_ne!(a, b);
+        assert_eq!(a.extension().unwrap(), "wav");
+        assert!(a.starts_with(rec_dir.path()));
+    }
+
+    #[test]
+    fn rec_file_create_is_0600_on_unix() {
+        let base = tempfile::tempdir().unwrap();
+        let path = base.path().join("rec").join("session.wav");
+        let rec_file = RecFile::create(path.clone()).unwrap();
+        assert_eq!(rec_file.path(), path.as_path());
+        assert!(path.exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    #[test]
+    fn rec_file_drop_deletes_the_file() {
+        let base = tempfile::tempdir().unwrap();
+        let path = base.path().join("session.wav");
+        let rec_file = RecFile::create(path.clone()).unwrap();
+        assert!(path.exists());
+        drop(rec_file);
+        assert!(!path.exists(), "RecFile::drop must delete its file on every outcome");
+    }
+
+    #[test]
+    fn mock_capture_replays_script_only_on_explicit_tick() {
+        let mock = MockCapture::new();
+        mock.set_script(vec![
+            LevelSample { rms: 0.1, peak: 0.2 },
+            LevelSample { rms: 0.3, peak: 0.4 },
+        ]);
+        let mut rx = mock.level_rx();
+        let base = tempfile::tempdir().unwrap();
+        mock.start(&base.path().join("s.wav"), 999_999).unwrap();
+
+        // Before any tick(), only the start-time `None` reset has been sent.
+        assert_eq!(*rx.borrow_and_update(), None);
+
+        mock.tick();
+        assert_eq!(*rx.borrow_and_update(), Some(LevelSample { rms: 0.1, peak: 0.2 }));
+
+        mock.tick();
+        assert_eq!(*rx.borrow_and_update(), Some(LevelSample { rms: 0.3, peak: 0.4 }));
+    }
+
+    #[test]
+    fn mock_capture_die_silently_stops_ticking_while_running() {
+        let mock = MockCapture::new();
+        mock.set_script(vec![LevelSample { rms: 0.5, peak: 0.6 }]);
+        let base = tempfile::tempdir().unwrap();
+        mock.start(&base.path().join("s.wav"), 999_999).unwrap();
+        mock.set_die_silently(true);
+
+        let rx = mock.level_rx();
+        mock.tick();
+
+        assert_eq!(*rx.borrow(), None, "die_silently must suppress ticks");
+        assert!(mock.is_running(), "die_silently keeps is_running() true — that's the whole point");
+    }
+
+    #[test]
+    fn mock_capture_ignore_stop_returns_backend_error() {
+        let mock = MockCapture::new();
+        let base = tempfile::tempdir().unwrap();
+        mock.start(&base.path().join("s.wav"), 999_999).unwrap();
+        mock.set_ignore_stop(true);
+
+        let result = mock.stop();
+
+        assert!(matches!(result, Err(CaptureError::Backend(_))));
+        assert!(mock.is_running(), "ignore_stop means stop() didn't actually stop anything");
+    }
+
+    #[test]
+    fn mock_capture_stop_copies_fixture_wav_to_requested_path() {
+        let mock = MockCapture::new();
+        let base = tempfile::tempdir().unwrap();
+        let fixture = base.path().join("fixture.wav");
+        fs::write(&fixture, b"RIFF....WAVEfmt fake").unwrap();
+        mock.set_fixture_wav(fixture.clone());
+
+        let dest = base.path().join("session.wav");
+        fs::write(&dest, b"").unwrap();
+        mock.start(&dest, 999_999).unwrap();
+        mock.stop().unwrap();
+
+        assert_eq!(fs::read(&dest).unwrap(), fs::read(&fixture).unwrap());
+    }
+
+    #[test]
+    fn mock_capture_stop_reports_stats_from_ticked_samples() {
+        let mock = MockCapture::new();
+        mock.set_script(vec![
+            LevelSample { rms: 0.1, peak: 0.2 },
+            LevelSample { rms: 0.9, peak: 0.95 },
+        ]);
+        let base = tempfile::tempdir().unwrap();
+        mock.start(&base.path().join("s.wav"), 999_999).unwrap();
+        mock.tick();
+        mock.tick();
+
+        let stats = mock.stop().unwrap();
+
+        assert_eq!(stats.samples, 2);
+        assert_eq!(stats.duration_ms, 500);
+        assert!((stats.peak_rms - 0.95).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn mock_capture_second_start_without_stop_is_already_running() {
+        let mock = MockCapture::new();
+        let base = tempfile::tempdir().unwrap();
+        mock.start(&base.path().join("a.wav"), 1).unwrap();
+        let second = mock.start(&base.path().join("b.wav"), 1);
+        assert!(matches!(second, Err(CaptureError::AlreadyRunning)));
+    }
+}

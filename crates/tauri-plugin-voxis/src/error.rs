@@ -1,0 +1,93 @@
+//! Single command-facing error type. Every command in `commands.rs`
+//! returns `Result<T, PluginError>` — Tauri 2 requires the `Err` variant
+//! of a command's `Result` to be `Serialize` so it can cross the IPC
+//! boundary to the frontend as a JS-catchable rejection value.
+
+use serde::Serialize;
+
+use crate::capture::CaptureError;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PluginError {
+    /// `start()` while a session is already active (single-flight guard,
+    /// `session.rs`).
+    #[error("a dictation session is already recording")]
+    AlreadyRecording,
+    /// `stop`/`cancel`/`hold_lease` referencing a session id that isn't
+    /// (or is no longer) the active one. Struct variant (not a newtype
+    /// tuple variant) because serde's internally-tagged representation
+    /// (`tag = "kind"`) requires every variant to serialize as a map —
+    /// a bare `UnknownSession(String)` would fail to serialize under it.
+    /// Per-variant `rename_all` (rather than relying on the enum-level
+    /// one to cascade to fields) because `#[serde(tag = "kind", rename_all
+    /// = "camelCase")]` on the enum only camelCases the tag *value*, not
+    /// struct-variant field names.
+    #[error("no active session with id {session_id}")]
+    #[serde(rename_all = "camelCase")]
+    UnknownSession { session_id: String },
+    /// `start()` before `set_consent(true)` was recorded for the current
+    /// (host, provider) pair (`[R1-Safety S6]`).
+    #[error("consent required for provider '{provider_host}' before dictation can start")]
+    #[serde(rename_all = "camelCase")]
+    ConsentRequired { provider_host: String },
+    /// `AudioCapture` backend error, surfaced as-is. Struct variant, same
+    /// internally-tagged-enum reason as `UnknownSession` above.
+    #[error("capture backend error: {message}")]
+    Capture { message: String },
+    /// `SecretStore`/`ConsentStore` IO or (de)serialization error.
+    #[error("secret/consent store error: {message}")]
+    Store { message: String },
+    /// `apply_profile`/`import_profile_from_*` — real implementations
+    /// land in Task 2/6/7; Task 3's commands are wired but stubbed.
+    #[error("not implemented yet: {what}")]
+    NotImplemented { what: String },
+}
+
+impl From<CaptureError> for PluginError {
+    fn from(e: CaptureError) -> Self {
+        PluginError::Capture { message: e.to_string() }
+    }
+}
+
+impl From<Box<dyn std::error::Error + Send + Sync>> for PluginError {
+    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        PluginError::Store { message: e.to_string() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn already_recording_serializes_with_kind_tag() {
+        let value = serde_json::to_value(PluginError::AlreadyRecording).unwrap();
+        assert_eq!(value, serde_json::json!({"kind": "alreadyRecording"}));
+    }
+
+    #[test]
+    fn unknown_session_carries_the_id() {
+        let value =
+            serde_json::to_value(PluginError::UnknownSession { session_id: "abc".to_string() }).unwrap();
+        assert_eq!(value, serde_json::json!({"kind": "unknownSession", "sessionId": "abc"}));
+    }
+
+    #[test]
+    fn consent_required_carries_provider_host() {
+        let value = serde_json::to_value(PluginError::ConsentRequired {
+            provider_host: "api.groq.com".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({"kind": "consentRequired", "providerHost": "api.groq.com"})
+        );
+    }
+
+    #[test]
+    fn capture_error_converts_with_message_preserved() {
+        let err: PluginError = CaptureError::AlreadyRunning.into();
+        assert_eq!(err, PluginError::Capture { message: "capture already running".to_string() });
+    }
+}

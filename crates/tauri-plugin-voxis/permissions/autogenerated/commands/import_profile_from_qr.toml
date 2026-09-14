@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-import-profile-from-qr"
+description = "Enables the import_profile_from_qr command without any pre-configured scope."
+commands.allow = ["import_profile_from_qr"]
+
+[[permission]]
+identifier = "deny-import-profile-from-qr"
+description = "Denies the import_profile_from_qr command without any pre-configured scope."
+commands.deny = ["import_profile_from_qr"]

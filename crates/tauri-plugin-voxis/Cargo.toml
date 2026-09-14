@@ -1,0 +1,50 @@
+[package]
+name = "tauri-plugin-voxis"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+description = "Voxis dictation as an embeddable Tauri 2 plugin (desktop + iOS): commands/events contract, AudioCapture/SecretStore traits, MockCapture — Task 3 skeleton, pipeline stub (Task 3b wires the real capture -> guard -> transcription -> dictionary -> llm pipeline)"
+license = "MIT"
+# Tauri-plugin convention (mirrors the naked host's `tauri-plugin-capture`/
+# `tauri-plugin-lifecycle`): `links` lets Cargo enforce a single copy of
+# this plugin's build-script output in a dependency graph.
+links = "tauri-plugin-voxis"
+
+[lib]
+# Crate/module name the JS side and any Rust host import
+# (`tauri_plugin_voxis::init()`); package name stays the conventional
+# `tauri-plugin-<name>` for crates.io/npm-adjacent tooling.
+name = "tauri_plugin_voxis"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+# Path dep, NO features enabled by default — this crate must stay
+# `aarch64-apple-ios`-buildable with zero feature flags, same gate as
+# `voxis-core` itself (`scripts/check-ios-build.sh`). Task 4 turns on the
+# `rdev` feature only for its desktop-only `hotkey_desktop.rs`.
+voxis-core = { path = "../voxis-core" }
+
+# Mirrors naked's `tauri-plugin-capture`/`tauri-plugin-lifecycle` Cargo.toml
+# shape verbatim: base `tauri` dep with no extra features on top of
+# whatever the host's runtime provides, `wry` added back only for the iOS
+# target (mobile plugin macros need a concrete `Runtime` there).
+tauri = { version = "2", features = [] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+# Only `sync` is actually used (`tokio::sync::watch` in `capture.rs`) —
+# Task 3b's `pipeline.rs`/`lease.rs` are expected to need `rt`/`macros`/
+# `time` for the async pipeline and the 1 Hz heartbeat lease; not pulled
+# in ahead of that need (KISS/no speculative scope).
+tokio = { version = "1", features = ["sync"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+tauri = { version = "2", features = ["wry"] }
+
+[dev-dependencies]
+tempfile = "3"

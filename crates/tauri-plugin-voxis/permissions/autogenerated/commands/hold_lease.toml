@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-hold-lease"
+description = "Enables the hold_lease command without any pre-configured scope."
+commands.allow = ["hold_lease"]
+
+[[permission]]
+identifier = "deny-hold-lease"
+description = "Denies the hold_lease command without any pre-configured scope."
+commands.deny = ["hold_lease"]

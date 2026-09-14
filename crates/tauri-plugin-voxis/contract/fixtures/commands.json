@@ -1,0 +1,13 @@
+[
+  "start",
+  "stop",
+  "cancel",
+  "state",
+  "get_profile",
+  "apply_profile",
+  "import_profile_from_desktop",
+  "import_profile_from_qr",
+  "set_hotkey",
+  "set_consent",
+  "hold_lease"
+]
