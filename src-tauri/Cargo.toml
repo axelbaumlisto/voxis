@@ -42,11 +42,13 @@ specta = { version = "=2.0.0-rc.22", features = ["chrono"] }
 specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 
-# Pure core (config + storage — Task 1a; transcription/llm/learning/hotkey
-# follow in Task 1b). `tauri-support` enables the one Tauri-coupled
-# constructor, `storage::paths::AppPaths::new(&AppHandle)` — see
-# `crates/voxis-core/src/storage/paths.rs`.
-voxis-core = { path = "../crates/voxis-core", features = ["tauri-support"] }
+# Pure core (config + storage — Task 1a; transcription/llm/learning/audio_wav/
+# hotkey/guard — Task 1b). `rdev` enables the hotkey module's parser + rdev
+# press/release listener (`voxis_core::hotkey`); voice_lib's own thin
+# adapter lives in `hotkey/mod.rs`. voxis-core has zero Tauri dependency at
+# all now (Task 1b's deferred Task-1a minor M1 replaced
+# `AppPaths::new(&AppHandle)` with the tauri-free `AppPaths::for_desktop()`).
+voxis-core = { path = "../crates/voxis-core", features = ["rdev"] }
 
 # Parsing
 # (rusqlite/rust-ini/regex moved to voxis-core with config/storage in Task
@@ -74,6 +76,9 @@ tempfile = "3"
 
 # Audio recording
 cpal = "0.15"
+# `audio_wav` (WAV encoding) itself moved to voxis-core in Task 1b; kept as
+# a direct dependency here too since it's still a small, self-contained
+# crate with no downside to declaring directly (matches `rdev` below).
 hound = "3.5"
 
 # Audio feedback playback (start/stop/error beeps). Small, well-tested
@@ -94,7 +99,12 @@ tokio-util = { version = "0.7", features = ["rt"] }
 # Clipboard
 arboard = "3"
 
-# Low-level keyboard input (for single modifier hotkeys)
+# Low-level keyboard input (for single modifier hotkeys). The parser +
+# rdev press/release listener itself moved to voxis-core (Task 1b, `hotkey`
+# module, feature `rdev`) — voice_lib's own `hotkey/mod.rs` no longer uses
+# rdev directly, but kept as a direct dependency here too since
+# `examples/test_rdev.rs` (a standalone manual rdev smoke-test, unrelated
+# to the hotkey module) still does.
 # Using git version with macOS main thread fix (PR #147, merged 2025-05-20)
 rdev = { git = "https://github.com/Narsil/rdev", rev = "73123959276f0f29972b94e654f04614ba3826d2" }
 

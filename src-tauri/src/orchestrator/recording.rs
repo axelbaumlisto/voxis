@@ -68,88 +68,15 @@ pub(crate) fn stage_to_state(stage: Stage) -> RecordingState {
     }
 }
 
-/// Why `stop_recording` is being called.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StopReason {
-    /// Normal hotkey release.
-    Release,
-    /// Toggle-mode second press (was dead code — previously routed through
-    /// `on_hotkey_released`'s toggle guard, which returns immediately in
-    /// toggle mode and never reached `recorder.stop()`).
-    TogglePress,
-    /// `Orchestrator::cancel()` — discard path, no `queue.push`.
-    Cancel,
-    /// Layer 0: the press-side residual-window check found a release that
-    /// arrived after `await_stage(Recording)` but wasn't seen in time by
-    /// the release task itself.
-    ReleasePending,
-    /// Layer 2 recording guard (`recording_guard.rs`): continuous
-    /// near-silence exceeded the configured timeout, and the guard heard
-    /// some sound above `SILENCE_RMS` at some point earlier in this same
-    /// recording (the user spoke, then presumably walked away) — finalize
-    /// and transcribe as usual.
-    SilenceTimeout,
-    /// Layer 2 recording guard, safety variant: continuous near-silence
-    /// exceeded the configured timeout AND the guard never once heard
-    /// anything above `SILENCE_RMS` during the whole recording (VAD
-    /// disabled or unavailable, mic muted/disconnected for the entire
-    /// take). Routes to `StopDecision::Discard` instead of `Finalize`:
-    /// sending pure room noise to the transcription API risks a
-    /// well-known Whisper silence hallucination (e.g. "Thank you for
-    /// watching") being auto-typed into whatever window has focus, with
-    /// no human in the loop to notice it was never real speech.
-    SilenceTimeoutNoSpeech,
-    /// Layer 2/3 recording guard: recording exceeded the configured (or
-    /// absolute) maximum duration.
-    MaxDuration,
-    /// The recording guard observed `AudioRecorder::is_recording() ==
-    /// false` while it was still polling — the recording thread stopped
-    /// on its own (a stream build/play failure after `start()` returned
-    /// `Ok`, a panic) rather than via any `stop_recording` call. Always
-    /// resolves to `StopDecision::Recover` (any reason does, once
-    /// `is_recording` disagrees with the coordinator's stage) — this is a
-    /// distinct variant purely so the resulting `warn!`/breadcrumb says
-    /// why, instead of borrowing `MaxDuration`/`SilenceTimeout` for
-    /// something neither describes.
-    StreamDied,
-}
-
-/// Outcome of checking whether a `stop_recording` call should actually touch
-/// the recorder, and if so, how.
-///
-/// SRP: pure decision, no side effects — `stop_recording` performs the
-/// logging/recorder/queue/overlay side effects based on this value. Kept
-/// free of any `AppHandle`/`Arc` dependency so it's unit-testable without a
-/// running Tauri app.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StopDecision {
-    /// Nothing to stop: the coordinator isn't in `Stage::Recording` at
-    /// all. Silent — this is the loser of a real race (the winner holds
-    /// `stop_lock` through its own stage transition, so a loser only ever
-    /// observes `Processing`/`Idle`, never `Recording` with a dead
-    /// recorder — see `Recover`), or a stray call with nothing to do.
-    Skip,
-    /// Abnormal: the coordinator still says `Stage::Recording` but
-    /// `AudioRecorder::is_recording()` is already `false`. Under
-    /// `stop_lock` this can NEVER be a benign race-loser (the winner of a
-    /// real race holds the lock through its own stage transition, so a
-    /// loser only ever observes `Processing`/`Idle`) — it means the
-    /// recording thread died after `start()`
-    /// returned `Ok` (stream build/play failure, a panic, device
-    /// unplugged). `stop_recording` must NOT call `recorder.stop()`
-    /// (nothing to stop) and must still return the coordinator to `Idle`
-    /// — leaving it pinned at `Recording` makes the hotkey dead until
-    /// restart (`press_action` ignores/skips every subsequent
-    /// press/toggle/cancel while stage is `Recording`).
-    Recover,
-    /// Stop the recorder but throw the audio away: no `queue.push`, no
-    /// transcription. Used only by `StopReason::Cancel`.
-    Discard,
-    /// Stop the recorder and, unless the capture turns out to be
-    /// too-short, queue it for transcription. Used by every reason other
-    /// than `Cancel`.
-    Finalize,
-}
+// `StopReason`, `StopDecision`, `PressAction` moved to `voxis_core::guard`
+// in Task 1b (pure enums, no dependencies at all — see that module's doc
+// comment for the full split rationale). The FUNCTIONS below
+// (`stop_decision`, `press_action`, `stage_to_state`) stay here: they take
+// `Stage` (`super::coordinator::Stage`), an orchestrator-internal type
+// outside Task 1b's file scope, so they couldn't move with the enums
+// without also moving `Stage` (and `RecordingState`, for `stage_to_state`)
+// — neither of which lives in a file this step touches.
+pub(crate) use voxis_core::guard::{PressAction, StopDecision, StopReason};
 
 /// Decide what a `stop_recording(reason)` call should do, given the
 /// coordinator's current stage and whether the recorder is actually
@@ -195,25 +122,6 @@ pub(crate) fn map_stop_error(e: &AudioError) -> StopErrorAction {
         AudioError::StopInProgress => StopErrorAction::SilentRaceLost,
         _ => StopErrorAction::UserError,
     }
-}
-
-/// What a hotkey/tap press should do, given the current hotkey mode and
-/// coordinator stage. Mirrors the two checks `on_hotkey_pressed` used to
-/// perform inline (toggle-stops-recording branch, then the TALRI
-/// Idle/Processing gate) as one pure, exhaustively-tested decision.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PressAction {
-    /// Toggle mode, already `Recording`: this press stops the current
-    /// take (routes to `stop_recording(StopReason::TogglePress)`) instead
-    /// of starting a new one.
-    StopToggle,
-    /// `Idle` or `Processing` (TALRI: a new recording may start while the
-    /// previous transcription is still running): proceed to debounce /
-    /// permission-check / `recorder.start()`.
-    Start,
-    /// Any other combination (hold-mode press while already `Recording`):
-    /// ignored.
-    Ignore,
 }
 
 /// Decide what an incoming press should do.

@@ -11,12 +11,15 @@
 //! tauri-coupled pieces stayed in `voice_lib::storage`:
 //! - `debug_storage` and `failed_audio` (not moved at all — orthogonal to
 //!   config/storage, listed as staying in the plan).
-//! - `AppPaths::new(&AppHandle)`, `get_app_paths(app)`, `get_storage_factory(app)`
-//!   (the latter two are free functions using `tauri::AppHandle::try_state`,
-//!   which has no meaning outside a running Tauri app — they live in
-//!   `voice_lib::storage::{get_app_paths, get_storage_factory}` and call into
-//!   this module's `AppPaths`/`StorageFactory`). `AppPaths::new` itself stays
-//!   here, feature-gated (`tauri-support`) — see `paths.rs` for why.
+//! - `get_app_paths(app)`, `get_storage_factory(app)` (free functions using
+//!   `tauri::AppHandle::try_state`, which has no meaning outside a running
+//!   Tauri app — they live in `voice_lib::storage::{get_app_paths,
+//!   get_storage_factory}` and call into this module's
+//!   `AppPaths`/`StorageFactory`). The old `AppPaths::new(&AppHandle)`
+//!   Tauri-coupled constructor was replaced in Task 1b's deferred
+//!   Task-1a minor M1 by the tauri-free `AppPaths::for_desktop()` — this
+//!   crate has no `tauri` dependency at all now, not even optional; see
+//!   `paths.rs` for why.
 
 pub mod config_ini;
 pub mod config_sqlite;

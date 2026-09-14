@@ -42,8 +42,8 @@ pub async fn send_chat_completion(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::client::build_chat_request;
+    use super::*;
 
     fn test_config(url: String) -> LlmConfig {
         LlmConfig {

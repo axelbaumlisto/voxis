@@ -3,7 +3,7 @@ name = "voxis-core"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.77.2"
-description = "Pure-Rust core (config + storage) for Voxis, buildable for iOS with no Tauri/desktop deps"
+description = "Pure-Rust core (config + storage + transcription + llm + learning + hotkey/guard logic) for Voxis, buildable for iOS with no Tauri/desktop deps"
 license = "MIT"
 
 [lib]
@@ -23,6 +23,17 @@ dirs = "5"
 libc = "0.2"
 tracing = "0.1"
 specta = { version = "=2.0.0-rc.22", features = ["derive"] }
+thiserror = "2"
+async-trait = "0.1"
+once_cell = "1"
+
+# WAV encoding (`audio_wav` — Task 1b, moved from voice_lib::audio::encoder).
+hound = "3.5"
+
+# HTTP client for `transcription` (Groq Whisper API) and `llm` (chat
+# completions) — same features voice_lib's Cargo.toml already used
+# (`rustls-tls`, no native OpenSSL dependency for iOS).
+reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"], default-features = false }
 
 # Optional: `storage::test_utils::create_temp_paths` is a normal
 # (non-`#[cfg(test)]`) public helper so voice_lib's own tests can use it too
@@ -33,14 +44,16 @@ specta = { version = "=2.0.0-rc.22", features = ["derive"] }
 # via [dev-dependencies] below.
 tempfile = { version = "3", optional = true }
 
-# Optional: only the `AppPaths::new(&AppHandle)` constructor needs Tauri, and
-# only when built as voice_lib's dependency (desktop). Off by default so
+# Optional: only the `hotkey` module (parser + rdev press/release listener,
+# moved from voice_lib::hotkey in Task 1b) needs rdev, and only when built
+# as voice_lib's dependency (desktop). Off by default so
 # `cargo build -p voxis-core --target aarch64-apple-ios` (no feature flags)
-# never touches Tauri. See `storage::paths` for the feature-gated impl block.
-tauri = { version = "2", optional = true }
+# never touches rdev. Same pinned git rev voice_lib's Cargo.toml already
+# used (macOS main-thread fix, PR #147).
+rdev = { git = "https://github.com/Narsil/rdev", rev = "73123959276f0f29972b94e654f04614ba3826d2", optional = true }
 
 [features]
-tauri-support = ["dep:tauri"]
+rdev = ["dep:rdev"]
 test-utils = ["dep:tempfile"]
 
 [dev-dependencies]
@@ -48,3 +61,8 @@ test-utils = ["dep:tempfile"]
 # regardless of the `test-utils` feature (which only matters for downstream
 # consumers like voice_lib — see the `[dependencies]` comment above).
 tempfile = "3"
+# `transcription`/`llm` integration tests use mockito (HTTP mocking) and
+# `#[tokio::test]` (async test harness) — dev-only, matching voice_lib's
+# pre-Task-1b dependency set for these same tests.
+mockito = "1"
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

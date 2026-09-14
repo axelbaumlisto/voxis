@@ -111,8 +111,8 @@ pub fn validate_visualization_theme(
 /// Get path to themes directory.
 #[tauri::command]
 #[specta::specta]
-pub fn get_themes_dir(app: AppHandle) -> Result<String, String> {
-    let paths = AppPaths::new(&app).map_err(|e| e.to_string())?;
+pub fn get_themes_dir(_app: AppHandle) -> Result<String, String> {
+    let paths = AppPaths::for_desktop().map_err(|e| e.to_string())?;
     let dir = paths.ensure_themes_dir().map_err(|e| e.to_string())?;
     Ok(dir.to_string_lossy().to_string())
 }

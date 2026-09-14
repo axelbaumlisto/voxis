@@ -1,7 +1,33 @@
-//! Pure LLM data types shared with voice_lib.
+//! LLM post-processing module for grammar correction and suggestions.
 //!
-//! Only `prompts` (multi-prompt template schema — pure serde/specta data,
-//! no HTTP client) lives here today. The rest of `voice_lib::llm` (HTTP
-//! client, provider trait, parsing) stays in voice_lib until Task 1b.
+//! Processes transcribed text through LLM to:
+//! 1. Fix grammar and punctuation
+//! 2. Extract dictionary suggestions for tech terms
+//!
+//! Returns structured result with corrected text and suggestions.
+//!
+//! Architecture (KISS pipeline):
+//! - types.rs: DictionarySuggestion, LlmResult types
+//! - config.rs: LlmConfig struct
+//! - client.rs: Shared HTTP request/response DTOs
+//! - engine.rs: Pipeline orchestration + request execution
+//! - parser.rs: JSON parsing strategies + result parsing facade
+//! - provider/: pluggable `LlmProvider` trait + HTTP impl (the only public LLM facade)
+//! - prompts/: multi-prompt template registry (moved in Task 1a, ahead of
+//!   the rest of this module, since `storage::prompts_sqlite` needed it)
+//!
+//! Task 1b moved everything except `prompts` here from `voice_lib::llm`
+//! (mechanical extraction — `reqwest`/`rustls-tls`, no Tauri/cpal/rdev).
+//! `voice_lib` re-exports every one of these under their original paths.
 
+mod client;
+mod config;
+mod engine;
+pub mod parser;
 pub mod prompts;
+pub mod provider;
+mod types;
+
+pub use config::LlmConfig;
+pub use provider::{HttpLlmProvider, LlmProvider};
+pub use types::{DictionarySuggestion, LlmResult};

@@ -1,27 +1,18 @@
-//! LLM post-processing module for grammar correction and suggestions.
+//! LLM post-processing module for grammar correction and suggestions —
+//! thin re-export shim.
 //!
-//! Processes transcribed text through LLM to:
-//! 1. Fix grammar and punctuation
-//! 2. Extract dictionary suggestions for tech terms
-//!
-//! Returns structured result with corrected text and suggestions.
-//!
-//! Architecture (KISS pipeline):
-//! - types.rs: DictionarySuggestion, LlmResult types
-//! - config.rs: LlmConfig struct
-//! - client.rs: Shared HTTP request/response DTOs
-//! - engine.rs: Pipeline orchestration + request execution
-//! - parser.rs: JSON parsing strategies + result parsing facade
-//! - provider/: pluggable `LlmProvider` trait + HTTP impl (the only public LLM facade)
+//! Task 1a moved `prompts` (pure serde/specta data) into
+//! `voxis_core::llm::prompts` since `storage::prompts_sqlite` depends on
+//! it — see `prompts/mod.rs`'s own doc comment (unchanged by this step).
+//! Task 1b moved the rest of this module (client/config/engine/parser/
+//! provider/types — the HTTP-based `LlmProvider` implementation, no
+//! Tauri/cpal/rdev) into `voxis_core::llm` too. Re-exported here under the
+//! exact original paths so every existing `crate::llm::…` reference
+//! (including `crate::llm::parser::…`, `crate::llm::provider::…`) keeps
+//! resolving unchanged.
 
-mod client;
-mod config;
-mod engine;
-pub mod parser;
 pub mod prompts;
-pub mod provider;
-mod types;
 
-pub use config::LlmConfig;
-pub use provider::{HttpLlmProvider, LlmProvider};
-pub use types::{DictionarySuggestion, LlmResult};
+pub use voxis_core::llm::{parser, provider};
+pub use voxis_core::llm::{DictionarySuggestion, LlmConfig, LlmResult};
+pub use voxis_core::llm::{HttpLlmProvider, LlmProvider};

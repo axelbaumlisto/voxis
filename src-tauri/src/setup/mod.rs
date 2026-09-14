@@ -34,8 +34,7 @@ pub use window::handle_window_event;
 pub fn configure_app(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     crate::diagnostics::breadcrumbs::sites::setup_configure_entry();
     tracing::debug!("Setup: initializing app paths...");
-    let app_handle = app.handle();
-    let paths = storage::AppPaths::new(app_handle)?;
+    let paths = storage::AppPaths::for_desktop()?;
     tracing::debug!("Setup: paths initialized at {:?}", paths.config_dir());
 
     tracing::debug!("Setup: checking system permissions...");

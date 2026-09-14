@@ -1,22 +1,15 @@
-//! Learning module for dictionary self-learning.
+//! Learning module for dictionary self-learning — thin re-export shim.
 //!
-//! Architecture (SRP - Round 8):
-//! - mode.rs: LearningMode enum (disabled/pending/auto)
-//! - result.rs: SuggestionResult enum
-//! - tracker.rs: CorrectionTracker coordinator
-//! - normalizer.rs: SuggestionNormalizer with TERM_MAPPINGS
+//! Task 1b moved the whole module (mode/result/tracker/normalizer) into
+//! `voxis_core::learning` (pure Rust: uses `voxis_core::llm::
+//! DictionarySuggestion` and `voxis_core::storage`'s traits, no Tauri/
+//! cpal/rdev). Re-exported here under the exact original paths so every
+//! existing `crate::learning::…` reference keeps resolving unchanged.
 //!
 //! Modes:
 //! - disabled: No learning, suggestions are ignored
 //! - pending: Suggestions are stored but require manual approval
 //! - auto: Suggestions are automatically added to dictionary after threshold
 
-mod mode;
-mod normalizer;
-mod result;
-mod tracker;
-
-pub use mode::LearningMode;
-pub use normalizer::SuggestionNormalizer;
-pub use result::SuggestionResult;
-pub use tracker::CorrectionTracker;
+pub use voxis_core::learning::{CorrectionTracker, LearningMode, SuggestionNormalizer};
+pub use voxis_core::learning::SuggestionResult;

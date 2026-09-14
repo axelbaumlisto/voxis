@@ -232,20 +232,21 @@ impl AppPaths {
     }
 }
 
-// `AppPaths::new(&AppHandle)` is the one Tauri-coupled constructor. It must
-// be an *inherent* impl on this exact `AppPaths` type (not a trait, not a
-// wrapper) so `voice_lib`'s re-exported `storage::AppPaths::new(app_handle)`
-// call sites (`setup/mod.rs`, `commands/overlay.rs`) keep compiling
-// unchanged — Rust's orphan rule (E0116) forbids adding an inherent impl for
-// a foreign type from voice_lib itself, and a trait method would require
-// those call sites to add a `use` import, which the plan requires stay
-// untouched. Feature-gating instead of unconditionally depending on `tauri`
-// keeps `voxis-core` iOS-buildable and dependency-clean by default (mirrors
-// Task 1b's plan to gate `hotkey` behind the `rdev` feature).
-#[cfg(feature = "tauri-support")]
 impl AppPaths {
-    /// Create AppPaths from Tauri AppHandle.
-    pub fn new(_app: &tauri::AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
+    /// Resolve the desktop `AppPaths` — the canonical application data
+    /// directory, created if missing.
+    ///
+    /// Task 1b's deferred Task-1a minor M1: replaces the old
+    /// `AppPaths::new(&AppHandle)` Tauri-coupled constructor. `new` never
+    /// actually used its `_app` parameter (it called the same
+    /// `voxis_desktop_config_dir()` this does), so this is that exact
+    /// behaviour under a tauri-free name — voxis-core no longer has any
+    /// `tauri` dependency, not even an optional one. voice_lib's
+    /// `storage::get_app_paths`/`get_storage_factory` shims keep taking
+    /// `&AppHandle` for their own signature stability, but their two
+    /// direct-construction call sites (`setup/mod.rs`,
+    /// `commands/overlay.rs`) now call this instead.
+    pub fn for_desktop() -> Result<Self, Box<dyn std::error::Error>> {
         // Use the canonical application data directory.
         let config_dir = voxis_desktop_config_dir().ok_or("Cannot find config directory")?;
 

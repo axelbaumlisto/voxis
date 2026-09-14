@@ -92,8 +92,12 @@ mod tests {
 
     #[test]
     fn test_new_sets_name() {
-        let provider =
-            HttpLlmProvider::new("Groq", "https://api.groq.com", "key123", "llama-3.1-8b-instant");
+        let provider = HttpLlmProvider::new(
+            "Groq",
+            "https://api.groq.com",
+            "key123",
+            "llama-3.1-8b-instant",
+        );
         assert_eq!(provider.name(), "Groq");
     }
 
