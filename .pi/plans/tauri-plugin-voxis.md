@@ -263,7 +263,7 @@ DictationResult{ text, language?, duration_ms, guard_outcome }`, `cancel(id)`, `
 `hold_lease(id)` `[R1-Safety S4]`; **события** `voxis://state` (Idle|Recording|Transcribing|Error),
 `voxis://level {rms, peak, muted}` (≤ 20 Hz), `voxis://result`; **трейты**: `AudioCapture
 { start(path, cap_samples); stop() -> Result<CaptureStats{duration_ms, samples, peak_rms}>; level_rx }`
-`[R1-Arch S2/S3, R2-Coherence tactical]` — к��нтракт фиксирует self-cap по `cap_samples` внутри бэкенда,
+`[R1-Arch S2/S3, R2-Coherence tactical]` — контракт фиксирует self-cap по `cap_samples` внутри бэкенда,
 liveness (4 опроса без тика при running = `StreamDied`), владение путём `rec/<uuid>.wav` + cleanup
 в Drop + sweep on init `[R1-Safety S5]`; `SecretStore { get/set/delete }` + default impls (desktop
 `keyring`/0600; iOS — в T8); `Secret` из core; `MockCapture` (воспроизводит RMS-окна и WAV-фикстуру,
@@ -341,7 +341,7 @@ vitest: drag-persist, safe-area clamp, pointercancel→stop, keyup-lost→stop, 
 naked** (jsdom + CSP meta), lease-тик.
 **Verify:** `bun run test:run` в guest-js; `bun run harness:overlay` (новый скрипт; корневой `harness` — theme-engine harness, не трогать) показывает оверлей с mock-level
 **Steps:**
-1. Па��ет ESM + d.ts; `@tauri-apps/api` peer.
+1. Пакет ESM + d.ts; `@tauri-apps/api` peer.
 2. `overlay.ts`: custom element `voxis-overlay`, shadow DOM, слоты для темы.
 3. `drag.ts`: чистая функция `clampToViewport(pos, size, safeArea, viewport)` + контроллер.
 4. `hotkey.ts`: чистая машина Pressed/Released с таймаутом потери keyup.
