@@ -1,0 +1,63 @@
+# MIGRATION / ORDERING / EXECUTABILITY review — tauri-plugin-voxis plan
+
+## Verdict: GO-WITH-CHANGES — the DAG is mostly sound, but one Depends: field contradicts the plan's own gates prose, one Files: list hides real scope, and the iOS/CI story for the blocking gates isn't actually wired into the CI that exists today.
+
+## Strategic findings
+
+**S1. Task 7's `Depends:` omits Task 3.5, contradicting the gates section's own claim.**
+Gates §1 states: *"T3.5 (desktop, `examples/host-min` + `MockCapture` + fake-STT, Playwright в CI) блокирует T4/T6/T7"*. But Task 7 ("Voxis desktop → «Поделиться профилем»") declares `**Depends:** Task 2` only — no Task 3.5. Task 4 (`Depends: Task 3.5`) and Task 6 (`Depends: Task 2, Task 3.5`) both correctly encode the gate; Task 7 does not. If a scheduler honors only the `Depends:` field (as the ordering role is asked to assume for /ado execution), Task 7 can start before the tracer-bullet gate goes green, defeating the stated purpose of the gate.
+Impact: silently unblocked task, gate prose and DAG diverge.
+Fix: add `Task 3.5` to Task 7's `Depends:` line, or explicitly state in the gates section why profile-sharing is exempt from the tracer-bullet gate.
+
+**S2. Task 1's `Files:` list omits `src-tauri/src/orchestrator/`, but its own Steps require editing it.**
+Task 1 `Files:` lists only `config,storage,transcription,llm,learning` plus `lib.rs`. Step 2, however, says to move *"`orchestrator::stop_decision` + чистая логика guard-окон (`recording_guard` — только функции решения…)"* into `voxis-core`. Verified in the repo: `stop_decision` lives in `src-tauri/src/orchestrator/recording.rs:158`, and the guard-window logic is in `src-tauri/src/orchestrator/recording_guard.rs` (tests through line ~1100, including a hardware-calibration test block for `SILENCE_RMS`). Neither file is in Task 1's Files:.
+Impact: understates Task 1's real diff surface (already the largest task), and hides a potential Files: collision if any other Phase-0/1 task ever touches `orchestrator/*` in parallel.
+Fix: add `src-tauri/src/orchestrator/{recording.rs,recording_guard.rs}` to Task 1 `Files:`, and correct step wording (there is no module literally named `orchestrator::stop_decision`; it is a function inside `orchestrator::recording`).
+
+**S3. Task 9's on-device acceptance criterion cannot be executed at the point it's scheduled.**
+Task 9 Acceptance requires: *"начать запись → свернуть хост → остров показывает запись → Stop из острова → текст пришёл в хост после возврата"* — this needs a widget extension physically embedded in a host's Xcode project (per Task 9 Step 0's own clipshot-derived rules: `app-extension` target + `embed: true` + `xcodegen generate`). Task 9's `Depends:` is only `Task 8.5`, and its `Files:` are plugin-only (`ios/Sources/LiveActivity.swift`, `ios/WidgetExtension/**` template, docs). No task before or alongside Task 9 wires a widget extension into any host (`examples/host-min` never gets one per Task 8.5's Files, and naked's host-side integration is Task 10/11, both scheduled *after* Task 9 in Phase 3, with Task 11 explicitly marking Task 9 "optional in this release"). So Task 9, as ordered, has an Acceptance/Verify step that has nothing to run against.
+Impact: Task 9 cannot actually be closed out at its scheduled position; a worker would either fake the verification or silently defer it (which the plan does allow via "optional", but doesn't say so in Task 9 itself).
+Fix: split Task 9 into (a) Swift/ActivityKit implementation + fallback path (verifiable via unit-level/no-host means), and (b) a separate on-device full-flow verification task that explicitly `Depends: Task 9, Task 10/11` (host must exist first).
+
+**S4. Gate 7 ("profile round-trip automated in host-min") has no task that implements it.**
+Gates §7: *"export(desktop-fixture) → import(plugin) → get_profile() — хэш совпадает; **в host-min автоматизировано**."* Task 3.5 builds `host-min` but `Depends: Task 3, Task 5` only (not Task 2 or Task 6, where `VoxisProfile`/`import_profile_from_desktop` live), and its Files don't include any profile fixtures. Task 6 builds `profile_source.rs` but its Files never touch `examples/host-min`, and its own Verify is a unit test (`cargo test -p tauri-plugin-voxis profile_source::`), not an e2e host-min check.
+Impact: a blocking-sounding gate with no task obligated to build it — it will not exist unless someone notices the gap during execution.
+Fix: either add profile round-trip automation to Task 6's Files/Verify (extending host-min), or demote gate 7 to a Follow-up and update the gates section accordingly.
+
+**S5. The "iOS cross-build in CI" gate (gate §5) and Task 12's CI wiring aren't backed by a CI lane that currently exists for per-commit builds.**
+`.forgejo/workflows/ci.yml` runs everything inside `docker run ... voxis-ci:latest` (a Linux container) on `push: branches: [main]` — there is no Apple SDK/Xcode in that image, and no macOS lane in `ci.yml` at all. The only macOS-capable lane in this repo is `scripts/macos-vm.sh` (KVM VM), used exclusively inside `.forgejo/workflows/release.yml`'s `build` job, and that step is `continue-on-error: true` ("best-effort"), triggered only on `v*` tags/`workflow_dispatch`, not on every push to main. Task 12's `Files:` list only `.forgejo/workflows/ci.yml` for "iOS cross-build check", but the acceptance text itself says this check runs "в macOS-lane (`scripts/macos-vm.sh` уже есть)" — i.e. it actually depends on release.yml's infra, which Task 12 doesn't list as a Files: target.
+Impact: gate 5 ("iOS cross-build in CI c T1" — blocking) and Task 1's Verify command (`cargo build -p voxis-core --target aarch64-apple-ios`) cannot be enforced automatically on every commit under the CI that exists today; only manually, or once-per-release (best-effort).
+Fix: either (a) add a real macOS-capable per-commit lane (new workflow or a job in ci.yml using the VM), or (b) explicitly downgrade gate 5 to "verified manually per commit until Task 12 lands the release-time check" and drop "blocking" language, and correct Task 12's Files to include `release.yml`.
+
+**S6. Task 4's hotkey backend choice is not reconciled with an existing, documented limitation in this codebase.**
+`src-tauri/src/hotkey/mod.rs:3-5`: *"Unlike tauri-plugin-global-shortcut, rdev can detect single modifier key presses/releases (e.g., alt_r, ctrl_r) which is required for Python soupawhisper compatibility."* `src-tauri/src/config/consts.rs:120`: `pub const DEFAULT_HOTKEY: &str = "ctrl_r";` — i.e., Voxis's actual production default hold-to-talk key is a bare single modifier, which is exactly the case the codebase's own comment says `tauri-plugin-global-shortcut` cannot handle. Task 4 nonetheless picks `tauri-plugin-global-shortcut` for the plugin's desktop hotkey and demonstrates it with a combo (`⌥R`), sidestepping the single-modifier case without discussion, and Task 10 (naked) inherits "default ⌥R" rather than parity with Voxis's real default.
+Impact: the plugin cannot reproduce Voxis desktop's actual default hold-to-talk UX (bare `ctrl_r`) with the chosen library; this is a hidden design gap that Task 4's Acceptance doesn't test and Task 10 quietly works around by changing the default instead of fixing the gap.
+Fix: Task 4 should either use `rdev` (as `voice_lib` already does) behind the same `AudioCapture`-style trait, or explicitly document in Task 4's Acceptance that single-modifier hotkeys are out of scope for the plugin and the default changes accordingly.
+
+## Tactical findings
+
+- **Task 1 is oversized for one worker/one review.** It bundles workspace scaffolding, 5 module moves (config/storage/transcription/llm/learning), the undeclared orchestrator guard-logic extraction (see S2), a reqwest feature-flag change, and an iOS cross-compile fix, gated by ~300+ pre-existing tests across those modules (sampled via `grep '#\[test\]'` across `storage/*`, `llm/*`, `learning/*`, `config/*` — well over 250 test functions in just those four areas). Suggest split: **T1a** = workspace + `config` + `storage` (mechanical, high test count, low risk); **T1b** = `transcription` + `llm` + `learning` + orchestrator guard-logic extraction + iOS cross-build fix (higher semantic risk, `reqwest`/tokio feature surgery). `T1b Depends: T1a`.
+- **Task 9 is oversized and mixes doc-writing with implementation.** Step 0 alone is a full replica of clipshot's hard-won xcodegen playbook (six numbered gotchas) that belongs in `docs/PLUGIN_IOS_HOST.md` as a reference, separate from the actual `ActivityKit`/`LiveActivityIntent` Swift work in Steps 1-2. Recommend splitting the doc transcription from the Swift implementation so each can be reviewed independently (see also S3 for the on-device-verification split).
+- **Skill `ipad-physical-testing`, referenced by Tasks 8, 8.5, and 11 as the device-test procedure, is not present in this repo's `.pi/skills/`** (only `voxis-deploy/SKILL.md` exists — confirmed via `find .pi/skills`). If it lives elsewhere (global skill store), the plan should say where; if it doesn't exist yet, it's an undeclared prerequisite for three tasks' Verify steps.
+- **Task 4 Step 1 leaves an unresolved fork with no Files: owner.** "Вынести из `voice_lib::audio` … в core или дублировать минимально — предпочесть перенос в `voxis-core::audio_wav` (Task 1 может подхватить)" — neither Task 1 nor Task 4's `Files:` list `src-tauri/src/audio/` at all, yet the WAV writer/resample code that Task 4 needs originates there. Pick one task and update its Files:.
+
+## Depends:/Files: annotation errors (consolidated)
+
+1. Task 7 `Depends:` missing `Task 3.5` (contradicts gates §1) — S1.
+2. Task 1 `Files:` missing `src-tauri/src/orchestrator/{recording.rs,recording_guard.rs}` despite Steps requiring edits there — S2.
+3. Gate §7 (profile round-trip in host-min) has no task `Files:`/`Depends:` that implements it — S4.
+4. Task 12 `Files:` lists only `ci.yml` for the iOS cross-build check, but the actual macOS-VM infra referenced in its own Acceptance text lives in `release.yml` — S5.
+5. Neither Task 1 nor Task 4 `Files:` declares `src-tauri/src/audio/`, though Task 4 Step 1 requires sourcing WAV/resample code from there.
+
+## Verified-OK
+
+- Task 4 (`Depends: Task 3.5`), Task 6 (`Depends: Task 2, Task 3.5`), Task 9 (`Depends: Task 8.5`), Task 11 (`Depends: Task 8.5, Task 10`) all correctly encode the gates §1 tracer-bullet blocking relationships in the actual `Depends:` field (only Task 7 does not — S1).
+- Task 3.5 correctly depends only on Task 3 + Task 5 (contract + guest-js), not Task 4 — matches its own Step 2 (`MockCapture` via `VOXIS_CAPTURE=mock:<wav>`), correctly resolving the example dependency question posed for this review.
+- Task 5 correctly `Depends: Task 3` for the command/model contract.
+- Tasks 10 → 11 → 11b in naked-cli are strictly chained via `Depends:` (11 depends on 10, 11b depends on 11), so despite touching overlapping paths (`src-tauri/Cargo.toml`, `src-tauri/gen/apple/**`) across tasks, there is no actual parallel-execution collision — they're serialized by the graph already.
+- `.forgejo/workflows/release.yml` triggers only on `push: tags: ['v*']` (plus `workflow_dispatch` with format validation `^v[0-9]+\.[0-9]+\.[0-9]+$`). A tag `plugin-v0.1.0` does not start with `v` and would not match the `v*` glob, and even a manual `workflow_dispatch` with that tag would hard-fail the format check before any build/DMG step runs. Confirmed by reading the full workflow — no DMG-build risk from the plugin tag.
+- Task 9 Step 0's clipshot-derived claims (xcodegen owns Info.plist/entitlements and rewrites them every generation; `cargo tauri ios build` does not run xcodegen; the extension must own `outputFiles` for `libapp.a` or Xcode reports "Multiple commands produce libapp.a"/dependency cycles; extension needs its own `DEVELOPMENT_TEAM`) all match `~/work/clipshot/gen/apple/project.yml` and `scripts/ios-build.sh` verbatim.
+- Task 1's "≥1037 green tests" regression gate is structurally enforced for all downstream work since every other task transitively `Depends:` on Task 1.
+- Task 8/8.5/11 correctly mark their hardware-dependent steps as manual/device-only rather than claiming CI-executability.
+
+**Evidence gap (disclosed, not a finding):** this session's toolset has no shell/ssh execution capability, so naked-cli-side path claims (`src/components/KeyPanel.tsx`, `AppMainToolbar.tsx`, `crates/naked-plugin-capture`, `scripts/ci-check.sh`, `src-tauri/gen/apple/**`) could not be verified against the actual `naked-cli` repo on `spex`, despite the task brief suggesting `ssh spex`. Recommend a follow-up pass with shell access before treating Tasks 10/11/11b's Files: as verified.
