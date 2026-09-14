@@ -178,7 +178,7 @@ HUMAN GATE проходит **на реальном микрофоне и реа
 
 ### Phase 0 — ядро
 
-### Task 1a: `voxis-core` — workspace + `config` + `storage` (механика, много тестов, низкий риск)
+### Task 1a: ✅ APPROVED `d98183b` (3 review rounds; clean-clone verified 1051/0) — `voxis-core` — workspace + `config` + `storage` (механика, много тестов, низкий риск)
 **Files:** `src-tauri/Cargo.toml` (workspace), `crates/voxis-core/{Cargo.toml,src/**}`,
 `src-tauri/src/config/**` (кроме `change_handler.rs`), `src-tauri/src/storage/**` (кроме
 `debug_storage.rs`, `failed_audio.rs`), `src-tauri/src/lib.rs`, `scripts/check-ios-build.sh`,
@@ -661,6 +661,12 @@ foreground для микрофона — это правило iOS, не наш 
 (job core+plugin: `cargo test --workspace` в Linux-docker), `.forgejo/workflows/release.yml`
 (macOS-VM lane: `scripts/check-ios-build.sh`, для этого шага `continue-on-error: false`) `[R1-Migration S5]`
 **Depends:** Task 10, Task 11, Task 9b
+`[ADO-1a lessons]` Чеклист последствий переезда workspace-root в корень (все три всплыли при T1a):
+(1) `/target/` в `.gitignore`; (2) `Cargo.lock` теперь в корне — обновить bump-инструкцию в
+`voxis-deploy` SKILL.md; (3) `[profile.*]` читаются **только** из корневого `Cargo.toml` — guard-тест
+`src-tauri/tests/release_profile_guard.rs` это стережёт; (4) голые паттерны в `.gitignore`
+(`dictionary.txt`, `*.db`, `config.ini`) глотают одноимённые фикстуры — фикстуры именовать `*.fixture.*`;
+(5) `tauri::generate_context!` требует существующий `dist/` даже для `cargo test` (pre-existing).
 **Acceptance:** README плагина: установка, команды/события, HotkeySpec, профиль (3 пути),
 iOS-требования, `SecretStore`/consent/privacy; `ci.yml` гоняет `cargo test --workspace` (Linux);
 `release.yml` macOS-VM lane гоняет `scripts/check-ios-build.sh` (проверка, не артефакт); тег
