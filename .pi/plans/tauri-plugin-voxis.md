@@ -214,7 +214,7 @@ tempdir → post-T1 `factory` загружает → каждое поле ра�
 4. `pub use` в `voice_lib`; перенести тесты; data-gate фикстура.
 5. `scripts/check-ios-build.sh` (rustup target add, cargo build); прогнать.
 
-### Task 1b: `voxis-core` — `transcription`, `llm`, `learning`, `audio_wav`, `hotkey`, guard-логика
+### Task 1b: ✅ APPROVED `851cd0c` (1 round; clean-clone 1053/0) — `voxis-core` — `transcription`, `llm`, `learning`, `audio_wav`, `hotkey`, guard-логика
 **Files:** `src-tauri/src/{transcription,llm,learning}/**`, `src-tauri/src/audio/encoder.rs` →
 `crates/voxis-core/src/audio_wav.rs`, `src-tauri/src/hotkey/**` → `crates/voxis-core/src/hotkey/**`
 (feature `rdev`), `src-tauri/src/orchestrator/{recording.rs,recording_guard.rs}` (вынос чистых
@@ -734,3 +734,6 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
   - Заменить системную диктовку Siri нельзя; iOS 27 private hooks «Siri Extensions / Model
     Delegation» не включены (вероятно EU-only) — следить.
 - Voxis desktop сам как хост своего плагина (dogfooding, убирает дублирование `audio/`).
+- `[ADO-1b minors]` drop dead `hound` dep из voice_lib; вынести press/release-машину hotkey из rdev-callback
+  в `fn step(...)` для unit-теста с fake `HotkeySink`; комментарий «kept for signature stability» у
+  `get_themes_dir(_app)`; `WavError` display дублирует `AudioError::WavError` — не оборачивать через `to_string()`.
