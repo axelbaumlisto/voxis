@@ -432,3 +432,18 @@ jobs:
           else
             echo "gh CLI unavailable; skipping GitHub probe"
           fi
+
+      - name: prune binaries from older Forgejo releases
+        # Runs LAST in this job, after the release above has been verified
+        # complete (deb+rpm asserted, DMG probed) — never touch older releases
+        # until the just-published one is confirmed intact. Forgejo attachments
+        # are a duplicate archive (GitHub is the canonical download channel and
+        # keeps full history); see scripts/prune-release-assets.sh for why.
+        run: |
+          set -uo pipefail
+          cd /home/spex/work/voxis
+          tag="${{ needs.build.outputs.tag }}"
+          FORGEJO_API="${GITHUB_SERVER_URL%/}/api/v1/repos/${GITHUB_REPOSITORY}" \
+          FORGEJO_TOKEN="${GITHUB_TOKEN}" \
+            bash scripts/prune-release-assets.sh --keep-tag "$tag" --apply || \
+              echo "WARN: release-asset prune failed; disk will grow but the release is intact"

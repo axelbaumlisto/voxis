@@ -258,8 +258,14 @@ for l in d.splitlines():
 
 ## Publishing targets
 
-- Forgejo release: `https://clipshot.cc/git/zverozabr/voxis/releases/tag/vX.Y.Z`
-- GitHub release (binaries only, canonical public download): `axelbaumlisto/voxis`
+- Forgejo release: `https://clipshot.cc/git/zverozabr/voxis/releases/tag/vX.Y.Z` —
+  retains binaries **only on the newest release** (`scripts/prune-release-assets.sh`,
+  runs as the last step of `publish` in `release.yml`, `--apply`); older tags keep
+  their release entry + notes but lose attachments. Dry-run manually:
+  `FORGEJO_API=https://clipshot.cc/git/api/v1/repos/zverozabr/voxis FORGEJO_TOKEN=$(ssh spex 'cat ~/.config/forgejo/token') bash scripts/prune-release-assets.sh`
+- GitHub release (binaries only, canonical public download): `axelbaumlisto/voxis` —
+  keeps **full history** (Homebrew's formula URL pins a specific past release, so
+  old GitHub assets must stay downloadable; this script never touches GitHub)
 - Homebrew tap: `axelbaumlisto/homebrew-voxis` (repo name `homebrew-voxis` so
   `brew tap axelbaumlisto/voxis` resolves). Canonical formula source is in-tree
   `homebrew-tap/Formula/voxis.rb`; CI replaces the tap copy on release. User install:
