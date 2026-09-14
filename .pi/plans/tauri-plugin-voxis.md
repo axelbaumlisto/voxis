@@ -203,7 +203,11 @@ tempdir → post-T1 `factory` загружает → каждое поле ра�
 `config_dir == <путь v0.1.5>`.
 **Verify:** `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && scripts/check-ios-build.sh`
 **Steps:**
-1. Workspace: `[workspace] members = [".", "crates/voxis-core"]` в `src-tauri/Cargo.toml`.
+1. Workspace `[ADO-1a amendment]`: **корневой** `/Cargo.toml` с `[workspace] resolver = "2" members =
+   ["src-tauri", "crates/voxis-core"]` (как у naked); `Cargo.lock` переезжает в корень репо
+   (`src-tauri/Cargo.lock` исчезает). Cargo требует, чтобы member был **иерархически ниже** workspace-root
+   — `[workspace]` в `src-tauri/Cargo.toml` с `crates/` рядом невозможен (worker проверил репро).
+   Следствие для релизов: bump версии правит `/Cargo.lock` (обновить `voxis-deploy` SKILL.md, T12).
 2. Перенести `config/` (AppConfig, consts, validation); `change_handler.rs` остаётся.
 3. `storage/`: split `mod.rs`/`paths.rs` как в Acceptance; `libc::EXDEV`-миграция путей идёт в core
    (без tauri); shim в voice_lib.
