@@ -249,6 +249,11 @@ Sources/AudioCapture.swift}`, `…/src/mobile.rs`
 2. `AudioCapture.swift`: engine, converter, WAV-writer (заголовок дописывается на stop), RMS.
 3. `mobile.rs`: `PluginHandle::run_mobile_plugin` для `start/stop/cancel`, `Channel` уровней.
 4. Прерывания/route change → события.
+5. **Системный mute микрофона** (iOS 17+/26: кнопка mute в Dynamic Island и Control Center для
+   пишущего приложения): наблюдать `AVAudioApplication.inputMuteStateChangeNotification`
+   (`AVAudioApplicationMuteStateKey`), пробрасывать `muted: bool` в pipeline → guard считает
+   mute как тишину и показывает состояние в оверлее; иначе запишем нули и получим галлюцинацию.
+6. Haptics (`UIImpactFeedbackGenerator`) на start/stop — как у Wispr Flow.
 
 ### Task 9: iOS Live Activity (Dynamic Island) при записи в фоне
 **Files:** `crates/tauri-plugin-voxis/ios/Sources/LiveActivity.swift`,
@@ -265,6 +270,9 @@ Widget-extension в Tauri-генерируемый Xcode-проект добав
 хост → остров показывает запись → Stop из острова → текст пришёл в хост после возврата.
 **Verify:** прогон на iPad/iPhone по скрипту из `docs/PLUGIN_IOS_HOST.md`
 **Steps:**
+0. Widget-таргет добавлять через `npx @choochmeque/tauri-apple-extensions ios add …` (XcodeGen,
+   идемпотентно, переживает регенерацию `gen/apple`); референс App Group/entitlements —
+   `tauri-plugin-widgets` (`init-ios`). App Group регистрируется на портале Apple руками.
 1. `ActivityAttributes` + состояние; запуск/обновление/финиш.
 2. `StopDictationIntent: LiveActivityIntent` в extension; App Group + `CFNotificationCenter`.
 3. Инструкция хосту: bundle id extension, App Group, background modes, entitlements.
@@ -306,7 +314,10 @@ guard: 75 с тишины → Discard + сообщение, ничего не в
 **Steps:**
 1. Info.plist + capabilities iOS.
 2. Сборка и установка по skill.
-3. Прогоны A (речь), B (drag+persist), C (тишина), D (hotkey с клавиатуры), E (QR-импорт).
+3. Прогоны A (речь), B (drag+persist), C (тишина), D (hotkey с клавиатуры), E (QR-импорт),
+   F (системная mute-кнопка во время записи → guard/индикация).
+3b. Опция: Apple Pencil Pro squeeze как hold-to-talk (`UIPencilInteraction`, уважать
+   `preferredSqueezeAction`) — дёшево, только foreground хоста.
 4. Калибровка порога при расхождении; записать измерения.
 
 ### Task 11b: iOS Siri / Action Button / Control Center → диктовка в naked (App Intents)
@@ -352,6 +363,24 @@ iOS-требования; CI собирает `voxis-core` и плагин по�
    ключи не в логах (`grep -i "api_key\|sk-" logs` пусто).
 
 ## Follow-ups (вне плана)
+
+- **Каталог механизмов Apple** (исследование 2026-09-07, вердикты):
+  - Триггеры standalone: **Vocal Shortcuts** (iOS 18, Accessibility) — своя фраза без «Привет
+    Siri» и без имени приложения, on-device, с lock screen (пользователь обучает 3 повтора —
+    показать в onboarding); **AirPods stem** через `MPRemoteCommandCenter.togglePlayPause`
+    (приложение должно быть Now Playing с `.playback`; в `.playAndRecord` команды могут не
+    приходить → переключать категорию); Shortcuts «Dictate Text» (Siri STT, язык задавать
+    явно); `requestValue()` (Siri спрашивает и отдаёт текст, приложение не открывается);
+    Apple Watch companion.
+  - Транскрипция on-device: `SpeechTranscriber` — русского в `supportedLocales` по одним данным
+    нет → для ru использовать `DictationTranscriber` (+ `AnalysisContext.contextualStrings` до
+    100 фраз = наш словарь на этапе распознавания). Проверять `supportedLocales` на устройстве.
+  - Пост-обработка on-device: **Foundation Models** (iOS 26, `LanguageModelSession`,
+    `@Generable`) для пунктуации/чистки вместо облачного LLM — измерить качество на ru.
+  - Мост iPhone → Mac без сервера: **Universal Clipboard** (Continuity) — скопировано на iPhone,
+    ⌘V на Mac; macOS 26 показывает Live Activities iPhone в меню-баре.
+  - Не работает для нас: `AVCaptureEventInteraction` (только камера), автовозврат (26.4),
+    замена системной диктовки Siri.
 
 - `TranscriptionEngine` trait + on-device iOS 26 `DictationTranscriber` (WER 2.12 %, офлайн;
   проверить `supportedLocales` для ru-RU) и WhisperKit-fallback.
