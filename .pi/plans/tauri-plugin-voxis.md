@@ -244,7 +244,7 @@ rdev-listener с уведомлением через `pub trait HotkeySink { fn 
    `SILENCE_RMS`).
 5. iOS-таргет; `cfg`-утечки.
 
-### Task 2: `VoxisProfile` — модель, экспорт/импорт, шифрование
+### Task 2: ✅ APPROVED `acc1c92` (1 round) — `VoxisProfile` — модель, экспорт/импорт, шифрование
 **Files:** `crates/voxis-core/src/profile/{mod.rs,crypto.rs,tests.rs}`
 **Depends:** Task 1b
 **Acceptance:** `VoxisProfile { version: 1, config: ProfileConfig, dictionary: Vec<(String,String)>,
@@ -270,7 +270,7 @@ round-trip оба `KeySource`; тест «history не попадает»; ве�
 
 ### Phase 1 — плагин
 
-### Task 3: Каркас `tauri-plugin-voxis` (Rust) — контракт команд/событий, трейты, MockCapture
+### Task 3: ✅ APPROVED (2 rounds) — Каркас `tauri-plugin-voxis` (Rust) — контракт команд/событий, трейты, MockCapture
 **Files:** `crates/tauri-plugin-voxis/{Cargo.toml,build.rs,src/{lib.rs,commands.rs,models.rs,capture.rs,
 secrets.rs,consent.rs,error.rs},permissions/**}`
 **Depends:** Task 1b
@@ -734,6 +734,11 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
   - Заменить системную диктовку Siri нельзя; iOS 27 private hooks «Siri Extensions / Model
     Delegation» не включены (вероятно EU-only) — следить.
 - Voxis desktop сам как хост своего плагина (dogfooding, убирает дублирование `audio/`).
+- `[ADO-2/3 minors]` profile: zeroize key/plaintext; unused base64url helpers (для T7); O(n²) sync_dictionary;
+  LlmProvider snake_case внутри camelCase-профиля (документировать в контракте T5/T10). plugin: `sweep()` глотает
+  per-file ошибки; `secrets.json` write-temp-then-rename; COMMANDS в общий `commands.txt`; для 3b — injectable
+  emitter для событий, `do_stop` при ошибке capture.stop оставляет бэкенд «running», async-команды для сети,
+  `MockCapture` cap_samples knob.
 - `[ADO-1b minors]` drop dead `hound` dep из voice_lib; вынести press/release-машину hotkey из rdev-callback
   в `fn step(...)` для unit-теста с fake `HotkeySink`; комментарий «kept for signature stability» у
   `get_themes_dir(_app)`; `WavError` display дублирует `AudioError::WavError` — не оборачивать через `to_string()`.
