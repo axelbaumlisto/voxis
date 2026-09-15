@@ -756,6 +756,11 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
   `audio_device` в `ProfileConfig` (T2 исключил как backend-specific — пересмотреть: имя устройства
   переносимо между Mac'ами одного пользователя, на iOS игнорируется), `init_desktop` читает его из
   pipeline_config; host-min/naked — `VOXIS_DEVICE`/UI-выбор. Делать в T6 (профиль) + T10 (naked UI).
+- `[ENV 2026-09-15]` voice_lib timing-тесты (`test_check_microphone_native_smoke` 500 ms bound, `orchestrator::tests::test_rapid_start_stop_cycles`,
+  `test_is_recording_false_immediately_after_stop`) падают ОДИНАКОВО на `93774c6` и `main`: AVFoundation
+  permission-probe стал 1.2 с (был 9–41 мс утром), CoreAudio деградировал после дня hardware-прогонов
+  (host-min ×N, probe, SimAudioProc). Не регресс кода; лечится перезапуском coreaudiod/ребутом. Гейт /ado
+  для шагов T6/T7 — тесты core/plugin/profile_share + clean-clone lib 1278/3 (та же тройка).
 - `[ADO-3.5 notes]` `src-tauri/tests/audio_integration.rs` (реальный микрофон, `stop() < 600 ms`) флакает
   одинаково на HEAD при занятом CoreAudio (`SimAudioProc` iOS Simulator, `heard`, работающий Voxis) — не
   гейт /ado, но перед hardware-прогонами закрывать Simulator. host-min лезет в `pub PluginState.pipeline_config/secrets`
