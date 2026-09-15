@@ -367,7 +367,7 @@ naked** (jsdom + CSP meta), lease-тик.
 5. `theme-bridge.ts`: адаптер ThemeApi (уровень, состояние) → существующий контракт тем.
 6. Тесты + harness-страница.
 
-### Task 3.5: ⏸ part 1 (CI/mock) APPROVED `fff6245` (2 rounds); part 2 HUMAN GATE (real mic + Groq) — PENDING user presence — Tracer bullet (desktop) — `examples/host-min` + `voxis-fake-stt` + Playwright
+### Task 3.5: ✅ part 1 `fff6245`; part 2 HUMAN GATE ✅ headless (real mic + real Groq + real guard: speech→text, 17 s silence→NoSpeech, no HTTP; see research/plugin-plan/HUMAN_GATE_3_5_headless.md); alt_r/CSP/Cmd+R remain for a GUI session — Tracer bullet (desktop) — `examples/host-min` + `voxis-fake-stt` + Playwright
 **Files:** `crates/voxis-fake-stt/**`, `crates/tauri-plugin-voxis/examples/host-min/**` (в т.ч.
 `src-tauri/tauri.conf.json` с **CSP, идентичной naked** `[R1-Safety S3]`),
 `crates/tauri-plugin-voxis/contract/fixtures/*.json` (включая `profile-qr.json` `[R1-Safety T1]`),
@@ -738,6 +738,11 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
   - Заменить системную диктовку Siri нельзя; iOS 27 private hooks «Siri Extensions / Model
     Delegation» не включены (вероятно EU-only) — следить.
 - Voxis desktop сам как хост своего плагина (dogfooding, убирает дублирование `audio/`).
+- **`[HW-GATE finding]` Устройство ввода**: `CpalCapture::new()` берёт системный default = BY-V (петличка из
+  исходного инцидента) → нули → галлюцинация. Плагин ДОЛЖЕН выбирать устройство из профиля: вернуть
+  `audio_device` в `ProfileConfig` (T2 исключил как backend-specific — пересмотреть: имя устройства
+  переносимо между Mac'ами одного пользователя, на iOS игнорируется), `init_desktop` читает его из
+  pipeline_config; host-min/naked — `VOXIS_DEVICE`/UI-выбор. Делать в T6 (профиль) + T10 (naked UI).
 - `[ADO-3.5 notes]` `src-tauri/tests/audio_integration.rs` (реальный микрофон, `stop() < 600 ms`) флакает
   одинаково на HEAD при занятом CoreAudio (`SimAudioProc` iOS Simulator, `heard`, работающий Voxis) — не
   гейт /ado, но перед hardware-прогонами закрывать Simulator. host-min лезет в `pub PluginState.pipeline_config/secrets`
