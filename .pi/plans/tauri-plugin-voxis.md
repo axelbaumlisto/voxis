@@ -278,7 +278,7 @@ secrets.rs,consent.rs,error.rs},permissions/**}`
 `init_with(SecretStore)`; **команды**: `start(mode: Hold|Toggle) -> SessionId`, `stop(id) ->
 DictationResult{ text, language?, duration_ms, guard_outcome }`, `cancel(id)`, `state() -> State`,
 `get_profile()`, `apply_profile(bytes, key_source)`, `import_profile_from_desktop()` (реализация в T6),
-`import_profile_from_qr(payload)`, `set_hotkey(spec)`, `set_consent(bool)` `[R1-Safety S6]`,
+`import_profile_from_qr(payload, code)`, `set_hotkey(spec)`, `set_consent(bool)` `[R1-Safety S6]`,
 `hold_lease(id)` `[R1-Safety S4]`; **события** `voxis://state` (Idle|Recording|Transcribing|Error),
 `voxis://level {rms, peak, muted}` (≤ 20 Hz), `voxis://result`; **трейты**: `AudioCapture
 { start(path, cap_samples); stop() -> Result<CaptureStats{duration_ms, samples, peak_rms}>; level_rx }`
@@ -393,7 +393,7 @@ Docker `voxis-ci`). **Гейт**: до зелёного T4/T6/T7 не старт
 3. Контрактные фикстуры + тесты-снапшоты Rust/TS.
 4. Playwright-сценарии речь/тишина; CI job.
 
-### Task 6: Desktop-источник профиля для «той же машины» + `import_profile_from_desktop`
+### Task 6: ✅ APPROVED `ed1ffae` (2 rounds; host-min `profile-import` scenario → Task 6b) — Desktop-источник профиля для «той же машины» + `import_profile_from_desktop`
 **Files:** `crates/tauri-plugin-voxis/src/profile_source.rs`, `crates/voxis-core/src/storage/sqlite_base.rs`
 (`open_read_only`), `crates/voxis-core/src/storage/{config_sqlite,providers/storage,prompts_sqlite/*}.rs`
 (`::read_only(path)` конструкторы), `crates/tauri-plugin-voxis/examples/host-min/**` (round-trip e2e)
@@ -416,7 +416,20 @@ Voxis) → профиль без промптов, не ошибка. Тесты
 3. Хранилище плагина: sqlite для не-секретов (тот же `factory` с другим путём) + `SecretStore`.
 4. Round-trip сценарий в host-min.
 
-### Task 7: Voxis desktop → «Поделиться профилем» (QR + LAN + файл)
+### Task 6b: host-min `profile-import` smoke + device-from-profile `[ADO follow-up of T6 + HW-GATE finding]`
+**Files:** `crates/tauri-plugin-voxis/examples/host-min/**`, `crates/voxis-core/src/profile/mod.rs` (+`audio_device` в
+`ProfileConfig`), `crates/tauri-plugin-voxis/src/{lib.rs,desktop.rs,profile_source.rs}` (init_desktop берёт устройство из
+pipeline_config), `crates/tauri-plugin-voxis/guest-js/src/types/contract.ts`, `contract/fixtures/profile-v1.json`
+**Depends:** Task 6
+**Acceptance:** smoke-сценарий `profile-import` (VOXIS_DESKTOP_CONFIG_DIR + VOXIS_SMOKE_IMPORT=1 → ImportSummary +
+pipeline_config.api_url_override из профиля — gate 7); host-min больше не лезет в `pub PluginState` поля (env-fallback
+только для cpal real run); `ProfileConfig.audio_device: Option<String>` (переносимо между Mac'ами одного пользователя;
+iOS игнорирует); `CpalCapture` создаётся с устройством из профиля (fallback default) — на этом Mac default = BY-V даёт
+нули (HUMAN_GATE_3_5_headless.md). Minors из ревью 6: doc busy_timeout (rusqlite default 5 s), плагинный contention-тест
+→ EXCLUSIVE, README контракта: host = IPv4-литерал, token `[A-Za-z0-9_-]{1,64}`.
+**Verify:** `bash scripts/host-min-smoke.sh` (4 сценария), `cargo test -p tauri-plugin-voxis --features desktop`
+
+### Task 7: ✅ APPROVED `1c0dde6` (1 round + minors) — Voxis desktop → «Поделиться профилем» (QR + LAN + файл)
 **Files:** `src-tauri/src/commands/profile_share.rs`, `src-tauri/src/profile_share/{server.rs,mod.rs}`,
 `src/components/settings/ProfileShare.tsx`, `src/lib/commands.ts`, `src-tauri/capabilities/*.json`
 **Depends:** Task 2, Task 3.5 (формат QR-payload = `contract/fixtures/profile-qr.json`) `[R1-Migration S1]`
