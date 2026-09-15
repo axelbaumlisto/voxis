@@ -45,6 +45,13 @@ pub mod guard_adapter;
 #[cfg(feature = "desktop")]
 pub mod hotkey_desktop;
 pub mod lease;
+// Task 8: the iOS Swift bridge (`AudioCapture`/`SecretStore` backed by
+// `run_mobile_plugin` calls into `ios/Sources/*.swift`) -- target-gated,
+// same reason `desktop` is feature-gated: this module's own
+// `tauri::ios_plugin_binding!`/`register_ios_plugin` calls only exist on
+// `#[cfg(target_os = "ios")]` inside `tauri` itself.
+#[cfg(target_os = "ios")]
+pub mod mobile;
 pub mod models;
 pub mod pipeline;
 // Task 6: `VoxisProfile` sources/sinks -- desktop-directory discovery +
@@ -397,11 +404,15 @@ fn desktop_hotkey_factory<R: Runtime>(app: tauri::AppHandle<R>) -> Arc<dyn Hotke
 /// one without `build` itself needing to be generic over a closure type.
 type HotkeyFactory<R> = fn(tauri::AppHandle<R>) -> Arc<dyn HotkeyController>;
 
-fn build<R: Runtime>(
-    secrets_override: Option<Arc<dyn SecretStore>>,
-    capture_factory: Box<dyn Fn() -> Arc<dyn AudioCapture> + Send + Sync>,
-    hotkey_factory: Option<HotkeyFactory<R>>,
-) -> TauriPlugin<R> {
+/// The invoke-handler/`on_page_load`/`on_event` chain shared by every
+/// `TauriPlugin` this crate builds (`build`, `init_ios`) — the eleven
+/// JS-facing commands never change per-platform, and both the Hold-mode
+/// webview-reload guard and the process-exit guard below apply just as
+/// much to an iOS host's single webview as to desktop's. Only `.setup(..)`
+/// differs between platforms (iOS additionally registers the Swift
+/// plugin before building `PluginState`), so that stays out of this
+/// helper.
+fn plugin_builder<R: Runtime>() -> Builder<R> {
     Builder::new("voxis")
         .invoke_handler(tauri::generate_handler![
             commands::start,
@@ -416,6 +427,43 @@ fn build<R: Runtime>(
             commands::set_consent,
             commands::hold_lease,
         ])
+        // `[R1-Safety S4]` / review finding F1: a dead/reloaded webview
+        // must not leave a Hold session's mic open. `on_page_load` fires
+        // on every navigation/reload of the plugin's webview -- including
+        // the reload that follows an iOS "web content process
+        // terminated" crash (Tauri/WKWebView don't expose that event
+        // directly; the next `on_page_load` after it recovering is the
+        // closest first observable signal). The Hold-mode heartbeat lease
+        // (`lease.rs`) already covers the gap between the crash and that
+        // reload (3 s worst case) independently of this hook.
+        .on_page_load(|webview, _payload| {
+            if let Some(state) = webview.try_state::<PluginState>() {
+                state.sessions.cancel_all_hold();
+            }
+        })
+        // Belt-and-suspenders for the same guarantee on desktop: the host
+        // window/app closing entirely (not just navigating) must not
+        // leave a Hold session running past process exit.
+        .on_event(|app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::Destroyed, .. }
+                    | tauri::RunEvent::Exit
+                    | tauri::RunEvent::ExitRequested { .. }
+            ) {
+                if let Some(state) = app.try_state::<PluginState>() {
+                    state.sessions.cancel_all_hold();
+                }
+            }
+        })
+}
+
+fn build<R: Runtime>(
+    secrets_override: Option<Arc<dyn SecretStore>>,
+    capture_factory: Box<dyn Fn() -> Arc<dyn AudioCapture> + Send + Sync>,
+    hotkey_factory: Option<HotkeyFactory<R>>,
+) -> TauriPlugin<R> {
+    plugin_builder()
         .setup(move |app, _api| {
             // Both `?` here surface a real "the host's app identifier/
             // paths aren't set up" failure through plugin `setup` instead
@@ -447,34 +495,52 @@ fn build<R: Runtime>(
             app.manage(state);
             Ok(())
         })
-        // `[R1-Safety S4]` / review finding F1: a dead/reloaded webview
-        // must not leave a Hold session's mic open. `on_page_load` fires
-        // on every navigation/reload of the plugin's webview -- including
-        // the reload that follows an iOS "web content process
-        // terminated" crash (Tauri/WKWebView don't expose that event
-        // directly; the next `on_page_load` after it recovering is the
-        // closest first observable signal). The Hold-mode heartbeat lease
-        // (`lease.rs`) already covers the gap between the crash and that
-        // reload (3 s worst case) independently of this hook.
-        .on_page_load(|webview, _payload| {
-            if let Some(state) = webview.try_state::<PluginState>() {
-                state.sessions.cancel_all_hold();
+        .build()
+}
+
+/// Registers the plugin with the real iOS backends (Task 8):
+/// `mobile::IosCapture` (Swift `AVAudioEngine` bridge) for `AudioCapture`
+/// and `mobile::IosKeychainSecretStore` for `SecretStore`, unless a
+/// host-supplied `SecretStore` override is given (same
+/// `secrets_override` convention as `init_with`/`init_desktop_with` --
+/// naked's own `naked_core::SecretStore` still wins if the host passes
+/// one in, the iOS Keychain is only the *default*, same relationship
+/// `FileSecretStore` has to desktop's `init`). No hotkey backend: iOS has
+/// no OS-level hotkey concept (`HotkeyController`'s own doc comment,
+/// plan decision 5) -- touch hosts drive hotkeys from guest-js
+/// `keydown`/`keyup` instead, so `PluginState.hotkey` stays `None` here
+/// exactly like the non-desktop `init`/`init_with`.
+#[cfg(target_os = "ios")]
+pub fn init_ios<R: Runtime>() -> TauriPlugin<R> {
+    init_ios_with(None)
+}
+
+/// Same as [`init_ios`], with a host-supplied `SecretStore` instead of
+/// the default `mobile::IosKeychainSecretStore`.
+#[cfg(target_os = "ios")]
+pub fn init_ios_with<R: Runtime>(secrets_override: Option<Arc<dyn SecretStore>>) -> TauriPlugin<R> {
+    plugin_builder()
+        .setup(move |app, api| {
+            let config_dir = app.path().app_config_dir()?;
+            let cache_dir = app.path().app_cache_dir()?;
+
+            let mobile_handle = mobile::init(app, api)?;
+            let capture: Arc<dyn AudioCapture> = Arc::new(mobile::IosCapture::new(mobile_handle.clone()));
+            let secrets = secrets_override.clone().unwrap_or_else(|| {
+                Arc::new(mobile::IosKeychainSecretStore::new(mobile_handle.clone())) as Arc<dyn SecretStore>
+            });
+            let events: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.app_handle().clone()));
+            let state = PluginState::new(config_dir, cache_dir, secrets, capture, events, None);
+
+            // `[R1-Safety S5]`, same as desktop's `build`: any file left
+            // in `rec/` at startup is an orphan from a crash/SIGKILL
+            // mid-recording.
+            if let Err(e) = state.rec_dir.sweep() {
+                tracing::warn!(error = %e, "RecDir::sweep failed during plugin setup — an orphaned recording file may remain on disk");
             }
-        })
-        // Belt-and-suspenders for the same guarantee on desktop: the host
-        // window/app closing entirely (not just navigating) must not
-        // leave a Hold session running past process exit.
-        .on_event(|app, event| {
-            if matches!(
-                event,
-                tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::Destroyed, .. }
-                    | tauri::RunEvent::Exit
-                    | tauri::RunEvent::ExitRequested { .. }
-            ) {
-                if let Some(state) = app.try_state::<PluginState>() {
-                    state.sessions.cancel_all_hold();
-                }
-            }
+
+            app.manage(state);
+            Ok(())
         })
         .build()
 }

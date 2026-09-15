@@ -17,6 +17,13 @@
 //   `voxis-fake-stt`'s sha256 lookup matches this exact fixture.
 // - `cpal`: `tauri_plugin_voxis::init_desktop()` -- real `CpalCapture` +
 //   `RdevHotkey`. Prompts for microphone permission on first use.
+// - `ios`: `tauri_plugin_voxis::init_ios()` (Task 8/8.5, `target_os =
+//   "ios"` builds only) -- real Swift `AVAudioEngine` capture +
+//   `Keychain` `SecretStore` via `mobile.rs`'s `run_mobile_plugin`
+//   bridge. Prompts for microphone permission (`AVAudioApplication.
+//   requestRecordPermission`) on first use; host-min's own iOS project
+//   init (`tauri ios init`, `NSMicrophoneUsageDescription`, dev signing)
+//   is Task 8.5, not this file.
 //
 // STT endpoint / API key (Task 3.5's own "no new plugin command" path,
 // per the plan's step text: read `pipeline.rs`'s `PipelineDeps` and
@@ -188,6 +195,23 @@ fn main() {
         builder.plugin(tauri_plugin_voxis::init_with_capture(capture))
     } else if capture_mode.starts_with("cpal") {
         builder.plugin(tauri_plugin_voxis::init_desktop())
+    } else if capture_mode.starts_with("ios") {
+        // Task 8.5's own tracer bullet (iOS Simulator/iPad-stand, real
+        // `AVAudioEngine` + Keychain via `mobile.rs`): `cfg`-gated the
+        // same way `tauri_plugin_voxis::init_desktop` itself is gated
+        // behind the `desktop` Cargo feature, except here it's a target
+        // gate (iOS's Swift bridge only exists for `target_os = "ios"`,
+        // not a Cargo feature this host toggles) -- `VOXIS_CAPTURE=ios`
+        // on any other target falls through to the `mock`/`init()`
+        // branch below instead of failing to compile.
+        #[cfg(target_os = "ios")]
+        {
+            builder.plugin(tauri_plugin_voxis::init_ios())
+        }
+        #[cfg(not(target_os = "ios"))]
+        {
+            panic!("VOXIS_CAPTURE=ios is only available when host-min itself is built for target_os = \"ios\" (Task 8.5)");
+        }
     } else {
         builder.plugin(tauri_plugin_voxis::init())
     };

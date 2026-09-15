@@ -8,6 +8,20 @@ dist/
 src-tauri/target/
 /target/
 
+# tauri-plugin-voxis iOS: `ios/.build`/`Package.resolved` are the Swift
+# package manager's own build cache/lockfile, regenerated on every
+# `swift build`/`cargo build --target aarch64-apple-ios*` -- not tracked.
+# `crates/tauri-plugin-voxis/.tauri/tauri-api` (vendored from Tauri's own
+# `mobile/ios-api` by build.rs's `.ios_path("ios")`, Task 8) is
+# deliberately NOT ignored here (review round 2 decision: follow naked's
+# own convention of committing its plugins' vendored `.tauri/tauri-api`)
+# -- a fresh clone can `swift build`/`swiftc -typecheck` the `ios/`
+# package standalone without a prior `cargo build` having vendored it
+# first.
+crates/tauri-plugin-voxis/ios/.build/
+crates/tauri-plugin-voxis/ios/Package.resolved
+crates/tauri-plugin-voxis/examples/host-min/src-tauri/gen/apple/.tauri/
+
 # IDE
 .idea/
 .vscode/

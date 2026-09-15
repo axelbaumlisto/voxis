@@ -5,11 +5,20 @@
 // which allows all eleven commands — see that file's own comment) into the
 // ACL manifest embedded in the plugin binary.
 //
-// `ios_path` is intentionally NOT set here: Task 3 ships no `ios/` Swift
-// sources yet (that's Task 8, `mobile.rs` + `ios/Sources/*.swift`, mirroring
+// Task 8: `ios/` now has real Swift sources (`Sources/VoxisPlugin.swift` +
+// friends) — `.ios_path("ios")` tells `tauri-plugin`'s build-script support
+// (`src/build/mobile.rs::setup`, that crate's own source) to vendor Tauri's
+// own `mobile/ios-api` Swift package to `<this crate>/.tauri/tauri-api` and
+// link the Apple library when the actual build target is
+// `aarch64-apple-ios`/`aarch64-apple-ios-sim` on a macOS host — mirrors
 // `naked-plugin-capture`'s `tauri_plugin::Builder::new(COMMANDS).ios_path
-// ("ios").build()`); the iOS cross-build gate in this task only needs the
-// Rust side to compile for `aarch64-apple-ios`, not a real Swift bridge.
+// ("ios").build()` verbatim. `COMMANDS` itself is unchanged: the six
+// Swift-side commands (`startCapture`/`stopCapture`/`resetCapture`/
+// `secretGet`/`secretSet`/`secretDelete`, `src/mobile.rs`) are an internal
+// Rust<->Swift bridge invoked only via `PluginHandle::run_mobile_plugin`,
+// never exposed to JS — they do not belong in this JS-facing command list
+// (same split as naked's own `register_listener`/`remove_listener`/
+// `current_state` vs. its plugin's own Swift command names).
 const COMMANDS: &[&str] = &[
     "start",
     "stop",
@@ -25,5 +34,5 @@ const COMMANDS: &[&str] = &[
 ];
 
 fn main() {
-    tauri_plugin::Builder::new(COMMANDS).build();
+    tauri_plugin::Builder::new(COMMANDS).ios_path("ios").build();
 }

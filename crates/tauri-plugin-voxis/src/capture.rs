@@ -90,7 +90,19 @@ pub enum CaptureError {
 ///   `Recording`. Task 3b's `guard_adapter.rs` implements that poll; this
 ///   trait only fixes the channel type it polls.
 pub trait AudioCapture: Send + Sync {
-    /// Start writing 16 kHz mono WAV samples to `path`.
+    /// Start writing 16 kHz mono WAV samples to `path`. `cap_samples` is
+    /// always expressed in samples **at 16 kHz** (`voxis_core::audio_wav::
+    /// TRANSCRIPTION_SAMPLE_RATE`), regardless of whatever native rate a
+    /// given backend actually records at — `commands.rs`'s `do_start`
+    /// computes it via `voxis_core::guard::native_cap_samples(..,
+    /// TRANSCRIPTION_SAMPLE_RATE)` before any backend's `start()` runs, so
+    /// it cannot know the real device rate yet. A backend recording at a
+    /// different native rate (desktop's `CpalCapture`) must rescale this
+    /// value internally once its own rate is known before comparing a
+    /// sample count against it (see `desktop::pure::scale_cap_samples`); a
+    /// backend whose own output is already fixed at 16 kHz before this
+    /// self-cap check ever runs (iOS's `AVAudioConverter` output, Task 8)
+    /// needs no such scaling and can compare directly.
     fn start(&self, path: &Path, cap_samples: usize) -> Result<(), CaptureError>;
     /// Stop and finalize the WAV file, returning capture statistics.
     fn stop(&self) -> Result<CaptureStats, CaptureError>;
