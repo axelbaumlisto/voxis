@@ -1,0 +1,36 @@
+{
+  "name": "@voxis/tauri-plugin-voxis",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Typed guest-js API + <voxis-overlay> web component for tauri-plugin-voxis (Task 5). Hand-written TS mirroring the Rust command/event contract in ../contract/fixtures/*.json and ../src/models.rs — no codegen.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun ../../../scripts/build-themes.ts && tsc -p tsconfig.json",
+    "test": "bun ../../../scripts/build-themes.ts && vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "harness": "vite --config vite.harness.config.ts"
+  },
+  "peerDependencies": {
+    "@tauri-apps/api": "^2"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "^2.11.0",
+    "jsdom": "^28.1.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.0"
+  }
+}

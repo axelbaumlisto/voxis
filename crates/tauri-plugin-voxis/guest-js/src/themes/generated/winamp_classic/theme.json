@@ -1,0 +1,8 @@
+{
+  "manifest_version": 2,
+  "id": "winamp_classic",
+  "name": "Winamp Classic",
+  "description": "Green-yellow-red spectrum analyzer bars",
+  "api_version": 1,
+  "entry": "theme.js"
+}

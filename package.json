@@ -17,6 +17,8 @@
     "test:e2e": "playwright test",
     "test:all": "vitest run && playwright test",
      "test:rust": "cd src-tauri && cargo build --examples && cargo test",
+    "test:guest-js": "cd crates/tauri-plugin-voxis/guest-js && bun run test",
+    "harness:overlay": "cd crates/tauri-plugin-voxis/guest-js && bun run harness",
     "lint": "eslint src --ext ts,tsx"
   },
   "dependencies": {

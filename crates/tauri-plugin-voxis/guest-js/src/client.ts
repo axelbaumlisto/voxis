@@ -1,0 +1,196 @@
+// crates/tauri-plugin-voxis/guest-js/src/client.ts
+/**
+ * Typed wrappers over `@tauri-apps/api/core`'s `invoke`/
+ * `@tauri-apps/api/event`'s `listen`, using the exact command/event names
+ * in `../contract/fixtures/{commands,events}.json`. `invoke`/`listen` are
+ * injectable (`createClient({invoke, listen})`) so tests, `overlay.ts`,
+ * and the `harness/` page all run with no Tauri runtime at all — see
+ * `VoxisClientDeps`.
+ *
+ * Split out of `index.ts` (rather than defined there) so `overlay.ts` can
+ * import `createClient`/`VoxisClient` without an index.ts <-> overlay.ts
+ * import cycle (`index.ts` re-exports `mountOverlay` from `overlay.ts`).
+ */
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { listen as tauriListen } from "@tauri-apps/api/event";
+
+import type {
+  CommandName,
+  DictationResult,
+  HotkeySpec,
+  ImportSummary,
+  KeySourceDto,
+  LevelEvent,
+  Mode,
+  PluginState,
+  SessionId,
+  VoxisProfileDto,
+} from "./types/contract";
+import { LEVEL_EVENT, RESULT_EVENT, STATE_EVENT } from "./types/contract";
+
+/** An IPC `invoke`-shaped function — matches `@tauri-apps/api/core`'s `invoke`. */
+export type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+
+/** An event `payload` envelope — matches `@tauri-apps/api/event`'s `Event<T>`. */
+export interface EventEnvelope<T> {
+  event: string;
+  id: number;
+  payload: T;
+}
+
+export type UnlistenFn = () => void;
+
+/** An IPC `listen`-shaped function — matches `@tauri-apps/api/event`'s `listen`. */
+export type ListenFn = <T>(event: string, handler: (event: EventEnvelope<T>) => void) => Promise<UnlistenFn>;
+
+export interface VoxisClientDeps {
+  invoke?: InvokeFn;
+  listen?: ListenFn;
+}
+
+export interface VoxisClient {
+  start(mode: Mode): Promise<SessionId>;
+  stop(id: SessionId): Promise<DictationResult>;
+  cancel(id: SessionId): Promise<void>;
+  state(): Promise<PluginState>;
+  getProfile(): Promise<VoxisProfileDto>;
+  applyProfile(bytes: number[], keySource: KeySourceDto): Promise<ImportSummary>;
+  importProfileFromDesktop(): Promise<ImportSummary>;
+  importProfileFromQr(payload: string): Promise<ImportSummary>;
+  setHotkey(spec: HotkeySpec): Promise<void>;
+  setConsent(consented: boolean): Promise<void>;
+  holdLease(id: SessionId): Promise<void>;
+  /**
+   * `start(mode)`, then resolve on the next `voxis://result` event — the
+   * plan's `dictate({mode}): Promise<DictationResult>` convenience
+   * wrapper. `dictate()` does not itself call `stop()`; a caller (the
+   * overlay's pointer/hotkey handling, or a host driving the API
+   * directly) is expected to call `stop()`/`cancel()` to end the
+   * session, at which point the plugin emits `voxis://result` and this
+   * promise resolves. Given the plugin's own single-flight guarantee
+   * (a second `start()` while active fails with `AlreadyRecording`),
+   * "the next result event after this start()" can only be *this*
+   * session's result.
+   *
+   * Rejects instead of hanging forever if the session ends without ever
+   * producing a result: `voxis://state` turning `"error"` (a
+   * capture/transcription failure — the plugin never emits
+   * `voxis://result` for that path) rejects immediately;
+   * `voxis://state` returning to `"idle"` with no `voxis://result`
+   * following within a short grace window (an out-of-band `cancel()`
+   * racing ahead of its own result event, or any other session-ended-
+   * without-a-result outcome) rejects too.
+   */
+  dictate(opts: { mode: Mode }): Promise<DictationResult>;
+  onState(cb: (state: PluginState) => void): Promise<UnlistenFn>;
+  onLevel(cb: (level: LevelEvent) => void): Promise<UnlistenFn>;
+  onResult(cb: (result: DictationResult) => void): Promise<UnlistenFn>;
+}
+
+/**
+ * `plugin:<name>|<command>` — the Tauri v2 IPC command-name convention
+ * for plugin-registered commands (`Builder::new("voxis")` in `lib.rs`),
+ * matching `@tauri-apps/plugin-store`/`@tauri-apps/plugin-shell`'s own
+ * generated guest-js (`invoke('plugin:store|get_store', ...)` etc.).
+ */
+function pluginCommand(name: CommandName): string {
+  return `plugin:voxis|${name}`;
+}
+
+/** See `dictate()`'s doc comment — `[fixed per REJECT-FIX L4]`. */
+const DICTATE_IDLE_GRACE_MS = 50;
+
+/**
+ * Builds a `VoxisClient`. With no arguments, wraps the real
+ * `@tauri-apps/api` (for use inside an actual Tauri webview); tests and
+ * `harness/main.ts` pass `{invoke, listen}` mocks instead so nothing here
+ * ever needs a running Tauri backend to exercise.
+ */
+export function createClient(deps: VoxisClientDeps = {}): VoxisClient {
+  const invoke: InvokeFn = deps.invoke ?? (tauriInvoke as InvokeFn);
+  const listen: ListenFn = deps.listen ?? (tauriListen as unknown as ListenFn);
+
+  const client: VoxisClient = {
+    start: (mode) => invoke<SessionId>(pluginCommand("start"), { mode }),
+    stop: (id) => invoke<DictationResult>(pluginCommand("stop"), { id }),
+    cancel: (id) => invoke<void>(pluginCommand("cancel"), { id }),
+    state: () => invoke<PluginState>(pluginCommand("state")),
+    getProfile: () => invoke<VoxisProfileDto>(pluginCommand("get_profile")),
+    applyProfile: (bytes, keySource) => invoke<ImportSummary>(pluginCommand("apply_profile"), { bytes, keySource }),
+    importProfileFromDesktop: () => invoke<ImportSummary>(pluginCommand("import_profile_from_desktop")),
+    importProfileFromQr: (payload) => invoke<ImportSummary>(pluginCommand("import_profile_from_qr"), { payload }),
+    setHotkey: (spec: HotkeySpec) => invoke<void>(pluginCommand("set_hotkey"), { spec }),
+    setConsent: (consented) => invoke<void>(pluginCommand("set_consent"), { consented }),
+    holdLease: (id) => invoke<void>(pluginCommand("hold_lease"), { id }),
+
+    // `[fixed per REJECT-FIX L4]` The result listener used to attach
+    // *after* `start()` resolved, and `dictate()` never settled at all
+    // if the session ended without a `voxis://result` (e.g. an
+    // out-of-band `cancel()` racing ahead, or a capture/transcription
+    // failure that only ever emits `voxis://state: "error"`). Now: both
+    // listeners are attached and awaited *before* `start()` is called,
+    // and an `"error"`/idle-without-result state settles (rejects) the
+    // promise instead of leaving it pending forever.
+    async dictate({ mode }) {
+      return new Promise<DictationResult>((resolve, reject) => {
+        let settled = false;
+        let unlistenResult: UnlistenFn | undefined;
+        let unlistenState: UnlistenFn | undefined;
+        let idleGraceTimer: ReturnType<typeof setTimeout> | undefined;
+
+        const cleanup = () => {
+          unlistenResult?.();
+          unlistenState?.();
+          if (idleGraceTimer !== undefined) clearTimeout(idleGraceTimer);
+        };
+        const settleResolve = (result: DictationResult) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(result);
+        };
+        const settleReject = (err: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(err instanceof Error ? err : new Error(String(err)));
+        };
+
+        Promise.all([
+          listen<DictationResult>(RESULT_EVENT, (event) => settleResolve(event.payload)),
+          listen<PluginState>(STATE_EVENT, (event) => {
+            if (settled) return;
+            if (event.payload === "error") {
+              settleReject(new Error('voxis://state turned "error" with no voxis://result'));
+            } else if (event.payload === "idle") {
+              // A result for this same transition, if any, is emitted by
+              // the plugin right after (`pipeline.rs`'s `finalize()`:
+              // state, then result) — give it a short grace window
+              // before concluding none is coming (out-of-band `cancel()`,
+              // or any other session-ended-without-a-result outcome).
+              idleGraceTimer = setTimeout(() => {
+                settleReject(
+                  new Error(
+                    'voxis://state returned to "idle" with no voxis://result (session ended without a result, e.g. cancel())'
+                  )
+                );
+              }, DICTATE_IDLE_GRACE_MS);
+            }
+          }),
+        ])
+          .then(([resultUnlisten, stateUnlisten]) => {
+            unlistenResult = resultUnlisten;
+            unlistenState = stateUnlisten;
+            return client.start(mode);
+          })
+          .catch(settleReject);
+      });
+    },
+
+    onState: (cb) => listen<PluginState>(STATE_EVENT, (event) => cb(event.payload)),
+    onLevel: (cb) => listen<LevelEvent>(LEVEL_EVENT, (event) => cb(event.payload)),
+    onResult: (cb) => listen<DictationResult>(RESULT_EVENT, (event) => cb(event.payload)),
+  };
+
+  return client;
+}

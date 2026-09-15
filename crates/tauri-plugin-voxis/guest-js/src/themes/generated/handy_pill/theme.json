@@ -1,0 +1,8 @@
+{
+  "manifest_version": 2,
+  "id": "handy_pill",
+  "name": "Handy Pill",
+  "description": "Compact pill: mic icon, 9 bars, cancel button (Handy pink)",
+  "api_version": 1,
+  "entry": "theme.js"
+}

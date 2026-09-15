@@ -1,0 +1,57 @@
+<!doctype html>
+<!--
+  crates/tauri-plugin-voxis/guest-js/harness/index.html
+  Served by `bun run harness:overlay` (root) / `bun run harness`
+  (this package) via `vite.harness.config.ts` — mounts <voxis-overlay>
+  with a mock invoke/listen (no Tauri runtime) and fake levels so the
+  pill/theme can be eyeballed. Same CSP the overlay must actually run
+  under in naked (jsdom can't enforce this — the real guard is
+  __tests__/csp-bundle.test.ts, which greps the built dist/ for blob:/
+  data:text/javascript).
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'" />
+    <title>voxis-overlay harness</title>
+    <style>
+      body {
+        margin: 0;
+        height: 100vh;
+        background: #222;
+        color: #eee;
+        font: 14px/1.4 system-ui, sans-serif;
+      }
+      #controls {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 12px;
+        border-radius: 8px;
+        z-index: 1;
+      }
+      select,
+      button {
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="controls">
+      <label>Theme <select id="theme"></select></label>
+      <label>Mode
+        <select id="mode">
+          <option value="hold">hold</option>
+          <option value="toggle">toggle</option>
+        </select>
+      </label>
+      <button id="fake-level">toggle fake level sweep</button>
+      <span id="state">state: idle</span>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
