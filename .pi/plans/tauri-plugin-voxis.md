@@ -666,7 +666,11 @@ foreground для микрофона — это правило iOS, не наш 
 `voxis-deploy` SKILL.md; (3) `[profile.*]` читаются **только** из корневого `Cargo.toml` — guard-тест
 `src-tauri/tests/release_profile_guard.rs` это стережёт; (4) голые паттерны в `.gitignore`
 (`dictionary.txt`, `*.db`, `config.ini`) глотают одноимённые фикстуры — фикстуры именовать `*.fixture.*`;
-(5) `tauri::generate_context!` требует существующий `dist/` даже для `cargo test` (pre-existing).
+(5) `tauri::generate_context!` требует существующий `dist/` даже для `cargo test` (pre-existing);
+(6) **Spotlight индексирует новый `target/` в корне** (25 GB) → load avg 300–500 на этом Mac и флаки
+timing-тестов voice_lib (`test_rapid_start_stop_cycles`, `test_check_microphone_native_smoke`) — лечится
+`touch target/.metadata_never_index`; добавить в `scripts/check-ios-build.sh`/dev-setup и в CI-образ не нужно
+(Linux). Диагностика: `ps -Ao pcpu,comm -r | head` показывает `mds_store`.
 **Acceptance:** README плагина: установка, команды/события, HotkeySpec, профиль (3 пути),
 iOS-требования, `SecretStore`/consent/privacy; `ci.yml` гоняет `cargo test --workspace` (Linux);
 `release.yml` macOS-VM lane гоняет `scripts/check-ios-build.sh` (проверка, не артефакт); тег
