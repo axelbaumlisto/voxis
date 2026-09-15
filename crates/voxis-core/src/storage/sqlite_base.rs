@@ -3,8 +3,9 @@
 //! Provides common connection and schema initialization logic
 //! used by all SQLite storage implementations.
 
-use rusqlite::Connection;
-use std::path::Path;
+use rusqlite::{Connection, OpenFlags};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Trait for types that can be parsed from SQLite rows.
 /// DRY: Eliminates duplicated parse_row functions across storage modules.
@@ -60,6 +61,66 @@ where
 {
     let conn = Connection::open(path)?;
     init_schema(&conn)?;
+    Ok(conn)
+}
+
+/// `open_read_only`'s error type.
+///
+/// `NotFound` is the deliberate reason this isn't a bare
+/// `Box<dyn std::error::Error>` like `open_with_schema`: a read-only import
+/// (Task 6 `profile_source.rs`) needs to tell "Voxis isn't installed here"
+/// (missing `config.db`/`prompts.db`) apart from an actual SQLite error on
+/// a file that does exist, and doing that by string-matching the message
+/// of a generic error would be fragile.
+#[derive(Debug, thiserror::Error)]
+pub enum ReadOnlyOpenError {
+    /// The database file does not exist. Checked explicitly *before*
+    /// `Connection::open_with_flags` — `SQLITE_OPEN_READ_ONLY` never
+    /// creates a missing file (unlike the default `Connection::open`/
+    /// `open_with_schema`, which always does via the implicit
+    /// `SQLITE_OPEN_CREATE`), but a nonexistent path still fails inside
+    /// SQLite as a generic `SQLITE_CANTOPEN`; this variant gives callers
+    /// something to `matches!`/`if let` on instead of string-sniffing.
+    #[error("database file not found: {0}")]
+    NotFound(PathBuf),
+    /// Any other SQLite failure (corrupt file, permission error, etc.).
+    #[error("sqlite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+}
+
+/// Open a SQLite connection strictly read-only, for reading a database
+/// that another live process may own (`[R1-Safety S7]`: importing a
+/// profile from an installed Voxis desktop while it may be running and
+/// writing to the same files).
+///
+/// Deliberately **not** [`SqliteSchema::connect`]/[`open_with_schema`]:
+/// those always run `init_schema`, which for `ConfigSqliteStorage`/
+/// `ProvidersStorage`/`LlmPromptsStorage` can execute `CREATE TABLE`/
+/// `INSERT` statements (builtin-provider/default-prompt seeding on an
+/// empty table) — under `SQLITE_OPEN_READ_ONLY` those writes fail with
+/// `SQLITE_READONLY` even though the read the caller actually wants would
+/// have succeeded. This function opens the file exactly as it stands, no
+/// schema touched.
+///
+/// - `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX`: never creates the
+///   file; `NO_MUTEX` because each `read_only()`-constructed storage in
+///   this crate opens its own single-threaded connection per call (same
+///   assumption `Connection::open` already makes for the read-write
+///   path).
+/// - `busy_timeout(2s)`: the desktop install has no WAL mode/busy_timeout
+///   of its own, so a write transaction it briefly holds (e.g. saving
+///   config after a settings change) locks the file; without a timeout a
+///   concurrent read fails immediately with `SQLITE_BUSY` instead of
+///   waiting the short while for the writer to commit.
+pub fn open_read_only(path: &Path) -> Result<Connection, ReadOnlyOpenError> {
+    if !path.exists() {
+        return Err(ReadOnlyOpenError::NotFound(path.to_path_buf()));
+    }
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.busy_timeout(Duration::from_secs(2))?;
     Ok(conn)
 }
 
@@ -287,5 +348,143 @@ mod tests {
         let conn = storage.connect().unwrap();
         conn.execute("INSERT INTO notes (body) VALUES ('still works')", [])
             .unwrap();
+    }
+
+    // -- open_read_only ---------------------------------------------
+
+    #[test]
+    fn open_read_only_missing_file_is_not_found_and_creates_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.db");
+
+        let result = open_read_only(&path);
+
+        assert!(matches!(result, Err(ReadOnlyOpenError::NotFound(p)) if p == path));
+        assert!(!path.exists(), "read-only open must NEVER create the file");
+    }
+
+    #[test]
+    fn open_read_only_reads_existing_data_without_init_schema() {
+        let file = NamedTempFile::new().unwrap();
+        // Pre-populate with a schema/row that looks nothing like any real
+        // storage's init_schema — proves open_read_only doesn't run any
+        // CREATE TABLE of its own (it would collide/no-op either way, but
+        // this also proves it doesn't require a specific schema to open).
+        {
+            let conn = Connection::open(file.path()).unwrap();
+            conn.execute("CREATE TABLE t (v TEXT)", []).unwrap();
+            conn.execute("INSERT INTO t VALUES ('hello')", []).unwrap();
+        }
+
+        let conn = open_read_only(file.path()).unwrap();
+        let value: String = conn
+            .query_row("SELECT v FROM t", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(value, "hello");
+    }
+
+    #[test]
+    fn open_read_only_rejects_writes() {
+        let file = NamedTempFile::new().unwrap();
+        {
+            let conn = Connection::open(file.path()).unwrap();
+            conn.execute("CREATE TABLE t (v TEXT)", []).unwrap();
+        }
+
+        let conn = open_read_only(file.path()).unwrap();
+        let result = conn.execute("INSERT INTO t VALUES ('nope')", []);
+        assert!(result.is_err(), "a read-only connection must refuse writes");
+    }
+
+    /// `[R1-Safety S7]` core regression: a concurrent writer holding a
+    /// genuine EXCLUSIVE lock (`BEGIN EXCLUSIVE` — unlike a plain `BEGIN
+    /// IMMEDIATE` + a small write, which only takes a RESERVED lock and
+    /// still admits concurrent readers of the pre-transaction snapshot
+    /// without ever hitting `SQLITE_BUSY` at all; verified empirically
+    /// while writing this test — that shape let the previous version of
+    /// this test pass even with `busy_timeout` deleted entirely, so it
+    /// was not actually exercising the retry path) must not make
+    /// `open_read_only` fail with `SQLITE_BUSY`: the reader must
+    /// genuinely WAIT for the writer (asserted via elapsed time, not
+    /// just "did it eventually succeed", which a lucky non-blocking race
+    /// could also satisfy) and then succeed once the writer releases the
+    /// lock, well within the 2s `busy_timeout`.
+    #[test]
+    fn open_read_only_waits_out_a_writers_exclusive_lock_within_the_busy_timeout() {
+        let file = NamedTempFile::new().unwrap();
+        {
+            let conn = Connection::open(file.path()).unwrap();
+            conn.execute("CREATE TABLE t (v TEXT)", []).unwrap();
+            conn.execute("INSERT INTO t VALUES ('initial')", []).unwrap();
+        }
+
+        let path = file.path().to_path_buf();
+        let writer = Connection::open(&path).unwrap();
+        writer.execute("BEGIN EXCLUSIVE", []).unwrap();
+        writer.execute("UPDATE t SET v = 'mid-write'", []).unwrap();
+
+        const HOLD_MS: u64 = 200;
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(HOLD_MS));
+            writer.execute("COMMIT", []).unwrap();
+        });
+
+        let started = std::time::Instant::now();
+        let conn = open_read_only(&path).unwrap();
+        let value: String = conn
+            .query_row("SELECT v FROM t", [], |row| row.get(0))
+            .unwrap();
+        let elapsed = started.elapsed();
+
+        handle.join().unwrap();
+        assert!(
+            elapsed >= std::time::Duration::from_millis(150),
+            "the read must have actually blocked on the writer's EXCLUSIVE lock (busy_timeout retrying), \
+             not returned immediately — elapsed only {elapsed:?} against a {HOLD_MS}ms hold"
+        );
+        assert_eq!(value, "mid-write", "the read must observe the post-commit state");
+    }
+
+    /// Negative control for the test above: proves `open_read_only`'s own
+    /// `busy_timeout(2s)` call is load-bearing, not decorative. A
+    /// read-only connection opened the same way but with an explicit
+    /// **zero** `busy_timeout` (rather than skipping the call entirely —
+    /// empirically, this build's bundled SQLite retries on its own for
+    /// several *seconds* with no `busy_timeout` call at all, which would
+    /// make "skip the call" a slow, non-deterministic negative control;
+    /// `Duration::ZERO` exercises the exact same "give up immediately"
+    /// code path deterministically and fast) must fail immediately with
+    /// `SQLITE_BUSY` against the identical `BEGIN EXCLUSIVE` writer.
+    #[test]
+    fn read_only_connection_with_zero_busy_timeout_fails_fast_under_the_same_contention() {
+        let file = NamedTempFile::new().unwrap();
+        {
+            let conn = Connection::open(file.path()).unwrap();
+            conn.execute("CREATE TABLE t (v TEXT)", []).unwrap();
+            conn.execute("INSERT INTO t VALUES ('initial')", []).unwrap();
+        }
+
+        let path = file.path().to_path_buf();
+        let writer = Connection::open(&path).unwrap();
+        writer.execute("BEGIN EXCLUSIVE", []).unwrap();
+        writer.execute("UPDATE t SET v = 'mid-write'", []).unwrap();
+
+        let conn = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .unwrap();
+        conn.busy_timeout(Duration::ZERO).unwrap();
+        let result = conn.query_row("SELECT COUNT(*) FROM t", [], |row| row.get::<_, i64>(0));
+
+        writer.execute("COMMIT", []).unwrap();
+        drop(writer);
+
+        match result {
+            Err(rusqlite::Error::SqliteFailure(err, _)) => {
+                assert_eq!(err.code, rusqlite::ErrorCode::DatabaseBusy, "expected SQLITE_BUSY, got {err:?}");
+            }
+            other => panic!("expected an immediate SQLITE_BUSY with a zero busy_timeout, got {other:?}"),
+        }
     }
 }

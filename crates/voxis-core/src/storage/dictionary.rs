@@ -23,6 +23,21 @@ impl DictionaryStorage {
         Self { path }
     }
 
+    /// Task 6: same call surface as the three sqlite storages'
+    /// `::read_only(path)` constructors, for `profile_source.rs` to
+    /// construct all four uniformly. `dictionary.txt` is plain text with
+    /// no schema-init side effect to guard against — `load()` never
+    /// creates or writes the file (missing path -> empty `Vec`, matching
+    /// `ConfigSqliteStorage`'s own "missing db -> defaults, not an
+    /// error" behavior) — so this is a plain alias for `new`, documented
+    /// as the read-only entry point rather than a behavioral change.
+    /// Callers must still avoid calling `add`/`delete`/`update` on an
+    /// instance obtained this way (there is no on-disk enforcement here,
+    /// unlike the sqlite storages' `SQLITE_OPEN_READ_ONLY`).
+    pub fn read_only(path: PathBuf) -> Self {
+        Self::new(path)
+    }
+
     /// Load all dictionary entries as (source, replacement) pairs.
     /// Supports both Python format (source = replacement) and pipe format (source|replacement)
     pub fn load(&self) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
@@ -544,6 +559,24 @@ chat gpt = ChatGPT
         // Should not crash due to unescaped regex chars
         let result = storage.apply("I program in c++ every day");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn read_only_loads_existing_dictionary() {
+        let file = NamedTempFile::new().unwrap();
+        let storage = DictionaryStorage::new(file.path().to_path_buf());
+        storage.add("солид", "SOLID").unwrap();
+
+        let ro = DictionaryStorage::read_only(file.path().to_path_buf());
+        let entries = ro.load().unwrap();
+
+        assert_eq!(entries, vec![("солид".to_string(), "SOLID".to_string())]);
+    }
+
+    #[test]
+    fn read_only_missing_dictionary_file_returns_empty_not_error() {
+        let ro = DictionaryStorage::read_only(PathBuf::from("/nonexistent/dictionary.txt"));
+        assert!(ro.load().unwrap().is_empty());
     }
 
     #[test]

@@ -95,10 +95,15 @@ export type KeySourceDto = { type: "qr"; k: string; code: string } | { type: "pa
 
 /** `models::ImportSummary`. */
 export interface ImportSummary {
+  /** Where this profile came from: `"desktop"`, `"qr"`, or `"passphrase"`. */
+  source: string;
   dictionaryEntries: number;
   llmProviders: number;
   llmPrompts: number;
+  /** Whether the imported profile carried a transcription API key -- never the key itself. */
+  hasApiKey: boolean;
   theme: string;
+  hotkey: string;
 }
 
 // ---------------------------------------------------------------------

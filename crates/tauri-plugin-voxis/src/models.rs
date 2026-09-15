@@ -167,13 +167,29 @@ pub enum KeySourceDto {
 
 /// Result of applying an imported profile — what changed, without
 /// echoing back any secret values.
+///
+/// `source`/`has_api_key`/`hotkey` were added in Task 6
+/// (`import_profile_from_desktop`'s own acceptance: `{source: 'desktop',
+/// dictionary_entries, providers, prompts, has_api_key, theme, hotkey}`)
+/// — additive to Task 3's original `dictionary_entries`/`llm_providers`/
+/// `llm_prompts`/`theme` fields (kept under those existing names rather
+/// than renamed to "providers"/"prompts", so this stays backward
+/// compatible with anything already reading the Task-3 shape).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportSummary {
+    /// Where this profile came from: `"desktop"` (`import_profile_from_desktop`),
+    /// `"qr"` (`import_profile_from_qr`), or `"passphrase"`/`"qr"` (`apply_profile`,
+    /// named after the `KeySourceDto` variant used).
+    pub source: String,
     pub dictionary_entries: usize,
     pub llm_providers: usize,
     pub llm_prompts: usize,
+    /// Whether the imported profile carried a transcription API key
+    /// (`ProfileConfig::api_key_ref.is_some()`) — never the key itself.
+    pub has_api_key: bool,
     pub theme: String,
+    pub hotkey: String,
 }
 
 /// `voxis://state` event name.
@@ -361,18 +377,24 @@ mod tests {
     #[test]
     fn import_summary_fields_are_camel_case() {
         let summary = ImportSummary {
+            source: "desktop".to_string(),
             dictionary_entries: 3,
             llm_providers: 1,
             llm_prompts: 2,
+            has_api_key: true,
             theme: "default".to_string(),
+            hotkey: "alt_r".to_string(),
         };
         assert_eq!(
             serde_json::to_value(&summary).unwrap(),
             serde_json::json!({
+                "source": "desktop",
                 "dictionaryEntries": 3,
                 "llmProviders": 1,
                 "llmPrompts": 2,
+                "hasApiKey": true,
                 "theme": "default",
+                "hotkey": "alt_r",
             })
         );
     }

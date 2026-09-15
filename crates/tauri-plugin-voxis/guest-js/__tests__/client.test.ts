@@ -42,6 +42,36 @@ function createFakeIpc() {
   return { invoke, listen, emit, callOrder };
 }
 
+describe("createClient() profile commands [REJECT-FIX F1]", () => {
+  it("importProfileFromQr(payload, code) invokes import_profile_from_qr with both args", async () => {
+    const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
+    const invoke: InvokeFn = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return undefined as never;
+    });
+    const client = createClient({ invoke });
+
+    await client.importProfileFromQr("qr-payload-json", "123456");
+
+    expect(calls).toEqual([
+      { cmd: "plugin:voxis|import_profile_from_qr", args: { payload: "qr-payload-json", code: "123456" } },
+    ]);
+  });
+
+  it("importProfileFromDesktop() invokes import_profile_from_desktop with no args", async () => {
+    const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
+    const invoke: InvokeFn = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return undefined as never;
+    });
+    const client = createClient({ invoke });
+
+    await client.importProfileFromDesktop();
+
+    expect(calls).toEqual([{ cmd: "plugin:voxis|import_profile_from_desktop", args: undefined }]);
+  });
+});
+
 describe("createClient().dictate", () => {
   afterEach(() => {
     vi.useRealTimers();

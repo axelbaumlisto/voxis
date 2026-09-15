@@ -51,6 +51,13 @@ uuid = { version = "1", features = ["v4"] }
 # own actually populating it from a `VoxisProfile`).
 regex = "1"
 
+# Task 6: `import_profile_from_qr`'s plain-HTTP GET to the desktop's
+# on-LAN profile-share server (Task 7, `[R1-Safety T1]` — that server is
+# deliberately plain HTTP, not HTTPS: LAN-only, single-use token, short
+# TTL). `default-features = false` drops reqwest's default TLS/system-
+# configuration features; this crate never dials `https://`.
+reqwest = { version = "0.12", default-features = false }
+
 # Task 4, all optional and pulled in only by the `desktop` feature below —
 # a plain (non-target-gated) dependency, same as `voxis-core`'s own
 # `rdev` optional dep: `cargo build -p tauri-plugin-voxis --target
@@ -78,6 +85,15 @@ desktop = ["dep:cpal", "dep:rdev", "voxis-core/rdev"]
 [dev-dependencies]
 tempfile = "3"
 mockito = "1"
+# Task 6 `profile_source.rs` tests: byte-verifies mtime+sha256 of the
+# desktop's fixture DBs are unchanged after a full read-only profile
+# import. Same version voxis-core already pins.
+sha2 = "0.10"
+# Task 6 `profile_source.rs` tests: opens a second, direct write
+# connection to a fixture desktop config.db to simulate a concurrently-
+# running Voxis holding a write transaction during import. Same version +
+# `bundled` feature voxis-core already pins.
+rusqlite = { version = "0.32", features = ["bundled"] }
 # `test-util` (for `tokio::time::pause`/`advance`, `#[tokio::test(start_paused
 # = true)]`) is additive only for this crate's own test builds — cargo
 # does not fold dev-dependency features into the plain `cargo build` of

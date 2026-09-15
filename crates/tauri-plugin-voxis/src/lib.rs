@@ -47,6 +47,13 @@ pub mod hotkey_desktop;
 pub mod lease;
 pub mod models;
 pub mod pipeline;
+// Task 6: `VoxisProfile` sources/sinks -- desktop-directory discovery +
+// read-only import, the plugin's own profile storage, and the QR/file
+// transports' shared "apply what we got" path. Public so `commands.rs`'s
+// thin command wrappers and `examples/host-min` (Task 6 acceptance #5's
+// `profile-import` smoke scenario) can call `import_from_desktop`
+// directly.
+pub mod profile_source;
 pub mod secrets;
 pub mod session;
 
@@ -126,6 +133,15 @@ pub struct PluginState {
     /// Hardcoded to the desktop Voxis default (Groq) until Task 2/6 wire
     /// this from the active `VoxisProfile` instead.
     pub provider_host: String,
+    /// Task 6: `<host-config>/voxis-plugin/` — the plugin's OWN profile
+    /// storage root (`config.db`/`dictionary.txt`/`providers.db`/
+    /// `prompts.db`, via `profile_source::PluginProfileStorage`). Same
+    /// directory `secrets`/`consent` already use (`PLUGIN_DIR_NAME`);
+    /// kept as its own field (not recomputed from a stored `config_dir`,
+    /// which `PluginState` doesn't otherwise retain) so `profile_source.rs`
+    /// doesn't need a second constructor argument threaded through
+    /// `PluginState::new`/`build`.
+    pub profile_dir: PathBuf,
 }
 
 impl PluginState {
@@ -176,6 +192,7 @@ impl PluginState {
             hotkey,
             host_id: "default-host".to_string(),
             provider_host: "api.groq.com".to_string(),
+            profile_dir: plugin_config_dir,
         }
     }
 }
@@ -487,6 +504,7 @@ mod hotkey_sink_tests {
             hotkey: None,
             host_id: "test-host".to_string(),
             provider_host: "api.groq.com".to_string(),
+            profile_dir: tmp.path().join("voxis-plugin"),
         };
         state.consent.set_consent("test-host", "api.groq.com", true).unwrap();
         state

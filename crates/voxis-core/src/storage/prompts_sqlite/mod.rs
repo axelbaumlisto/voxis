@@ -24,17 +24,41 @@ use super::sqlite_base::SqliteSchema;
 
 pub struct LlmPromptsStorage {
     path: PathBuf,
+    /// Task 6: see `ConfigSqliteStorage`'s field of the same name.
+    read_only: bool,
 }
 
 impl LlmPromptsStorage {
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self { path, read_only: false }
+    }
+
+    /// Open an existing `prompts.db` strictly read-only — see
+    /// `ConfigSqliteStorage::read_only`'s doc comment (`[R1-Safety S7]`).
+    /// An older Voxis install predating multi-prompt support has no
+    /// `prompts.db` at all; callers (`profile_source.rs`) are expected to
+    /// check `path.exists()` themselves and skip constructing this at all
+    /// in that case (`list()`/`get_active_id()` would otherwise surface
+    /// `sqlite_base::ReadOnlyOpenError::NotFound`, not an empty result) —
+    /// see that module's doc comment for exactly how it turns "missing
+    /// prompts.db" into "profile without prompts", not an error.
+    pub fn read_only(path: PathBuf) -> Self {
+        Self { path, read_only: true }
+    }
+
+    /// DRY seam every method below calls instead of `self.connect()`.
+    fn conn(&self) -> Result<Connection, Box<dyn std::error::Error>> {
+        if self.read_only {
+            Ok(super::sqlite_base::open_read_only(&self.path)?)
+        } else {
+            self.connect()
+        }
     }
 
     /// First-run seed: if the table is empty, insert the canonical defaults.
     /// Idempotent — calling this on a populated table is a no-op.
     pub fn seed_defaults_if_empty(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM llm_prompts", [], |r| r.get(0))?;
         if count == 0 {
             for p in default_prompts() {
@@ -48,7 +72,7 @@ impl LlmPromptsStorage {
     }
 
     pub fn list(&self) -> Result<Vec<LlmPrompt>, Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
         let mut stmt =
             conn.prepare("SELECT id, name, prompt FROM llm_prompts ORDER BY created_at ASC")?;
         let rows = stmt.query_map([], |row| {
@@ -62,7 +86,7 @@ impl LlmPromptsStorage {
     }
 
     pub fn get(&self, id: &str) -> Result<Option<LlmPrompt>, Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
         let row = conn
             .query_row(
                 "SELECT id, name, prompt FROM llm_prompts WHERE id = ?1",
@@ -88,7 +112,7 @@ impl LlmPromptsStorage {
         name: &str,
         prompt: &str,
     ) -> Result<LlmPrompt, Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
         conn.execute(
             "INSERT INTO llm_prompts (id, name, prompt) VALUES (?1, ?2, ?3)",
             params![id, name, prompt],
@@ -108,7 +132,7 @@ impl LlmPromptsStorage {
         name: &str,
         prompt: &str,
     ) -> Result<LlmPrompt, Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
         let n = conn.execute(
             "UPDATE llm_prompts \
                 SET name = ?2, prompt = ?3, updated_at = strftime('%s','now') \
@@ -126,7 +150,7 @@ impl LlmPromptsStorage {
     }
 
     pub fn delete(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
         conn.execute("DELETE FROM llm_prompts WHERE id = ?1", params![id])?;
         // If the deleted prompt was the active one, clear the pointer
         // so we never end up pointing to a ghost id.
@@ -138,7 +162,7 @@ impl LlmPromptsStorage {
     }
 
     pub fn get_active_id(&self) -> Result<Option<String>, Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
         let id: Option<String> = conn
             .query_row(
                 "SELECT value FROM llm_prompts_state WHERE key = 'active_id'",
@@ -151,7 +175,7 @@ impl LlmPromptsStorage {
     }
 
     pub fn set_active_id(&self, id: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
         match id {
             Some(v) => {
                 conn.execute(

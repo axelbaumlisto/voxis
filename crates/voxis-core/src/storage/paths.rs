@@ -19,7 +19,20 @@ pub const LEGACY_CONFIG_DIR: &str = "soupawhisper";
 /// This is the pure, host-agnostic building block other consumers (a future
 /// `tauri-plugin-voxis` reading the desktop install's profile, this crate's
 /// data-gate test) can call without a `tauri::AppHandle`.
+///
+/// `VOXIS_DESKTOP_CONFIG_DIR` env override, checked first: Task 6's
+/// `import_profile_from_desktop` (and `examples/host-min`'s
+/// `profile-import` smoke scenario) need to point this at a fixture
+/// directory instead of the real `~/Library/Application Support/voxis` —
+/// same pattern other Voxis-family tools use for test isolation. Empty
+/// string is treated the same as unset (a cleared-but-still-exported var
+/// in some shells) rather than resolving to a bogus empty `PathBuf`.
 pub fn voxis_desktop_config_dir() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("VOXIS_DESKTOP_CONFIG_DIR") {
+        if !dir.is_empty() {
+            return Some(PathBuf::from(dir));
+        }
+    }
     dirs::config_dir().map(|dir| dir.join(APP_CONFIG_DIR))
 }
 
@@ -258,6 +271,40 @@ impl AppPaths {
 }
 
 #[cfg(test)]
+/// Serializes every test that reads or sets `VOXIS_DESKTOP_CONFIG_DIR` —
+/// process env vars are global state, and cargo runs a crate's tests in
+/// parallel threads by default. Any test that calls
+/// `voxis_desktop_config_dir()` (even ones that never touch the env var
+/// themselves, like the two pre-existing tests below) must hold this lock
+/// for its whole assertion, or a concurrent env-override test could flip
+/// the var out from under it.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+/// RAII guard: sets `VOXIS_DESKTOP_CONFIG_DIR` under `ENV_LOCK` and always
+/// clears it again on drop (including on test panic), so one failing
+/// assertion can never leak the override into an unrelated later test.
+struct DesktopConfigDirEnvOverride {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl DesktopConfigDirEnvOverride {
+    fn set(value: &str) -> Self {
+        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("VOXIS_DESKTOP_CONFIG_DIR", value);
+        Self { _lock: lock }
+    }
+}
+
+#[cfg(test)]
+impl Drop for DesktopConfigDirEnvOverride {
+    fn drop(&mut self) {
+        std::env::remove_var("VOXIS_DESKTOP_CONFIG_DIR");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -267,6 +314,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn voxis_desktop_config_dir_matches_v0_1_5_on_macos() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = voxis_desktop_config_dir().expect("config_dir resolvable");
         assert!(
             dir.ends_with("Library/Application Support/voxis"),
@@ -279,7 +327,42 @@ mod tests {
         // `app_config_dir()` is kept as a thin alias for existing callers
         // (setup/logging, diagnostics/fatal, diagnostics/heartbeat); both
         // must resolve to the identical path.
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(voxis_desktop_config_dir(), app_config_dir());
+    }
+
+    // -- VOXIS_DESKTOP_CONFIG_DIR override ---------------------------
+
+    #[test]
+    fn voxis_desktop_config_dir_env_override_wins() {
+        let _guard = DesktopConfigDirEnvOverride::set("/tmp/some-fixture-voxis-config");
+        assert_eq!(
+            voxis_desktop_config_dir(),
+            Some(PathBuf::from("/tmp/some-fixture-voxis-config"))
+        );
+    }
+
+    #[test]
+    fn voxis_desktop_config_dir_env_override_empty_string_is_treated_as_unset() {
+        let _guard = DesktopConfigDirEnvOverride::set("");
+        assert_eq!(
+            voxis_desktop_config_dir(),
+            dirs::config_dir().map(|dir| dir.join(APP_CONFIG_DIR)),
+            "an empty VOXIS_DESKTOP_CONFIG_DIR must fall back to the real config dir, not resolve to an empty path"
+        );
+    }
+
+    #[test]
+    fn voxis_desktop_config_dir_without_override_is_unaffected() {
+        // No override set (and none from a previous test leaked, guaranteed
+        // by `DesktopConfigDirEnvOverride`'s Drop) — same value as the
+        // no-env-var baseline.
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(std::env::var("VOXIS_DESKTOP_CONFIG_DIR").is_err());
+        assert_eq!(
+            voxis_desktop_config_dir(),
+            dirs::config_dir().map(|dir| dir.join(APP_CONFIG_DIR))
+        );
     }
 
     #[test]

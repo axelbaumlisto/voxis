@@ -13,11 +13,10 @@
 //! only ever locked for the duration of a single, non-blocking method
 //! call \u2014 `begin`/`signal`/`end`/etc. \u2014 never held across a `.await`
 //! point in this file). `get_profile`/`apply_profile`/
-//! `import_profile_from_desktop`/`import_profile_from_qr` are wired
-//! (present in `COMMANDS` and the invoke handler, so permissions/ACL and
-//! any host capability file are ready for Task 2/6/7) but return
-//! `PluginError::NotImplemented` \u2014 those tasks own the real
-//! implementation.
+//! `import_profile_from_desktop`/`import_profile_from_qr` (Task 6/7)
+//! delegate to `profile_source.rs`: the first three are synchronous
+//! (local storage only); `import_profile_from_qr` is `async` (it makes
+//! an HTTP call to the desktop's LAN profile-share server, Task 7).
 
 use tauri::State as TauriState;
 
@@ -25,6 +24,7 @@ use crate::capture::RecFile;
 use crate::error::PluginError;
 use crate::models::{DictationResult, HotkeySpec, ImportSummary, KeySourceDto, Mode, SessionId};
 use crate::pipeline;
+use crate::profile_source;
 use crate::session::ControlSignal;
 use crate::PluginState;
 
@@ -153,32 +153,35 @@ pub fn state(state: TauriState<'_, PluginState>) -> crate::models::State {
 }
 
 #[tauri::command]
-pub fn get_profile(_state: TauriState<'_, PluginState>) -> Result<serde_json::Value, PluginError> {
-    Err(PluginError::NotImplemented { what: "get_profile (Task 2/6)".to_string() })
+pub fn get_profile(state: TauriState<'_, PluginState>) -> Result<serde_json::Value, PluginError> {
+    let profile = profile_source::current_profile(&state)?;
+    serde_json::to_value(&profile)
+        .map_err(|e| PluginError::Profile { message: format!("serializing profile: {e}") })
 }
 
 #[tauri::command]
 pub fn apply_profile(
-    _state: TauriState<'_, PluginState>,
-    _bytes: Vec<u8>,
-    _key_source: KeySourceDto,
+    state: TauriState<'_, PluginState>,
+    bytes: Vec<u8>,
+    key_source: KeySourceDto,
 ) -> Result<ImportSummary, PluginError> {
-    Err(PluginError::NotImplemented { what: "apply_profile (Task 2)".to_string() })
+    profile_source::apply_profile_bytes(&state, &bytes, key_source)
 }
 
 #[tauri::command]
 pub fn import_profile_from_desktop(
-    _state: TauriState<'_, PluginState>,
+    state: TauriState<'_, PluginState>,
 ) -> Result<ImportSummary, PluginError> {
-    Err(PluginError::NotImplemented { what: "import_profile_from_desktop (Task 6)".to_string() })
+    profile_source::import_from_desktop(&state)
 }
 
 #[tauri::command]
-pub fn import_profile_from_qr(
-    _state: TauriState<'_, PluginState>,
-    _payload: String,
+pub async fn import_profile_from_qr(
+    state: TauriState<'_, PluginState>,
+    payload: String,
+    code: String,
 ) -> Result<ImportSummary, PluginError> {
-    Err(PluginError::NotImplemented { what: "import_profile_from_qr (Task 7)".to_string() })
+    profile_source::import_from_qr(&state, &payload, code).await
 }
 
 pub(crate) fn do_set_hotkey(state: &PluginState, spec: &HotkeySpec) -> Result<(), PluginError> {
@@ -248,6 +251,7 @@ mod tests {
             hotkey: None,
             host_id: "test-host".to_string(),
             provider_host: "api.groq.com".to_string(),
+            profile_dir: tmp.path().join("voxis-plugin"),
         };
         (state, mock)
     }

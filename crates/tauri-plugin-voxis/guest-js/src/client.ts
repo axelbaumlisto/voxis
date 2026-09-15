@@ -56,7 +56,7 @@ export interface VoxisClient {
   getProfile(): Promise<VoxisProfileDto>;
   applyProfile(bytes: number[], keySource: KeySourceDto): Promise<ImportSummary>;
   importProfileFromDesktop(): Promise<ImportSummary>;
-  importProfileFromQr(payload: string): Promise<ImportSummary>;
+  importProfileFromQr(payload: string, code: string): Promise<ImportSummary>;
   setHotkey(spec: HotkeySpec): Promise<void>;
   setConsent(consented: boolean): Promise<void>;
   holdLease(id: SessionId): Promise<void>;
@@ -118,7 +118,8 @@ export function createClient(deps: VoxisClientDeps = {}): VoxisClient {
     getProfile: () => invoke<VoxisProfileDto>(pluginCommand("get_profile")),
     applyProfile: (bytes, keySource) => invoke<ImportSummary>(pluginCommand("apply_profile"), { bytes, keySource }),
     importProfileFromDesktop: () => invoke<ImportSummary>(pluginCommand("import_profile_from_desktop")),
-    importProfileFromQr: (payload) => invoke<ImportSummary>(pluginCommand("import_profile_from_qr"), { payload }),
+    importProfileFromQr: (payload, code) =>
+      invoke<ImportSummary>(pluginCommand("import_profile_from_qr"), { payload, code }),
     setHotkey: (spec: HotkeySpec) => invoke<void>(pluginCommand("set_hotkey"), { spec }),
     setConsent: (consented) => invoke<void>(pluginCommand("set_consent"), { consented }),
     holdLease: (id) => invoke<void>(pluginCommand("hold_lease"), { id }),

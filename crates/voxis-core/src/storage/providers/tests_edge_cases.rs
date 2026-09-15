@@ -226,3 +226,71 @@ fn test_list_providers_sorted() {
     sorted_names.sort();
     assert_eq!(custom_names, sorted_names);
 }
+
+// -- Task 6: ::read_only() -----------------------------------------
+
+#[test]
+fn read_only_reads_seeded_builtin_providers_without_writing() {
+    let file = NamedTempFile::new().unwrap();
+    let path = file.path().to_path_buf();
+    // Seed via a normal (read-write) instance first -- a real desktop
+    // install's providers.db always already has its builtin rows.
+    ProvidersStorage::new(path.clone()).get_all().unwrap();
+
+    let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+    let ro = ProvidersStorage::read_only(path.clone());
+    let providers = ro.get_all().unwrap();
+    let after = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+    assert!(providers.iter().any(|p| p.id == "groq"));
+    assert_eq!(before, after, "a read-only get_all must not touch the file's mtime");
+}
+
+#[test]
+fn read_only_missing_providers_db_does_not_create_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("providers.db");
+    let ro = ProvidersStorage::read_only(path.clone());
+
+    let result = ro.get_all();
+
+    assert!(result.is_err());
+    assert!(!path.exists(), "read-only open must never create providers.db");
+}
+
+/// `[R1-Safety S7]` core regression at the storage layer (not just
+/// `sqlite_base`'s own unit test): a real `ProvidersStorage::read_only`
+/// import must succeed even while a genuine writer connection (using the
+/// same `SqliteSchema::connect()` desktop code path, seeding included)
+/// holds an open write transaction on the same file.
+#[test]
+fn read_only_succeeds_while_a_writer_holds_a_transaction() {
+    let file = NamedTempFile::new().unwrap();
+    let path = file.path().to_path_buf();
+    ProvidersStorage::new(path.clone()).get_all().unwrap(); // seed
+
+    let writer = rusqlite::Connection::open(&path).unwrap();
+    writer.execute("BEGIN IMMEDIATE", []).unwrap();
+    writer
+        .execute(
+            "UPDATE llm_providers SET name = 'Groq (mid-write)' WHERE id = 'groq'",
+            [],
+        )
+        .unwrap();
+
+    let released = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let released_writer = released.clone();
+    let handle = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        writer.execute("COMMIT", []).unwrap();
+        released_writer.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+
+    let ro = ProvidersStorage::read_only(path);
+    let providers = ro.get_all().unwrap();
+
+    handle.join().unwrap();
+    assert!(released.load(std::sync::atomic::Ordering::SeqCst));
+    let groq = providers.iter().find(|p| p.id == "groq").unwrap();
+    assert_eq!(groq.name, "Groq", "read must observe the pre-transaction committed state");
+}

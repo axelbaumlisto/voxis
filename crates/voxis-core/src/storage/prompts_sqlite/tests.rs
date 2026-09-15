@@ -86,3 +86,42 @@ fn active_id_roundtrip() {
     s.set_active_id(None).expect("clear");
     assert!(s.get_active_id().expect("after clear").is_none());
 }
+
+// -- Task 6: ::read_only() ------------------------------------------
+
+#[test]
+fn read_only_lists_seeded_prompts_without_writing() {
+    let (_dir, paths) = create_temp_paths();
+    let path = paths.prompts_db();
+    let seeded = LlmPromptsStorage::new(path.clone());
+    seeded.seed_defaults_if_empty().unwrap();
+    seeded.set_active_id(Some("fix_grammar")).unwrap();
+
+    let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+    let ro = LlmPromptsStorage::read_only(path.clone());
+    let list = ro.list().unwrap();
+    let active = ro.get_active_id().unwrap();
+    let after = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+    assert_eq!(list.len(), 4);
+    assert_eq!(active.as_deref(), Some("fix_grammar"));
+    assert_eq!(before, after, "a read-only list/get_active_id must not touch the file's mtime");
+}
+
+#[test]
+fn read_only_missing_prompts_db_does_not_create_it() {
+    let (_dir, paths) = create_temp_paths();
+    let path = paths.prompts_db();
+    assert!(!path.exists());
+    let ro = LlmPromptsStorage::read_only(path.clone());
+
+    let result = ro.list();
+
+    assert!(
+        result.is_err(),
+        "an older Voxis install's missing prompts.db must surface as an error from this \
+         storage -- profile_source.rs is the layer that turns it into an empty-prompts profile, \
+         not this storage silently returning an empty Vec"
+    );
+    assert!(!path.exists(), "read-only open must never create prompts.db");
+}

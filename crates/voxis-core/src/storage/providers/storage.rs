@@ -11,11 +11,34 @@ use crate::storage::sqlite_base::SqliteSchema;
 /// SQLite storage for LLM providers.
 pub struct ProvidersStorage {
     path: PathBuf,
+    /// Task 6: see `ConfigSqliteStorage`'s field of the same name —
+    /// identical DRY-read-only-connection pattern.
+    read_only: bool,
 }
 
 impl ProvidersStorage {
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self { path, read_only: false }
+    }
+
+    /// Open an existing `providers.db` strictly read-only — see
+    /// `ConfigSqliteStorage::read_only`'s doc comment for the full
+    /// rationale (`[R1-Safety S7]`). Crucially skips `init_schema`'s
+    /// `insert_defaults` seeding-on-empty-table write, which would
+    /// otherwise fail with `SQLITE_READONLY` under a read-only connection
+    /// on a not-yet-seeded (impossible for a real install, but not
+    /// something this constructor should assume) database.
+    pub fn read_only(path: PathBuf) -> Self {
+        Self { path, read_only: true }
+    }
+
+    /// DRY seam every method below calls instead of `self.connect()`.
+    fn conn(&self) -> Result<Connection, Box<dyn std::error::Error>> {
+        if self.read_only {
+            Ok(crate::storage::sqlite_base::open_read_only(&self.path)?)
+        } else {
+            self.connect()
+        }
     }
 
     /// Insert default providers.
@@ -53,7 +76,7 @@ impl ProvidersStorage {
 
     /// Get all providers.
     pub fn get_all(&self) -> Result<Vec<LlmProvider>, Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
 
         let mut stmt = conn.prepare(
             "SELECT id, name, api_url, models, default_model, builtin
@@ -73,7 +96,7 @@ impl ProvidersStorage {
 
     /// Get a provider by ID.
     pub fn get(&self, id: &str) -> Result<Option<LlmProvider>, Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
 
         let result = conn.query_row(
             "SELECT id, name, api_url, models, default_model, builtin
@@ -92,7 +115,7 @@ impl ProvidersStorage {
 
     /// Add a new provider.
     pub fn add(&self, provider: &LlmProvider) -> Result<(), Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
         let models_json = serde_json::to_string(&provider.models)?;
 
         conn.execute(
@@ -112,7 +135,7 @@ impl ProvidersStorage {
 
     /// Update an existing provider.
     pub fn update(&self, provider: &LlmProvider) -> Result<(), Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
         let models_json = serde_json::to_string(&provider.models)?;
 
         conn.execute(
@@ -133,7 +156,7 @@ impl ProvidersStorage {
 
     /// Remove a provider (only non-builtin).
     pub fn remove(&self, id: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
 
         // Check if builtin
         let builtin: i32 = conn

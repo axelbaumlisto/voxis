@@ -66,6 +66,24 @@ pub enum PluginError {
     /// stuck-recording incident).
     #[error("hotkey permission denied: {message}")]
     PermissionDenied { message: String },
+    /// Task 6: `import_profile_from_desktop` found no installed Voxis
+    /// desktop on this machine (no `config.db` under
+    /// `voxis_core::storage::paths::voxis_desktop_config_dir()`).
+    #[error("Voxis desktop installation not found: {message}")]
+    NotFound { message: String },
+    /// Task 6/7: any failure building/reading/decrypting a `VoxisProfile`
+    /// — `voxis_core::profile::ProfileError` (crypto/validation/storage),
+    /// a malformed QR payload, or an HTTP-level rejection
+    /// (expired/reused token, non-2xx) from the desktop's profile-share
+    /// server (`import_profile_from_qr`).
+    #[error("profile error: {message}")]
+    Profile { message: String },
+}
+
+impl From<voxis_core::profile::ProfileError> for PluginError {
+    fn from(e: voxis_core::profile::ProfileError) -> Self {
+        PluginError::Profile { message: e.to_string() }
+    }
 }
 
 impl From<CaptureError> for PluginError {
@@ -113,5 +131,20 @@ mod tests {
     fn capture_error_converts_with_message_preserved() {
         let err: PluginError = CaptureError::AlreadyRunning.into();
         assert_eq!(err, PluginError::Capture { message: "capture already running".to_string() });
+    }
+
+    #[test]
+    fn not_found_serializes_with_kind_tag() {
+        let value =
+            serde_json::to_value(PluginError::NotFound { message: "no config.db".to_string() }).unwrap();
+        assert_eq!(value, serde_json::json!({"kind": "notFound", "message": "no config.db"}));
+    }
+
+    #[test]
+    fn profile_error_converts_from_voxis_core_profile_error() {
+        let core_err = voxis_core::profile::ProfileError::UnsupportedVersion { found: 2 };
+        let err: PluginError = core_err.into();
+        assert!(matches!(err, PluginError::Profile { .. }));
+        assert!(err.to_string().contains("unsupported profile version 2"));
     }
 }

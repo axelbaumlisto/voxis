@@ -12,16 +12,47 @@ use super::sqlite_base::SqliteSchema;
 /// SQLite storage for config.
 pub struct ConfigSqliteStorage {
     path: PathBuf,
+    /// Task 6: when `true`, every connection this storage opens goes
+    /// through `sqlite_base::open_read_only` (no `init_schema`, no
+    /// writes possible) instead of `SqliteSchema::connect`. See
+    /// `read_only`'s doc comment.
+    read_only: bool,
 }
 
 impl ConfigSqliteStorage {
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self { path, read_only: false }
+    }
+
+    /// Open an existing `config.db` strictly read-only — for
+    /// `import_profile_from_desktop` reading an installed Voxis desktop's
+    /// database, which may be open and being written to by that other
+    /// process at the same time (`[R1-Safety S7]`). Every connection this
+    /// instance opens (`load`/`is_empty`, and `save` if ever mistakenly
+    /// called on it) goes through `sqlite_base::open_read_only` — no
+    /// `CREATE TABLE`/`INSERT` (`init_schema`) ever runs, and an actual
+    /// write attempt fails with `SQLITE_READONLY` rather than silently
+    /// succeeding. A missing `path` surfaces as
+    /// `sqlite_base::ReadOnlyOpenError::NotFound` from the first call that
+    /// opens a connection, not from this constructor (which never touches
+    /// the filesystem).
+    pub fn read_only(path: PathBuf) -> Self {
+        Self { path, read_only: true }
+    }
+
+    /// DRY seam every method below calls instead of `self.connect()`
+    /// directly — the one place the `read_only` flag is honored.
+    fn conn(&self) -> Result<Connection, Box<dyn std::error::Error>> {
+        if self.read_only {
+            Ok(super::sqlite_base::open_read_only(&self.path)?)
+        } else {
+            self.connect()
+        }
     }
 
     /// Check if the config database is empty.
     pub fn is_empty(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM config", [], |row| row.get(0))?;
         Ok(count == 0)
     }
@@ -108,7 +139,7 @@ impl ConfigSqliteStorage {
             return Ok(AppConfig::default());
         }
 
-        let conn = self.connect()?;
+        let conn = self.conn()?;
         let mut config = AppConfig::default();
 
         // API settings
@@ -249,7 +280,7 @@ impl ConfigSqliteStorage {
 
     /// Save config to SQLite database.
     pub fn save(&self, config: &AppConfig) -> Result<(), Box<dyn std::error::Error>> {
-        let conn = self.connect()?;
+        let conn = self.conn()?;
 
         // API settings
         self.set(&conn, "api_key", &config.api_key)?;
@@ -1016,5 +1047,56 @@ mod tests {
         let loaded = storage.load().unwrap();
         assert_eq!(loaded.silence_timeout_ms, 60_000);
         assert_eq!(loaded.max_recording_ms, 600_000);
+    }
+
+    // -- Task 6: ::read_only() -----------------------------------------
+
+    #[test]
+    fn read_only_loads_an_existing_config_without_writing_to_it() {
+        let file = NamedTempFile::new().unwrap();
+        let path = file.path().to_path_buf();
+        let mut config = AppConfig {
+            api_key: "desktop-secret-key".to_string(),
+            hotkey: "alt_r".to_string(),
+            ..AppConfig::default()
+        };
+        config.llm.api_key = "llm-secret-key".to_string();
+        ConfigSqliteStorage::new(path.clone()).save(&config).unwrap();
+
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let ro = ConfigSqliteStorage::read_only(path.clone());
+        let loaded = ro.load().unwrap();
+        let after = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        assert_eq!(loaded.api_key, "desktop-secret-key");
+        assert_eq!(loaded.hotkey, "alt_r");
+        assert_eq!(loaded.llm.api_key, "llm-secret-key");
+        assert_eq!(before, after, "a read-only load must not touch the file's mtime");
+    }
+
+    #[test]
+    fn read_only_save_fails_instead_of_silently_writing() {
+        let file = NamedTempFile::new().unwrap();
+        let path = file.path().to_path_buf();
+        ConfigSqliteStorage::new(path.clone())
+            .save(&AppConfig::default())
+            .unwrap();
+
+        let ro = ConfigSqliteStorage::read_only(path);
+        let result = ro.save(&AppConfig::default());
+
+        assert!(result.is_err(), "a read-only-constructed storage must refuse writes, not silently succeed");
+    }
+
+    #[test]
+    fn read_only_missing_config_db_does_not_create_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.db");
+        let ro = ConfigSqliteStorage::read_only(path.clone());
+
+        let result = ro.is_empty();
+
+        assert!(result.is_err());
+        assert!(!path.exists(), "read-only open must never create config.db");
     }
 }
