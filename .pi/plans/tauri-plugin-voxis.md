@@ -367,7 +367,7 @@ naked** (jsdom + CSP meta), lease-тик.
 5. `theme-bridge.ts`: адаптер ThemeApi (уровень, состояние) → существующий контракт тем.
 6. Тесты + harness-страница.
 
-### Task 3.5: Tracer bullet (desktop) — `examples/host-min` + `voxis-fake-stt` + Playwright
+### Task 3.5: ⏸ part 1 (CI/mock) APPROVED `fff6245` (2 rounds); part 2 HUMAN GATE (real mic + Groq) — PENDING user presence — Tracer bullet (desktop) — `examples/host-min` + `voxis-fake-stt` + Playwright
 **Files:** `crates/voxis-fake-stt/**`, `crates/tauri-plugin-voxis/examples/host-min/**` (в т.ч.
 `src-tauri/tauri.conf.json` с **CSP, идентичной naked** `[R1-Safety S3]`),
 `crates/tauri-plugin-voxis/contract/fixtures/*.json` (включая `profile-qr.json` `[R1-Safety T1]`),
@@ -738,6 +738,12 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
   - Заменить системную диктовку Siri нельзя; iOS 27 private hooks «Siri Extensions / Model
     Delegation» не включены (вероятно EU-only) — следить.
 - Voxis desktop сам как хост своего плагина (dogfooding, убирает дублирование `audio/`).
+- `[ADO-3.5 notes]` `src-tauri/tests/audio_integration.rs` (реальный микрофон, `stop() < 600 ms`) флакает
+  одинаково на HEAD при занятом CoreAudio (`SimAudioProc` iOS Simulator, `heard`, работающий Voxis) — не
+  гейт /ado, но перед hardware-прогонами закрывать Simulator. host-min лезет в `pub PluginState.pipeline_config/secrets`
+  вместо `apply_profile` — заменить в T6/T7. Playwright/tauri-driver для host-min невозможен на macOS и
+  отсутствует в CI-образе → CI гонит реальный бинарь под xvfb (3 сценария); reload-during-Hold покрыт
+  только unit-тестами 3b; CSP-нарушения в живом webview — проверить руками на human gate.
 - `[ADO-4 minors]` перенести `HotkeyTracker` + таблицу букв/цифр из плагина в `voxis_core::hotkey`, чтобы desktop
   Voxis получил комбо и был один трекер; edge-loop сериализован за latency транскрипции (await только ack
   `signal(Stop)`, не outcome); level-thread sleep 250 мс → stop() ждёт до 250 мс (нарезать); первая
