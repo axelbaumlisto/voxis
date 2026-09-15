@@ -320,7 +320,7 @@ lease не требует; Tauri-хуки `on_page_load` / web-content-process-t
    **SIGKILL хоста во время Recording → relaunch → `rec/` пуст**; `grep -c sk- <plugin-config>/*.db == 0`
    после apply_profile.
 
-### Task 4: Desktop-реализация: cpal capture + rdev hotkey
+### Task 4: ✅ APPROVED `baf60f7` (2 rounds) — Desktop-реализация: cpal capture + rdev hotkey
 **Files:** `crates/tauri-plugin-voxis/src/{desktop.rs,hotkey_desktop.rs}`, `…/Cargo.toml`,
 `…/examples/host-min/src-tauri/src/main.rs` (вариант `VOXIS_CAPTURE=cpal`) `[R2-Coherence contradiction]`
 **Depends:** Task 3b (T3.5 теперь зависит от T4: реальный микрофон в tracer bullet)
@@ -738,6 +738,11 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
   - Заменить системную диктовку Siri нельзя; iOS 27 private hooks «Siri Extensions / Model
     Delegation» не включены (вероятно EU-only) — следить.
 - Voxis desktop сам как хост своего плагина (dogfooding, убирает дублирование `audio/`).
+- `[ADO-4 minors]` перенести `HotkeyTracker` + таблицу букв/цифр из плагина в `voxis_core::hotkey`, чтобы desktop
+  Voxis получил комбо и был один трекер; edge-loop сериализован за latency транскрипции (await только ack
+  `signal(Stop)`, не outcome); level-thread sleep 250 мс → stop() ждёт до 250 мс (нарезать); первая
+  регистрация hotkey может вернуть Ok при падении `rdev::listen` после 300 мс; host-min в workspace →
+  `cargo test --workspace` компилирует полный tauri-app (CI-время).
 - `[ADO-3b/5 minors]` 3b: DRY — `apply_entries(text,&[(String,String)])` в `voxis_core::storage::dictionary`
   (сейчас копия цикла в pipeline.rs с тестом-эквивалентом); ABA-тест lease с ОДНИМ общим SessionGuard
   и stale-id heartbeat; документировать в контракте: `voxis://result` эмитится ДО освобождения слота —
