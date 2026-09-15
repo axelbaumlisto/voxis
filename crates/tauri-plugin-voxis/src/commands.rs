@@ -181,15 +181,20 @@ pub fn import_profile_from_qr(
     Err(PluginError::NotImplemented { what: "import_profile_from_qr (Task 7)".to_string() })
 }
 
+pub(crate) fn do_set_hotkey(state: &PluginState, spec: &HotkeySpec) -> Result<(), PluginError> {
+    // `state.hotkey` is `None` on platforms/builds with no OS-level
+    // hotkey backend (iOS, or a desktop build without the `desktop`
+    // feature) -- same no-op the pre-Task-4 stub was, now delegating to
+    // `hotkey_desktop::RdevHotkey` (Task 4) when present.
+    match &state.hotkey {
+        Some(hotkey) => hotkey.set_hotkey(spec),
+        None => Ok(()),
+    }
+}
+
 #[tauri::command]
-pub fn set_hotkey(_state: TauriState<'_, PluginState>, spec: HotkeySpec) -> Result<(), PluginError> {
-    // Task 3 stub: stores nothing yet (no desktop/iOS backend to
-    // (re)register against \u2014 that's Task 4/8). Present so the command
-    // surface, permissions, and `HotkeySpec` wire format are all fixed
-    // now; a later task is expected to add a `Mutex<HotkeySpec>`-style
-    // field to `PluginState` once there's a real listener to update.
-    let _ = spec;
-    Ok(())
+pub fn set_hotkey(state: TauriState<'_, PluginState>, spec: HotkeySpec) -> Result<(), PluginError> {
+    do_set_hotkey(&state, &spec)
 }
 
 #[tauri::command]
@@ -240,6 +245,7 @@ mod tests {
             capture,
             events: Arc::new(RecordingSink::new()),
             pipeline_config: std::sync::Mutex::new(PipelineConfig { app_config, dictionary: Vec::new() }),
+            hotkey: None,
             host_id: "test-host".to_string(),
             provider_host: "api.groq.com".to_string(),
         };

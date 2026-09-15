@@ -2026,6 +2026,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec9d92d097f4749b64e8cc33d924d9f40a2d4eb91402b458014b781f5733d60f"
 
 [[package]]
+name = "host-min"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-voxis",
+]
+
+[[package]]
 name = "hound"
 version = "3.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5200,7 +5210,9 @@ dependencies = [
 name = "tauri-plugin-voxis"
 version = "0.1.0"
 dependencies = [
+ "cpal",
  "mockito",
+ "rdev",
  "regex",
  "serde",
  "serde_json",

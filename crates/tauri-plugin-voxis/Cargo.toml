@@ -51,8 +51,29 @@ uuid = { version = "1", features = ["v4"] }
 # own actually populating it from a `VoxisProfile`).
 regex = "1"
 
+# Task 4, all optional and pulled in only by the `desktop` feature below —
+# a plain (non-target-gated) dependency, same as `voxis-core`'s own
+# `rdev` optional dep: `cargo build -p tauri-plugin-voxis --target
+# aarch64-apple-ios` (default, zero features) must never see cpal/rdev,
+# which the `desktop` feature (not the target) gates.
+cpal = { version = "0.15", optional = true }
+# Same pinned git rev as voice_lib/voxis-core (macOS main-thread fix, PR
+# #147) — one rdev revision across the whole workspace.
+rdev = { git = "https://github.com/Narsil/rdev", rev = "73123959276f0f29972b94e654f04614ba3826d2", optional = true }
+# WAV finalization at `stop()` reuses `voxis_core::audio_wav` (hound is
+# voxis-core's own dependency, not re-exposed) — this crate's `desktop.rs`
+# has no direct hound usage, so no `dep:hound` is declared here.
+
 [target.'cfg(target_os = "ios")'.dependencies]
 tauri = { version = "2", features = ["wry"] }
+
+[features]
+default = []
+# Desktop capture (`CpalCapture`) + hotkey (`RdevHotkey`) backends. Off by
+# default so the iOS build (`scripts/check-ios-build.sh`) stays cpal/rdev-
+# free with zero feature flags — see `capture.rs`'s and `voxis-core`'s own
+# module docs for the same gate.
+desktop = ["dep:cpal", "dep:rdev", "voxis-core/rdev"]
 
 [dev-dependencies]
 tempfile = "3"

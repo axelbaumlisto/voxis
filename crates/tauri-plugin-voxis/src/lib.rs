@@ -34,9 +34,16 @@
 pub mod capture;
 pub mod commands;
 pub mod consent;
+// Task 4: desktop-only backends (`CpalCapture`/`RdevHotkey`), behind the
+// `desktop` Cargo feature so `cargo build -p tauri-plugin-voxis --target
+// aarch64-apple-ios` (default, zero features) never touches cpal/rdev.
+#[cfg(feature = "desktop")]
+pub mod desktop;
 pub mod error;
 pub mod events;
 pub mod guard_adapter;
+#[cfg(feature = "desktop")]
+pub mod hotkey_desktop;
 pub mod lease;
 pub mod models;
 pub mod pipeline;
@@ -64,6 +71,16 @@ use session::SessionGuard;
 /// recordings live under cache, not config) — kept apart from anything
 /// the host itself stores in either directory.
 const PLUGIN_DIR_NAME: &str = "voxis-plugin";
+
+/// Bridges `commands::set_hotkey` to a platform-specific OS-level hotkey
+/// backend. `hotkey_desktop::RdevHotkey` implements this (Task 4); iOS
+/// has no OS-level hotkey concept (plan decision 5 — touch hosts drive
+/// hotkeys from the guest-js `keydown`/`keyup` side instead), so
+/// `PluginState.hotkey` stays `None` there and `set_hotkey` is a
+/// harmless no-op, same as the pre-Task-4 stub.
+pub trait HotkeyController: Send + Sync {
+    fn set_hotkey(&self, spec: &models::HotkeySpec) -> Result<(), error::PluginError>;
+}
 
 /// Profile-derived settings/dictionary the pipeline needs at `start()`
 /// time (`pipeline::PipelineDeps` is built from a snapshot of this).
@@ -94,6 +111,12 @@ pub struct PluginState {
     /// `TauriEventSink` in production, `events::RecordingSink` in tests.
     pub events: Arc<dyn EventSink>,
     pub pipeline_config: std::sync::Mutex<PipelineConfig>,
+    /// The OS-level hotkey backend `commands::set_hotkey` delegates to
+    /// (Task 4's `hotkey_desktop::RdevHotkey` on desktop). `None` on
+    /// platforms/hosts with no such backend (iOS, or desktop builds
+    /// without the `desktop` feature) — `set_hotkey` is then a no-op,
+    /// same as the pre-Task-4 stub.
+    pub hotkey: Option<Arc<dyn HotkeyController>>,
     /// Identifies the embedding host for consent/secret scoping (e.g.
     /// `"naked"`). Task 3 has no profile plumbing yet to source this
     /// from, so `init`/`init_with` just take it as a constructor
@@ -133,7 +156,14 @@ impl PluginState {
     /// see `build`'s `setup` hook, which sources them from
     /// `app.path().app_config_dir()` / `app.path().app_cache_dir()`
     /// respectively.
-    fn new(config_dir: PathBuf, cache_dir: PathBuf, secrets: Arc<dyn SecretStore>, capture: Arc<dyn AudioCapture>, events: Arc<dyn EventSink>) -> Self {
+    fn new(
+        config_dir: PathBuf,
+        cache_dir: PathBuf,
+        secrets: Arc<dyn SecretStore>,
+        capture: Arc<dyn AudioCapture>,
+        events: Arc<dyn EventSink>,
+        hotkey: Option<Arc<dyn HotkeyController>>,
+    ) -> Self {
         let plugin_config_dir = config_dir.join(PLUGIN_DIR_NAME);
         Self {
             sessions: Arc::new(SessionGuard::new()),
@@ -143,6 +173,7 @@ impl PluginState {
             capture,
             events,
             pipeline_config: std::sync::Mutex::new(PipelineConfig::default()),
+            hotkey,
             host_id: "default-host".to_string(),
             provider_host: "api.groq.com".to_string(),
         }
@@ -156,16 +187,182 @@ impl PluginState {
 /// `CpalCapture`/the iOS Swift bridge and are expected to provide their
 /// own `init_with_capture`-style constructor instead of this default).
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
-    build(None)
+    build(None, default_capture, None)
 }
 
 /// Registers the plugin with a host-supplied `SecretStore` (e.g. naked's
 /// `naked_core::SecretStore`) instead of the desktop JSON fallback.
 pub fn init_with<R: Runtime>(secrets: Arc<dyn SecretStore>) -> TauriPlugin<R> {
-    build(Some(secrets))
+    build(Some(secrets), default_capture, None)
 }
 
-fn build<R: Runtime>(secrets_override: Option<Arc<dyn SecretStore>>) -> TauriPlugin<R> {
+fn default_capture() -> Arc<dyn AudioCapture> {
+    Arc::new(MockCapture::new())
+}
+
+/// Registers the plugin with the real desktop backends (Task 4):
+/// `desktop::CpalCapture` for `AudioCapture` and
+/// `hotkey_desktop::RdevHotkey` (wired to `commands::do_start`/`do_stop`
+/// through a `PluginHotkeySink`) for `commands::set_hotkey`. Behind the
+/// `desktop` Cargo feature.
+#[cfg(feature = "desktop")]
+pub fn init_desktop<R: Runtime>() -> TauriPlugin<R> {
+    build(None, desktop_capture, Some(desktop_hotkey_factory))
+}
+
+/// Same as [`init_desktop`], with a host-supplied `SecretStore`.
+#[cfg(feature = "desktop")]
+pub fn init_desktop_with<R: Runtime>(secrets: Arc<dyn SecretStore>) -> TauriPlugin<R> {
+    build(Some(secrets), desktop_capture, Some(desktop_hotkey_factory))
+}
+
+#[cfg(feature = "desktop")]
+fn desktop_capture() -> Arc<dyn AudioCapture> {
+    Arc::new(desktop::CpalCapture::new())
+}
+
+/// What to do about one `(hotkey_desktop::Edge, Mode)` given the currently-tracked
+/// active session, if any — pure decision, no I/O, fully unit-testable.
+/// Hold: press starts (if idle), release stops (if a session is active).
+/// Toggle: press starts-or-stops depending on whether one is already
+/// active; release is always a no-op (the physical key may still be
+/// "released" a moment after a toggle tap started a session).
+#[cfg(feature = "desktop")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HotkeyAction {
+    Start,
+    Stop,
+    Noop,
+}
+
+#[cfg(feature = "desktop")]
+fn decide_hotkey_action(mode: models::Mode, edge: hotkey_desktop::Edge, active: Option<&models::SessionId>) -> HotkeyAction {
+    match (mode, edge, active) {
+        (models::Mode::Hold, hotkey_desktop::Edge::Pressed, None) => HotkeyAction::Start,
+        (models::Mode::Hold, hotkey_desktop::Edge::Pressed, Some(_)) => HotkeyAction::Noop,
+        (models::Mode::Hold, hotkey_desktop::Edge::Released, Some(_)) => HotkeyAction::Stop,
+        (models::Mode::Hold, hotkey_desktop::Edge::Released, None) => HotkeyAction::Noop,
+        (models::Mode::Toggle, hotkey_desktop::Edge::Pressed, None) => HotkeyAction::Start,
+        (models::Mode::Toggle, hotkey_desktop::Edge::Pressed, Some(_)) => HotkeyAction::Stop,
+        (models::Mode::Toggle, hotkey_desktop::Edge::Released, _) => HotkeyAction::Noop,
+    }
+}
+
+/// Applies `decide_hotkey_action`'s outcome against `state`, awaiting the
+/// resulting `commands::do_start`/`do_stop` call to full completion
+/// before returning and updating `active` — the actual race fix (H2):
+/// as long as every edge is routed through one call to this function at
+/// a time, in arrival order (`run_hotkey_edge_loop`'s single-consumer
+/// `while let` loop below guarantees that), a release can never observe
+/// a press's session as "not started yet" merely because the press's own
+/// `.await` hasn't resolved -- there is no press `.await` still in
+/// flight when the release's turn comes.
+///
+/// Review round 2, N-M1: `active` is this loop's OWN belief about
+/// whether a hotkey-started session is still running -- nothing here
+/// observes a session ending any other way (UI stop/cancel button,
+/// `cancel_all_hold`, the guard's own silence/max-duration timeout, a
+/// pipeline failure). Without reconciling against the real source of
+/// truth first, a session that ended out-of-band left `active` stuck at
+/// `Some(stale_id)`, so the *next* Hold press was decided as `Noop`
+/// (`decide_hotkey_action` sees "already active") and silently recorded
+/// nothing. `state.sessions.has_active()` is checked (not
+/// `is_active(id)`) because it stays `true` through `Transcribing` --
+/// only `SessionGuard::end` (called once, at the very end of
+/// `pipeline::finalize`) clears it -- so a hotkey session that is still
+/// genuinely in flight (recording or transcribing) is never mistaken for
+/// stale here.
+#[cfg(feature = "desktop")]
+async fn apply_hotkey_edge(state: &PluginState, mode: models::Mode, edge: hotkey_desktop::Edge, active: &mut Option<models::SessionId>) {
+    if active.is_some() && !state.sessions.has_active() {
+        *active = None;
+    }
+    match decide_hotkey_action(mode, edge, active.as_ref()) {
+        HotkeyAction::Start => match commands::do_start(state, mode).await {
+            Ok(id) => *active = Some(id),
+            Err(e) => tracing::warn!(error = ?e, "hotkey-triggered start failed"),
+        },
+        HotkeyAction::Stop => {
+            if let Some(id) = active.take() {
+                let _ = commands::do_stop(state, &id).await;
+            }
+        }
+        HotkeyAction::Noop => {}
+    }
+}
+
+/// Bridges a fresh `hotkey_desktop::RdevHotkey`'s Pressed/Released edges
+/// to `commands::do_start`/`do_stop`. The rdev listener thread itself is
+/// synchronous and cannot `.await` directly, so `on_pressed`/`on_released`
+/// only push onto an unbounded channel (non-blocking, preserves arrival
+/// order); a single background task (`run_hotkey_edge_loop`, spawned once
+/// in `PluginHotkeySink::new`) drains it and calls `apply_hotkey_edge`
+/// for exactly one edge at a time.
+///
+/// Review fix H2: the previous design spawned a brand-new
+/// `tauri::async_runtime::spawn` task per edge, with no ordering between
+/// them; `active_session` was only set *after* `do_start().await`
+/// resolved, so a quick Hold tap's release task could run first (it sees
+/// `None`, does nothing) while the press task was still awaiting the
+/// network/pipeline call — recording stuck on until the guard's own
+/// silence/max-duration timeout, the original stuck-recording incident's
+/// own failure class. The single-consumer queue removes the race by
+/// construction instead of relying on lock timing.
+#[cfg(feature = "desktop")]
+struct PluginHotkeySink {
+    edge_tx: tokio::sync::mpsc::UnboundedSender<(hotkey_desktop::Edge, models::Mode)>,
+}
+
+#[cfg(feature = "desktop")]
+impl PluginHotkeySink {
+    fn new<R: Runtime>(app: tauri::AppHandle<R>) -> Self {
+        let (edge_tx, edge_rx) = tokio::sync::mpsc::unbounded_channel();
+        tauri::async_runtime::spawn(run_hotkey_edge_loop(app, edge_rx));
+        Self { edge_tx }
+    }
+}
+
+#[cfg(feature = "desktop")]
+async fn run_hotkey_edge_loop<R: Runtime>(app: tauri::AppHandle<R>, mut edge_rx: tokio::sync::mpsc::UnboundedReceiver<(hotkey_desktop::Edge, models::Mode)>) {
+    let mut active: Option<models::SessionId> = None;
+    while let Some((edge, mode)) = edge_rx.recv().await {
+        let state = app.state::<PluginState>();
+        apply_hotkey_edge(&state, mode, edge, &mut active).await;
+    }
+}
+
+#[cfg(feature = "desktop")]
+impl hotkey_desktop::HotkeyActions for PluginHotkeySink {
+    fn on_pressed(&self, mode: models::Mode) {
+        if let Err(e) = self.edge_tx.send((hotkey_desktop::Edge::Pressed, mode)) {
+            tracing::error!(error = ?e, "hotkey edge loop is gone -- dropped a Pressed edge");
+        }
+    }
+
+    fn on_released(&self, mode: models::Mode) {
+        if let Err(e) = self.edge_tx.send((hotkey_desktop::Edge::Released, mode)) {
+            tracing::error!(error = ?e, "hotkey edge loop is gone -- dropped a Released edge");
+        }
+    }
+}
+
+#[cfg(feature = "desktop")]
+fn desktop_hotkey_factory<R: Runtime>(app: tauri::AppHandle<R>) -> Arc<dyn HotkeyController> {
+    let actions: Arc<dyn hotkey_desktop::HotkeyActions> = Arc::new(PluginHotkeySink::new(app));
+    Arc::new(hotkey_desktop::RdevHotkey::new(actions))
+}
+
+/// Builds a `HotkeyController` from the plugin's `AppHandle` once it's
+/// available (`build`'s `setup` hook) — a plain fn pointer (not a
+/// capturing closure) so `init`/`init_desktop` can each pass a different
+/// one without `build` itself needing to be generic over a closure type.
+type HotkeyFactory<R> = fn(tauri::AppHandle<R>) -> Arc<dyn HotkeyController>;
+
+fn build<R: Runtime>(
+    secrets_override: Option<Arc<dyn SecretStore>>,
+    capture_factory: fn() -> Arc<dyn AudioCapture>,
+    hotkey_factory: Option<HotkeyFactory<R>>,
+) -> TauriPlugin<R> {
     Builder::new("voxis")
         .invoke_handler(tauri::generate_handler![
             commands::start,
@@ -193,9 +390,10 @@ fn build<R: Runtime>(secrets_override: Option<Arc<dyn SecretStore>>) -> TauriPlu
                 Arc::new(FileSecretStore::new(config_dir.join(PLUGIN_DIR_NAME).join("secrets.json")))
                     as Arc<dyn SecretStore>
             });
-            let capture: Arc<dyn AudioCapture> = Arc::new(MockCapture::new());
+            let capture: Arc<dyn AudioCapture> = capture_factory();
+            let hotkey = hotkey_factory.map(|f| f(app.app_handle().clone()));
             let events: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.app_handle().clone()));
-            let state = PluginState::new(config_dir, cache_dir, secrets, capture, events);
+            let state = PluginState::new(config_dir, cache_dir, secrets, capture, events, hotkey);
 
             // `[R1-Safety S5]`: any file left in `rec/` at startup is an
             // orphan from a crash/SIGKILL mid-recording — sweep
@@ -240,4 +438,166 @@ fn build<R: Runtime>(secrets_override: Option<Arc<dyn SecretStore>>) -> TauriPlu
             }
         })
         .build()
+}
+
+#[cfg(all(test, feature = "desktop"))]
+mod hotkey_sink_tests {
+    use super::*;
+    use crate::capture::MockCapture;
+    use crate::consent::ConsentStore;
+    use crate::events::RecordingSink;
+    use crate::secrets::InMemorySecretStore;
+    use crate::session::SessionGuard;
+    use std::sync::Mutex as StdMutex;
+
+    fn test_plugin_state(tmp: &tempfile::TempDir) -> PluginState {
+        let secrets: Arc<dyn SecretStore> = Arc::new(InMemorySecretStore::new());
+        secrets.set(pipeline::API_KEY_SECRET_NAME, &voxis_core::profile::Secret::new("test-key")).unwrap();
+        let app_config = voxis_core::config::AppConfig { silence_timeout_ms: 0, ..voxis_core::config::AppConfig::default() };
+        let state = PluginState {
+            sessions: Arc::new(SessionGuard::new()),
+            consent: ConsentStore::new(tmp.path().join("consent.json")),
+            secrets,
+            rec_dir: capture::RecDir::new(tmp.path().to_path_buf()),
+            capture: Arc::new(MockCapture::new()),
+            events: Arc::new(RecordingSink::new()),
+            pipeline_config: StdMutex::new(PipelineConfig { app_config, dictionary: Vec::new() }),
+            hotkey: None,
+            host_id: "test-host".to_string(),
+            provider_host: "api.groq.com".to_string(),
+        };
+        state.consent.set_consent("test-host", "api.groq.com", true).unwrap();
+        state
+    }
+
+    // -- decide_hotkey_action: pure decision table --------------------
+
+    #[test]
+    fn hold_press_while_idle_starts() {
+        assert_eq!(decide_hotkey_action(models::Mode::Hold, hotkey_desktop::Edge::Pressed, None), HotkeyAction::Start);
+    }
+
+    #[test]
+    fn hold_release_while_active_stops() {
+        let id = models::SessionId::new();
+        assert_eq!(decide_hotkey_action(models::Mode::Hold, hotkey_desktop::Edge::Released, Some(&id)), HotkeyAction::Stop);
+    }
+
+    #[test]
+    fn hold_release_while_idle_is_noop() {
+        assert_eq!(decide_hotkey_action(models::Mode::Hold, hotkey_desktop::Edge::Released, None), HotkeyAction::Noop);
+    }
+
+    #[test]
+    fn hold_press_while_already_active_is_noop() {
+        let id = models::SessionId::new();
+        assert_eq!(decide_hotkey_action(models::Mode::Hold, hotkey_desktop::Edge::Pressed, Some(&id)), HotkeyAction::Noop);
+    }
+
+    #[test]
+    fn toggle_press_while_idle_starts() {
+        assert_eq!(decide_hotkey_action(models::Mode::Toggle, hotkey_desktop::Edge::Pressed, None), HotkeyAction::Start);
+    }
+
+    #[test]
+    fn toggle_press_while_active_stops() {
+        let id = models::SessionId::new();
+        assert_eq!(decide_hotkey_action(models::Mode::Toggle, hotkey_desktop::Edge::Pressed, Some(&id)), HotkeyAction::Stop);
+    }
+
+    #[test]
+    fn toggle_release_is_always_noop() {
+        let id = models::SessionId::new();
+        assert_eq!(decide_hotkey_action(models::Mode::Toggle, hotkey_desktop::Edge::Released, Some(&id)), HotkeyAction::Noop);
+        assert_eq!(decide_hotkey_action(models::Mode::Toggle, hotkey_desktop::Edge::Released, None), HotkeyAction::Noop);
+    }
+
+    // -- apply_hotkey_edge: the actual H2 regression, end to end ------
+
+    /// Quick Hold tap: press then release, applied strictly in order
+    /// (exactly what `run_hotkey_edge_loop`'s single-consumer queue
+    /// guarantees for two edges that arrive close together) -- must
+    /// start, then actually stop, never leaving the session stuck
+    /// active because the release "ran too early".
+    #[tokio::test]
+    async fn quick_hold_tap_starts_then_stops_even_though_the_release_arrives_almost_immediately() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_plugin_state(&tmp);
+        let mut active: Option<models::SessionId> = None;
+
+        apply_hotkey_edge(&state, models::Mode::Hold, hotkey_desktop::Edge::Pressed, &mut active).await;
+        assert!(active.is_some(), "press must have started a session");
+        assert!(state.sessions.has_active());
+
+        apply_hotkey_edge(&state, models::Mode::Hold, hotkey_desktop::Edge::Released, &mut active).await;
+        assert!(active.is_none(), "release must have cleared the tracked session");
+        assert!(!state.sessions.has_active(), "the session must actually be stopped, not left stuck recording");
+    }
+
+    /// N-M1 regression: a hotkey-started session that ends via a
+    /// completely different path (UI stop/cancel, `cancel_all_hold`, the
+    /// guard's own silence/max-duration timeout, a pipeline failure --
+    /// simulated here directly via `SessionGuard::end`, the same call
+    /// `pipeline::finalize` itself makes) must not leave `active` stuck
+    /// at the stale id -- the *next* Hold press has to actually start a
+    /// new session instead of being silently decided `Noop`.
+    #[tokio::test]
+    async fn hold_press_after_session_ended_out_of_band_starts_a_new_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_plugin_state(&tmp);
+        let mut active: Option<models::SessionId> = None;
+
+        apply_hotkey_edge(&state, models::Mode::Hold, hotkey_desktop::Edge::Pressed, &mut active).await;
+        let first_id = active.clone().expect("press must have started a session");
+
+        // Ended out-of-band (not through `apply_hotkey_edge`'s own Stop
+        // branch) -- e.g. the UI's own stop button -- via the real
+        // `commands::do_stop` (tears down the capture backend too, same
+        // as a real non-hotkey stop path would; a bare `SessionGuard::end`
+        // alone would leave `MockCapture` "running" and make the second
+        // `do_start` below fail for an unrelated reason).
+        commands::do_stop(&state, &first_id).await.unwrap();
+        assert!(!state.sessions.has_active());
+
+        apply_hotkey_edge(&state, models::Mode::Hold, hotkey_desktop::Edge::Pressed, &mut active).await;
+        assert!(active.is_some(), "a fresh Hold press must start a NEW session, not be swallowed as \"already active\"");
+        assert_ne!(active.as_ref(), Some(&first_id), "must be a genuinely new session id");
+        assert!(state.sessions.has_active());
+    }
+
+    /// Toggle double-tap: two presses (no releases matter) must start
+    /// exactly one session then stop that same one, never two starts or
+    /// a stuck session.
+    #[tokio::test]
+    async fn toggle_double_tap_is_one_start_and_one_stop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_plugin_state(&tmp);
+        let mut active: Option<models::SessionId> = None;
+
+        apply_hotkey_edge(&state, models::Mode::Toggle, hotkey_desktop::Edge::Pressed, &mut active).await;
+        assert!(active.is_some(), "first tap must start a session");
+        let started_id = active.clone();
+
+        apply_hotkey_edge(&state, models::Mode::Toggle, hotkey_desktop::Edge::Pressed, &mut active).await;
+        assert!(active.is_none(), "second tap must stop the session the first tap started");
+        assert!(!state.sessions.has_active());
+        assert!(started_id.is_some());
+    }
+
+    /// A `Released` edge for a toggle-mode session must never stop it
+    /// (that's the *next press*'s job) -- guards against accidentally
+    /// wiring `on_released` to `Stop` for toggle sessions.
+    #[tokio::test]
+    async fn toggle_release_never_stops_the_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_plugin_state(&tmp);
+        let mut active: Option<models::SessionId> = None;
+
+        apply_hotkey_edge(&state, models::Mode::Toggle, hotkey_desktop::Edge::Pressed, &mut active).await;
+        assert!(active.is_some());
+
+        apply_hotkey_edge(&state, models::Mode::Toggle, hotkey_desktop::Edge::Released, &mut active).await;
+        assert!(active.is_some(), "release must be a no-op for an active toggle session");
+        assert!(state.sessions.has_active());
+    }
 }

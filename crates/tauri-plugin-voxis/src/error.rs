@@ -50,6 +50,22 @@ pub enum PluginError {
     /// fires for this outcome (there is no `DictationResult` to publish).
     #[error("transcription failed: {message}")]
     Transcription { message: String },
+    /// `set_hotkey` (Task 4 `hotkey_desktop.rs`) given a spec string that
+    /// matches neither `voxis_core::hotkey::parse_hotkey` (single named
+    /// key) nor `HotkeyCombo::parse` (`"Mod+Mod+Key"`), or whose trailing
+    /// combo key has no rdev mapping. Fails loud at registration time
+    /// instead of silently keeping the previous hotkey or panicking.
+    #[error("invalid hotkey spec: {message}")]
+    InvalidHotkey { message: String },
+    /// `set_hotkey` (Task 4) detected that the OS-level key listener
+    /// (rdev on desktop) failed to start — on macOS this is almost always
+    /// a missing Accessibility/Input Monitoring grant. Detected from
+    /// `rdev::listen`'s own return value, never from a blocking
+    /// permission-prompt call on the hotkey press path (see
+    /// `hotkey_desktop.rs` module doc: that pattern caused the original
+    /// stuck-recording incident).
+    #[error("hotkey permission denied: {message}")]
+    PermissionDenied { message: String },
 }
 
 impl From<CaptureError> for PluginError {

@@ -1,0 +1,18 @@
+[package]
+name = "host-min"
+version = "0.0.0"
+description = "Minimal Tauri 2 host embedding tauri-plugin-voxis (Task 4 manual/tracer-bullet harness)"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "host-min"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-voxis = { path = "../../..", features = ["desktop"] }
+serde_json = "1"

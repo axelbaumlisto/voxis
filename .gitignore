@@ -91,3 +91,7 @@ docs-site/_capture-screenshots.mjs
 
 # Tauri-generated schemas/ACL (regenerated from src-tauri/capabilities/ on build)
 src-tauri/gen/
+# Same, for the tauri-plugin-voxis Task 4 host-min example (L1 review fix:
+# ~4.8k lines of regenerated JSON schema were sitting unignored in the
+# working tree here, one `git add -A` away from being committed).
+crates/tauri-plugin-voxis/examples/host-min/src-tauri/gen/
