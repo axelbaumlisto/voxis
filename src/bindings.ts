@@ -293,6 +293,54 @@ async retryTranscription(id: string) : Promise<Result<string, string>> {
 }
 },
 /**
+ * Start a new QR/LAN "share profile" session, replacing any previously
+ * active one. `interface_name` names one of `list_share_interfaces()`'s
+ * entries; `None` picks the default (first non-loopback).
+ * 
+ * Named `interface_name`, not `interface`: `interface` is a reserved word
+ * in strict-mode JS/ES modules, so specta's generated `bindings.ts` (which
+ * mirrors this parameter's name verbatim as a JS function parameter)
+ * would otherwise fail to even parse under esbuild/vitest.
+ */
+async startProfileShare(interfaceName: string | null) : Promise<Result<ShareSession, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_profile_share", { interfaceName }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stop the currently active QR/LAN session, if any. Idempotent.
+ */
+async stopProfileShare() : Promise<void> {
+    await TAURI_INVOKE("stop_profile_share");
+},
+/**
+ * List non-loopback LAN interfaces the QR/LAN server could bind to.
+ */
+async listShareInterfaces() : Promise<Result<ShareInterface[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_share_interfaces") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Seal the desktop's own profile under a passphrase (generating one from
+ * the embedded wordlist when `passphrase` is `None`) and write it to
+ * `path`.
+ */
+async exportProfileFile(path: string, passphrase: string | null) : Promise<Result<ExportResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_profile_file", { path, passphrase }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Check all required permissions and return their status.
  */
 async checkPermissions() : Promise<PermissionInfo[]> {
@@ -981,6 +1029,12 @@ export type DictionaryConfig = { path?: string; learning_mode?: string; learning
  */
 export type DictionaryEntry = { id: number; source: string; replacement: string }
 /**
+ * Result of `export_profile_file`. `passphrase` is only populated when the
+ * caller didn't supply one — the generated phrase must be shown to the
+ * user exactly once, since this is the only place it's ever surfaced.
+ */
+export type ExportResult = { passphrase: string | null }
+/**
  * Metadata for a failed transcription attempt.
  */
 export type FailedTranscription = { 
@@ -1081,6 +1135,29 @@ export type PermissionInfo = { name: string; status: string; description: string
  * deserialize.
  */
 export type ReprocessResult = { processed: number; suggestions_found: number; recorded?: number; promoted?: number; skipped?: number }
+/**
+ * One non-loopback IPv4 LAN interface, as offered to the UI for the
+ * interface picker (plan: "default first non-loopback, user can pick").
+ */
+export type ShareInterface = { name: string; ip: string }
+/**
+ * An active (or just-started) QR/LAN share session, as returned to the UI.
+ */
+export type ShareSession = { 
+/**
+ * Self-contained SVG markup (no external image service) rendering the
+ * QR payload described in the module docs.
+ */
+qr_svg: string; 
+/**
+ * 6-digit second factor, shown next to (never inside) the QR.
+ */
+code: string; host: string; port: number; 
+/**
+ * Unix milliseconds; the UI derives its countdown from this instead of
+ * hardcoding the 120s TTL client-side.
+ */
+expires_at_ms: number }
 /**
  * What the orchestrator should do when this binding fires.
  * 

@@ -27,6 +27,7 @@ pub mod output;
 pub mod overlay;
 pub mod overlay_native;
 pub mod permissions;
+pub mod profile_share;
 pub mod setup;
 pub mod shortcut;
 pub mod storage;
@@ -130,6 +131,11 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
         crate::commands::failed::get_failed_transcriptions,
         crate::commands::failed::dismiss_failed_transcription,
         crate::commands::failed::retry_transcription,
+        // profile share (QR/LAN + file export)
+        crate::commands::profile_share::start_profile_share,
+        crate::commands::profile_share::stop_profile_share,
+        crate::commands::profile_share::list_share_interfaces,
+        crate::commands::profile_share::export_profile_file,
         // permissions
         crate::commands::permissions::check_permissions,
         crate::commands::permissions::open_permission_settings,

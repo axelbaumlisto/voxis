@@ -18,6 +18,7 @@ pub mod history;
 pub mod overlay;
 pub mod permissions;
 pub mod onboarding;
+pub mod profile_share;
 pub mod prompts;
 pub mod providers;
 pub mod recording;
@@ -92,3 +93,8 @@ pub use permissions::{
 
 // Failed transcriptions
 pub use failed::{dismiss_failed_transcription, get_failed_transcriptions};
+
+// Profile share (QR/LAN + file export)
+pub use profile_share::{
+    export_profile_file, list_share_interfaces, start_profile_share, stop_profile_share,
+};

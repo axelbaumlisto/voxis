@@ -9,6 +9,7 @@ import AutoSubmitSelector from "../components/settings/AutoSubmitSelector";
 import CrashDiagnosticsStatus from "../components/settings/CrashDiagnosticsStatus";
 import ExportDiagnostics from "../components/settings/ExportDiagnostics";
 import UpdateNotice from "../components/settings/UpdateNotice";
+import ProfileShare from "../components/settings/ProfileShare";
 import LlmPromptManager from "../components/settings/LlmPromptManager";
 import ShortcutBindingList from "../components/settings/ShortcutBindingList";
 import OverlayBackendSelector from "../components/settings/OverlayBackendSelector";
@@ -202,6 +203,8 @@ export function renderCustomWidget(
       return <ExportDiagnostics label={label} description={description} />;
     case "check-for-update":
       return <UpdateNotice label={label} description={description} />;
+    case "profile-share":
+      return <ProfileShare label={label} description={description} />;
     case "always-on-microphone":
       return (
         <AlwaysOnMicrophone

@@ -99,6 +99,25 @@ tokio-util = { version = "0.7", features = ["rt"] }
 # Clipboard
 arboard = "3"
 
+# `profile_share`: one-shot LAN HTTP server for "Share profile to device"
+# (QR/code transport of a sealed VoxisProfile, Task 7 of the
+# tauri-plugin-voxis plan). `axum` version pinned to the same 0.7 line
+# already resolved for `crates/voxis-fake-stt` (no duplicate major version
+# in the lockfile). `qrcode`: SVG rendering with zero external network
+# calls (plan requirement — no third-party QR-image services). `if-addrs`:
+# enumerate non-loopback LAN interfaces so the server can bind one chosen
+# IPv4 instead of `0.0.0.0` (`[R1-Safety T1]`). `getrandom` matches the
+# version voxis-core's `profile::crypto` already uses for CSPRNG bytes —
+# same source of randomness for `k_qr`/token/code.
+axum = { version = "0.7", default-features = false, features = ["http1", "tokio"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+if-addrs = "0.15"
+getrandom = "0.2"
+# Constant-time token compare in `profile_share::server::TokenGate` — already
+# in the dependency graph transitively via voxis-core's chacha20poly1305,
+# added here directly so `voice_lib` can `use subtle::ConstantTimeEq`.
+subtle = "2"
+
 # Low-level keyboard input (for single modifier hotkeys). The parser +
 # rdev press/release listener itself moved to voxis-core (Task 1b, `hotkey`
 # module, feature `rdev`) — voice_lib's own `hotkey/mod.rs` no longer uses

@@ -565,3 +565,67 @@ export async function retryTranscription(id: string): Promise<string> {
 export async function dismissFailedTranscription(id: string): Promise<void> {
   return invoke<void>("dismiss_failed_transcription", { id });
 }
+
+// =============================================================================
+// Profile Share Commands (QR/LAN + file export — tauri-plugin-voxis plan Task 7)
+// =============================================================================
+
+export interface ShareInterface {
+  name: string;
+  ip: string;
+}
+
+/** An active (or just-started) QR/LAN "share profile" session. */
+export interface ShareSession {
+  /** Self-contained SVG markup for the QR code (no external image service). */
+  qr_svg: string;
+  /** 6-digit second factor, shown next to (never inside) the QR. */
+  code: string;
+  host: string;
+  port: number;
+  /** Unix milliseconds; derive the UI countdown from this. */
+  expires_at_ms: number;
+}
+
+export interface ExportResult {
+  /** Only set when the caller passed no passphrase — show it once, then discard. */
+  passphrase: string | null;
+}
+
+/**
+ * Start a new QR/LAN "share profile" session, replacing any previously
+ * active one. `interface` names one of `listShareInterfaces()`'s entries;
+ * omit it (or pass `null`) for the default (first non-loopback).
+ */
+export async function startProfileShare(
+  interfaceName?: string | null
+): Promise<ShareSession> {
+  return invoke<ShareSession>("start_profile_share", {
+    interfaceName: interfaceName ?? null,
+  });
+}
+
+/** Stop the currently active QR/LAN session, if any. Idempotent. */
+export async function stopProfileShare(): Promise<void> {
+  return invoke<void>("stop_profile_share");
+}
+
+/** List non-loopback LAN interfaces the QR/LAN server could bind to. */
+export async function listShareInterfaces(): Promise<ShareInterface[]> {
+  return invoke<ShareInterface[]>("list_share_interfaces");
+}
+
+/**
+ * Seal the desktop's own profile under a passphrase (generating one from
+ * the embedded wordlist when `passphrase` is omitted/`null`) and write it
+ * to `path`.
+ */
+export async function exportProfileFile(
+  path: string,
+  passphrase?: string | null
+): Promise<ExportResult> {
+  return invoke<ExportResult>("export_profile_file", {
+    path,
+    passphrase: passphrase ?? null,
+  });
+}

@@ -173,5 +173,9 @@ pub fn command_handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 
         commands::failed::get_failed_transcriptions,
         commands::failed::dismiss_failed_transcription,
         commands::failed::retry_transcription,
+        commands::profile_share::start_profile_share,
+        commands::profile_share::stop_profile_share,
+        commands::profile_share::list_share_interfaces,
+        commands::profile_share::export_profile_file,
     ]
 }

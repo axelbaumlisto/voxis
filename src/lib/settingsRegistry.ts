@@ -512,6 +512,17 @@ export const SETTINGS_REGISTRY: SettingDefinition[] = [
     descriptionKey: "settings.checkForUpdateDesc",
     customComponent: "check-for-update",
   },
+  {
+    key: "profile_share",
+    label: "Share profile to device",
+    labelKey: "settings.profileShare",
+    widgetType: "custom",
+    section: "Advanced",
+    description:
+      "Send your provider/model/guard/LLM/dictionary settings to another device via QR code (LAN) or an encrypted file. API keys travel encrypted; nothing is ever sent unencrypted or to a third-party service.",
+    descriptionKey: "settings.profileShareDesc",
+    customComponent: "profile-share",
+  },
 ];
 
 /**

@@ -137,6 +137,8 @@
     "exportDiagnosticsDesc": "Copy logs and debug files plus a redacted config summary into a local folder for troubleshooting. Nothing is sent anywhere; API keys and secrets are never included.",
     "checkForUpdate": "Check for Updates",
     "checkForUpdateDesc": "Check GitHub for a newer Voxis release. Runs only when you click — no automatic background checks.",
+    "profileShare": "Share profile to device",
+    "profileShareDesc": "Send your provider/model/guard/LLM/dictionary settings to another device via QR code (LAN) or an encrypted file. API keys travel encrypted; nothing is ever sent unencrypted or to a third-party service.",
     "updateChecking": "Checking…",
     "updateUpToDate": "You're up to date (v{{version}}).",
     "updateAvailable": "v{{version}} is available.",
