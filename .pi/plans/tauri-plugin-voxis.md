@@ -452,7 +452,7 @@ CSPRNG), одноразовый токен, 6-значный код; HTTP (`axum
 
 ### Phase 2 — iOS
 
-### Task 8: iOS Swift-сторона: `AVAudioEngine` capture + разрешения
+### Task 8: ✅ APPROVED (2 rounds; device/Simulator verification → T8.5) — iOS Swift-сторона: `AVAudioEngine` capture + разрешения
 **Files:** `crates/tauri-plugin-voxis/ios/{Package.swift,Sources/VoxisPlugin.swift,
 Sources/AudioCapture.swift}`, `…/src/mobile.rs`, `…/examples/host-min/src-tauri/src/main.rs` (вариант `ios`)
 **Depends:** Task 3b
@@ -767,6 +767,11 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
   вместо `apply_profile` — заменить в T6/T7. Playwright/tauri-driver для host-min невозможен на macOS и
   отсутствует в CI-образе → CI гонит реальный бинарь под xvfb (3 сценария); reload-during-Hold покрыт
   только unit-тестами 3b; CSP-нарушения в живом webview — проверить руками на human gate.
+- `[ADO-8 follow-ups]` commands.rs do_start/do_stop → `spawn_blocking(capture.start/stop).await` (run_mobile_plugin и
+  CpalCapture::stop блокируют tokio-worker); rebuild AVAudioEngine после mediaServicesWereReset; Keychain
+  `WhenUnlockedThisDeviceOnly` → errSecInteractionNotAllowed при финализации на lock screen (T9a: кэшировать ключ на
+  время сессии или AfterFirstUnlock); mockito port-contention флак в profile_source тестах (T6b); reason-string при
+  гонке таймера/уведомления «whichever first».
 - `[ADO-4 minors]` перенести `HotkeyTracker` + таблицу букв/цифр из плагина в `voxis_core::hotkey`, чтобы desktop
   Voxis получил комбо и был один трекер; edge-loop сериализован за latency транскрипции (await только ack
   `signal(Stop)`, не outcome); level-thread sleep 250 мс → stop() ждёт до 250 мс (нарезать); первая
