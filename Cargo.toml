@@ -7,7 +7,7 @@ resolver = "2"
 # pure-Rust core it now depends on (path dep, `src-tauri/Cargo.toml`).
 # Later tasks add `crates/tauri-plugin-voxis`, `crates/voxis-fake-stt`, etc.
 # as siblings of `crates/voxis-core` under this same workspace.
-members = ["src-tauri", "crates/voxis-core", "crates/tauri-plugin-voxis", "crates/tauri-plugin-voxis/examples/host-min/src-tauri"]
+members = ["src-tauri", "crates/voxis-core", "crates/tauri-plugin-voxis", "crates/tauri-plugin-voxis/examples/host-min/src-tauri", "crates/voxis-fake-stt"]
 
 # Moved here (verbatim) from `src-tauri/Cargo.toml` when the workspace root
 # moved to this repo-root manifest: Cargo only honours `[profile.*]` tables

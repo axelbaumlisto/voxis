@@ -3,11 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <title>host-min</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem;
+      }
+    </style>
   </head>
   <body>
-    <button id="start">Start</button>
-    <button id="stop">Stop</button>
+    <p>
+      Consent (real hosts must show a real consent screen before this --
+      host-min calls <code>setConsent(true)</code> unconditionally at
+      startup for tracer-bullet convenience only, see README.md).
+    </p>
+    <button id="toggle">Toggle recording</button>
     <pre id="result"></pre>
-    <script src="main.js"></script>
+    <script type="module" src="main.js"></script>
   </body>
 </html>

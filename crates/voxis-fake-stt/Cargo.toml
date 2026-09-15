@@ -1,0 +1,37 @@
+[package]
+name = "voxis-fake-stt"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+description = "Deterministic, network-free stand-in for the Groq Whisper-compatible /v1/audio/transcriptions endpoint (Task 3.5's tracer bullet): maps sha256(uploaded WAV bytes) -> fixed text from a committed JSON map, 400 (with the sha in the body) for anything unrecognised. Used by CI and host-min's mock path only -- the plan's real HUMAN GATE run always uses cpal + Groq, never this server."
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "voxis-fake-stt"
+path = "src/main.rs"
+
+[lib]
+name = "voxis_fake_stt"
+
+[dependencies]
+axum = { version = "0.7", features = ["multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+# Integration test drives the real Groq-compatible client from voxis-core
+# against this server on a random port -- the actual protocol-compatibility
+# proof (step 1's acceptance: "mockito-free integration test").
+voxis-core = { path = "../voxis-core" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tempfile = "3"
+# Only the generator example (`examples/gen_silence.rs`, writes
+# fixtures/audio/silence.wav) and the fixture-stats test
+# (`tests/silence_fixture.rs`) decode/encode WAV bytes -- examples and
+# tests both get dev-dependencies, the library/binary do not need hound.
+hound = "3.5"

@@ -19,6 +19,7 @@
      "test:rust": "cd src-tauri && cargo build --examples && cargo test",
     "test:guest-js": "cd crates/tauri-plugin-voxis/guest-js && bun run test",
     "harness:overlay": "cd crates/tauri-plugin-voxis/guest-js && bun run harness",
+    "e2e:host-min": "bash crates/tauri-plugin-voxis/examples/host-min/scripts/host-min-smoke.sh",
     "lint": "eslint src --ext ts,tsx"
   },
   "dependencies": {

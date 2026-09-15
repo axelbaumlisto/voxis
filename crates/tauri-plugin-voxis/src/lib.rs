@@ -187,17 +187,39 @@ impl PluginState {
 /// `CpalCapture`/the iOS Swift bridge and are expected to provide their
 /// own `init_with_capture`-style constructor instead of this default).
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
-    build(None, default_capture, None)
+    build(None, Box::new(default_capture), None)
 }
 
 /// Registers the plugin with a host-supplied `SecretStore` (e.g. naked's
 /// `naked_core::SecretStore`) instead of the desktop JSON fallback.
 pub fn init_with<R: Runtime>(secrets: Arc<dyn SecretStore>) -> TauriPlugin<R> {
-    build(Some(secrets), default_capture, None)
+    build(Some(secrets), Box::new(default_capture), None)
 }
 
 fn default_capture() -> Arc<dyn AudioCapture> {
     Arc::new(MockCapture::new())
+}
+
+/// Registers the plugin with a host-supplied, already-constructed
+/// `AudioCapture` instead of a fresh default `MockCapture` (Task 3.5's
+/// own tracer bullet: `host-min` needs a `MockCapture` it has already
+/// `set_script`/`set_fixture_wav`'d from a WAV fixture *before* the
+/// plugin's `setup` hook runs, which a bare factory fn pointer can't
+/// express since it can't capture the fixture path). Anticipated by this
+/// module's own pre-Task-4 doc comment ("Task 4/8 ... are expected to
+/// provide their own `init_with_capture`-style constructor"); no hotkey
+/// backend is wired (same as `init`) — a host using this constructor for
+/// a scripted `MockCapture` has no real hotkey to drive anyway.
+pub fn init_with_capture<R: Runtime>(capture: Arc<dyn AudioCapture>) -> TauriPlugin<R> {
+    build(None, Box::new(move || capture.clone()), None)
+}
+
+/// Same as [`init_with_capture`], with a host-supplied `SecretStore` too.
+pub fn init_with_capture_and_secrets<R: Runtime>(
+    secrets: Arc<dyn SecretStore>,
+    capture: Arc<dyn AudioCapture>,
+) -> TauriPlugin<R> {
+    build(Some(secrets), Box::new(move || capture.clone()), None)
 }
 
 /// Registers the plugin with the real desktop backends (Task 4):
@@ -207,13 +229,13 @@ fn default_capture() -> Arc<dyn AudioCapture> {
 /// `desktop` Cargo feature.
 #[cfg(feature = "desktop")]
 pub fn init_desktop<R: Runtime>() -> TauriPlugin<R> {
-    build(None, desktop_capture, Some(desktop_hotkey_factory))
+    build(None, Box::new(desktop_capture), Some(desktop_hotkey_factory))
 }
 
 /// Same as [`init_desktop`], with a host-supplied `SecretStore`.
 #[cfg(feature = "desktop")]
 pub fn init_desktop_with<R: Runtime>(secrets: Arc<dyn SecretStore>) -> TauriPlugin<R> {
-    build(Some(secrets), desktop_capture, Some(desktop_hotkey_factory))
+    build(Some(secrets), Box::new(desktop_capture), Some(desktop_hotkey_factory))
 }
 
 #[cfg(feature = "desktop")]
@@ -360,7 +382,7 @@ type HotkeyFactory<R> = fn(tauri::AppHandle<R>) -> Arc<dyn HotkeyController>;
 
 fn build<R: Runtime>(
     secrets_override: Option<Arc<dyn SecretStore>>,
-    capture_factory: fn() -> Arc<dyn AudioCapture>,
+    capture_factory: Box<dyn Fn() -> Arc<dyn AudioCapture> + Send + Sync>,
     hotkey_factory: Option<HotkeyFactory<R>>,
 ) -> TauriPlugin<R> {
     Builder::new("voxis")

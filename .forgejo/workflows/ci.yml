@@ -51,3 +51,56 @@ jobs:
               # the bun runtime and ~100 mock-based tests fail spuriously.
               bun run test:run
             '
+
+  # Task 3.5 tracer bullet: `voxis-fake-stt` (protocol-compat + fixture
+  # tests, no network) + the REAL `host-min` Tauri binary driven end to
+  # end against a real `voxis-fake-stt` server under `xvfb-run` (the
+  # voxis-ci image has libwebkit2gtk-4.1/libgtk-3/xvfb -- see
+  # Dockerfile.ci -- so this runs the actual binary, not a browser/
+  # webview-driver stand-in; see `examples/host-min/README.md` for why a
+  # Playwright/tauri-driver harness was not added in this same change).
+  # Independent of `fast` above -- a failure here never blocks it.
+  host-min-e2e:
+    runs-on: host
+    timeout-minutes: 30
+    env:
+      GIT_PAGER: cat
+      PAGER: cat
+    steps:
+      - name: checkout (manual; Forgejo /git subpath breaks actions/checkout URL)
+        run: |
+          set -euo pipefail
+          base="${CI_GIT_BASE:-$GITHUB_SERVER_URL}"
+          git init -q .
+          git remote add origin "${base}/${GITHUB_REPOSITORY}.git"
+          git -c http.extraheader="Authorization: basic $(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 -w0)" \
+            -c protocol.version=2 fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+          git --no-pager log --oneline -1
+
+      - name: voxis-fake-stt tests + host-min real-binary smoke (mock capture + fake-stt, no real mic/Groq) in voxis-ci image
+        run: |
+          set -euo pipefail
+          cache="$HOME/.cache/voxis-ci"
+          mkdir -p "$cache/cargo" "$cache/target" "$cache/home"
+          docker run --rm \
+            -v "$PWD":/w -w /w \
+            -v "$cache/cargo":/tmp/cargo-home \
+            -v "$cache/target":/tmp/ci-target \
+            -v "$cache/home":/tmp/cihome \
+            -e CARGO_HOME=/tmp/cargo-home \
+            -e CARGO_TARGET_DIR=/tmp/ci-target \
+            -e HOME=/tmp/cihome \
+            --user "$(id -u):$(id -g)" \
+            voxis-ci:latest \
+            bash -euo pipefail -c '
+              echo "=== [required] voxis-fake-stt unit + protocol-compat + fixture tests ===" &&
+              cargo test -p voxis-fake-stt &&
+              echo "=== [required] host-min real-binary smoke (speech + silence + speech-streamdied, mock capture + fake-stt) ===" &&
+              # host-min-smoke.sh itself bundles guest-js into ui/vendor/
+              # (review fix F4 -- that directory is gitignored, generated
+              # fresh every run) and THEN builds host-min, so frontendDist
+              # is never stale/missing at compile time; no separate
+              # `cargo build -p host-min` before this.
+              xvfb-run -a bash crates/tauri-plugin-voxis/examples/host-min/scripts/host-min-smoke.sh
+            '

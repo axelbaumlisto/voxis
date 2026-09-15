@@ -16,3 +16,13 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-voxis = { path = "../../..", features = ["desktop"] }
 serde_json = "1"
+# `Secret` (SecretStore API-key plumbing) + `AppConfig` (silence-timeout/
+# STT-URL override, mirroring how `pipeline.rs` itself reads it) --
+# Task 3.5's own "apply the STT URL/API key through the existing
+# PipelineConfig/SecretStore path" wiring, no new plugin command.
+voxis-core = { path = "../../../../voxis-core" }
+# Decodes the `VOXIS_CAPTURE=mock:<wav>` fixture into per-250ms RMS/peak
+# windows to script `MockCapture` -- same crate `voxis-core`'s own
+# `audio_wav` module already depends on for WAV *encoding*.
+hound = "3.5"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
