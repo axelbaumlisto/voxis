@@ -492,7 +492,7 @@ Sources/AudioCapture.swift}`, `…/src/mobile.rs`, `…/examples/host-min/src-ta
    `[R1-iOS C3]`.
 6. Haptics (`UIImpactFeedbackGenerator`) на start/stop — как у Wispr Flow.
 
-### Task 8.5: Tracer bullet (iOS) — `host-min` на iPad-стенде с реальным микрофоном
+### Task 8.5: ✅ stage 1 (iOS Simulator) `74bd12e` (2 rounds; silence→NoSpeech on real sim mic, speech→real Groq Russian); stage 2 iPad-стенд — HUMAN GATE pending (checklist in research/plugin-plan/review_8_5_r1.md) — Tracer bullet (iOS) — `host-min` на iPad-стенде с реальным микрофоном
 **Files:** `crates/tauri-plugin-voxis/examples/host-min/src-tauri/gen/apple/**`, `docs/PLUGIN_IOS_HOST.md` (черновик)
 **Depends:** Task 8, Task 3.5
 **Acceptance:** `host-min` собирается под iOS; **этап 1 — iOS Simulator на этом Mac** (микрофон Mac,
@@ -751,6 +751,10 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
   - Заменить системную диктовку Siri нельзя; iOS 27 private hooks «Siri Extensions / Model
     Delegation» не включены (вероятно EU-only) — следить.
 - Voxis desktop сам как хост своего плагина (dogfooding, убирает дублирование `audio/`).
+- **`[HW-GATE finding #2]` iOS Simulator наследует системный default input Mac** — с AirPods/BY-V как default
+  speech-run даёт мусор («Torsdagsfond», Norwegian); с «Микрофон MacBook Air» — русский текст через Groq.
+  `host-min-ios-smoke.sh` теперь проверяет `SwitchAudioSource -t input -c` как precondition. Усиливает
+  требование Task 6b: устройство ввода — из профиля/явного выбора, никогда «default».
 - **`[HW-GATE finding]` Устройство ввода**: `CpalCapture::new()` берёт системный default = BY-V (петличка из
   исходного инцидента) → нули → галлюцинация. Плагин ДОЛЖЕН выбирать устройство из профиля: вернуть
   `audio_device` в `ProfileConfig` (T2 исключил как backend-specific — пересмотреть: имя устройства
