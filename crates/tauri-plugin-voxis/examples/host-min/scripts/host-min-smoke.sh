@@ -31,10 +31,25 @@
 # stale/missing bundle at `cargo build` time ships stale/missing JS, not
 # a build failure.
 set -euo pipefail
-cd "$(dirname "$0")/.."  # -> examples/host-min
-host_min_dir="$PWD"
-cd "$(dirname "$0")/../../../../.."  # -> repo root
-repo_root="$PWD"
+# Task 8.5 fix: both resolved from the ORIGINAL `$0` in one subshell each
+# (not two sequential `cd`s in this shell) -- `$0` stays whatever
+# relative-path string the caller invoked this script with (CI/`package.
+# json`'s `e2e:host-min` both use the relative `crates/tauri-plugin-voxis/
+# examples/host-min/scripts/host-min-smoke.sh`, never the repo-root
+# forwarding stub), so a second `cd` relative to the FIRST `cd`'s new cwd
+# silently resolved the wrong directory -- `bash crates/tauri-plugin-
+# voxis/examples/host-min/scripts/host-min-smoke.sh` from the repo root
+# failed outright (`cd: .../scripts/../../../../..: No such file or
+# directory`) before this fix, never actually exercised by a run from
+# that exact relative path until Task 8.5 needed to invoke it that way
+# for its own acceptance criterion #7.
+host_min_dir="$(cd "$(dirname "$0")/.." && pwd)"           # -> examples/host-min
+repo_root="$(cd "$(dirname "$0")/../../../../.." && pwd)"  # -> repo root
+# `target/debug/...`/`fixtures/audio/...` below are repo-root-relative
+# (the workspace's single `target/` dir always lives there, regardless of
+# which member crate's directory `cargo build` was invoked from) -- land
+# in `repo_root`, not `host_min_dir`.
+cd "$repo_root"
 
 echo "=== bundling guest-js overlay into ui/vendor ==="
 bash "$host_min_dir/scripts/bundle-overlay.sh"

@@ -5,6 +5,20 @@ description = "Minimal Tauri 2 host embedding tauri-plugin-voxis (Task 4 manual/
 edition = "2021"
 publish = false
 
+# Task 8.5: iOS builds require a library target (`staticlib`/`cdylib`) with
+# a `#[tauri::mobile_entry_point]` entry function -- `rlib` keeps the
+# desktop `[[bin]]` below able to link it directly (`host_min_lib::run()`).
+# Name follows Tauri's own scaffold convention (`<crate>_lib`, avoids a
+# name clash with the `host-min` binary target).
+# Note: Cargo has no per-target `crate-type` -- `staticlib`/`cdylib` are
+# also built (and unused) for desktop `cargo build`/`cargo run` targets,
+# not just the iOS build that actually needs them; harmless, just extra
+# build output.
+[lib]
+name = "host_min_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+path = "src/lib.rs"
+
 [[bin]]
 name = "host-min"
 path = "src/main.rs"
@@ -14,7 +28,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-voxis = { path = "../../..", features = ["desktop"] }
 serde_json = "1"
 # `Secret` (SecretStore API-key plumbing) + `AppConfig` (silence-timeout/
 # STT-URL override, mirroring how `pipeline.rs` itself reads it) --
@@ -26,3 +39,16 @@ voxis-core = { path = "../../../../voxis-core" }
 # `audio_wav` module already depends on for WAV *encoding*.
 hound = "3.5"
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+
+# Task 8.5: `desktop` (cpal/rdev) only makes sense off-iOS -- cpal doesn't
+# build for `aarch64-apple-ios`/`-sim` in this workspace's pinned version
+# the way this plugin's own `desktop.rs` uses it, and rdev's X11/macOS-
+# AppKit backends don't apply to iOS either. `VOXIS_CAPTURE=ios` (Task 8's
+# `init_ios()`, `mobile.rs`) needs no extra Cargo feature -- it's plain,
+# always-compiled code behind `#[cfg(target_os = "ios")]` inside the
+# plugin crate itself.
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+tauri-plugin-voxis = { path = "../../..", features = ["desktop"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+tauri-plugin-voxis = { path = "../../.." }

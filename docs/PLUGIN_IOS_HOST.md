@@ -216,6 +216,58 @@ document cannot give from source-reading alone — folded into the same T8.5 pas
   and confirm the actual failure mode — see the `[T9a]` note below on
   `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and `errSecInteractionNotAllowed`.
 
+## `[T8.5]` Simulator stage results (this Mac) — see `research/plugin-ios/T8_5_simulator.md` for full evidence
+
+Ran, not just planned — `host-min`'s own `gen/apple/` project (`cargo tauri ios init` +
+`project.yml` edits, `deploymentTarget.iOS: 17.0`, `NSMicrophoneUsageDescription` in
+`info.properties`) built and ran on an iPhone 17 Pro Simulator (iOS 26.5), real
+`AVAudioEngine` capture via Mac-mic passthrough, both a SILENCE and a real-Groq SPEECH
+scenario. Learnings worth keeping close to this document (full detail, verbatim
+log/screenshot evidence in `research/plugin-ios/T8_5_simulator.md`):
+
+- **A Tauri iOS host needs a library target, not just a `[[bin]]`.** `cargo tauri ios
+  build` always links a `staticlib`/`cdylib` with a `#[tauri::mobile_entry_point]`
+  entry function — a host written bin-only (as `host-min` originally was, being a
+  desktop-first tracer bullet) fails immediately with `error: no library targets
+  found in package`. Any future Tauri-iOS host in this repo needs `src/lib.rs`
+  (`crate-type = ["staticlib", "cdylib", "rlib"]`, `pub fn run()`) from the start,
+  with `main.rs` just calling into it.
+- **A per-target Cargo dependency split (`desktop` feature off-iOS) can silently break
+  any OTHER capture-mode branch that wasn't itself already `cfg`-gated** — a
+  `VOXIS_CAPTURE=cpal` branch calling `init_desktop()` unconditionally at compile time
+  only ever worked because the `desktop` feature used to be on for every target; once
+  iOS stopped linking it, that branch needed the same `#[cfg(target_os = "ios")]`
+  treatment the `ios` branch already had.
+- **`SIMCTL_CHILD_*` env vars for `xcrun simctl launch` must be `export`ed in the
+  calling shell** — passing them as trailing `simctl launch` arguments instead makes
+  them the launched app's own `argv`, not its environment (`xcrun simctl launch
+  --help`'s own last line says so; easy to miss).
+- **`--console-pty`/`--stdout=`/`--stderr=` were unreliable for capturing a launched
+  Simulator app's stdout** in a non-interactive tooling environment; `xcrun simctl
+  spawn <udid> log show/stream --predicate 'process == "<binary>"'` reliably captured
+  every `println!` line (tagged `[stdout]`/`[stderr]`) instead — filter by the
+  launched PID (`log show`'s own PID column) if a previous run's output could still be
+  inside the same `--last` time window.
+- **The Simulator's own noise floor (Mac mic passthrough) sits close to `SILENCE_RMS =
+  0.02`** — one SILENCE run's ambient room noise (fan/HVAC) pushed peak RMS to ~0.02
+  and the guard correctly attempted a real transcription instead of discarding as
+  silence (not a bug — the calibration has very little headroom on this hardware).
+  The iPad stand's own noise-floor measurement (this document's `[T8.5]` item 6 in the
+  plan, `consts.rs`) should keep this in mind.
+- **The Simulator's microphone input is whatever the Mac's own default audio INPUT
+  device currently is — pin it to the built-in mic before any SPEECH run.** A SPEECH
+  scenario run with AirPods as the Mac's default input produced a garbage transcript
+  (`" Torsdagsfond"`, detected as Norwegian Nynorsk) that initially looked like an
+  acoustics/speaker-quality problem but wasn't: the Simulator was actually listening
+  through AirPods' own mic, not the Mac's built-in one, with no in-Simulator signal
+  that this had happened. Pinning the input first (`SwitchAudioSource -t input -s
+  "<built-in mic name>"`, `brew install switchaudio-osx`) and re-running the identical
+  command produced a real, on-language transcript instead (`guardOutcome: finalized`,
+  `language: Russian`, real in-room speech). Full evidence in
+  `research/plugin-ios/T8_5_simulator.md`'s Scenario (b); `scripts/host-min-ios-smoke.sh`
+  now checks this precondition and fails loudly instead of silently trusting whatever
+  device happens to be active.
+
 ## `[T9a]` Live Activity / Dynamic Island
 
 Not implemented yet — see the plan's Task 9a/9b. This document will gain a

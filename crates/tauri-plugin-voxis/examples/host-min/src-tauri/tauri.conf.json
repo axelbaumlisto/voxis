@@ -23,6 +23,9 @@
   },
   "bundle": {
     "active": false,
-    "icon": ["icons/icon.png"]
+    "icon": ["icons/icon.png"],
+    "iOS": {
+      "developmentTeam": "GZL949D756"
+    }
   }
 }
