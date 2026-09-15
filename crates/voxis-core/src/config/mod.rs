@@ -249,6 +249,9 @@ impl Default for DictionaryConfig {
 /// - overlay: Recording overlay UI settings
 /// - llm: LLM post-processing settings
 /// - dictionary: Dictionary and learning settings
+///
+/// Every field must be persisted in ConfigSqliteStorage::save/load — see
+/// test every_app_config_field_round_trips_through_sqlite.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct AppConfig {
     // API settings

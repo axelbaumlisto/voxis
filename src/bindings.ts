@@ -888,6 +888,9 @@ async reprocessHistoryForSuggestions(limit: number | null) : Promise<Result<Repr
  * - overlay: Recording overlay UI settings
  * - llm: LLM post-processing settings
  * - dictionary: Dictionary and learning settings
+ * 
+ * Every field must be persisted in ConfigSqliteStorage::save/load — see
+ * test every_app_config_field_round_trips_through_sqlite.
  */
 export type AppConfig = { api_key?: string; model?: string; language?: string; hotkey?: string; 
 /**

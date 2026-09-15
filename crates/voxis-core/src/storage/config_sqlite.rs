@@ -162,6 +162,14 @@ impl ConfigSqliteStorage {
         // Hotkey
         config.hotkey = self.get_str(&conn, "hotkey", &config.hotkey);
         config.hotkey_hold_ms = self.get_typed(&conn, "hotkey_hold_ms", config.hotkey_hold_ms);
+        // `min_recording_ms`: Task 6c — same silent-revert class as Task
+        // 6b's `api_url_override`. Neither `save` nor `load` touched this
+        // key at all, so a custom "minimum recording length" setting
+        // silently reverted to `DEFAULT_MIN_RECORDING_MS` on every
+        // restart. Caught by
+        // `every_app_config_field_round_trips_through_sqlite`.
+        config.min_recording_ms =
+            self.get_typed(&conn, "min_recording_ms", config.min_recording_ms);
 
         // Recording guard (Layer 5)
         config.silence_timeout_ms =
@@ -291,6 +299,9 @@ impl ConfigSqliteStorage {
     }
 
     /// Save config to SQLite database.
+    ///
+    /// Every field must be persisted in ConfigSqliteStorage::save/load —
+    /// see test every_app_config_field_round_trips_through_sqlite.
     pub fn save(&self, config: &AppConfig) -> Result<(), Box<dyn std::error::Error>> {
         let conn = self.conn()?;
 
@@ -303,6 +314,9 @@ impl ConfigSqliteStorage {
         // Hotkey
         self.set(&conn, "hotkey", &config.hotkey)?;
         self.set(&conn, "hotkey_hold_ms", &config.hotkey_hold_ms.to_string())?;
+        // Task 6c: was never written by `save` at all (see the matching
+        // `load` comment above).
+        self.set(&conn, "min_recording_ms", &config.min_recording_ms.to_string())?;
 
         // Recording guard (Layer 5)
         self.set(
@@ -390,8 +404,25 @@ impl ConfigSqliteStorage {
         self.set(&conn, "paste_shortcuts", &config.paste_shortcuts)?;
 
         // VAD
+        // Task 6c: `backend`/`onset_frames`/`hangover_frames`/
+        // `prefill_frames` were read by `load` (above) but never written
+        // here — same silent-revert class as `min_recording_ms` and Task
+        // 6b's `api_url_override`. Found by
+        // `every_app_config_field_round_trips_through_sqlite`.
         self.set(&conn, "vad_enabled", &config.vad.enabled.to_string())?;
+        self.set(&conn, "vad_backend", &config.vad.backend)?;
         self.set(&conn, "vad_threshold", &config.vad.threshold.to_string())?;
+        self.set(&conn, "vad_onset_frames", &config.vad.onset_frames.to_string())?;
+        self.set(
+            &conn,
+            "vad_hangover_frames",
+            &config.vad.hangover_frames.to_string(),
+        )?;
+        self.set(
+            &conn,
+            "vad_prefill_frames",
+            &config.vad.prefill_frames.to_string(),
+        )?;
 
         // Overlay
         self.set(
@@ -1174,5 +1205,168 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!path.exists(), "read-only open must never create config.db");
+    }
+
+    // -- Task 6c: the durable guard ------------------------------------
+
+    /// Builds an `AppConfig` where every single field holds a value that
+    /// differs from `AppConfig::default()`. Used by
+    /// `every_app_config_field_round_trips_through_sqlite` below.
+    fn fully_non_default_app_config() -> AppConfig {
+        AppConfig {
+            api_key: "nd-api-key".to_string(),
+            model: "nd-model".to_string(),
+            language: "en".to_string(),
+            hotkey: "f13".to_string(),
+            hotkey_hold_ms: 999,
+            min_recording_ms: 777,
+            silence_timeout_ms: 12_345,
+            max_recording_ms: 54_321,
+            auto_type: false,
+            auto_enter: true,
+            typing_delay: 88,
+            notifications: false,
+            backend: "x11".to_string(),
+            debug: true,
+            audio_device: "nd-audio-device".to_string(),
+            history_enabled: false,
+            history_days: 7,
+            active_provider: "local".to_string(),
+            cloud_provider: "openai".to_string(),
+            local_backend: "whisper_cpp".to_string(),
+            text_processing: false,
+            append_trailing_space: true,
+            translate_to_english: true,
+            auto_submit_key: crate::output_types::AutoSubmitKey::CmdEnter,
+            audio_feedback: crate::audio_feedback_types::AudioFeedbackSettings {
+                enabled: true,
+                volume: 0.15,
+            },
+            shortcut_bindings: vec![crate::shortcut::binding::ShortcutBinding {
+                id: "nd-binding".to_string(),
+                name: "ND Binding".to_string(),
+                description: "Non-default fixture binding".to_string(),
+                default_binding: "f14".to_string(),
+                current_binding: "f15".to_string(),
+                action: crate::shortcut::binding::ShortcutAction::TranscribePostProcess {
+                    prompt_id: Some("nd-prompt".to_string()),
+                },
+            }],
+            first_run_completed: true,
+            hotkey_mode: "toggle".to_string(),
+            retention_period: "days_3".to_string(),
+            retention_limit: 42,
+            always_on_microphone: true,
+            paste_shortcuts: "ctrl_v".to_string(),
+            api_url_override: Some("http://127.0.0.1:4217/v1/audio/transcriptions".to_string()),
+            vad: VadConfig {
+                enabled: false,
+                backend: "silero".to_string(),
+                threshold: 0.91,
+                onset_frames: 9,
+                hangover_frames: 13,
+                prefill_frames: 6,
+            },
+            overlay: OverlayConfig {
+                enabled: false,
+                position: "top_right".to_string(),
+                size: "large".to_string(),
+                margin: -12,
+                audio_boost: 250.0,
+                theme: "neon".to_string(),
+                backend: "none".to_string(),
+            },
+            llm: LlmConfig {
+                enabled: true,
+                provider: "openai".to_string(),
+                api_url: "https://example.invalid/v1/chat/completions".to_string(),
+                api_key: "nd-llm-key".to_string(),
+                model: "nd-llm-model".to_string(),
+                prompt: "nd-llm-prompt".to_string(),
+            },
+            dictionary: DictionaryConfig {
+                path: "/tmp/nd-dictionary.txt".to_string(),
+                learning_mode: "manual".to_string(),
+                learning_threshold: 11,
+            },
+        }
+    }
+
+    /// THE DURABLE GUARD (Task 6c): `AppConfig` gained a second silently
+    /// dropped field (`min_recording_ms`, same class of bug as Task 6b's
+    /// `api_url_override`) because no test ever exercised every field at
+    /// once. This test builds an `AppConfig` where EVERY field is a
+    /// non-default value, round-trips it through `save`/`load`, and
+    /// asserts the result is byte-identical — so a future field added to
+    /// `AppConfig` but forgotten in `save`/`load` fails this test
+    /// immediately (it would load back as its \*default\*, not the
+    /// non-default value that was saved).
+    ///
+    /// The `let AppConfig { .. } = ..` destructure below (no `..` rest
+    /// pattern) is a compile-time belt-and-braces on top of that: adding
+    /// a field to `AppConfig` without adding it here too is a compile
+    /// error ("pattern does not mention field"), not just a maybe-caught
+    /// runtime assertion.
+    #[test]
+    fn every_app_config_field_round_trips_through_sqlite() {
+        let saved = fully_non_default_app_config();
+
+        // Compile-time exhaustiveness check: every `AppConfig` field must
+        // be named here. Add a field to the struct without adding it to
+        // both this pattern AND `fully_non_default_app_config` above and
+        // this file fails to compile.
+        let AppConfig {
+            api_key: _,
+            model: _,
+            language: _,
+            hotkey: _,
+            hotkey_hold_ms: _,
+            min_recording_ms: _,
+            silence_timeout_ms: _,
+            max_recording_ms: _,
+            auto_type: _,
+            auto_enter: _,
+            typing_delay: _,
+            notifications: _,
+            backend: _,
+            debug: _,
+            audio_device: _,
+            history_enabled: _,
+            history_days: _,
+            active_provider: _,
+            cloud_provider: _,
+            local_backend: _,
+            text_processing: _,
+            append_trailing_space: _,
+            translate_to_english: _,
+            auto_submit_key: _,
+            audio_feedback: _,
+            shortcut_bindings: _,
+            first_run_completed: _,
+            hotkey_mode: _,
+            retention_period: _,
+            retention_limit: _,
+            always_on_microphone: _,
+            paste_shortcuts: _,
+            api_url_override: _,
+            vad: _,
+            overlay: _,
+            llm: _,
+            dictionary: _,
+        } = saved.clone();
+
+        let file = NamedTempFile::new().unwrap();
+        let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
+
+        storage.save(&saved).unwrap();
+        let loaded = storage.load().unwrap();
+
+        assert_eq!(
+            saved, loaded,
+            "every AppConfig field must round-trip through ConfigSqliteStorage save/load; a \
+             mismatch here means some field is set to a non-default value on save but comes \
+             back as its default on load (silently dropped, e.g. min_recording_ms before \
+             Task 6c / api_url_override before Task 6b)"
+        );
     }
 }
