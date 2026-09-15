@@ -11,10 +11,42 @@ use tokio::sync::watch;
 
 /// One RMS/peak measurement of the input signal, pushed onto
 /// `AudioCapture::level_rx` roughly every 250 ms while a capture runs.
+///
+/// `muted` (Task 3b, `[R1-Safety T3]`/`[R1-iOS C3]`): `true` when the
+/// backend detects the input is muted (iOS system mic-mute button,
+/// desktop equivalent) — flows straight through to the `voxis://level`
+/// event's own `muted` field for an immediate UI reaction, and
+/// `guard_adapter` treats it as silence (zeroes the peak it feeds
+/// `guard_step`) regardless of the actual (zero) signal, so a muted take
+/// behaves exactly like a silent one for the guard's timeout/NoSpeech
+/// logic instead of needing its own parallel decision path.
+///
+/// `cap_hit` (`[R1-Arch S2]`, self-cap): `true` once the backend's own
+/// `cap_samples` ceiling (passed to `start`) has been reached —
+/// independent of whether anything is still polling `level_rx` (a real
+/// cpal callback / Swift tap enforces this in its own thread; `MockCapture`
+/// mirrors that by refusing to advance past `cap_samples` in `tick()`).
+/// `guard_adapter`'s poll loop treats a `cap_hit` sample as an immediate
+/// `MaxDuration` stop, same as `guard_step`'s own `cap_hit` parameter —
+/// the backstop is honoured even if the async guard task that would
+/// otherwise notice `elapsed_ms >= max` were somehow never spawned.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LevelSample {
     pub rms: f32,
     pub peak: f32,
+    pub muted: bool,
+    pub cap_hit: bool,
+}
+
+impl LevelSample {
+    /// Convenience constructor for scripting `MockCapture` in tests —
+    /// `muted`/`cap_hit` default `false` (both are actually overwritten by
+    /// `MockCapture::tick()` from its own knobs/self-cap state at emit
+    /// time regardless of what's scripted here, so a literal's values for
+    /// those two fields would be misleading busywork to fill in by hand).
+    pub fn new(rms: f32, peak: f32) -> Self {
+        Self { rms, peak, muted: false, cap_hit: false }
+    }
 }
 
 /// `stop()`'s result — enough for the (stub, Task 3; real, Task 3b)
@@ -64,6 +96,15 @@ pub trait AudioCapture: Send + Sync {
     fn stop(&self) -> Result<CaptureStats, CaptureError>;
     /// Current level channel — `None` until the first sample after `start`.
     fn level_rx(&self) -> watch::Receiver<Option<LevelSample>>;
+    /// Force the backend back to a known-idle state after a `stop()` that
+    /// returned `Err` (Task 3b `[ADO-2/3 minors]`, "for 3b": `do_stop`
+    /// must not leave the backend internally "running" just because the
+    /// plugin's own session slot was already freed — without this, the
+    /// *next* `start()` would fail with `CaptureError::AlreadyRunning`
+    /// even though nothing in the plugin thinks a session is active).
+    /// Default no-op: a backend whose `stop()` can't fail (or that
+    /// already self-recovers) needs nothing here.
+    fn reset(&self) {}
 }
 
 /// `<host-cache>/voxis-plugin/rec/` — the plugin's dedicated scratch
@@ -167,6 +208,17 @@ struct MockCaptureState {
     started_path: Option<PathBuf>,
     peak_rms: f32,
     samples_written: usize,
+    /// The `cap_samples` argument the most recent `start()` was given —
+    /// `tick()`'s self-cap ceiling (`[R1-Arch S2]`).
+    cap_samples: usize,
+    /// Set once `samples_written` has reached `cap_samples`; every
+    /// scripted sample emitted from that point on carries
+    /// `cap_hit: true`, and `tick()` stops advancing the script (mirrors
+    /// a real backend that stops writing once its buffer is full).
+    cap_hit: bool,
+    /// The `muted` knob (Task 3b `[R1-Safety T3]`) — forced onto every
+    /// emitted `LevelSample` regardless of the scripted rms/peak.
+    muted: bool,
 }
 
 impl Default for MockCaptureState {
@@ -180,6 +232,9 @@ impl Default for MockCaptureState {
             started_path: None,
             peak_rms: 0.0,
             samples_written: 0,
+            cap_samples: usize::MAX,
+            cap_hit: false,
+            muted: false,
         }
     }
 }
@@ -231,21 +286,38 @@ impl MockCapture {
         self.state.lock().unwrap().ignore_stop = ignore;
     }
 
+    /// The muted knob (`[R1-Safety T3]`): every sample `tick()` emits from
+    /// now on carries `muted` as given, until changed again.
+    pub fn set_muted(&self, muted: bool) {
+        self.state.lock().unwrap().muted = muted;
+    }
+
     /// Pushes the next scripted sample onto `level_rx`. No-op (and, in
     /// particular, no tick observed by watchers) once `die_silently` is
-    /// set or the script is exhausted or the capture isn't running —
-    /// mirroring a backend whose callback stopped firing while
-    /// `is_recording()` still returns `true`.
+    /// set, the script is exhausted, the capture isn't running, or the
+    /// self-cap has already been hit (`[R1-Arch S2]` — a real backend
+    /// stops writing once its buffer is full, independent of anything
+    /// still polling `level_rx`) — mirroring a backend whose callback
+    /// stopped firing while `is_recording()` still returns `true`.
     pub fn tick(&self) {
         let mut state = self.state.lock().unwrap();
-        if !state.running || state.die_silently {
+        if !state.running || state.die_silently || state.cap_hit {
             return;
         }
-        if let Some(sample) = state.script.pop_front() {
+        if let Some(mut sample) = state.script.pop_front() {
             state.peak_rms = state.peak_rms.max(sample.peak);
             state.samples_written += 1;
+            if state.samples_written >= state.cap_samples {
+                state.cap_hit = true;
+            }
+            sample.muted = state.muted;
+            sample.cap_hit = state.cap_hit;
             let _ = self.tx.send(Some(sample));
         }
+    }
+
+    pub fn cap_hit(&self) -> bool {
+        self.state.lock().unwrap().cap_hit
     }
 
     pub fn is_running(&self) -> bool {
@@ -260,7 +332,7 @@ impl Default for MockCapture {
 }
 
 impl AudioCapture for MockCapture {
-    fn start(&self, path: &Path, _cap_samples: usize) -> Result<(), CaptureError> {
+    fn start(&self, path: &Path, cap_samples: usize) -> Result<(), CaptureError> {
         let mut state = self.state.lock().unwrap();
         if state.running {
             return Err(CaptureError::AlreadyRunning);
@@ -269,6 +341,8 @@ impl AudioCapture for MockCapture {
         state.started_path = Some(path.to_path_buf());
         state.peak_rms = 0.0;
         state.samples_written = 0;
+        state.cap_samples = cap_samples;
+        state.cap_hit = false;
         let _ = self.tx.send(None);
         Ok(())
     }
@@ -295,6 +369,12 @@ impl AudioCapture for MockCapture {
 
     fn level_rx(&self) -> watch::Receiver<Option<LevelSample>> {
         self.rx.clone()
+    }
+
+    fn reset(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.running = false;
+        state.started_path = None;
     }
 }
 
@@ -371,8 +451,8 @@ mod tests {
     fn mock_capture_replays_script_only_on_explicit_tick() {
         let mock = MockCapture::new();
         mock.set_script(vec![
-            LevelSample { rms: 0.1, peak: 0.2 },
-            LevelSample { rms: 0.3, peak: 0.4 },
+            LevelSample::new(0.1, 0.2),
+            LevelSample::new(0.3, 0.4),
         ]);
         let mut rx = mock.level_rx();
         let base = tempfile::tempdir().unwrap();
@@ -382,16 +462,16 @@ mod tests {
         assert_eq!(*rx.borrow_and_update(), None);
 
         mock.tick();
-        assert_eq!(*rx.borrow_and_update(), Some(LevelSample { rms: 0.1, peak: 0.2 }));
+        assert_eq!(*rx.borrow_and_update(), Some(LevelSample::new(0.1, 0.2)));
 
         mock.tick();
-        assert_eq!(*rx.borrow_and_update(), Some(LevelSample { rms: 0.3, peak: 0.4 }));
+        assert_eq!(*rx.borrow_and_update(), Some(LevelSample::new(0.3, 0.4)));
     }
 
     #[test]
     fn mock_capture_die_silently_stops_ticking_while_running() {
         let mock = MockCapture::new();
-        mock.set_script(vec![LevelSample { rms: 0.5, peak: 0.6 }]);
+        mock.set_script(vec![LevelSample::new(0.5, 0.6)]);
         let base = tempfile::tempdir().unwrap();
         mock.start(&base.path().join("s.wav"), 999_999).unwrap();
         mock.set_die_silently(true);
@@ -436,8 +516,8 @@ mod tests {
     fn mock_capture_stop_reports_stats_from_ticked_samples() {
         let mock = MockCapture::new();
         mock.set_script(vec![
-            LevelSample { rms: 0.1, peak: 0.2 },
-            LevelSample { rms: 0.9, peak: 0.95 },
+            LevelSample::new(0.1, 0.2),
+            LevelSample::new(0.9, 0.95),
         ]);
         let base = tempfile::tempdir().unwrap();
         mock.start(&base.path().join("s.wav"), 999_999).unwrap();
@@ -458,5 +538,79 @@ mod tests {
         mock.start(&base.path().join("a.wav"), 1).unwrap();
         let second = mock.start(&base.path().join("b.wav"), 1);
         assert!(matches!(second, Err(CaptureError::AlreadyRunning)));
+    }
+
+    /// `[R1-Arch S2]` self-cap: the backend must stop advancing past
+    /// `cap_samples` **on its own**, with no guard/pipeline task involved
+    /// at all — this test drives `tick()` directly, standing in for a
+    /// real cpal callback/Swift tap enforcing its own ceiling regardless
+    /// of whether anything above it is still alive to notice.
+    #[test]
+    fn mock_capture_self_cap_stops_advancing_past_cap_samples_with_no_guard_involved() {
+        let mock = MockCapture::new();
+        mock.set_script(vec![
+            LevelSample::new(0.1, 0.1),
+            LevelSample::new(0.1, 0.1),
+            LevelSample::new(0.1, 0.1),
+            LevelSample::new(0.1, 0.1),
+            LevelSample::new(0.1, 0.1),
+        ]);
+        let base = tempfile::tempdir().unwrap();
+        mock.start(&base.path().join("s.wav"), 3).unwrap();
+
+        assert!(!mock.cap_hit());
+        mock.tick();
+        mock.tick();
+        assert!(!mock.cap_hit(), "cap must not fire before the 3rd sample");
+        mock.tick(); // 3rd sample reaches the cap
+        assert!(mock.cap_hit());
+        mock.tick();
+        mock.tick();
+
+        let stats = mock.stop().unwrap();
+        assert_eq!(stats.samples, 3, "ticks past cap_samples must not advance the script further");
+    }
+
+    #[test]
+    fn mock_capture_emits_cap_hit_on_the_sample_that_reaches_the_cap() {
+        let mock = MockCapture::new();
+        mock.set_script(vec![LevelSample::new(0.1, 0.1), LevelSample::new(0.1, 0.1)]);
+        let base = tempfile::tempdir().unwrap();
+        mock.start(&base.path().join("s.wav"), 1).unwrap();
+        let mut rx = mock.level_rx();
+
+        mock.tick();
+        assert!(rx.borrow_and_update().unwrap().cap_hit, "the sample that reaches cap_samples must carry cap_hit=true");
+    }
+
+    #[test]
+    fn mock_capture_muted_knob_flows_into_emitted_samples() {
+        let mock = MockCapture::new();
+        mock.set_script(vec![LevelSample::new(0.1, 0.1), LevelSample::new(0.1, 0.1)]);
+        let base = tempfile::tempdir().unwrap();
+        mock.start(&base.path().join("s.wav"), 999_999).unwrap();
+        let mut rx = mock.level_rx();
+
+        mock.tick();
+        assert!(!rx.borrow_and_update().unwrap().muted);
+
+        mock.set_muted(true);
+        mock.tick();
+        assert!(rx.borrow_and_update().unwrap().muted);
+    }
+
+    #[test]
+    fn reset_clears_running_state_so_a_subsequent_start_succeeds() {
+        let mock = MockCapture::new();
+        let base = tempfile::tempdir().unwrap();
+        mock.start(&base.path().join("s.wav"), 999_999).unwrap();
+        mock.set_ignore_stop(true);
+        assert!(mock.stop().is_err(), "stop() fails while ignore_stop is set");
+        assert!(mock.is_running(), "the failed stop() must not have cleared running on its own");
+
+        mock.reset();
+
+        assert!(!mock.is_running(), "reset() must clear running regardless of the earlier stop() failure");
+        assert!(mock.start(&base.path().join("s2.wav"), 999_999).is_ok(), "a subsequent start() must succeed after reset()");
     }
 }

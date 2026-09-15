@@ -9,27 +9,37 @@
 //!   (`RecDir`/`RecFile`), `MockCapture`.
 //! - `secrets`/`consent`: `SecretStore` trait + desktop fallback impls,
 //!   the per-(host, provider) consent gate.
-//! - `session`: single-flight active-session guard.
+//! - `session`: single-flight active-session guard + the per-session
+//!   `Recording`/`Transcribing` state machine and the handles a command
+//!   needs to reach into a running session's pipeline task.
+//! - `events`: `EventSink` — the injectable seam between the pipeline
+//!   and `voxis://state`/`voxis://level`/`voxis://result`
+//!   (`TauriEventSink` in production, `RecordingSink` in tests).
+//! - `lease`: the Hold-mode heartbeat lease (`LeaseTracker`).
+//! - `guard_adapter`: adapts `voxis_core::guard`'s RMS-window decision
+//!   logic to the plugin's `LevelSample` polling.
+//! - `pipeline`: the real capture -> guard -> transcription -> dictionary
+//!   -> llm -> `DictationResult` pipeline (Task 3b).
 //! - `error`: the one `PluginError` every command returns.
 //! - `commands`: the eleven Tauri commands, thin wrappers around
 //!   testable `do_*` functions operating on `&PluginState` (no Tauri
 //!   runtime needed to unit-test the actual logic).
 //!
-//! **Task 3 scope**: the skeleton above, wired together with a stub
-//! pipeline — `start`/`stop`/`cancel` really do single-flight session
-//! management, real consent gating, and real `RecFile` cleanup, but
-//! `stop()` always returns an empty-text `DictationResult` with
-//! `GuardOutcome::Finalized` (no guard timers, no transcription). Task 3b
-//! (`pipeline.rs`/`session.rs` additions/`lease.rs`/`guard_adapter.rs`)
-//! replaces the stub with the real capture -> guard -> transcription ->
-//! dictionary -> llm pipeline, lease-based hold-mode safety, and the
-//! richer failure-mode tests the plan's Task 3b acceptance lists.
+//! **Task 3b** replaced Task 3's always-`Finalized`-empty-text pipeline
+//! stub with the real thing: guard-driven silence/max-duration/self-cap/
+//! liveness decisions, Hold-mode heartbeat lease, an abortable
+//! transcription step, dictionary application, and optional LLM
+//! post-process — see `pipeline.rs`'s module doc for the full shape.
 
 pub mod capture;
 pub mod commands;
 pub mod consent;
 pub mod error;
+pub mod events;
+pub mod guard_adapter;
+pub mod lease;
 pub mod models;
+pub mod pipeline;
 pub mod secrets;
 pub mod session;
 
@@ -43,6 +53,7 @@ use tauri::{
 
 use capture::{AudioCapture, MockCapture, RecDir};
 use consent::ConsentStore;
+use events::{EventSink, TauriEventSink};
 use secrets::{FileSecretStore, SecretStore};
 use session::SessionGuard;
 
@@ -54,15 +65,35 @@ use session::SessionGuard;
 /// the host itself stores in either directory.
 const PLUGIN_DIR_NAME: &str = "voxis-plugin";
 
+/// Profile-derived settings/dictionary the pipeline needs at `start()`
+/// time (`pipeline::PipelineDeps` is built from a snapshot of this).
+/// Task 2/6/7 own actually populating it from an applied `VoxisProfile`
+/// via `apply_profile`/`import_profile_from_*`; until then it's just
+/// `AppConfig::default()` + an empty dictionary.
+#[derive(Default)]
+pub struct PipelineConfig {
+    pub app_config: voxis_core::config::AppConfig,
+    pub dictionary: Vec<(String, String)>,
+}
+
 /// Managed Tauri state: everything a command needs, gathered in one
 /// place so `commands.rs`'s `do_*` functions can take `&PluginState`
 /// directly (constructible in tests with no running Tauri app).
 pub struct PluginState {
-    pub sessions: SessionGuard,
+    /// `Arc`-wrapped (Task 3b, was a plain field in Task 3): the
+    /// spawned pipeline task (`pipeline::spawn`) needs its own
+    /// `'static`-lifetime handle to end the session's bookkeeping from
+    /// inside `finalize`, independent of any particular command
+    /// invocation's borrow of `&PluginState`.
+    pub sessions: Arc<SessionGuard>,
     pub consent: ConsentStore,
     pub secrets: Arc<dyn SecretStore>,
     pub rec_dir: RecDir,
     pub capture: Arc<dyn AudioCapture>,
+    /// The injectable event emitter (`[ADO-2/3 minors]`, "for 3b") —
+    /// `TauriEventSink` in production, `events::RecordingSink` in tests.
+    pub events: Arc<dyn EventSink>,
+    pub pipeline_config: std::sync::Mutex<PipelineConfig>,
     /// Identifies the embedding host for consent/secret scoping (e.g.
     /// `"naked"`). Task 3 has no profile plumbing yet to source this
     /// from, so `init`/`init_with` just take it as a constructor
@@ -72,6 +103,23 @@ pub struct PluginState {
     /// Hardcoded to the desktop Voxis default (Groq) until Task 2/6 wire
     /// this from the active `VoxisProfile` instead.
     pub provider_host: String,
+}
+
+impl PluginState {
+    /// Snapshot of everything `pipeline::spawn` needs, cloned out from
+    /// behind `pipeline_config`'s lock (never held across an `.await` —
+    /// the pipeline task that actually runs the async work is entirely
+    /// separate from whatever command invocation calls this).
+    pub fn pipeline_deps(&self) -> pipeline::PipelineDeps {
+        let config = self.pipeline_config.lock().unwrap();
+        pipeline::PipelineDeps {
+            capture: self.capture.clone(),
+            secrets: self.secrets.clone(),
+            events: self.events.clone(),
+            app_config: config.app_config.clone(),
+            dictionary: config.dictionary.clone(),
+        }
+    }
 }
 
 impl PluginState {
@@ -85,14 +133,16 @@ impl PluginState {
     /// see `build`'s `setup` hook, which sources them from
     /// `app.path().app_config_dir()` / `app.path().app_cache_dir()`
     /// respectively.
-    fn new(config_dir: PathBuf, cache_dir: PathBuf, secrets: Arc<dyn SecretStore>, capture: Arc<dyn AudioCapture>) -> Self {
+    fn new(config_dir: PathBuf, cache_dir: PathBuf, secrets: Arc<dyn SecretStore>, capture: Arc<dyn AudioCapture>, events: Arc<dyn EventSink>) -> Self {
         let plugin_config_dir = config_dir.join(PLUGIN_DIR_NAME);
         Self {
-            sessions: SessionGuard::new(),
+            sessions: Arc::new(SessionGuard::new()),
             consent: ConsentStore::new(plugin_config_dir.join("consent.json")),
             secrets,
             rec_dir: RecDir::new(cache_dir),
             capture,
+            events,
+            pipeline_config: std::sync::Mutex::new(PipelineConfig::default()),
             host_id: "default-host".to_string(),
             provider_host: "api.groq.com".to_string(),
         }
@@ -144,7 +194,8 @@ fn build<R: Runtime>(secrets_override: Option<Arc<dyn SecretStore>>) -> TauriPlu
                     as Arc<dyn SecretStore>
             });
             let capture: Arc<dyn AudioCapture> = Arc::new(MockCapture::new());
-            let state = PluginState::new(config_dir, cache_dir, secrets, capture);
+            let events: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.app_handle().clone()));
+            let state = PluginState::new(config_dir, cache_dir, secrets, capture, events);
 
             // `[R1-Safety S5]`: any file left in `rec/` at startup is an
             // orphan from a crash/SIGKILL mid-recording — sweep
@@ -158,6 +209,35 @@ fn build<R: Runtime>(secrets_override: Option<Arc<dyn SecretStore>>) -> TauriPlu
 
             app.manage(state);
             Ok(())
+        })
+        // `[R1-Safety S4]` / review finding F1: a dead/reloaded webview
+        // must not leave a Hold session's mic open. `on_page_load` fires
+        // on every navigation/reload of the plugin's webview -- including
+        // the reload that follows an iOS "web content process
+        // terminated" crash (Tauri/WKWebView don't expose that event
+        // directly; the next `on_page_load` after it recovering is the
+        // closest first observable signal). The Hold-mode heartbeat lease
+        // (`lease.rs`) already covers the gap between the crash and that
+        // reload (3 s worst case) independently of this hook.
+        .on_page_load(|webview, _payload| {
+            if let Some(state) = webview.try_state::<PluginState>() {
+                state.sessions.cancel_all_hold();
+            }
+        })
+        // Belt-and-suspenders for the same guarantee on desktop: the host
+        // window/app closing entirely (not just navigating) must not
+        // leave a Hold session running past process exit.
+        .on_event(|app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::Destroyed, .. }
+                    | tauri::RunEvent::Exit
+                    | tauri::RunEvent::ExitRequested { .. }
+            ) {
+                if let Some(state) = app.try_state::<PluginState>() {
+                    state.sessions.cancel_all_hold();
+                }
+            }
         })
         .build()
 }

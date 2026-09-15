@@ -3,7 +3,7 @@ name = "tauri-plugin-voxis"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.77.2"
-description = "Voxis dictation as an embeddable Tauri 2 plugin (desktop + iOS): commands/events contract, AudioCapture/SecretStore traits, MockCapture — Task 3 skeleton, pipeline stub (Task 3b wires the real capture -> guard -> transcription -> dictionary -> llm pipeline)"
+description = "Voxis dictation as an embeddable Tauri 2 plugin (desktop + iOS): commands/events contract, AudioCapture/SecretStore traits, MockCapture (Task 3), and the real capture -> guard -> transcription -> dictionary -> llm pipeline with Hold-mode heartbeat lease and injectable event emission (Task 3b)"
 license = "MIT"
 # Tauri-plugin convention (mirrors the naked host's `tauri-plugin-capture`/
 # `tauri-plugin-lifecycle`): `links` lets Cargo enforce a single copy of
@@ -36,15 +36,36 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tracing = "0.1"
-# Only `sync` is actually used (`tokio::sync::watch` in `capture.rs`) —
-# Task 3b's `pipeline.rs`/`lease.rs` are expected to need `rt`/`macros`/
-# `time` for the async pipeline and the 1 Hz heartbeat lease; not pulled
-# in ahead of that need (KISS/no speculative scope).
-tokio = { version = "1", features = ["sync"] }
+# `rt`/`macros`/`time` added in Task 3b for the async pipeline
+# (`pipeline.rs`'s 250ms guard-poll `tokio::time::interval`, the 1 Hz
+# heartbeat lease in `lease.rs`, `#[tokio::test]`) on top of the `sync`
+# already used by `capture.rs`'s `tokio::sync::watch`.
+tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
 uuid = { version = "1", features = ["v4"] }
+# Dictionary-replacement application (Task 3b `pipeline.rs`): same
+# case-insensitive word-boundary regex approach as
+# `voxis_core::storage::dictionary::DictionaryStorage::apply`, which is
+# coupled to reading its own file from disk on every call and so isn't a
+# pure function this crate can reuse directly — the plugin instead
+# applies a plain in-memory `Vec<(String, String)>` snapshot (Task 2/6/7
+# own actually populating it from a `VoxisProfile`).
+regex = "1"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 tauri = { version = "2", features = ["wry"] }
 
 [dev-dependencies]
 tempfile = "3"
+mockito = "1"
+# `test-util` (for `tokio::time::pause`/`advance`, `#[tokio::test(start_paused
+# = true)]`) is additive only for this crate's own test builds — cargo
+# does not fold dev-dependency features into the plain `cargo build` of
+# the library itself.
+# `rt-multi-thread` (round-2 review, F2 scenario A/B tests): those two
+# tests deliberately block a real OS thread inside a synchronous trait
+# method (`AudioCapture::stop`/`SecretStore::get`) to pin down the exact
+# TOCTOU window `cancelled` closes -- on the default `current_thread`
+# test runtime that would deadlock the single worker thread against the
+# test's own task, so those two tests opt into
+# `#[tokio::test(flavor = "multi_thread", worker_threads = 2)]` instead.
+tokio = { version = "1", features = ["test-util", "rt-multi-thread"] }

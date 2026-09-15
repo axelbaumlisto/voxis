@@ -42,6 +42,14 @@ pub enum PluginError {
     /// land in Task 2/6/7; Task 3's commands are wired but stubbed.
     #[error("not implemented yet: {what}")]
     NotImplemented { what: String },
+    /// The pipeline's transcription step (`pipeline.rs`) failed: no API
+    /// key in the `SecretStore`, `TranscriptionClient` construction
+    /// failed, or the HTTP call itself returned an error (network,
+    /// non-2xx, unparseable body). Surfaced as `stop()`'s rejection and a
+    /// `voxis://state` `Error` transition — no `voxis://result` event
+    /// fires for this outcome (there is no `DictationResult` to publish).
+    #[error("transcription failed: {message}")]
+    Transcription { message: String },
 }
 
 impl From<CaptureError> for PluginError {

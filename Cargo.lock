@@ -5200,6 +5200,8 @@ dependencies = [
 name = "tauri-plugin-voxis"
 version = "0.1.0"
 dependencies = [
+ "mockito",
+ "regex",
  "serde",
  "serde_json",
  "tauri",
