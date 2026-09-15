@@ -211,6 +211,19 @@ impl SessionGuard {
         self.active.lock().unwrap().is_some()
     }
 
+    /// The currently active session's id, if any -- `[ADO-9a]`: the Live
+    /// Activity Lock Screen/Dynamic Island Stop button has no session id
+    /// of its own to call `signal`/`request_cancel` with (unlike every
+    /// other caller of those two methods, which already holds an id
+    /// handed back by `start()`); single-flight (at most one
+    /// `ActiveSession` ever, this struct's own top-level doc comment)
+    /// makes "the active session" unambiguous, so this is a plain,
+    /// read-only mirror of `has_active()`/`is_active(id)` with no new
+    /// invariant to maintain.
+    pub fn active_id(&self) -> Option<SessionId> {
+        self.active.lock().unwrap().as_ref().map(|active| active.id.clone())
+    }
+
     /// Plugin-wide `state()` (Idle/Recording/Transcribing) \u2014 there is at
     /// most one session, so its stage (or the absence of one) IS the
     /// plugin's state.
@@ -319,6 +332,18 @@ mod tests {
         assert!(guard.has_active());
         assert_eq!(guard.stage_of(&id), Some(Stage::Recording));
         assert_eq!(guard.state(), State::Recording);
+    }
+
+    #[test]
+    fn active_id_mirrors_has_active() {
+        let guard = SessionGuard::new();
+        assert_eq!(guard.active_id(), None);
+
+        let id = guard.begin(Mode::Hold).unwrap();
+        assert_eq!(guard.active_id(), Some(id.clone()));
+
+        guard.end(&id).unwrap();
+        assert_eq!(guard.active_id(), None);
     }
 
     #[test]

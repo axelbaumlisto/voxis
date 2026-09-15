@@ -498,6 +498,184 @@ fn build<R: Runtime>(
         .build()
 }
 
+/// Task 9a: forwards a Live Activity Stop-intent payload to whatever
+/// session is currently active, exactly like releasing a Hold hotkey
+/// (finalize via `commands::do_stop`, not discard via `cancel`) --
+/// `SessionGuard::active_id`'s own doc on why "the active session" is
+/// unambiguous here. Deliberately **not** `#[cfg(target_os = "ios")]`:
+/// this is the pure "given the active session (if any), what do we
+/// call" decision, independent of how the Stop intent's payload
+/// actually reaches this process (the Swift `Channel` bridge,
+/// `mobile::LiveActivityController::register_intent_channel`, which IS
+/// target-gated, along with everything else in `mobile.rs`) -- keeping
+/// this one function untied to that target gate is what lets
+/// `live_activity_intent_tests` below exercise it with a normal `cargo
+/// test -p tauri-plugin-voxis` on this (non-iOS) host, the only
+/// realistic way to unit-test it at all pre-iPad-stand (Task 9a
+/// acceptance #4: "fake payload -> the right session call" -- the
+/// "fake payload" is the Swift-side JSON decode, already covered by
+/// `mobile.rs`'s own `IntentPayloadWire`; what actually varies per-call,
+/// and is worth a host-side regression test, is this function's own
+/// active/no-active branch).
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))] // only called from the iOS mobile path on-device; exercised via unit tests on host
+pub(crate) async fn handle_live_activity_stop_intent(state: &PluginState) {
+    match state.sessions.active_id() {
+        Some(id) => {
+            if let Err(e) = commands::do_stop(state, &id).await {
+                tracing::warn!(error = ?e, "Live Activity Stop intent: do_stop failed");
+            }
+        }
+        None => tracing::warn!("Live Activity Stop intent fired with no active session -- ignored"),
+    }
+}
+
+#[cfg(test)]
+mod live_activity_intent_tests {
+    use super::*;
+    use crate::capture::MockCapture;
+    use crate::consent::ConsentStore;
+    use crate::events::RecordingSink;
+    use crate::secrets::InMemorySecretStore;
+    use crate::session::SessionGuard;
+    use std::sync::Mutex as StdMutex;
+
+    fn test_state(tmp: &tempfile::TempDir) -> PluginState {
+        let secrets: Arc<dyn SecretStore> = Arc::new(InMemorySecretStore::new());
+        secrets.set(pipeline::API_KEY_SECRET_NAME, &voxis_core::profile::Secret::new("test-key")).unwrap();
+        let app_config = voxis_core::config::AppConfig { silence_timeout_ms: 0, ..voxis_core::config::AppConfig::default() };
+        let state = PluginState {
+            sessions: Arc::new(SessionGuard::new()),
+            consent: ConsentStore::new(tmp.path().join("consent.json")),
+            secrets,
+            rec_dir: capture::RecDir::new(tmp.path().to_path_buf()),
+            capture: Arc::new(MockCapture::new()),
+            events: Arc::new(RecordingSink::new()),
+            pipeline_config: StdMutex::new(PipelineConfig { app_config, dictionary: Vec::new() }),
+            hotkey: None,
+            host_id: "test-host".to_string(),
+            provider_host: "api.groq.com".to_string(),
+            profile_dir: tmp.path().join("voxis-plugin"),
+        };
+        state.consent.set_consent("test-host", "api.groq.com", true).unwrap();
+        state
+    }
+
+    #[tokio::test]
+    async fn stop_intent_with_no_active_session_is_a_harmless_no_op() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(&tmp);
+        assert!(!state.sessions.has_active());
+
+        handle_live_activity_stop_intent(&state).await; // must not panic
+
+        assert!(!state.sessions.has_active());
+    }
+
+    /// Task 9a acceptance #3: "Stop = finalize, like releasing the
+    /// hotkey" -- must actually end the session (`do_stop`), never leave
+    /// it stuck `Recording`/`Transcribing` the way a dropped/ignored
+    /// signal would.
+    #[tokio::test]
+    async fn stop_intent_finalizes_the_active_session_like_a_hotkey_release() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(&tmp);
+        let id = commands::do_start(&state, models::Mode::Hold).await.unwrap();
+        assert!(state.sessions.is_active(&id));
+
+        handle_live_activity_stop_intent(&state).await;
+
+        assert!(!state.sessions.has_active(), "Stop intent must finalize (like releasing Hold), not leave the session stuck");
+    }
+}
+
+/// Task 9a: `EventSink` decorator that mirrors `voxis://state`/
+/// `voxis://level` into the Swift-side `mobile::LiveActivityController`,
+/// on top of forwarding every event to `inner` unchanged (the plugin's
+/// normal `TauriEventSink` -- the host's JS side still gets every event
+/// exactly as before; this decorator only adds a side effect, never
+/// changes what the frontend observes). `pipeline.rs` is untouched
+/// (Task 9a's own file scope): this seam is exactly why `EventSink` was
+/// made injectable in the first place (`events.rs`'s own module doc).
+///
+/// - `voxis://state == Recording` -> `start()` (fresh `started_at`).
+/// - `voxis://state == Transcribing` -> `update("transcribing", elapsed,
+///   ..)` (elapsed computed from the `Recording`-side `started_at`).
+/// - `voxis://state` is `Idle`/`Error` -> `end()`.
+/// - `voxis://level` -> throttled (>= 1s apart) `update("recording", ..,
+///   peak)`, and only while a Live Activity might actually be running
+///   (`started_at.is_some()`) -- there is no reason to even attempt a
+///   Swift round-trip for every ~50ms level tick otherwise.
+///
+/// Every one of the three `LiveActivityController` calls this makes is
+/// itself best-effort/log-only (that struct's own doc) -- this decorator
+/// adds no additional error handling on top, by construction there is
+/// nothing here that CAN fail outward.
+#[cfg(target_os = "ios")]
+struct LiveActivityEventSink<R: Runtime> {
+    inner: Arc<dyn EventSink>,
+    controller: Arc<mobile::LiveActivityController<R>>,
+    /// `Some` for the duration of one Live-Activity-backed session
+    /// (set on `Recording`, cleared on `Idle`/`Error`) -- doubles as
+    /// "is a Live Activity plausibly running right now", gating the
+    /// `voxis://level` throttle below without a second field.
+    started_at: std::sync::Mutex<Option<std::time::Instant>>,
+    last_peak_update: std::sync::Mutex<Option<std::time::Instant>>,
+}
+
+#[cfg(target_os = "ios")]
+impl<R: Runtime> LiveActivityEventSink<R> {
+    fn new(inner: Arc<dyn EventSink>, controller: Arc<mobile::LiveActivityController<R>>) -> Self {
+        Self { inner, controller, started_at: std::sync::Mutex::new(None), last_peak_update: std::sync::Mutex::new(None) }
+    }
+}
+
+#[cfg(target_os = "ios")]
+impl<R: Runtime> EventSink for LiveActivityEventSink<R> {
+    fn emit(&self, event: &str, payload: serde_json::Value) {
+        self.inner.emit(event, payload.clone());
+
+        if event == models::STATE_EVENT {
+            let Ok(state) = serde_json::from_value::<models::State>(payload) else { return };
+            match state {
+                models::State::Recording => {
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    *self.started_at.lock().unwrap() = Some(std::time::Instant::now());
+                    self.controller.start(now_ms);
+                }
+                models::State::Transcribing => {
+                    let elapsed = self.started_at.lock().unwrap().map(|t| t.elapsed().as_secs());
+                    self.controller.update("transcribing", elapsed, 0.0);
+                }
+                models::State::Idle | models::State::Error => {
+                    self.controller.end();
+                    *self.started_at.lock().unwrap() = None;
+                }
+            }
+            return;
+        }
+
+        if event == models::LEVEL_EVENT {
+            if self.started_at.lock().unwrap().is_none() {
+                return;
+            }
+            {
+                let mut last = self.last_peak_update.lock().unwrap();
+                let due = last.map_or(true, |t| t.elapsed() >= std::time::Duration::from_secs(1));
+                if !due {
+                    return;
+                }
+                *last = Some(std::time::Instant::now());
+            }
+            if let Ok(level) = serde_json::from_value::<models::LevelEvent>(payload) {
+                self.controller.update("recording", None, level.peak);
+            }
+        }
+    }
+}
+
 /// Registers the plugin with the real iOS backends (Task 8):
 /// `mobile::IosCapture` (Swift `AVAudioEngine` bridge) for `AudioCapture`
 /// and `mobile::IosKeychainSecretStore` for `SecretStore`, unless a
@@ -529,7 +707,28 @@ pub fn init_ios_with<R: Runtime>(secrets_override: Option<Arc<dyn SecretStore>>)
             let secrets = secrets_override.clone().unwrap_or_else(|| {
                 Arc::new(mobile::IosKeychainSecretStore::new(mobile_handle.clone())) as Arc<dyn SecretStore>
             });
-            let events: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.app_handle().clone()));
+
+            // Task 9a: registered once, before `PluginState` (and
+            // therefore `app.manage`) exists yet -- harmless, since the
+            // Stop intent can only fire once a session is actually
+            // recording, long after `setup` has returned and `app.state::
+            // <PluginState>()` below is valid (same ordering
+            // `PluginHotkeySink`/`run_hotkey_edge_loop` already rely on
+            // for the desktop hotkey path).
+            let live_activity = Arc::new(mobile::LiveActivityController::new(mobile_handle.clone()));
+            let intent_app_handle = app.app_handle().clone();
+            live_activity.register_intent_channel(move || {
+                let app_handle = intent_app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle.state::<PluginState>();
+                    handle_live_activity_stop_intent(&state).await;
+                });
+            });
+
+            let events: Arc<dyn EventSink> = Arc::new(LiveActivityEventSink::new(
+                Arc::new(TauriEventSink::new(app.app_handle().clone())),
+                live_activity,
+            ));
             let state = PluginState::new(config_dir, cache_dir, secrets, capture, events, None);
 
             // `[R1-Safety S5]`, same as desktop's `build`: any file left

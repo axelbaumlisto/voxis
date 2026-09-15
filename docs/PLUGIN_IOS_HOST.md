@@ -2,8 +2,9 @@
 
 > **Status:** draft, written alongside Task 8 (`AVAudioEngine` capture + Keychain
 > `SecretStore`, `crates/tauri-plugin-voxis/ios/`). Task 8.5 (iOS Simulator + iPad-stand
-> tracer bullet) and Task 9a (Live Activity) will extend this document — see the
-> `[T8.5]`/`[T9a]` markers below for what is intentionally not filled in yet.
+> tracer bullet) and Task 9a (Live Activity Swift implementation + this section) have
+> landed — see the `[T8.5]`/`[T9a]` markers below. Task 9b (on-device end-to-end
+> verification once a host actually wires this in) has not run yet.
 
 This is the checklist for any Tauri 2 host (iPadOS/iOS) that embeds
 `tauri-plugin-voxis`. It complements `docs/THEMES.md`/`docs/THEME_EDITING.md` (overlay
@@ -22,7 +23,7 @@ unconditionally. A host targeting an older minimum cannot embed this plugin.
 |---|---|---|
 | `NSMicrophoneUsageDescription` | Must **name the actual STT provider** (e.g. "Used to record your voice and send it to Groq for transcription."), not a generic "this app uses your microphone". App Store review checks that the usage string matches what the app actually does with the audio. | **Required — its absence is not a soft failure.** If this key is missing, iOS does not deny the permission gracefully and does not hand the plugin a `PermissionDenied` to report: the OS **terminates the process** the moment `AVAudioApplication.requestRecordPermission`/`AVAudioSession` activation first touches the microphone, with a TCC crash log reading something like `This app has crashed because it attempted to access privacy-sensitive data without a usage description. The app's Info.plist must contain an NSMicrophoneUsageDescription key with a string value explaining to the user how the app uses this data.` This happens on the **very first** `startCapture` call after install — there is no in-app warning beforehand, and no `stop()`/`reject` path in this plugin ever runs, because the process is already gone. Get this key into the host's `Info.plist`/`project.yml` before the first test run, not after. |
 | `UIBackgroundModes` → `audio` | **Only add this if the host actually wants recording to survive backgrounding** (dictation while the user switches apps, plan Task 9a/9b's Live Activity flow). Without it, `AVAudioSession` gets deactivated by the OS shortly after the host leaves the foreground, and the *next* `level` tick simply stops (the plugin's own liveness signal, `StreamDied → Recover` — no crash, but the in-flight recording is truncated at background+few-seconds). | App Store guideline 2.5.4 requires the app to actually use background audio, not just declare the mode as a workaround — the host's App Store notes should say "voice dictation continues while switching apps" explicitly. |
-| `NSSupportsLiveActivities` | `true`, **only once Task 9a lands** — not needed for Task 8's plain capture path. | Dynamic Island / Lock Screen recording indicator (Task 9a/9b), not implemented yet. |
+| `NSSupportsLiveActivities` | `true`, **only if the host wants the Dynamic Island/Lock Screen indicator** (Task 9a, see the section below) — not needed for Task 8's plain capture path. | Dynamic Island / Lock Screen recording indicator + Stop button (Task 9a; on-device verification is Task 9b). |
 
 The plugin itself ships no `Info.plist` — every key above is the **host's** Xcode
 project/`project.yml`, since `NSMicrophoneUsageDescription`'s wording is inherently
@@ -270,20 +271,224 @@ log/screenshot evidence in `research/plugin-ios/T8_5_simulator.md`):
 
 ## `[T9a]` Live Activity / Dynamic Island
 
-Not implemented yet — see the plan's Task 9a/9b. This document will gain a
-`NSSupportsLiveActivities` + WidgetBundle integration section once that task lands.
+Implemented (Task 9a) — Swift side + Rust bridge, verifiable without a host:
+`ios/Sources/LiveActivity.swift` (app-side `ActivityKit` controller,
+`VoxisLiveActivityBridge`), `ios/LiveActivityWidget/{VoxisActivityAttributes,
+VoxisActivityView,StopDictationIntent}.swift` (what the **host** adds to its own
+widget-extension target), `src/mobile.rs`'s `LiveActivityController` (+ the intent
+`Channel`), `src/lib.rs`'s `LiveActivityEventSink` (mirrors `voxis://state`/
+`voxis://level` into it), and `src/session.rs`'s `SessionGuard::active_id`. **Task 9b**
+owns the on-device, end-to-end check once a host actually has this wired into its own
+`WidgetBundle` (naked) — nothing below has run on a device/Simulator yet; see that
+task for the honest gap this leaves.
 
-**Keychain + locked screen, noted now for when 9a's Live Activity "Stop" button lands:**
-`KeychainSecretStore.swift` uses `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` —
-deliberately (`[R1-Safety S2]`, Task 8's own acceptance criteria) the strictest class
-that still works for a foreground session, but it means any `secretGet`/`secretSet`/
-`secretDelete` call that happens **while the device is locked** (e.g. a Live Activity's
-"Stop" intent finalizing a transcription — the pipeline's transcription step reads the
-API key via `SecretStore::get`, `pipeline.rs`) fails with `errSecInteractionNotAllowed`,
-not a slow/blocked prompt. Task 9a/9b's own Stop-intent handling needs to either (a)
-read the API key up front while still unlocked and hold it in memory for the
-in-flight session only, or (b) surface this specific Keychain failure as its own
-distinct error rather than a generic transcription failure, so a user stopping
-dictation from a locked Lock Screen gets an actionable message instead of a silent
-drop. Not implemented — this is 9a's problem to solve, recorded here so it isn't
-rediscovered from scratch.
+### What starts/stops the activity, and when
+
+`LiveActivityEventSink` (`lib.rs`, `#[cfg(target_os = "ios")]` only) wraps the plugin's
+normal `TauriEventSink` and additionally mirrors every `voxis://state`/`voxis://level`
+event into `mobile::LiveActivityController`:
+
+| `voxis://state` | Live Activity call |
+|---|---|
+| `Recording` | `start(startedAtMs)` — fresh `Activity.request`, `phase: .recording` |
+| `Transcribing` | `update(phase: "transcribing", elapsedSeconds: <computed>, peak: 0)` |
+| `Idle` / `Error` | `end()` — `dismissalPolicy: .immediate` (Task 9a acceptance: ends within ~1s, not the `ActivityKit` default of up to 4h on the Lock Screen) |
+
+`voxis://level` additionally drives `update(phase: "recording", elapsedSeconds: nil, peak)`,
+throttled to at most once/second — the Dynamic Island's own elapsed-time text
+(`Text(startedAt, style: .timer)`, `VoxisActivityView.swift`) already auto-updates on
+device with zero further pushes while `phase == .recording`; only the peak level needs
+an actual content push, and not on every ~50ms level tick.
+
+**Never throws into the pipeline** (Task 9a acceptance #2): every
+`LiveActivityController::start`/`update`/`end` call on the Rust side, and every
+`ActivityKit` call inside `VoxisLiveActivityBridge` on the Swift side, is wrapped so a
+failure (Live Activities disabled, `NSSupportsLiveActivities` missing from the host's
+`Info.plist`, a transport-level `run_mobile_plugin` error) only logs a warning —
+dictation itself is unaffected either way.
+
+### Stop button: Swift → Rust, in-process, no App Group
+
+The Lock Screen/Dynamic Island **Stop** button is bound to `StopDictationIntent`, a
+`LiveActivityIntent`. Per Apple's own documented behaviour (confirmed by the plan's own
+research, `[R1-iOS C1]`, not yet re-confirmed on-device by this task — that is Task 9b's
+job), `perform()` for this intent kind always runs **in the app process** (launching or
+resuming it in the background if suspended), never in the widget-extension process —
+so this plugin does **not** need an App Group + Darwin-notification fallback to get the
+Stop tap back to Rust; it forwards directly:
+
+```
+Dynamic Island Stop tap
+  -> StopDictationIntent.perform()          (app process, per Apple's own contract)
+  -> VoxisLiveActivityBridge.shared?.stopRequestedByIntent()
+  -> the Rust-created Channel (registered once via `registerIntentChannel`,
+     mobile.rs::LiveActivityController::register_intent_channel)
+  -> lib.rs's on_stop closure -> handle_live_activity_stop_intent(&state)
+  -> state.sessions.active_id() -> commands::do_stop(&state, id)   (Stop = finalize,
+                                                                     like releasing Hold —
+                                                                     not Cancel/discard)
+```
+
+`handle_live_activity_stop_intent` (`lib.rs`, deliberately **not** target-gated) is unit
+tested on this host (`cargo test -p tauri-plugin-voxis`, `live_activity_intent_tests`)
+with the existing `MockCapture`/`RecordingSink` doubles — a fake `{"action": "stop"}`
+payload path is exercised as far as Rust can go without an iOS process: "no active
+session → warn, no-op" and "active session → finalized, exactly like a hotkey release".
+If the App-process-execution premise above turns out **not** to hold for this specific
+intent kind on real hardware (Task 9b's job to confirm), the fallback is an App Group +
+Darwin notification, same as any other host's app↔extension IPC — not implemented here,
+since the direct path is what Apple's docs describe and what naked's own Live Activity
+work never needed either way (naked's Live Activity has no interactive button at all).
+
+### Why `VoxisActivityAttributes`/`StopDictationIntent` are each declared TWICE
+
+`ios/Sources/LiveActivity.swift` (this plugin's own SwiftPM package, the **app**
+target) and `ios/LiveActivityWidget/{VoxisActivityAttributes,StopDictationIntent}.swift`
+(what the **host** adds to its widget-**extension** target) each declare their own,
+independent copy of both types — not an oversight, and not something to "deduplicate"
+by sharing one file across targets:
+
+- `ActivityKit` communicates `ContentState` across the app/extension process boundary by
+  `Codable` encode/decode, not by Swift type identity — two independently-compiled,
+  structurally-identical copies of `VoxisActivityAttributes` in two different targets
+  work correctly as long as their field names/types stay in sync.
+- Apple's cross-process `AppIntent` resolution matches by (container app's bundle id,
+  intent type name), not by Swift module — a `StopDictationIntent` compiled into the
+  app and a same-named one compiled into the extension are recognised as "the same
+  intent"; only the **app**-side copy's `perform()` body ever actually executes.
+- **Proven precedent already in this monorepo's sibling host**: naked's own
+  `NakedLiveActivityAttributes` is declared exactly this way — once `private` inside
+  the app-side `naked-plugin-lifecycle/ios/Sources/LifecyclePlugin.swift:95`, once in
+  the widget extension's own `gen/apple/NakedLiveActivity/
+  NakedLiveActivityAttributes.swift` — same `ContentState` fields, otherwise unrelated
+  code, two separate files, two separate targets.
+
+**Keep both copies of each type structurally in sync by hand** whenever either changes
+— there is no compiler check across the two files/targets for this (each file's own
+module doc comment says so and points at its sibling).
+
+### Adding this to a host that already has a `WidgetBundle` (naked's own case)
+
+Naked already has a Live Activity extension target (`NakedLiveActivity`, `type:
+app-extension`, `NSSupportsLiveActivities: true` — `gen/apple/project.yml:254-261`) with
+its own `@main struct NakedLiveActivityBundle: WidgetBundle`. Adding Voxis's activity to
+an **existing** `WidgetBundle` needs no new Xcode target at all — **except one thing to
+decide first**:
+
+0. **Naked's `NakedLiveActivity` extension target is pinned at `deploymentTarget: "16.1"`**
+   (`gen/apple/project.yml:257`), but every one of the three `ios/LiveActivityWidget/
+   *.swift` files this doc has the host copy in has at least one declaration that is a
+   genuine iOS 17.0+ API — `StopDictationIntent` conforms to `LiveActivityIntent`
+   (17.0+, stricter than `ActivityAttributes`'s own 16.1 floor), and `VoxisActivityWidget`/
+   `VoxisActivityLockScreenView` call `Button(intent: StopDictationIntent())`. Unlike
+   naked's own existing `NakedLiveActivityWidget` (no interactive button at all, so it
+   never needed anything past `ActivityAttributes`'s 16.1 floor), these three files
+   **will not compile unguarded** in an extension target below iOS 17.0 — every
+   declaration in them (`VoxisActivityAttributes`, `StopDictationIntent`,
+   `VoxisActivityWidget` and its private helper views) is therefore marked
+   `@available(iOS 17.0, *)` in this plugin's own copies (verified: `xcrun --sdk
+   iphonesimulator swiftc -typecheck -target arm64-apple-ios16.1-simulator
+   ios/LiveActivityWidget/*.swift` now passes, as does the same command with `-target
+   arm64-apple-ios17.0-simulator`). That alone makes the **files** compile at 16.1, but
+   step 2 below ("add `VoxisActivityWidget()` to the existing `WidgetBundle.body`") still
+   needs one of these two choices, made **before** step 2:
+
+   - **Option A — bump `NakedLiveActivity.deploymentTarget` to `"17.0"`.** Simplest: step 2
+     becomes a plain, unconditional `VoxisActivityWidget()` line, no `#available` needed
+     anywhere in the bundle. Consistent with the fact that naked's app target already has
+     to raise its own `deploymentTarget.iOS` to 17.0 the moment it depends on
+     `tauri-plugin-voxis` at all (`ios/Package.swift`'s `platforms: [.iOS(.v17)]`, this
+     doc's own opening `AVAudioApplication` note) — an extension target with a
+     `deploymentTarget` below its app target's is unusual, not the normal case. **Cost**:
+     naked's own existing (non-interactive) Live Activity — today shipped down to 16.1 —
+     stops shipping to 16.1/16.2 devices; anyone still on those OS versions loses it
+     entirely, not just the new Voxis one.
+   - **Option B — keep `NakedLiveActivity` at 16.1** and register `VoxisActivityWidget()`
+     behind an availability check inside `WidgetBundle.body` instead of unconditionally:
+     `if #available(iOS 17.0, *) { VoxisActivityWidget() }`. **Verified** this typechecks
+     inside `var body: some Widget` at both `-target arm64-apple-ios16.1-simulator` and
+     `-target arm64-apple-ios17.0-simulator` (a minimal `WidgetBundle` with one
+     unconditional `Widget` and one `@available(iOS 17.0, *)`-gated `Widget` inside an
+     `if #available` block, `swiftc -parse-as-library -typecheck`, both targets, exit 0).
+     Naked's own existing Live Activity keeps shipping to 16.1/16.2 devices unchanged;
+     Voxis's Live Activity simply never appears there (falls back to no Live Activity at
+     all on that device, same as this plugin's own `VoxisLiveActivityBridge.start()`
+     `#available(iOS 17.0, *)` guard already does app-side).
+
+   **Recommended: Option B.** It costs nothing to naked's existing 16.1/16.2 users (Option
+   A silently regresses them) and matches the pattern this plugin already uses everywhere
+   else for the same iOS-17 floor (`VoxisLiveActivityBridge.start()`'s own `guard
+   #available(iOS 17.0, *) else { ... continuing without one, no error }`) — a Voxis Live
+   Activity that simply doesn't appear on a pre-17 device is the same acceptable-degradation
+   story as everywhere else in this plugin, not a new one.
+
+1. Copy (or symlink — either is fine, XcodeGen just needs a real path to compile) this
+   plugin's three `ios/LiveActivityWidget/*.swift` files into the extension's own
+   sources directory (naked: `gen/apple/NakedLiveActivity/`) — or add their real paths
+   directly to that target's `sources:` list in `project.yml` (XcodeGen accepts
+   individual file paths, not just directories, same as any other `sources:` entry —
+   `.pi/plans/tauri-plugin-voxis.md`'s own Task 9a step 0 already established this for
+   `gen/apple/project.yml`-driven extensions).
+2. Add `VoxisActivityWidget()` as a second entry in the existing `WidgetBundle.body`
+   (naked: `NakedLiveActivityBundle.body`, `gen/apple/NakedLiveActivity/
+   NakedLiveActivityWidget.swift`) — a `WidgetBundle` can list more than one `Widget`;
+   this does **not** replace `NakedLiveActivityWidget()`, it adds alongside it. Per
+   step 0's choice: with Option A (deployment target bumped to 17.0) this is a plain
+   `VoxisActivityWidget()` line; with Option B (kept at 16.1, recommended) wrap it as
+   `if #available(iOS 17.0, *) { VoxisActivityWidget() }`.
+3. Also add `StopDictationIntent.swift` (one of the same three files) to the **app**
+   target's own sources too — see "why declared twice" above for why this is required,
+   not optional; skipping this step means the button renders but tapping it does
+   nothing (the OS can't find a matching app-side intent to execute).
+4. `NSSupportsLiveActivities: true` is already set for naked (`project.yml`, same key
+   this document's `Info.plist` keys table already covers) — a host adding a **fresh**
+   extension (one that doesn't exist yet) needs the full `type: app-extension` +
+   `NSExtensionPointIdentifier: com.apple.widgetkit-extension` + own `DEVELOPMENT_TEAM`
+   + `ActivityKit.framework`/`SwiftUI.framework`/`WidgetKit.framework` `dependencies:`
+   block from this task's own step 0 research (`.pi/plans/tauri-plugin-voxis.md`,
+   verbatim clipshot/naked XcodeGen lessons — `xcodegen generate` before every build,
+   `Info.plist`/entitlements only via `project.yml` properties, the extension's own
+   `DEVELOPMENT_TEAM`, no Rust-linking `outputFiles` needed since this widget's Rust
+   footprint is zero, pure SwiftUI render).
+5. `UIBackgroundModes: audio` (already covered by this doc's `Info.plist` keys table)
+   is what actually keeps the dictation session — and therefore the Live Activity that
+   mirrors it — alive once the host backgrounds; the 2.5.4 justification text ("voice
+   dictation continues while switching apps") applies unchanged.
+6. `xcodegen generate` before the next build — this plugin adds no new automation for
+   that step; it was already required for every other `project.yml` edit.
+
+### Honest gaps (Task 9b's job, not glossed over here)
+
+- **Foreground-only demonstrated so far.** Everything above is verified by Rust unit
+  tests (`live_activity_intent_tests`) and standalone Swift compiles/typechecks
+  (`cargo build -p tauri-plugin-voxis --target aarch64-apple-ios[-sim]`; `xcrun --sdk
+  iphonesimulator swiftc -typecheck -target arm64-apple-ios16.1-simulator
+  ios/LiveActivityWidget/*.swift` and the same at `-target
+  arm64-apple-ios17.0-simulator` — both targets, since "step 0" above depends on the
+  16.1 one specifically) — **none of it has run inside an actual Dynamic
+  Island yet.** Dynamic Island only shows a Live Activity while the host is
+  backgrounded (or on the Lock Screen) — this is iOS's own behaviour, not a bug in this
+  plugin: a host that starts a session while staying in the foreground the whole time
+  will never see it in the Dynamic Island at all, only in Notification Center's
+  history once it ends (the plan's own Approach §4 already documents this for the
+  overlay/Dynamic Island relationship generally).
+- **The Apple-docs "perform() runs in the app process" premise is unconfirmed on
+  hardware for this exact intent/app combination** — Task 9b's own job (`docs/
+  IPHONE_STAND.md`; plan Task 9b's acceptance criterion is literally "confirm that
+  `LiveActivityIntent.perform()` runs in the app process (log the pid); otherwise
+  switch on the App Group + Darwin-notification fallback").
+- **Locked-screen Keychain read during the Stop-triggered transcription is still
+  unresolved.** `KeychainSecretStore.swift` uses
+  `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` (`[R1-Safety S2]`, Task 8's own
+  acceptance) — deliberately the strictest class that still works for a foreground
+  session — but it means a `secretGet` call that happens **while the device is
+  locked** (the pipeline's transcription step reads the API key via
+  `SecretStore::get`, `pipeline.rs`, right after a Lock-Screen Stop tap finalizes the
+  session) fails with `errSecInteractionNotAllowed`, not a slow/blocked prompt. This
+  task did not change `KeychainSecretStore.swift`/`pipeline.rs` (outside this task's
+  own file scope) — a user stopping dictation from a locked Lock Screen may see a
+  transcription failure instead of a result. Two options for whichever task picks this
+  up: (a) read the API key up front while still unlocked and hold it in memory for the
+  in-flight session only, or (b) surface this specific Keychain failure as its own
+  distinct, actionable error. Recorded here so it isn't rediscovered from scratch —
+  carried over verbatim from this section's pre-Task-9a draft, still open.
