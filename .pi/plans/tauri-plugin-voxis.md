@@ -298,7 +298,7 @@ liveness (4 опроса без тика при running = `StreamDied`), вла�
 4. `secrets.rs`, `consent.rs`, `error.rs`.
 5. Тесты контракта: сериализация команд/событий, AlreadyRecording, `rec/` sweep on init, consent-отказ.
 
-### Task 3b: Pipeline и режимы отказа `[R2-Exec F4]`
+### Task 3b: ✅ APPROVED `8d4538d` (3 rounds) — Pipeline и режимы отказа `[R2-Exec F4]`
 **Files:** `crates/tauri-plugin-voxis/src/{pipeline.rs,session.rs,lease.rs,guard_adapter.rs}`
 **Depends:** Task 3
 **Acceptance:** pipeline = capture → guard-decision (`voxis_core::guard`) → `TranscriptionClient` →
@@ -337,7 +337,7 @@ lease не требует; Tauri-хуки `on_page_load` / web-content-process-t
 2. `hotkey_desktop.rs`: адаптер над `voxis_core::hotkey` (rdev listener → plugin start/stop).
 3. Тесты `HotkeySpec` ↔ строка (`"alt_r"`, `"Ctrl+Shift+V"`).
 
-### Task 5: guest-js: `@voxis/tauri-plugin-voxis` — API, `<voxis-overlay>`, in-app hotkey
+### Task 5: ✅ APPROVED `b7ca673` (2 rounds) — guest-js: `@voxis/tauri-plugin-voxis` — API, `<voxis-overlay>`, in-app hotkey
 **Files:** `crates/tauri-plugin-voxis/guest-js/{package.json,vite.config.ts,src/{index.ts,overlay.ts,drag.ts,
 hotkey.ts,lease.ts,theme-bridge.ts,themes/registry.ts},__tests__/**}`, `scripts/build-themes.ts`
 (добавить второй output в guest-js), корневой `package.json` (`"harness:overlay"`) `[R2-Exec F6]`.
@@ -738,6 +738,12 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
   - Заменить системную диктовку Siri нельзя; iOS 27 private hooks «Siri Extensions / Model
     Delegation» не включены (вероятно EU-only) — следить.
 - Voxis desktop сам как хост своего плагина (dogfooding, убирает дублирование `audio/`).
+- `[ADO-3b/5 minors]` 3b: DRY — `apply_entries(text,&[(String,String)])` в `voxis_core::storage::dictionary`
+  (сейчас копия цикла в pipeline.rs с тестом-эквивалентом); ABA-тест lease с ОДНИМ общим SessionGuard
+  и stale-id heartbeat; документировать в контракте: `voxis://result` эмитится ДО освобождения слота —
+  клиент ждёт возврата `stop()`/`cancel()`, не события, перед следующим `start()`. 5: `command` как
+  combo-модификатор (Rust принимает); `dictate()` partial-listen leak при отказе одного из listen();
+  тест на отписку viewport-listeners после `disconnectedCallback`.
 - `[ADO-2/3 minors]` profile: zeroize key/plaintext; unused base64url helpers (для T7); O(n²) sync_dictionary;
   LlmProvider snake_case внутри camelCase-профиля (документировать в контракте T5/T10). plugin: `sweep()` глотает
   per-file ошибки; `secrets.json` write-temp-then-rename; COMMANDS в общий `commands.txt`; для 3b — injectable
