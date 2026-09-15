@@ -1,11 +1,5 @@
 # cargo-audit policy. Every ignore needs a reason and a re-check trigger.
+# 2026-09-16: quick-xml RUSTSEC-2026-0194/0195 ignores removed — tauri-plugin-notification 2.4.0 /
+# plist 1.10.1 moved the tree to quick-xml 0.42.0. Keep this file so a future ignore has a home.
 [advisories]
-ignore = [
-  # quick-xml 0.37.5 (via tauri-plugin-notification → notify-rust → tauri-winrt-notification, Windows-only)
-  # and 0.39.4 (via tauri → plist, parses only our own Info.plist at build/startup).
-  # Both advisories concern parsing UNTRUSTED XML; Voxis never feeds untrusted XML to either path.
-  # Fix requires upstream bumps to quick-xml >= 0.41 (semver-incompatible). Re-check on every tauri /
-  # tauri-plugin-notification upgrade: `cargo audit` must drop these two lines when upstream moves.
-  "RUSTSEC-2026-0194",
-  "RUSTSEC-2026-0195",
-]
+ignore = []
