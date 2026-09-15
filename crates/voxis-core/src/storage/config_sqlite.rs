@@ -146,6 +146,18 @@ impl ConfigSqliteStorage {
         config.api_key = self.get(&conn, "api_key").unwrap_or_default();
         config.model = self.get_str(&conn, "model", &config.model);
         config.language = self.get_str(&conn, "language", &config.language);
+        // `api_url_override`: this was a real, pre-existing gap (found
+        // while validating Task 6b's profile round-trip) -- neither
+        // `load` nor `save` touched this key at all, so a user's
+        // self-hosted endpoint (Settings -> Provider, `docs/
+        // SELF_HOSTED_TRANSCRIPTION.md`) silently reverted to `None`
+        // (default Groq) on the very next config load/app restart, even
+        // though `save_config` calls this exact `save`. Same
+        // empty-string-means-`None` convention `api_key`/`llm.api_key`
+        // already use for an optional secret-shaped string.
+        let stored_api_url_override = self.get(&conn, "api_url_override").unwrap_or_default();
+        config.api_url_override =
+            (!stored_api_url_override.is_empty()).then_some(stored_api_url_override);
 
         // Hotkey
         config.hotkey = self.get_str(&conn, "hotkey", &config.hotkey);
@@ -286,6 +298,7 @@ impl ConfigSqliteStorage {
         self.set(&conn, "api_key", &config.api_key)?;
         self.set(&conn, "model", &config.model)?;
         self.set(&conn, "language", &config.language)?;
+        self.set(&conn, "api_url_override", config.api_url_override.as_deref().unwrap_or(""))?;
 
         // Hotkey
         self.set(&conn, "hotkey", &config.hotkey)?;
@@ -487,6 +500,69 @@ mod tests {
         assert_eq!(loaded.hotkey, "f12");
         assert!(!loaded.auto_type);
         assert_eq!(loaded.llm.api_key, "llm-key-456");
+    }
+
+    /// Task 6b regression: `api_url_override` used to round-trip to
+    /// `None` regardless of what was saved (`save`/`load` never touched
+    /// its key at all) -- a real, pre-existing gap discovered while
+    /// validating the plugin's profile-import path, and a genuine
+    /// production bug in desktop Voxis's own `save_config` command
+    /// (`Settings -> Provider`'s custom endpoint field, `docs/
+    /// SELF_HOSTED_TRANSCRIPTION.md`), not something introduced by the
+    /// plugin work.
+    #[test]
+    fn api_url_override_round_trips_some() {
+        let file = NamedTempFile::new().unwrap();
+        let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
+
+        let config = AppConfig {
+            api_url_override: Some("http://127.0.0.1:4217/v1/audio/transcriptions".to_string()),
+            ..AppConfig::default()
+        };
+        storage.save(&config).unwrap();
+
+        let loaded = storage.load().unwrap();
+
+        assert_eq!(
+            loaded.api_url_override.as_deref(),
+            Some("http://127.0.0.1:4217/v1/audio/transcriptions")
+        );
+    }
+
+    #[test]
+    fn api_url_override_round_trips_none() {
+        let file = NamedTempFile::new().unwrap();
+        let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
+
+        let config = AppConfig { api_url_override: None, ..AppConfig::default() };
+        storage.save(&config).unwrap();
+
+        let loaded = storage.load().unwrap();
+
+        assert_eq!(loaded.api_url_override, None);
+    }
+
+    /// A `Some` value saved, then explicitly cleared back to `None` and
+    /// saved again, must actually clear on disk -- not just "a fresh
+    /// `AppConfig::default()` happens to be `None`" (the test above
+    /// alone wouldn't catch a `save` that only ever ADDS the key, never
+    /// overwrites it back to empty).
+    #[test]
+    fn api_url_override_can_be_cleared_back_to_none() {
+        let file = NamedTempFile::new().unwrap();
+        let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
+
+        let with_override = AppConfig {
+            api_url_override: Some("http://127.0.0.1:4217/v1/audio/transcriptions".to_string()),
+            ..AppConfig::default()
+        };
+        storage.save(&with_override).unwrap();
+        assert!(storage.load().unwrap().api_url_override.is_some());
+
+        let cleared = AppConfig { api_url_override: None, ..AppConfig::default() };
+        storage.save(&cleared).unwrap();
+
+        assert_eq!(storage.load().unwrap().api_url_override, None);
     }
 
     #[test]

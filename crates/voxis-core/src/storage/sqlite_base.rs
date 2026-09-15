@@ -107,11 +107,20 @@ pub enum ReadOnlyOpenError {
 ///   this crate opens its own single-threaded connection per call (same
 ///   assumption `Connection::open` already makes for the read-write
 ///   path).
-/// - `busy_timeout(2s)`: the desktop install has no WAL mode/busy_timeout
-///   of its own, so a write transaction it briefly holds (e.g. saving
-///   config after a settings change) locks the file; without a timeout a
-///   concurrent read fails immediately with `SQLITE_BUSY` instead of
-///   waiting the short while for the writer to commit.
+/// - `busy_timeout(2s)`: the desktop install has no WAL mode of its own,
+///   so a write transaction it briefly holds (e.g. saving config after a
+///   settings change) locks the file. This call does NOT introduce
+///   retrying where none existed before: `rusqlite` itself already calls
+///   `sqlite3_busy_timeout(db, 5000)` on every `Connection::open`/
+///   `open_with_flags` (`rusqlite`'s `inner_connection.rs`) — SQLite's OWN
+///   default is `0` (fail instantly with `SQLITE_BUSY`), but every
+///   connection this crate ever opens already retries for up to 5s
+///   regardless of this function. The explicit `busy_timeout(2s)` here
+///   SHORTENS that 5s default to a fixed 2s, deliberately independent of
+///   whatever `rusqlite` happens to default to — so a profile import
+///   against a writer stuck far longer than a normal settings-save can't
+///   block for nearly twice as long as this function actually needs to
+///   wait.
 pub fn open_read_only(path: &Path) -> Result<Connection, ReadOnlyOpenError> {
     if !path.exists() {
         return Err(ReadOnlyOpenError::NotFound(path.to_path_buf()));

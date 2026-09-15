@@ -23,10 +23,19 @@ what a user could type in by hand if scanning fails):
 - `v`: payload version. `1` is the only version either side understands
   today; the client rejects anything else before making any network call.
 - `host`/`port`: the LAN IP Task 7's server bound to (never `0.0.0.0`) and
-  its listening port.
-- `token`: a single-use random identifier for this share session. Bound to
-  the *first* client IP that redeems it; every request after that (whether
-  a genuine retry or an attacker replay) gets `410`.
+  its listening port. `host` **must be an IPv4 literal** — the client
+  (`profile_source::build_qr_url`) parses it with `std::net::Ipv4Addr::
+  from_str` and rejects anything that isn't (a hostname, a `user@host`
+  authority-injection string) before ever building a URL from it; Task 7's
+  server only ever emits a literal address of an interface it chose
+  itself, never a resolvable name.
+- `token`: a single-use random identifier for this share session, restricted
+  to the charset `[A-Za-z0-9_-]{1,64}` (the same charset a UUID/random-slug
+  generator would ever produce — the example above is a UUID). The client
+  rejects anything outside that charset/length before use, so `token` can
+  never smuggle extra query parameters (`&`, `#`, etc.) into the request URL.
+  Bound to the *first* client IP that redeems it; every request after that
+  (whether a genuine retry or an attacker replay) gets `410`.
 - `k`: `base64url` (no padding) of `k_qr` — 256 bits of CSPRNG output. This
   is the actual key material; the 6-digit `code` shown next to the QR on
   the sharing device is a **second factor only** (protects against a

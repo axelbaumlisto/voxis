@@ -65,6 +65,53 @@ VOXIS_CAPTURE=cpal VOXIS_API_KEY=<your Groq key> cargo run -p host-min
   normally reach the plugin via `apply_profile` (Task 2/6/7); until then
   this is a fixed, documented default.
 
+## Profile import (`VOXIS_SMOKE_IMPORT`/`VOXIS_SMOKE_SEED_DESKTOP_DIR`) -- plan gate 7
+
+Task 6b closes the plan's gate 7 ("profile round-trip in host-min") with a
+fourth `host-min-smoke.sh` scenario, `profile-import`, that no longer
+reaches into `PluginState.pipeline_config`/`secrets` directly for its STT
+URL/API key -- it goes through the REAL `import_profile_from_desktop`
+command (Task 6) instead:
+
+```sh
+seed_dir=$(mktemp -d)
+VOXIS_SMOKE_SEED_DESKTOP_DIR="$seed_dir" \
+VOXIS_SMOKE_SEED_STT_URL="http://127.0.0.1:8790/v1/audio/transcriptions" \
+VOXIS_DESKTOP_CONFIG_DIR="$seed_dir" \
+VOXIS_SMOKE_IMPORT=1 \
+VOXIS_CAPTURE="mock:$PWD/../../../../fixtures/audio/speech.wav" \
+VOXIS_SMOKE_AUTOSTART=1 \
+  cargo run -p host-min
+```
+
+- `VOXIS_SMOKE_SEED_DESKTOP_DIR=<dir>`: before the plugin is even built,
+  writes a Voxis-desktop-format config dir at `<dir>` using voxis-core's OWN
+  storage writers (`ConfigSqliteStorage`/`DictionaryStorage`/
+  `ProvidersStorage`) -- a fixed `audio_device: "Mock Device"`, one
+  dictionary entry (`разблюдовка = ПРОФИЛЬ`, rewriting one word of
+  `speech.wav`'s fixed fake-stt transcript), one custom LLM provider, and
+  (via `VOXIS_SMOKE_SEED_STT_URL`) an `api_url_override` pointed at
+  wherever `voxis-fake-stt` is actually listening for this run.
+- `VOXIS_DESKTOP_CONFIG_DIR=<dir>` (already an existing `voxis-core`
+  override, not new): points `import_profile_from_desktop` at that same
+  seeded directory instead of the real OS config dir.
+- `VOXIS_SMOKE_IMPORT=1`: calls `import_profile_from_desktop` at startup
+  and prints `IMPORT_SUMMARY <json>` -- the smoke script's assertion point
+  for the import itself, independent of the `RESULT_EVENT` that follows.
+- **Deliberately NOT set in this scenario**: `VOXIS_STT_URL`/`VOXIS_API_KEY`
+  -- the whole point of gate 7 is that the profile itself (not an env var)
+  is what routes the pipeline's next transcription request to `voxis-fake-stt`
+  and supplies its API key. `scripts/host-min-smoke.sh`'s `profile-import`
+  scenario asserts both: the `RESULT_EVENT` text went through the imported
+  dictionary entry (`разблюдовка` -> `ПРОФИЛЬ`), and `voxis-fake-stt`'s own log shows exactly
+  one `TRANSCRIBE_REQUEST` -- proving the request reached it at all (a
+  profile whose `api_url_override` didn't survive the round trip would
+  instead try the real Groq endpoint and fail outright, exactly what a bug
+  found and fixed during this task looked like: see `crates/voxis-core/src/
+  storage/config_sqlite.rs`'s `api_url_override` round-trip -- it was
+  never persisted at all before this task, a pre-existing production bug
+  in desktop Voxis's own `Settings -> Provider` custom-endpoint field).
+
 `init_with_capture` (new, additive-only `tauri-plugin-voxis` constructor,
 `crates/tauri-plugin-voxis/src/lib.rs`) is what makes the scripted-mock
 path possible: it registers the plugin with an already-constructed

@@ -179,6 +179,12 @@ impl AudioCapture for CpalCapture {
         *self.cmd_tx.lock().unwrap() = Some(tx);
 
         let device_id = self.device_id.lock().unwrap().clone();
+        // Task 6b (`[HW-GATE finding]`): the ONLY place a device name is
+        // ever logged is here, at the moment a session actually starts
+        // using it — name only, never the whole device-list dump, so a
+        // desktop bug report shows exactly which input a given
+        // recording used without spamming the log on every level tick.
+        tracing::info!(device = %device_id, "CpalCapture: starting with input device");
         let samples = self.samples.clone();
         let native_rate = self.native_rate.clone();
         let max_samples = self.max_samples.clone();
@@ -277,6 +283,13 @@ impl AudioCapture for CpalCapture {
 
     fn level_rx(&self) -> watch::Receiver<Option<LevelSample>> {
         self.level_rx.clone()
+    }
+
+    fn set_device_id(&self, device_id: &str) {
+        // Re-read fresh at the top of every `start()` (`device_id.lock()`
+        // above) — this takes effect starting with the very next session,
+        // not the one (if any) currently running.
+        *self.device_id.lock().unwrap() = device_id.to_string();
     }
 
     fn reset(&self) {
@@ -493,5 +506,33 @@ where
         err_fn,
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Task 6b acceptance #2's own "do not open real devices in unit
+    /// tests" constraint: this drives `set_device_id`/`CpalCapture::new`
+    /// directly, never `start()` — no cpal host/stream is ever touched.
+    /// `AudioCapture::start`'s own `let device_id = self.device_id.lock()
+    /// ...` line (this file, above) re-reads this field fresh on every
+    /// call, so asserting the field itself is exactly "the next start()
+    /// will use it" without needing a real device to prove it.
+    #[test]
+    fn set_device_id_updates_what_the_next_start_will_read() {
+        let capture = CpalCapture::new();
+        assert_eq!(*capture.device_id.lock().unwrap(), "default");
+
+        capture.set_device_id("Mock Device");
+
+        assert_eq!(*capture.device_id.lock().unwrap(), "Mock Device");
+    }
+
+    #[test]
+    fn with_device_id_seeds_the_initial_device() {
+        let capture = CpalCapture::with_device_id("BY-V");
+        assert_eq!(*capture.device_id.lock().unwrap(), "BY-V");
+    }
 }
 

@@ -25,26 +25,57 @@
 //   init (`tauri ios init`, `NSMicrophoneUsageDescription`, dev signing)
 //   is Task 8.5, not this file.
 //
-// STT endpoint / API key (Task 3.5's own "no new plugin command" path,
-// per the plan's step text: read `pipeline.rs`'s `PipelineDeps` and
-// reach into the plugin's already-`pub` `PluginState` fields directly
-// from this host's own `setup` hook instead of a new
-// `apply_profile`/`get_profile` call -- those two remain
-// `PluginError::NotImplemented` stubs until Task 2/6/7):
-// - `VOXIS_STT_URL`: written into `PipelineConfig.app_config.
-//   api_url_override` (exactly what `pipeline::run_transcription` reads
-//   to build its `TranscriptionClient`) -- point this at a running
-//   `voxis-fake-stt` for the CI/mock path.
-// - `VOXIS_API_KEY`: seeded into the plugin's own `SecretStore` under
-//   `pipeline::API_KEY_SECRET_NAME` -- for the mock/CI path any
-//   non-empty string works (`voxis-fake-stt` never checks the bearer
-//   token); the real HUMAN GATE run sets this to a real Groq key.
-// - `VOXIS_SILENCE_TIMEOUT_MS` (default 3000): `AppConfig::
-//   silence_timeout_ms` is 60_000 by default -- far longer than this
-//   tracer bullet's 17s `silence.wav`/real silence gate ever waits, so
-//   host-min always shortens it (real desktop Voxis's own configured
-//   value would normally reach the plugin via `apply_profile`, Task
-//   2/6/7 -- until then, host-min picks a sane fixed default itself).
+// STT endpoint / API key: two paths now coexist (Task 6b closes plan gate
+// 7 -- "profile round-trip in host-min" -- by adding the SECOND one):
+// - **profile import** (`VOXIS_SMOKE_IMPORT=1`, new): calls the REAL
+//   `import_profile_from_desktop` command (Task 6) at startup, which
+//   populates `PluginState.pipeline_config`/`SecretStore` from whatever
+//   Voxis-desktop-format config dir `VOXIS_DESKTOP_CONFIG_DIR` resolves to
+//   (`VOXIS_SMOKE_SEED_DESKTOP_DIR`, below, is how this same binary can
+//   also WRITE that dir first, for a self-contained smoke scenario with no
+//   real Voxis desktop install needed). Prints `IMPORT_SUMMARY <json>` (or
+//   `IMPORT_ERROR <debug>`) so the smoke script can assert on it. Host-min
+//   does NOT also reach into `pipeline_config`/`secrets` directly for this
+//   path -- the whole point of gate 7 is that the profile itself is the
+//   only source of `api_url_override`/the API key here.
+// - **env fallback** (`VOXIS_STT_URL`/`VOXIS_API_KEY`, reaching directly
+//   into the plugin's already-`pub` `PluginState.pipeline_config`/
+//   `secrets` fields from this host's own `setup` hook): the ORIGINAL
+//   Task 3.5 wiring, from before `import_profile_from_desktop` existed.
+//   Kept as the exception path for the two cases that have no desktop
+//   profile to import from at all -- `VOXIS_SMOKE_IMPORT` unset:
+//   - CI's `mock:<wav>` scenarios (`speech`/`silence`/`speech-streamdied`),
+//     which point at a `voxis-fake-stt` instance that no desktop profile
+//     could name in advance (its port is only known at CI runtime).
+//   - a real `VOXIS_CAPTURE=cpal` hardware run against a real Groq key,
+//     when the operator hasn't set up `import_profile_from_desktop`
+//     against a real installed Voxis first.
+//   - `VOXIS_STT_URL`: written into `PipelineConfig.app_config.
+//     api_url_override` (exactly what `pipeline::run_transcription` reads
+//     to build its `TranscriptionClient`).
+//   - `VOXIS_API_KEY`: seeded into the plugin's own `SecretStore` under
+//     `pipeline::API_KEY_SECRET_NAME` -- for the mock/CI path any
+//     non-empty string works (`voxis-fake-stt` never checks the bearer
+//     token); the real HUMAN GATE run sets this to a real Groq key.
+// - `VOXIS_SILENCE_TIMEOUT_MS` (default 3000, applied regardless of which
+//   of the two paths above ran): `AppConfig::silence_timeout_ms` is
+//   60_000 by default -- far longer than this tracer bullet's 17s
+//   `silence.wav`/real silence gate ever waits, so host-min always
+//   shortens it; not a secret/endpoint, so this one small override stays
+//   unconditional either way.
+//
+// `VOXIS_SMOKE_SEED_DESKTOP_DIR=<dir>` (smoke-only, Task 6b's own
+// `profile-import` scenario): before building the plugin at all, writes a
+// Voxis-desktop-format config dir at `<dir>` using voxis-core's OWN
+// storage writers (`ConfigSqliteStorage::save`, `DictionaryStorage::add`,
+// `ProvidersStorage::add` -- exactly what a real desktop install's own
+// code produces, see `seed_desktop_config_dir` below). Pair this with
+// setting `VOXIS_DESKTOP_CONFIG_DIR` to the SAME directory (which
+// `import_profile_from_desktop`/`voxis_core::storage::paths::
+// voxis_desktop_config_dir()` already honours) and `VOXIS_SMOKE_IMPORT=1`
+// to import it back. `VOXIS_SMOKE_SEED_STT_URL` sets the seeded config's
+// `api_url_override` (the smoke script points this at whichever
+// `voxis-fake-stt` port it started for that run).
 //
 // `VOXIS_SMOKE_AUTOSTART=1` (read only by `scripts/host-min-smoke.sh`):
 // starts a `Mode::Toggle` session ~300ms after boot and prints every
@@ -68,6 +99,7 @@ use tauri_plugin_voxis::models::{Mode, LEVEL_EVENT, RESULT_EVENT, STATE_EVENT};
 use tauri_plugin_voxis::pipeline::API_KEY_SECRET_NAME;
 use tauri_plugin_voxis::PluginState;
 use voxis_core::profile::Secret;
+use voxis_core::storage::{ConfigSqliteStorage, DictionaryStorage as CoreDictionaryStorage, LlmProvider, ProvidersStorage};
 
 /// Matches `voxis_core::config::GUARD_POLL_MS` -- the guard's own poll
 /// cadence -- so a scripted `MockCapture` drives exactly the same
@@ -164,6 +196,57 @@ fn scripted_mock_capture(fixture_path: PathBuf) -> (Arc<dyn AudioCapture>, usize
     (mock, script_len)
 }
 
+/// `VOXIS_SMOKE_SEED_DESKTOP_DIR=<dir>` (Task 6b's own `profile-import`
+/// smoke scenario): writes a Voxis-desktop-format config dir at `dir`
+/// using voxis-core's OWN storage writers -- the exact same construction
+/// `profile_source.rs`'s own `#[cfg(test)] DesktopFixture::seed` test
+/// helper uses, just from host-min's real binary instead of a unit test,
+/// so `import_profile_from_desktop` (pointed here via
+/// `VOXIS_DESKTOP_CONFIG_DIR`) has a real config/dictionary/providers
+/// database to read. Fixed values (not configurable via env, KISS -- this
+/// smoke scenario needs exactly one dictionary entry/provider, not an
+/// arbitrary set) other than `stt_url`, which must be dynamic (the
+/// smoke script only learns `voxis-fake-stt`'s port at runtime):
+/// - `audio_device: "Mock Device"` -- Task 6b's own `[HW-GATE finding]`
+///   acceptance value.
+/// - dictionary: `разблюдовка = ПРОФИЛЬ` -- rewrites one word of
+///   `fixtures/audio/speech.wav`'s fixed `voxis-fake-stt` transcript
+///   ("...сегодняшняя разблюдовка."), so the smoke script can assert the
+///   `RESULT_EVENT` text actually went through the IMPORTED dictionary,
+///   not just an empty one.
+/// - one custom (non-builtin) LLM provider -- proves `llm.providers` made
+///   the round trip too (`IMPORT_SUMMARY.llmProviders` reflects it).
+fn seed_desktop_config_dir(dir: &Path, stt_url: Option<&str>) {
+    let mut config = voxis_core::config::AppConfig {
+        api_key: "voxis-smoke-desktop-api-key".to_string(),
+        audio_device: "Mock Device".to_string(),
+        ..voxis_core::config::AppConfig::default()
+    };
+    if let Some(url) = stt_url {
+        config.api_url_override = Some(url.to_string());
+    }
+    ConfigSqliteStorage::new(dir.join("config.db"))
+        .save(&config)
+        .expect("VOXIS_SMOKE_SEED_DESKTOP_DIR: seeding config.db");
+
+    CoreDictionaryStorage::new(dir.join("dictionary.txt"))
+        .add("разблюдовка", "ПРОФИЛЬ")
+        .expect("VOXIS_SMOKE_SEED_DESKTOP_DIR: seeding dictionary.txt");
+
+    let providers = ProvidersStorage::new(dir.join("providers.db"));
+    providers.get_all().expect("VOXIS_SMOKE_SEED_DESKTOP_DIR: seeding providers.db (builtins)");
+    providers
+        .add(&LlmProvider {
+            id: "smoke-desktop-provider".to_string(),
+            name: "Smoke Desktop Provider".to_string(),
+            api_url: "https://example.invalid/v1".to_string(),
+            models: vec![],
+            default_model: "model-x".to_string(),
+            builtin: false,
+        })
+        .expect("VOXIS_SMOKE_SEED_DESKTOP_DIR: seeding providers.db (custom provider)");
+}
+
 /// Task 8.5: iOS builds need a library target (`staticlib`/`cdylib`) with a
 /// `#[tauri::mobile_entry_point]`-tagged entry function -- `main.rs` (the
 /// actual `[[bin]]`, desktop-only per Tauri's own mobile convention) just
@@ -172,9 +255,19 @@ fn scripted_mock_capture(fixture_path: PathBuf) -> (Arc<dyn AudioCapture>, usize
 /// host-min`/`scripts/host-min-smoke.sh`.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Task 6b: seeding must happen before ANYTHING reads
+    // `VOXIS_DESKTOP_CONFIG_DIR` (the plugin's own `setup` hook, below,
+    // via `import_profile_from_desktop`) -- do it first, synchronously,
+    // before `tauri::Builder` is even constructed.
+    if let Ok(seed_dir) = std::env::var("VOXIS_SMOKE_SEED_DESKTOP_DIR") {
+        let seed_stt_url = std::env::var("VOXIS_SMOKE_SEED_STT_URL").ok();
+        seed_desktop_config_dir(Path::new(&seed_dir), seed_stt_url.as_deref());
+    }
+
     let capture_mode = std::env::var("VOXIS_CAPTURE").unwrap_or_else(|_| "mock".to_string());
     let stt_url = std::env::var("VOXIS_STT_URL").ok();
     let api_key = std::env::var("VOXIS_API_KEY").ok();
+    let smoke_import = std::env::var("VOXIS_SMOKE_IMPORT").is_ok();
     let silence_timeout_ms: u32 =
         std::env::var("VOXIS_SILENCE_TIMEOUT_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(3_000);
     let smoke_autostart = std::env::var("VOXIS_SMOKE_AUTOSTART").is_ok();
@@ -247,16 +340,28 @@ pub fn run() {
     builder = builder.setup(move |app| {
         let state = app.state::<PluginState>();
 
-        // STT URL / API key: seeded directly into the plugin's already-
-        // `pub` `PluginState` fields (`pipeline_config`/`secrets`) --
-        // see the module doc for why this isn't `apply_profile`.
-        let key = api_key.clone().unwrap_or_else(|| "voxis-fake-stt-dummy-key".to_string());
-        state.secrets.set(API_KEY_SECRET_NAME, &Secret::new(key)).expect("seeding SecretStore api key");
-        {
-            let mut cfg = state.pipeline_config.lock().unwrap();
-            cfg.app_config.silence_timeout_ms = silence_timeout_ms;
+        state.pipeline_config.lock().unwrap().app_config.silence_timeout_ms = silence_timeout_ms;
+
+        if smoke_import {
+            // The real `import_profile_from_desktop` command (Task 6) --
+            // no direct reach into `pipeline_config`/`secrets` for this
+            // path; see the module doc's "STT endpoint / API key" section.
+            match tauri_plugin_voxis::commands::import_profile_from_desktop(app.state::<PluginState>()) {
+                Ok(summary) => println!(
+                    "IMPORT_SUMMARY {}",
+                    serde_json::to_string(&summary).expect("serializing ImportSummary")
+                ),
+                Err(e) => println!("IMPORT_ERROR {e:?}"),
+            }
+        } else {
+            // Env fallback -- see the module doc's "STT endpoint / API
+            // key" section for exactly which scenarios still take this
+            // path (mock-CI fixtures with no desktop profile to import,
+            // or a real `VOXIS_CAPTURE=cpal` hardware run).
+            let key = api_key.clone().unwrap_or_else(|| "voxis-fake-stt-dummy-key".to_string());
+            state.secrets.set(API_KEY_SECRET_NAME, &Secret::new(key)).expect("seeding SecretStore api key");
             if let Some(url) = &stt_url {
-                cfg.app_config.api_url_override = Some(url.clone());
+                state.pipeline_config.lock().unwrap().app_config.api_url_override = Some(url.clone());
             }
         }
 

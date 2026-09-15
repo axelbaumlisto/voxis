@@ -4,6 +4,7 @@
     "provider": "groq",
     "model": "whisper-large-v3",
     "apiKeyRef": "api_key",
+    "audioDevice": "MacBook Pro Microphone",
     "language": "en",
     "translateToEnglish": false,
     "minRecordingMs": 300,

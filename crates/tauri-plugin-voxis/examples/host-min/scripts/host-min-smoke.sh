@@ -163,4 +163,103 @@ run_scenario "speech" "speech.wav" "Вот такая у нас сегодняш
 run_scenario "silence" "silence.wav" "\"text\":\"\"" "0" "silenceTimeoutNoSpeech"
 run_scenario "speech-streamdied" "speech.wav" "Вот такая у нас сегодняшняя разблюдовка" "1" "streamDied" "VOXIS_SMOKE_NO_STOP=1"
 
+# Task 6b / plan gate 7 ("profile round-trip in host-min"): seeds a fake
+# desktop config dir (host-min's own `seed_desktop_config_dir`, driven by
+# `VOXIS_SMOKE_SEED_DESKTOP_DIR`), points `VOXIS_DESKTOP_CONFIG_DIR` at the
+# SAME dir, imports it back with `VOXIS_SMOKE_IMPORT=1` (the real
+# `import_profile_from_desktop` command, not a direct `pipeline_config`
+# reach), then runs the ordinary speech scenario -- but asserts the result
+# went through the IMPORTED dictionary entry (разблюдовка -> ПРОФИЛЬ) and
+# that fake-stt was reached at the URL the PROFILE carried
+# (`VOXIS_STT_URL` is deliberately NOT set anywhere in this scenario --
+# only `VOXIS_SMOKE_SEED_STT_URL`, which seeds the desktop config's own
+# `api_url_override` for `import_profile_from_desktop` to pick up).
+run_profile_import_scenario() {
+  local name="profile-import"
+
+  : > "$fake_stt_log"
+  start_fake_stt
+  echo "=== [$name] fake-stt on port $fake_stt_port ==="
+
+  local seed_dir
+  seed_dir="$(mktemp -d)"
+
+  env \
+  VOXIS_SMOKE_SEED_DESKTOP_DIR="$seed_dir" \
+  VOXIS_SMOKE_SEED_STT_URL="http://127.0.0.1:$fake_stt_port/v1/audio/transcriptions" \
+  VOXIS_DESKTOP_CONFIG_DIR="$seed_dir" \
+  VOXIS_SMOKE_IMPORT=1 \
+  VOXIS_CAPTURE="mock:$repo_root/fixtures/audio/speech.wav" \
+  VOXIS_SMOKE_AUTOSTART=1 \
+  VOXIS_SILENCE_TIMEOUT_MS=3000 \
+    "$host_min_bin" > "$host_min_log" 2>&1 &
+  host_min_pid=$!
+
+  local deadline=$((SECONDS + 30))
+  while [ $SECONDS -lt $deadline ]; do
+    if grep -q "RESULT_EVENT" "$host_min_log" 2>/dev/null; then
+      break
+    fi
+    sleep 0.25
+  done
+
+  kill "$host_min_pid" 2>/dev/null || true
+  wait "$host_min_pid" 2>/dev/null || true
+  host_min_pid=""
+  kill "$fake_stt_pid" 2>/dev/null || true
+  wait "$fake_stt_pid" 2>/dev/null || true
+  fake_stt_pid=""
+  rm -rf "$seed_dir"
+
+  echo "--- host-min log ($name) ---"
+  cat "$host_min_log"
+  echo "--- fake-stt log ($name) ---"
+  cat "$fake_stt_log"
+
+  if ! grep -q "IMPORT_SUMMARY" "$host_min_log"; then
+    echo "FAIL [$name]: no IMPORT_SUMMARY observed" >&2
+    exit 1
+  fi
+  local summary_line
+  summary_line=$(grep "IMPORT_SUMMARY" "$host_min_log" | tail -1)
+  if ! echo "$summary_line" | grep -q '"source":"desktop"'; then
+    echo "FAIL [$name]: IMPORT_SUMMARY.source was not \"desktop\": $summary_line" >&2
+    exit 1
+  fi
+  if ! echo "$summary_line" | grep -q '"dictionaryEntries":1'; then
+    echo "FAIL [$name]: IMPORT_SUMMARY.dictionaryEntries was not 1: $summary_line" >&2
+    exit 1
+  fi
+
+  if ! grep -q "RESULT_EVENT" "$host_min_log"; then
+    echo "FAIL [$name]: no RESULT_EVENT observed within 30s" >&2
+    exit 1
+  fi
+  local result_line
+  result_line=$(grep "RESULT_EVENT" "$host_min_log" | tail -1)
+  if ! echo "$result_line" | grep -q "ПРОФИЛЬ"; then
+    echo "FAIL [$name]: RESULT_EVENT text was not rewritten by the imported dictionary entry (разблюдовка -> ПРОФИЛЬ): $result_line" >&2
+    exit 1
+  fi
+  if echo "$result_line" | grep -q "разблюдовка"; then
+    echo "FAIL [$name]: RESULT_EVENT text still contains the pre-dictionary word: $result_line" >&2
+    exit 1
+  fi
+  if ! echo "$result_line" | grep -q '"guardOutcome":"finalized"'; then
+    echo "FAIL [$name]: expected guardOutcome=finalized: $result_line" >&2
+    exit 1
+  fi
+
+  local actual_requests
+  actual_requests=$(grep -c "TRANSCRIBE_REQUEST" "$fake_stt_log" || true)
+  if [ "$actual_requests" != "1" ]; then
+    echo "FAIL [$name]: expected 1 fake-stt request (via the profile's api_url_override, no VOXIS_STT_URL set), got $actual_requests" >&2
+    exit 1
+  fi
+
+  echo "PASS [$name]"
+}
+
+run_profile_import_scenario
+
 echo "=== host-min-smoke.sh: all scenarios passed ==="

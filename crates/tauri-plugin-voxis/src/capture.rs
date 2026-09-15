@@ -117,6 +117,23 @@ pub trait AudioCapture: Send + Sync {
     /// Default no-op: a backend whose `stop()` can't fail (or that
     /// already self-recovers) needs nothing here.
     fn reset(&self) {}
+
+    /// Select the input device by platform-specific id/name for the
+    /// *next* `start()` (Task 6b / `[HW-GATE finding]`: a profile's
+    /// `ProfileConfig::audio_device` must steer capture away from
+    /// whatever the system default input device happens to be — on this
+    /// hardware that default is a lavalier mic that records zeros).
+    /// `desktop::CpalCapture` overrides this to update the device its own
+    /// `start()` re-reads fresh every call, so a call here takes effect
+    /// starting with the very next session, no restart required.
+    /// Default no-op: backends with no device-selection concept (iOS's
+    /// `AVAudioEngine` bridge — `.record` category always uses the
+    /// system input, Task 8's own doc) simply ignore it; `MockCapture`
+    /// overrides it too, purely to make the wiring
+    /// (`profile_source::refresh_pipeline_config` calling this after
+    /// every profile import/apply) assertable in tests without a real
+    /// `CpalCapture`.
+    fn set_device_id(&self, _device_id: &str) {}
 }
 
 /// `<host-cache>/voxis-plugin/rec/` — the plugin's dedicated scratch
@@ -231,6 +248,11 @@ struct MockCaptureState {
     /// The `muted` knob (Task 3b `[R1-Safety T3]`) — forced onto every
     /// emitted `LevelSample` regardless of the scripted rms/peak.
     muted: bool,
+    /// Last value `set_device_id` was called with (Task 6b) — `None`
+    /// until the first call, purely a test-observability knob (a real
+    /// backend has no such getter; nothing about capture behaviour reads
+    /// this field back).
+    device_id: Option<String>,
 }
 
 impl Default for MockCaptureState {
@@ -247,6 +269,7 @@ impl Default for MockCaptureState {
             cap_samples: usize::MAX,
             cap_hit: false,
             muted: false,
+            device_id: None,
         }
     }
 }
@@ -335,6 +358,13 @@ impl MockCapture {
     pub fn is_running(&self) -> bool {
         self.state.lock().unwrap().running
     }
+
+    /// The last value `set_device_id` (`AudioCapture`'s trait method) was
+    /// called with, if any — what Task 6b's `import_from_desktop_sets_
+    /// capture_device_from_profile` test asserts against.
+    pub fn device_id(&self) -> Option<String> {
+        self.state.lock().unwrap().device_id.clone()
+    }
 }
 
 impl Default for MockCapture {
@@ -387,6 +417,10 @@ impl AudioCapture for MockCapture {
         let mut state = self.state.lock().unwrap();
         state.running = false;
         state.started_path = None;
+    }
+
+    fn set_device_id(&self, device_id: &str) {
+        self.state.lock().unwrap().device_id = Some(device_id.to_string());
     }
 }
 

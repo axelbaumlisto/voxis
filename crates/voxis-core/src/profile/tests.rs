@@ -136,6 +136,41 @@ fn from_storage_builds_expected_profile_and_secrets() {
 }
 
 #[test]
+fn from_storage_maps_default_audio_device_to_none() {
+    let ts = test_storage();
+    // `AppConfig::default()`'s own `audio_device` is already
+    // `DEFAULT_AUDIO_DEVICE` ("default") -- no explicit override needed.
+    let (profile, _secrets) = VoxisProfile::from_storage(
+        &ts.factory.config(),
+        &ts.factory.dictionary(),
+        &ts.factory.providers(),
+        &ts.prompts,
+    )
+    .unwrap();
+
+    assert_eq!(profile.config.audio_device, None, "the system-default device must round-trip as None, not the literal string \"default\"");
+}
+
+#[test]
+fn from_storage_maps_a_named_audio_device_to_some() {
+    let ts = test_storage();
+    let config_storage = ts.factory.config();
+    let mut app_config = config_storage.load().unwrap();
+    app_config.audio_device = "BY-V".to_string();
+    config_storage.save(&app_config).unwrap();
+
+    let (profile, _secrets) = VoxisProfile::from_storage(
+        &ts.factory.config(),
+        &ts.factory.dictionary(),
+        &ts.factory.providers(),
+        &ts.prompts,
+    )
+    .unwrap();
+
+    assert_eq!(profile.config.audio_device.as_deref(), Some("BY-V"));
+}
+
+#[test]
 fn from_storage_excludes_history() {
     let ts = test_storage();
     // A history row exists in the same config-dir the profile is built
@@ -174,6 +209,7 @@ fn minimal_profile() -> VoxisProfile {
             api_url_override: None,
             language: "en".to_string(),
             translate_to_english: false,
+            audio_device: None,
             min_recording_ms: 300,
             silence_timeout_ms: 60_000,
             max_recording_ms: 600_000,
@@ -201,6 +237,58 @@ fn minimal_secrets() -> ProfileSecrets {
         api_key: Some(Secret::new("sk-imported-transcription-key")),
         llm_api_key: Some(Secret::new("sk-imported-llm-key")),
     }
+}
+
+#[test]
+fn apply_to_maps_none_audio_device_back_to_the_default_sentinel() {
+    let ts = test_storage();
+    // Seed a non-default device first, so applying a profile with
+    // `audio_device: None` is a genuine reset back to "default", not
+    // just "never touched it".
+    let config_storage = ts.factory.config();
+    let mut app_config = config_storage.load().unwrap();
+    app_config.audio_device = "stale-device".to_string();
+    config_storage.save(&app_config).unwrap();
+
+    let profile = minimal_profile();
+    assert_eq!(profile.config.audio_device, None);
+    let secrets = minimal_secrets();
+    let mut sink = MockSecretSink::default();
+    profile
+        .apply_to(
+            &secrets,
+            &ts.factory.config(),
+            &ts.factory.dictionary(),
+            &ts.factory.providers(),
+            &ts.prompts,
+            &mut sink,
+        )
+        .unwrap();
+
+    let stored = ts.factory.config().load().unwrap();
+    assert_eq!(stored.audio_device, crate::config::DEFAULT_AUDIO_DEVICE);
+}
+
+#[test]
+fn apply_to_writes_a_named_audio_device() {
+    let ts = test_storage();
+    let mut profile = minimal_profile();
+    profile.config.audio_device = Some("Mock Device".to_string());
+    let secrets = minimal_secrets();
+    let mut sink = MockSecretSink::default();
+    profile
+        .apply_to(
+            &secrets,
+            &ts.factory.config(),
+            &ts.factory.dictionary(),
+            &ts.factory.providers(),
+            &ts.prompts,
+            &mut sink,
+        )
+        .unwrap();
+
+    let stored = ts.factory.config().load().unwrap();
+    assert_eq!(stored.audio_device, "Mock Device");
 }
 
 #[test]
@@ -520,6 +608,7 @@ fn fixture_profile_v1_deserializes_and_is_version_1() {
     let profile: VoxisProfile = serde_json::from_str(fixture).expect("fixture must deserialize");
     profile.check_version().expect("fixture must be version 1");
     assert!(!profile.config.provider.is_empty());
+    assert_eq!(profile.config.audio_device.as_deref(), Some("MacBook Pro Microphone"));
     assert!(profile.config.api_key_ref.is_some(), "fixture must use a ref, not a raw key");
     assert!(profile.config.llm_api_key_ref.is_some());
     // Synthetic values only \u2014 no secret-shaped content anywhere in the file.

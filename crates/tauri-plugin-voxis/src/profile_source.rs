@@ -135,7 +135,13 @@ fn apply_imported_profile(
 /// Reloads `PluginState::pipeline_config` (`app_config` + `dictionary`)
 /// from the plugin's own storage \u2014 called right after `apply_to` just
 /// wrote there, so the pipeline's very next `start()` observes the
-/// imported settings without requiring a plugin restart.
+/// imported settings without requiring a plugin restart. Task 6b
+/// (`[HW-GATE finding]`): also pushes `app_config.audio_device` into the
+/// capture backend via `AudioCapture::set_device_id` \u2014 this is the ONE
+/// place every import/apply transport (desktop directory, QR, file) goes
+/// through (`apply_imported_profile`, below), so a device named in a
+/// profile reaches `CpalCapture` regardless of which transport carried
+/// the profile.
 fn refresh_pipeline_config(
     state: &PluginState,
     plugin_storage: &PluginProfileStorage,
@@ -144,6 +150,8 @@ fn refresh_pipeline_config(
         .map_err(|e| PluginError::Profile { message: format!("reloading plugin config: {e}") })?;
     let dictionary = DictionaryStorageTrait::load(&plugin_storage.dictionary)
         .map_err(|e| PluginError::Profile { message: format!("reloading plugin dictionary: {e}") })?;
+
+    state.capture.set_device_id(&app_config.audio_device);
 
     let mut config = state.pipeline_config.lock().unwrap();
     config.app_config = app_config;
@@ -255,15 +263,23 @@ pub fn apply_profile_bytes(
 /// exactly 32 bytes for the `Qr` variant.
 fn core_key_source(dto: KeySourceDto) -> Result<KeySource, PluginError> {
     match dto {
-        KeySourceDto::Qr { k, code } => {
-            let bytes = voxis_core::profile::decode_base64url(&k)?;
-            let k_qr: [u8; 32] = bytes.try_into().map_err(|bytes: Vec<u8>| PluginError::Profile {
-                message: format!("QR key material must be exactly 32 bytes, got {}", bytes.len()),
-            })?;
-            Ok(KeySource::Qr { k_qr, code })
-        }
+        KeySourceDto::Qr { k, code } => Ok(KeySource::Qr { k_qr: k_qr_from_base64url(&k)?, code }),
         KeySourceDto::Passphrase { phrase } => Ok(KeySource::Passphrase(phrase)),
     }
+}
+
+/// `[ADO-2/3 minors]`/Task 6b: the one place `k_qr`'s wire form
+/// (base64url, `contract/fixtures/profile-qr.json`'s `k` field) is
+/// decoded into the fixed-size key `KeySource::Qr` actually needs —
+/// `core_key_source` (`apply_profile`'s `KeySourceDto::Qr`) and
+/// `import_from_qr` (the QR payload's own `k`) used to each inline an
+/// identical decode-then-length-check, so a change to the error message
+/// or the 32-byte requirement itself only needs to happen once.
+fn k_qr_from_base64url(k: &str) -> Result<[u8; 32], PluginError> {
+    let bytes = voxis_core::profile::decode_base64url(k)?;
+    bytes.try_into().map_err(|bytes: Vec<u8>| PluginError::Profile {
+        message: format!("QR key material must be exactly 32 bytes, got {}", bytes.len()),
+    })
 }
 
 // ---------------------------------------------------------------------
@@ -308,10 +324,7 @@ pub async fn import_from_qr(
             message: format!("unsupported QR payload version {} (expected 1)", qr.v),
         });
     }
-    let k_bytes = voxis_core::profile::decode_base64url(&qr.k)?;
-    let k_qr: [u8; 32] = k_bytes.try_into().map_err(|bytes: Vec<u8>| PluginError::Profile {
-        message: format!("QR key material must be exactly 32 bytes, got {}", bytes.len()),
-    })?;
+    let k_qr = k_qr_from_base64url(&qr.k)?;
 
     let url = build_qr_url(&qr)?;
     let response = fetch_sealed_profile(url).await?;
@@ -399,6 +412,28 @@ async fn fetch_sealed_profile(url: reqwest::Url) -> Result<Vec<u8>, PluginError>
     Ok(bytes.to_vec())
 }
 
+// `[ADO-8 follow-ups]`/Task 6b: an intermittent `import_from_qr_*` failure
+// ("error sending request for url" — connection refused against a mockito
+// server that had just reported itself listening) has been observed under
+// `cargo test`'s default parallel harness, NOT in isolation (`cargo test
+// <name>` alone is reliably green). Investigated for this task: every
+// `import_from_qr`/QR test below constructs its OWN `mockito::Server::
+// new_async()` (grep confirms no `static`/shared `Server` anywhere in this
+// module or `pipeline.rs`'s own mockito tests), so this is not the "shared
+// server across tests" shape the plan's own follow-up note guessed at.
+// Most likely cause, based on when it reproduces: this crate's test binary
+// also runs several real-OS-thread-heavy tests in the same parallel run
+// (`desktop.rs`'s cpal thread pair per session, this module's own
+// `..._holds_an_exclusive_write_lock` writer thread, `pipeline.rs`'s
+// real-time lease/liveness tests) — under enough concurrent thread/socket
+// pressure from those, a `reqwest::Client` built fresh per test can lose
+// the race between mockito's listener actually being ready to accept and
+// this test's own first connect attempt. Documented here rather than
+// "fixed" (per this task's own instruction: address the cause if found,
+// otherwise document it) — a real fix would mean either serializing the
+// whole crate's test binary (defeats the point of parallel tests) or
+// giving `import_from_qr`'s own reqwest client a connect retry, which is a
+// pipeline-wide behavioural change out of this task's scope.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,19 +451,29 @@ mod tests {
     /// Builds a bare `PluginState` for these tests \u2014 same shape as
     /// `commands.rs`'s own `test_state`, minus consent (irrelevant here).
     fn test_state(tmp: &tempfile::TempDir) -> PluginState {
-        PluginState {
+        test_state_with_mock(tmp).0
+    }
+
+    /// Same as `test_state`, also returning the `Arc<MockCapture>` so a
+    /// test can assert on it directly (Task 6b: `AudioCapture::
+    /// set_device_id` wiring) — mirrors `commands.rs`'s own
+    /// `test_state_with_mock`.
+    fn test_state_with_mock(tmp: &tempfile::TempDir) -> (PluginState, Arc<MockCapture>) {
+        let mock = Arc::new(MockCapture::new());
+        let state = PluginState {
             sessions: Arc::new(SessionGuard::new()),
             consent: ConsentStore::new(tmp.path().join("consent.json")),
             secrets: Arc::new(InMemorySecretStore::new()),
             rec_dir: RecDir::new(tmp.path().join("rec")),
-            capture: Arc::new(MockCapture::new()),
+            capture: mock.clone(),
             events: Arc::new(RecordingSink::new()),
             pipeline_config: std::sync::Mutex::new(PipelineConfig::default()),
             hotkey: None,
             host_id: "test-host".to_string(),
             provider_host: "api.groq.com".to_string(),
             profile_dir: tmp.path().join("voxis-plugin"),
-        }
+        };
+        (state, mock)
     }
 
     /// Seeds a tempdir Voxis-desktop-format config dir (real
@@ -454,6 +499,11 @@ mod tests {
             let mut config = voxis_core::config::AppConfig {
                 api_key: "desktop-secret-api-key".to_string(),
                 hotkey: "alt_r".to_string(),
+                // Task 6b (`[HW-GATE finding]`): a named (non-default)
+                // device, so `import_from_desktop_sets_capture_device_
+                // from_profile` below can assert the plugin's capture
+                // backend actually picked it up.
+                audio_device: "Mock Device".to_string(),
                 ..voxis_core::config::AppConfig::default()
             };
             config.overlay.theme = "waveform".to_string();
@@ -547,7 +597,33 @@ mod tests {
         // pipeline_config was refreshed from the import.
         let cfg = state.pipeline_config.lock().unwrap();
         assert_eq!(cfg.app_config.hotkey, "alt_r");
+        assert_eq!(cfg.app_config.audio_device, "Mock Device");
         assert_eq!(cfg.dictionary, vec![("солид".to_string(), "SOLID".to_string())]);
+        drop(fixture);
+    }
+
+    /// Task 6b / `[HW-GATE finding]` end to end: an imported profile's
+    /// `audio_device` must reach the capture backend, not just
+    /// `pipeline_config.app_config` — `refresh_pipeline_config` calls
+    /// `AudioCapture::set_device_id` on every apply/import
+    /// (`apply_imported_profile`'s one shared path), so the very next
+    /// `start()` after this import would use it. Exercised here through
+    /// `MockCapture` (this crate's own `AudioCapture` test double) rather
+    /// than a real `CpalCapture`, per this task's own "do not open real
+    /// devices in unit tests" constraint — `desktop.rs`'s own
+    /// `set_device_id_updates_what_the_next_start_will_read` test covers
+    /// the `CpalCapture`-specific half (that the device it reads at
+    /// `start()` time is exactly what `set_device_id` last wrote).
+    #[test]
+    fn import_from_desktop_sets_capture_device_from_profile() {
+        let fixture = DesktopFixture::seed(true);
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, mock) = test_state_with_mock(&tmp);
+        assert_eq!(mock.device_id(), None, "no device selected before any import");
+
+        import_from_desktop(&state).unwrap();
+
+        assert_eq!(mock.device_id(), Some("Mock Device".to_string()));
         drop(fixture);
     }
 
@@ -599,31 +675,59 @@ mod tests {
         }
     }
 
+    /// `[R1-Safety S7]` plugin-level smoke, one layer above
+    /// `sqlite_base`'s own `open_read_only_waits_out_a_writers_exclusive_
+    /// lock_within_the_busy_timeout` (which is the real regression test
+    /// for `busy_timeout` itself). Task 6b fix (review_6_r2 minor #2):
+    /// this used to `BEGIN IMMEDIATE` + a small `UPDATE`, which in
+    /// SQLite's default rollback-journal mode only takes a RESERVED lock
+    /// — readers are still admitted, so the import never actually
+    /// blocked and the test would have passed identically with
+    /// `busy_timeout` deleted entirely. `BEGIN EXCLUSIVE` genuinely denies
+    /// concurrent readers, so `import_from_desktop` (which goes through
+    /// `open_read_only`'s `busy_timeout(2s)`) must actually WAIT here —
+    /// asserted via elapsed time, not just "did it eventually succeed"
+    /// (a lucky non-blocking race could satisfy that too). The old
+    /// `released` assert (redundant with `handle.join()` succeeding at
+    /// all) is dropped.
     #[test]
-    fn import_from_desktop_succeeds_while_desktop_holds_a_write_transaction() {
+    fn import_from_desktop_succeeds_while_desktop_holds_an_exclusive_write_lock() {
         let fixture = DesktopFixture::seed(true);
         let tmp = tempfile::tempdir().unwrap();
         let state = test_state(&tmp);
 
         let writer = rusqlite::Connection::open(fixture.dir.join("config.db")).unwrap();
-        writer.execute("BEGIN IMMEDIATE", []).unwrap();
+        writer.execute("BEGIN EXCLUSIVE", []).unwrap();
+        // A genuinely different, still-VALID hotkey (unlike sqlite_base.rs's
+        // own EXCLUSIVE test, which writes into an unvalidated scratch
+        // column) -- apply_imported_profile runs the imported config through
+        // config::validate_config before import_from_desktop returns, so an
+        // arbitrary placeholder string like "mid-write" would fail
+        // validation instead of proving anything about blocking.
         writer
-            .execute("UPDATE config SET value = 'mid-write' WHERE key = 'hotkey'", [])
+            .execute("UPDATE config SET value = 'ctrl_r' WHERE key = 'hotkey'", [])
             .unwrap();
 
-        let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let released_writer = released.clone();
+        const HOLD_MS: u64 = 200;
         let handle = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(200));
+            std::thread::sleep(std::time::Duration::from_millis(HOLD_MS));
             writer.execute("COMMIT", []).unwrap();
-            released_writer.store(true, std::sync::atomic::Ordering::SeqCst);
         });
 
+        let started = std::time::Instant::now();
         let summary = import_from_desktop(&state).unwrap();
+        let elapsed = started.elapsed();
 
         handle.join().unwrap();
-        assert!(released.load(std::sync::atomic::Ordering::SeqCst));
-        assert_eq!(summary.hotkey, "alt_r", "import must observe the pre-transaction committed hotkey");
+        assert!(
+            elapsed >= std::time::Duration::from_millis(150),
+            "the import must have actually blocked on the writer's EXCLUSIVE lock (busy_timeout \
+             retrying), not returned immediately — elapsed only {elapsed:?} against a {HOLD_MS}ms hold"
+        );
+        assert_eq!(
+            summary.hotkey, "ctrl_r",
+            "import must observe the POST-commit hotkey -- proves the read genuinely waited for the writer's commit rather than seeing a pre-transaction snapshot"
+        );
     }
 
     // -- get_profile round-trip --------------------------------------
@@ -700,6 +804,7 @@ mod tests {
                 api_url_override: None,
                 language: "en".to_string(),
                 translate_to_english: false,
+                audio_device: None,
                 min_recording_ms: 300,
                 silence_timeout_ms: 60_000,
                 max_recording_ms: 600_000,

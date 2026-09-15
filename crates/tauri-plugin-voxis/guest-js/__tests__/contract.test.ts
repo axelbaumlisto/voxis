@@ -66,6 +66,7 @@ describe("contract fixtures", () => {
     expect(parsed.version).toBe(1);
     expect(parsed.config.provider).toBe("groq");
     expect(parsed.config.silenceTimeoutMs).toBe(60000);
+    expect(parsed.config.audioDevice).toBe("MacBook Pro Microphone");
     expect(parsed.dictionary).toEqual([
       ["солид", "SOLID"],
       ["докер", "Docker"],

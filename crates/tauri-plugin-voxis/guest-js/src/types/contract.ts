@@ -95,8 +95,8 @@ export type KeySourceDto = { type: "qr"; k: string; code: string } | { type: "pa
 
 /** `models::ImportSummary`. */
 export interface ImportSummary {
-  /** Where this profile came from: `"desktop"`, `"qr"`, or `"passphrase"`. */
-  source: string;
+  /** Where this profile came from — named after the transport/`KeySourceDto` variant used. */
+  source: "desktop" | "qr" | "passphrase";
   dictionaryEntries: number;
   llmProviders: number;
   llmPrompts: number;
@@ -148,6 +148,8 @@ export interface ProfileConfigDto {
   model: string;
   apiKeyRef?: string;
   apiUrlOverride?: string;
+  /** Task 6b / `[HW-GATE finding]`: cpal input device name; `undefined` means "system default", ignored on iOS. */
+  audioDevice?: string;
   language: string;
   translateToEnglish: boolean;
   minRecordingMs: number;
@@ -303,6 +305,7 @@ function parseProfileConfig(value: unknown, path: string): ProfileConfigDto {
     model: expectString(value.model, `${path}.model`),
     apiKeyRef: expectOptionalString(value.apiKeyRef, `${path}.apiKeyRef`),
     apiUrlOverride: expectOptionalString(value.apiUrlOverride, `${path}.apiUrlOverride`),
+    audioDevice: expectOptionalString(value.audioDevice, `${path}.audioDevice`),
     language: expectString(value.language, `${path}.language`),
     translateToEnglish: expectBoolean(value.translateToEnglish, `${path}.translateToEnglish`),
     minRecordingMs: expectNumber(value.minRecordingMs, `${path}.minRecordingMs`),
