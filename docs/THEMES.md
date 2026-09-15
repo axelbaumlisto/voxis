@@ -375,3 +375,43 @@ reload the browser.
 - The Rust command `validate_visualization_theme` performs manifest + entry
   checks without touching the JS runtime; it is available through the Tauri
   command surface for developer tooling/tests.
+
+## Appendix: `tauri-plugin-voxis`'s own `<voxis-overlay>` (a different overlay)
+
+Everything above is about the **desktop app's** native overlay window and
+its `theme.js` contract (`src/theme-engine/`, `src-tauri/themes/`). The
+`tauri-plugin-voxis` crate (`crates/tauri-plugin-voxis/`) ships an unrelated
+but similarly-named piece: a `<voxis-overlay>` custom element (guest-js
+package `crates/tauri-plugin-voxis/guest-js`, `src/overlay.ts`) that
+third-party Tauri host apps mount to get a draggable recording pill wired to
+the plugin's own `voxis://state`/`voxis://level`/`voxis://result` events. It
+reuses this same theme-engine contract for its visuals
+(`theme-bridge.ts`/`themes/registry.ts`) but is otherwise a separate
+integration surface with its own `mountOverlay()` API — this repo has no
+dedicated guest-js doc page yet, hence this appendix rather than a
+separate file.
+
+By default (`driver: "client"`, unchanged since the element's original
+Task 5 introduction) the overlay creates and owns its own `VoxisClient`
+subscription and drives `start`/`stop` itself off pointer gestures. A host
+that already holds its own long-lived `voxis://state`/`voxis://result`
+subscription (for example a `useVoxisRuntime`-style hook driving its own
+start/stop/consent/paste logic) can instead mount it in **host-driven**
+mode, so there is only ever one live subscriber/controller:
+
+```js
+import { mountOverlay } from "@voxis/tauri-plugin-voxis";
+
+const el = mountOverlay(document.body, { driver: "host" });
+// Feed it from whatever subscription the host already has:
+client.onState((s) => el.applyState(s));
+client.onLevel((l) => el.applyLevel(l));
+client.onResult((r) => el.applyResult(r));
+```
+
+In `driver: "host"` mode the element never creates/requires a client, its
+pill's pointer handlers only arm dragging and dispatch a
+`"voxis-overlay-press"` `CustomEvent` (`detail: {phase: "down" | "up"}`,
+for a host that wants hold-to-talk driven by the pill itself), and window
+`blur` is a no-op. See `src/overlay.ts`'s module doc comment ("Driver
+model") for the full contract.

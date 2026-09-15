@@ -304,6 +304,149 @@ describe("<voxis-overlay>", () => {
   });
 });
 
+describe("<voxis-overlay> driver: \"host\" [T10-overlay]", () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("mounts without a client, and never subscribes to one even if passed anyway", () => {
+    expect(() => mountOverlay(container, { driver: "host" })).not.toThrow();
+
+    const { client } = createMockClient();
+    const otherContainer = document.createElement("div");
+    document.body.appendChild(otherContainer);
+    mountOverlay(otherContainer, { driver: "host", client });
+    expect(client.onState).not.toHaveBeenCalled();
+    expect(client.onLevel).not.toHaveBeenCalled();
+    expect(client.onResult).not.toHaveBeenCalled();
+    otherContainer.remove();
+  });
+
+  it("pill press dispatches voxis-overlay-press and never starts/stops a session", async () => {
+    const { client } = createMockClient();
+    const el = mountOverlay(container, { driver: "host", client });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+    const phases: string[] = [];
+    el.addEventListener("voxis-overlay-press", (e) => {
+      phases.push((e as CustomEvent<{ phase: string }>).detail.phase);
+    });
+
+    pill.dispatchEvent(pointerEvent("pointerdown"));
+    pill.dispatchEvent(pointerEvent("pointerup"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(phases).toEqual(["down", "up"]);
+    expect(client.start).not.toHaveBeenCalled();
+    expect(client.stop).not.toHaveBeenCalled();
+  });
+
+  it("pointercancel/lostpointercapture also dispatch an 'up' phase, never start/stop", async () => {
+    const { client } = createMockClient();
+    const el = mountOverlay(container, { driver: "host", client });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+    const phases: string[] = [];
+    el.addEventListener("voxis-overlay-press", (e) => {
+      phases.push((e as CustomEvent<{ phase: string }>).detail.phase);
+    });
+
+    pill.dispatchEvent(pointerEvent("pointerdown"));
+    pill.dispatchEvent(pointerEvent("pointercancel"));
+    pill.dispatchEvent(pointerEvent("pointerdown"));
+    pill.dispatchEvent(pointerEvent("lostpointercapture"));
+    await Promise.resolve();
+
+    expect(phases).toEqual(["down", "up", "down", "up"]);
+    expect(client.start).not.toHaveBeenCalled();
+    expect(client.stop).not.toHaveBeenCalled();
+  });
+
+  it("does not add a window blur listener (nothing here is started, so nothing needs stopping on blur)", () => {
+    const addSpy = vi.spyOn(window, "addEventListener");
+    const el = mountOverlay(container, { driver: "host" });
+    expect(addSpy.mock.calls.some(([type]) => type === "blur")).toBe(false);
+    el.remove();
+  });
+
+  it("window blur is a no-op (no client to call, does not throw)", () => {
+    const el = mountOverlay(container, { driver: "host" });
+    expect(() => window.dispatchEvent(new Event("blur"))).not.toThrow();
+    el.remove();
+  });
+
+  it("the theme's own cancel action is a no-op instead of touching a nonexistent client", () => {
+    const el = mountOverlay(container, { driver: "host" });
+    const bridge = (el as unknown as { themeBridge: { api: { actions: { cancel: () => void } } } }).themeBridge;
+    expect(() => bridge.api.actions.cancel()).not.toThrow();
+    el.remove();
+  });
+
+  it("disconnectedCallback leaves no window listeners behind beyond the drag/viewport ones every driver adds", () => {
+    const addSpy = vi.spyOn(window, "addEventListener");
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+    const el = mountOverlay(container, { driver: "host" });
+    el.remove();
+
+    const addedTypes = addSpy.mock.calls.map(([type]) => type as string);
+    const removedTypes = removeSpy.mock.calls.map(([type]) => type as string);
+    expect(addedTypes).not.toContain("blur");
+    // Every listener type this driver *did* add (resize/orientationchange,
+    // shared with driver: "client") was also removed on disconnect.
+    for (const type of new Set(addedTypes)) {
+      expect(removedTypes).toContain(type);
+    }
+  });
+
+  it.each(["client", "host"] as const)(
+    "applyState (driver=%s) updates the recording indicator identically to the other driver",
+    (driver) => {
+      const { client, emitState } = createMockClient();
+      const el =
+        driver === "client" ? mountOverlay(container, { client, mode: "toggle" }) : mountOverlay(container, { driver: "host" });
+      const dot = el.shadowRoot!.querySelector(".dot") as HTMLElement;
+      const live = el.shadowRoot!.querySelector("[aria-live]") as HTMLElement;
+
+      expect(dot.classList.contains("visible")).toBe(false);
+      expect(live.textContent).toBe("");
+
+      if (driver === "client") {
+        emitState("recording");
+      } else {
+        el.applyState("recording");
+      }
+      expect(dot.classList.contains("visible")).toBe(true);
+      expect(live.textContent).toBe("Recording");
+
+      if (driver === "client") {
+        emitState("idle");
+      } else {
+        el.applyState("idle");
+      }
+      expect(dot.classList.contains("visible")).toBe(false);
+      expect(live.textContent).toBe("");
+    },
+  );
+
+  it("applyLevel/applyResult route into the same theme bridge/session-clearing path as the client driver, without throwing", () => {
+    const el = mountOverlay(container, { driver: "host" });
+    expect(() => {
+      el.applyState("recording");
+      el.applyLevel({ rms: 0.5, peak: 0.8, muted: false });
+      el.applyLevel({ rms: 0.5, peak: 0.8, muted: true });
+      el.applyResult({ text: "hi", language: null, durationMs: 10, guardOutcome: "finalized" });
+    }).not.toThrow();
+  });
+});
+
 describe("<voxis-overlay> under naked's CSP meta tag", () => {
   it("mounts without the CSP meta tag itself throwing (jsdom does not enforce CSP — see file doc comment)", () => {
     const meta = document.createElement("meta");
