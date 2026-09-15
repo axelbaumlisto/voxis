@@ -415,3 +415,21 @@ pill's pointer handlers only arm dragging and dispatch a
 for a host that wants hold-to-talk driven by the pill itself), and window
 `blur` is a no-op. See `src/overlay.ts`'s module doc comment ("Driver
 model") for the full contract.
+
+By default the pill's first-ever position (before anything is dragged and
+persisted to `localStorage`) is the bottom-right corner. A host whose own
+chrome already lives there — e.g. a status control in the bottom-right of a
+narrow phone viewport — can override that starting corner with
+`MountOverlayOptions.initialPosition`, either as a named corner or an
+explicit `{x, y}` (top-left origin, still clamped to the viewport/safe area
+like every other position this element computes). It only ever applies when
+nothing is persisted yet for `storageKey` — once a position exists (from a
+prior drag or mount), that persisted position always wins over
+`initialPosition`:
+
+```js
+import { mountOverlay } from "@voxis/tauri-plugin-voxis";
+
+// Avoid naked's bottom-right status control on first mount.
+const el = mountOverlay(document.body, { initialPosition: "top-right" });
+```

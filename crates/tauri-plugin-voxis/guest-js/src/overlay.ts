@@ -57,6 +57,8 @@ import {
   type DragController,
   type Point,
   type SafeArea,
+  type Size,
+  type Viewport,
 } from "./drag";
 import { startHoldLease, type Lease } from "./lease";
 import type { DictationResult, LevelEvent, Mode, PluginState, SessionId } from "./types/contract";
@@ -66,12 +68,50 @@ export const TAG_NAME = "voxis-overlay";
 
 const PILL_SIZE = { width: 64, height: 64 };
 
+/** Named starting corners for `MountOverlayOptions.initialPosition` — see that option's doc comment. */
+export type OverlayCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+const CORNER_MARGIN = 16;
+
+/**
+ * Resolves a named corner to a top-left `{x, y}` in `viewport`, inset by
+ * `CORNER_MARGIN` on the relevant edges — the same math the element's
+ * bottom-right default has always used (pre-`initialPosition`, this was
+ * inlined as a private `defaultPosition()` method; extracted here as a
+ * pure, viewport-injectable function so both `"bottom-right"`'s default
+ * behaviour and every other named corner share one implementation, and
+ * so it's unit-testable without mounting the custom element). The
+ * caller (`connectedCallback`) still runs the result through
+ * `clampToViewport` with the real safe area, so this function itself
+ * doesn't need to know about safe-area insets.
+ */
+export function cornerPosition(corner: OverlayCorner, size: Size, viewport: Viewport): Point {
+  const x = corner === "top-left" || corner === "bottom-left" ? CORNER_MARGIN : viewport.width - size.width - CORNER_MARGIN;
+  const y = corner === "top-left" || corner === "top-right" ? CORNER_MARGIN : viewport.height - size.height - CORNER_MARGIN;
+  return { x, y };
+}
+
 export interface MountOverlayOptions {
   theme?: string;
   /** Default `true`. */
   draggable?: boolean;
   /** `localStorage` key for the persisted drag position. Default `"default"`. */
   storageKey?: string;
+  /**
+   * Where the pill first appears when `loadPosition(storageKey)` finds
+   * nothing persisted yet — e.g. a host that knows its own chrome
+   * occupies the bottom-right corner (this option's original motivation:
+   * naked's status control on a 390px viewport) can start the pill
+   * somewhere it won't cover. Ignored entirely once a position has been
+   * persisted (drag or a prior mount already wrote one) — a persisted
+   * position always wins. A named corner resolves via `cornerPosition()`
+   * (the same math `"bottom-right"`, today's unchanged default, has
+   * always used); an explicit `{x, y}` is a top-left origin. Either way
+   * the result is still run through the existing `clampToViewport` (safe
+   * area + viewport) once mounted, so an out-of-bounds explicit point
+   * can't place the pill off-screen. Default: `"bottom-right"`.
+   */
+  initialPosition?: Point | OverlayCorner;
   /** Default `"hold"`. */
   mode?: Mode;
   /** Injectable client (tests/harness); defaults to `createClient()` (real `@tauri-apps/api`). Ignored (and not required) when `driver: "host"`. */
@@ -91,6 +131,7 @@ interface OverlayConfig {
   theme: string;
   draggable: boolean;
   storageKey: string;
+  initialPosition: Point | OverlayCorner | undefined;
   mode: Mode;
   driver: "client" | "host";
   client: VoxisClient | undefined;
@@ -207,7 +248,7 @@ export class VoxisOverlayElement extends HTMLElement {
     // Initial position — `env(safe-area-inset-*)` isn't computable until
     // connected (needs `document.body`); harmless default (bottom-right,
     // clamped) until the first `reposition()`.
-    const initial = loadPosition(config.storageKey) ?? this.defaultPosition();
+    const initial = loadPosition(config.storageKey) ?? this.resolveInitialPosition(config.initialPosition);
     const clamped = clampToViewport(initial, PILL_SIZE, this.safeArea(), readEffectiveViewport());
     this.pillEl.style.left = `${clamped.x}px`;
     this.pillEl.style.top = `${clamped.y}px`;
@@ -260,9 +301,11 @@ export class VoxisOverlayElement extends HTMLElement {
     }
   };
 
-  private defaultPosition() {
-    const viewport = readEffectiveViewport();
-    return { x: viewport.width - PILL_SIZE.width - 16, y: viewport.height - PILL_SIZE.height - 16 };
+  /** Resolves `MountOverlayOptions.initialPosition` — see that option's doc comment for the persisted-position-wins contract. */
+  private resolveInitialPosition(initialPosition: Point | OverlayCorner | undefined): Point {
+    if (initialPosition === undefined) return cornerPosition("bottom-right", PILL_SIZE, readEffectiveViewport());
+    if (typeof initialPosition === "string") return cornerPosition(initialPosition, PILL_SIZE, readEffectiveViewport());
+    return initialPosition;
   }
 
   private safeArea(): SafeArea {
@@ -520,6 +563,7 @@ export function mountOverlay(container: HTMLElement = document.body, options: Mo
     theme: options.theme ?? "default",
     draggable: options.draggable ?? true,
     storageKey: options.storageKey ?? "default",
+    initialPosition: options.initialPosition,
     mode: options.mode ?? "hold",
     driver,
     // `driver: "host"`: no client is created or required (per-task KISS

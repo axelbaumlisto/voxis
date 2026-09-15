@@ -8,7 +8,7 @@
 export * from "./types/contract";
 export * from "./client";
 export { mountOverlay, VoxisOverlayElement, TAG_NAME as OVERLAY_TAG_NAME } from "./overlay";
-export type { MountOverlayOptions } from "./overlay";
+export type { MountOverlayOptions, OverlayCorner } from "./overlay";
 export { DEFAULT_THEME_ID, resolveTheme, ThemeRegistry } from "./themes/registry";
 export { bindHotkey, HotkeyMachine, matchesHotkeySpec } from "./hotkey";
 export type { BoundHotkey, HotkeyMachineOptions } from "./hotkey";
