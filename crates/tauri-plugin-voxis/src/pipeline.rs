@@ -482,7 +482,17 @@ mod tests {
     // `start_paused` to run instantly regardless of guard-window length.
     #[tokio::test]
     async fn happy_path_returns_transcribed_and_dictionary_applied_text() {
-        let mut server = mockito::Server::new_async().await;
+        // Dedicated (non-pooled) listener -- mockito's plain `new_async()`
+        // draws from a process-wide pool of reused servers; under this
+        // crate's parallel test harness a server checked back into the pool
+        // by one finishing test can be handed to another before its
+        // listener is fully re-armed, producing a spurious "connection
+        // refused" against a port mockito had just reported as its own
+        // (see `profile_source.rs`'s identical fix/comment for the QR tests
+        // that first surfaced this). `new_with_opts_async` with `port: 0`
+        // gives each test a listener it exclusively owns end to end.
+        let mut server =
+            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
         let _mock = server
             .mock("POST", "/transcriptions")
             .with_status(200)
@@ -540,7 +550,8 @@ mod tests {
             }
         }
 
-        let mut server = mockito::Server::new_async().await;
+        let mut server =
+            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
         let _mock = server
             .mock("POST", "/transcriptions")
             .with_status(200)
@@ -587,7 +598,8 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn no_speech_discard_never_calls_transcription() {
-        let mut server = mockito::Server::new_async().await;
+        let mut server =
+            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
         let mock = server.mock("POST", "/transcriptions").expect(0).create_async().await;
 
         let dir = tempfile::tempdir().unwrap();
@@ -630,7 +642,8 @@ mod tests {
 
     #[tokio::test] // real time — see happy_path's comment on `start_paused` + real HTTP.
     async fn http_5xx_produces_transcription_error_and_deletes_file() {
-        let mut server = mockito::Server::new_async().await;
+        let mut server =
+            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
         let _mock = server.mock("POST", "/transcriptions").with_status(500).with_body("boom").create_async().await;
 
         let dir = tempfile::tempdir().unwrap();
@@ -804,7 +817,8 @@ mod tests {
 
     #[tokio::test] // real time — see happy_path's comment on `start_paused` + real HTTP.
     async fn cancel_during_transcribing_aborts_http_and_deletes_file() {
-        let mut server = mockito::Server::new_async().await;
+        let mut server =
+            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
         let _mock = server
             .mock("POST", "/transcriptions")
             .with_status(200)
@@ -1148,7 +1162,8 @@ mod tests {
     /// actually saves this case, not the signal.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancel_races_the_guards_own_finalize_scenario_a() {
-        let mut server = mockito::Server::new_async().await;
+        let mut server =
+            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
         let mock_endpoint = server.mock("POST", "/transcriptions").expect(0).create_async().await;
 
         let dir = tempfile::tempdir().unwrap();
@@ -1252,7 +1267,8 @@ mod tests {
     /// to build the client and fire the real HTTP request).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancel_while_secret_lookup_is_in_flight_scenario_b() {
-        let mut server = mockito::Server::new_async().await;
+        let mut server =
+            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
         let mock_endpoint = server.mock("POST", "/transcriptions").expect(0).create_async().await;
 
         let dir = tempfile::tempdir().unwrap();

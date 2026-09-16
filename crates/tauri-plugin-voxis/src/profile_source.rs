@@ -412,28 +412,32 @@ async fn fetch_sealed_profile(url: reqwest::Url) -> Result<Vec<u8>, PluginError>
     Ok(bytes.to_vec())
 }
 
-// `[ADO-8 follow-ups]`/Task 6b: an intermittent `import_from_qr_*` failure
-// ("error sending request for url" — connection refused against a mockito
-// server that had just reported itself listening) has been observed under
-// `cargo test`'s default parallel harness, NOT in isolation (`cargo test
-// <name>` alone is reliably green). Investigated for this task: every
-// `import_from_qr`/QR test below constructs its OWN `mockito::Server::
-// new_async()` (grep confirms no `static`/shared `Server` anywhere in this
-// module or `pipeline.rs`'s own mockito tests), so this is not the "shared
-// server across tests" shape the plan's own follow-up note guessed at.
-// Most likely cause, based on when it reproduces: this crate's test binary
-// also runs several real-OS-thread-heavy tests in the same parallel run
-// (`desktop.rs`'s cpal thread pair per session, this module's own
-// `..._holds_an_exclusive_write_lock` writer thread, `pipeline.rs`'s
-// real-time lease/liveness tests) — under enough concurrent thread/socket
-// pressure from those, a `reqwest::Client` built fresh per test can lose
-// the race between mockito's listener actually being ready to accept and
-// this test's own first connect attempt. Documented here rather than
-// "fixed" (per this task's own instruction: address the cause if found,
-// otherwise document it) — a real fix would mean either serializing the
-// whole crate's test binary (defeats the point of parallel tests) or
-// giving `import_from_qr`'s own reqwest client a connect retry, which is a
-// pipeline-wide behavioural change out of this task's scope.
+// `[ADO-8 follow-up, resolved]`: the intermittent `import_from_qr_*`
+// failure ("error sending request for url" — connection refused against a
+// mockito server that had just reported itself listening), reproduced
+// under `cargo test`'s default parallel harness (never in isolation) at
+// roughly 1-in-8 to 1-in-15 full-crate runs. Root cause, confirmed by
+// instrumenting a throwaway build to print `mockito`'s own reported
+// listening host:port per test and by observing that same port get
+// reissued to a *different* test within a single `cargo test` process:
+// each test below used the plain `mockito::Server::new_async()`
+// constructor, which draws from mockito's own process-wide pool of
+// pre-warmed servers (reused across tests to avoid the overhead of
+// spinning up a fresh listener every time) rather than owning a dedicated
+// listener. Under this crate's parallel test load, a server checked back
+// into the pool by one finishing test and immediately checked back out by
+// another has a narrow window — between the pool marking it available and
+// its listener actually being reset/re-armed for the next borrower —
+// where a connect attempt against that same host:port sees nothing
+// listening yet, i.e. exactly the observed "connection refused" against a
+// port mockito had just reported as its own.
+//
+// Fix: every QR test below now calls `mockito::Server::new_with_opts_async`
+// with an explicit `port: 0` instead of the pooled `new_async()` — this is
+// mockito's own documented non-pooled constructor, so each test gets a
+// listener it exclusively owns for its whole lifetime with no pool
+// checkout/reset race possible, while `port: 0` still asks the OS for a
+// fresh ephemeral port per test (no fixed-port collisions either).
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -825,7 +829,11 @@ mod tests {
 
     #[tokio::test]
     async fn import_from_qr_happy_path_fetches_opens_and_applies() {
-        let mut server = mockito::Server::new_async().await;
+        // Dedicated (non-pooled) listener -- see this module's doc comment
+        // above `mod tests` for why `new_async()` (mockito's pooled
+        // constructor) is flaky under this crate's parallel test load.
+        let mut server =
+            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
         let k_qr = [7u8; 32];
         let code = "123456".to_string();
         let mut profile = sample_profile();
@@ -867,7 +875,11 @@ mod tests {
 
     #[tokio::test]
     async fn import_from_qr_wrong_code_is_an_error() {
-        let mut server = mockito::Server::new_async().await;
+        // Dedicated (non-pooled) listener -- see this module's doc comment
+        // above `mod tests` for why `new_async()` (mockito's pooled
+        // constructor) is flaky under this crate's parallel test load.
+        let mut server =
+            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
         let k_qr = [7u8; 32];
         let profile = sample_profile();
         let secrets = ProfileSecrets::default();
@@ -903,7 +915,11 @@ mod tests {
 
     #[tokio::test]
     async fn import_from_qr_410_gone_is_an_error() {
-        let mut server = mockito::Server::new_async().await;
+        // Dedicated (non-pooled) listener -- see this module's doc comment
+        // above `mod tests` for why `new_async()` (mockito's pooled
+        // constructor) is flaky under this crate's parallel test load.
+        let mut server =
+            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
         let _mock = server
             .mock("GET", "/profile")
             .match_query(mockito::Matcher::Any)
@@ -1015,7 +1031,11 @@ mod tests {
 
     #[tokio::test]
     async fn import_from_qr_does_not_follow_a_redirect() {
-        let mut server = mockito::Server::new_async().await;
+        // Dedicated (non-pooled) listener -- see this module's doc comment
+        // above `mod tests` for why `new_async()` (mockito's pooled
+        // constructor) is flaky under this crate's parallel test load.
+        let mut server =
+            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
         let redirect_target = format!("{}/somewhere-else", server.url());
         let _mock = server
             .mock("GET", "/profile")
