@@ -253,7 +253,7 @@ jobs:
           # inside it) -- that step's own trap stops the VM exactly once,
           # whichever way it ends.
 
-      - name: iOS cross-build gate (voxis-core, blocking whenever the macOS VM is available)
+      - name: iOS cross-build gate (voxis-core, blocking whenever the macOS VM has the iOS SDK)
         continue-on-error: false
         timeout-minutes: 30
         run: |
@@ -275,6 +275,17 @@ jobs:
           trap cleanup EXIT
           if ! ios_ssh 'echo ok' >/dev/null 2>&1; then
             echo "macOS VM not reachable over SSH (the build step above may have skipped/failed to bring it up) -- skipping the iOS cross-build gate"
+            exit 0
+          fi
+          # The gate needs the iOS SDK (full Xcode) inside the VM; the release
+          # VM image ships Command Line Tools only, so `ring`'s cc-rs build died
+          # on `xcrun --show-sdk-path --sdk iphoneos` (v0.1.6 build task 6937)
+          # AFTER every artifact incl. the notarized DMG was already produced.
+          # Skip honestly when the SDK is absent -- the iOS cross-build is
+          # gated by scripts/check-ios-build.sh on the dev Mac and by naked's
+          # own "iOS compile smoke" CI lane, which do have Xcode.
+          if ! ios_ssh 'xcrun --sdk iphoneos --show-sdk-path' >/dev/null 2>&1; then
+            echo "::warning::macOS VM has no iOS SDK (Command Line Tools only) -- skipping the iOS cross-build gate; covered by scripts/check-ios-build.sh (dev Mac) and naked CI iOS compile smoke"
             exit 0
           fi
           echo "=== iOS cross-build gate: scripts/check-ios-build.sh inside the macOS VM (voxis-core, aarch64-apple-ios[-sim]) ==="
