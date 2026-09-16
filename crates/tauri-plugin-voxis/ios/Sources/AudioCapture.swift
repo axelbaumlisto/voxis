@@ -298,7 +298,8 @@ final class VoxisAudioCapture {
         interruptionReason = nil
         consecutiveNearSilentWindows = 0
         sawAudio = false
-        // Package.swift pins `platforms: [.iOS(.v17)]`, but some SwiftPM
+        // Package.swift pins `platforms: [.iOS(.v16)]` (17+ APIs are
+        // `#available`-gated at every call site), but some SwiftPM
         // build invocations (notably `swift-rs`'s own linker driver,
         // which built this exact package during the iOS cross-build
         // gate) do not consistently propagate that deployment target to

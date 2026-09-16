@@ -266,6 +266,9 @@ export class VoxisOverlayElement extends HTMLElement {
   private unlistenState: UnlistenFn | null = null;
   private unlistenLevel: UnlistenFn | null = null;
   private unlistenResult: UnlistenFn | null = null;
+  /** Bumped on every connect; a `listen` resolving for an older generation
+   * (or after disconnect) unsubscribes itself instead of storing the handle. */
+  private eventGeneration = 0;
   private lease: Lease | null = null;
   private activeSessionId: SessionId | null = null;
   private stopRequested = false;
@@ -378,6 +381,10 @@ export class VoxisOverlayElement extends HTMLElement {
     if (this.lifecycleState === "expanded") {
       this.mountThemeInstance();
     }
+    // The very first layout is a size change too (see `dispatchResize`'s
+    // contract): a host wiring its container off the event must not have to
+    // wait for the first compact↔expanded transition.
+    this.dispatchResize();
 
     this.wirePointerHandling(config);
     this.wireDrag(config);
@@ -395,6 +402,7 @@ export class VoxisOverlayElement extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    this.eventGeneration++;
     this.dragController?.destroy();
     this.dragController = null;
     this.unlistenState?.();
@@ -704,17 +712,23 @@ export class VoxisOverlayElement extends HTMLElement {
     const client = config.client;
     if (!client) return;
 
-    void client.onState((state) => this.applyState(state)).then((fn) => {
-      this.unlistenState = fn;
-    });
+    // `listen` is a real IPC round-trip under Tauri. If the element is
+    // disconnected before it resolves (React StrictMode's mount→unmount→mount,
+    // a route change), `disconnectedCallback` has nothing to call yet and the
+    // late-resolving handle would leak the subscription for the page's
+    // lifetime (blind review R3). Unsubscribe immediately in that case.
+    const generation = ++this.eventGeneration;
+    const keep = (assign: (fn: UnlistenFn) => void) => (fn: UnlistenFn) => {
+      if (!this.isConnected || generation !== this.eventGeneration) {
+        fn();
+        return;
+      }
+      assign(fn);
+    };
 
-    void client.onLevel((level) => this.applyLevel(level)).then((fn) => {
-      this.unlistenLevel = fn;
-    });
-
-    void client.onResult((result) => this.applyResult(result)).then((fn) => {
-      this.unlistenResult = fn;
-    });
+    void client.onState((state) => this.applyState(state)).then(keep((fn) => { this.unlistenState = fn; }));
+    void client.onLevel((level) => this.applyLevel(level)).then(keep((fn) => { this.unlistenLevel = fn; }));
+    void client.onResult((result) => this.applyResult(result)).then(keep((fn) => { this.unlistenResult = fn; }));
   }
 
   /**

@@ -127,7 +127,11 @@ async fn wait_for_outcome_receiver(
         if !state.sessions.is_active(id) {
             return Err(PluginError::UnknownSession { session_id: id.to_string() });
         }
-        tokio::task::yield_now().await;
+        // A short sleep, not a bare `yield_now`: on a single-worker runtime a
+        // cooperative yield spins the whole `spawn_blocking(capture.start)`
+        // window (blind review R1). 1 ms is far below any human-visible
+        // latency and keeps the worker free for `attach_handles`.
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
     }
 }
 

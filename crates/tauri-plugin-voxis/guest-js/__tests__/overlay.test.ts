@@ -241,6 +241,23 @@ describe("<voxis-overlay>", () => {
     expect(el.isConnected).toBe(false);
   });
 
+  it("R3: a listen that resolves AFTER a fast disconnect unsubscribes itself instead of leaking (StrictMode mount→unmount→mount)", async () => {
+    const { client } = createMockClient();
+    let resolveState: ((fn: () => void) => void) | null = null;
+    const stateUnlisten = vi.fn();
+    (client as { onState: VoxisClient["onState"] }).onState = vi.fn(
+      () => new Promise<() => void>((resolve) => { resolveState = resolve; }),
+    );
+    const el = mountOverlay(container, { client });
+    expect(resolveState).not.toBeNull();
+    el.remove();
+    // The IPC round-trip completes only now — after disconnectedCallback ran.
+    resolveState!(stateUnlisten);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(stateUnlisten).toHaveBeenCalledTimes(1);
+  });
+
   describe("viewport reflow [REJECT-FIX M1]", () => {
     class FakeVisualViewport extends EventTarget {
       constructor(public width: number, public height: number) {

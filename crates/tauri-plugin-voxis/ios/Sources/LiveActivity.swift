@@ -46,7 +46,8 @@ import Tauri
 // (invoked by `swift-rs`'s own build-script support, `build.rs`)
 // rejected these two ActivityKit/AppIntents types as unavailable
 // without this, even though `Package.swift` pins `platforms:
-// [.iOS(.v17)]`. Nothing outside an `#available`-guarded block in this
+// [.iOS(.v16)]` (the 17+ types are only reachable through the guards).
+// Nothing outside an `#available`-guarded block in this
 // file (or anywhere else in `Sources/`) references either type
 // unconditionally -- `VoxisLiveActivityBridge`'s own `activity` property
 // below is deliberately typed `Any?`, not `Activity<VoxisActivityAttributes>?`,
