@@ -17,7 +17,13 @@
 /// must call `expose()` and put the result into a plain `String` field of an
 /// internal DTO, which keeps every serialization boundary an explicit,
 /// grep-able decision rather than an accidental derive.
-#[derive(Clone, PartialEq, Eq)]
+/// `[ADO-2/3]` `ZeroizeOnDrop` wipes the wrapped `String`'s heap buffer
+/// when a `Secret` (or an `Option<Secret>`/`Vec<Secret>` containing one)
+/// goes out of scope, instead of leaving key material sitting in freed
+/// memory. `String` implements `zeroize::Zeroize` under the crate's
+/// default `alloc` feature (already enabled), so no extra `zeroize`
+/// feature is needed here.
+#[derive(Clone, PartialEq, Eq, zeroize::ZeroizeOnDrop)]
 pub struct Secret(String);
 
 impl Secret {
@@ -66,5 +72,16 @@ mod tests {
         let debug = format!("{:?}", list);
         assert!(!debug.contains("sk-one"));
         assert!(!debug.contains("sk-two"));
+    }
+
+    /// `[ADO-2/3]` Observing that a buffer was actually zeroed after `Drop`
+    /// ran is UB (it's freed memory) -- so this pins the wipe-on-drop
+    /// guarantee the only sound way available: a compile-time trait bound.
+    /// If `Secret` ever stopped deriving/implementing `ZeroizeOnDrop`, this
+    /// test would fail to *compile*, not just fail to run.
+    #[test]
+    fn secret_implements_zeroize_on_drop() {
+        fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+        assert_zeroize_on_drop::<Secret>();
     }
 }

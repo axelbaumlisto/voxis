@@ -77,6 +77,13 @@ getrandom = "0.2"
 # task's own fixtures, but the dependency + helper are added here per the
 # step's dependency list so downstream tasks don't need to re-pin it.
 base64 = "0.23"
+# `[ADO-2/3]` Wipe derived keys / decrypted secrets on drop (`profile::crypto`,
+# `profile::secret::Secret`) instead of leaving key material sitting in freed
+# heap/stack memory. Already a transitive dep via chacha20poly1305/rustls
+# (`cargo tree -i zeroize -p voxis-core` -> v1.8.2); pinned here as a direct
+# dep at that same resolved version, `derive` feature for
+# `#[derive(Zeroize, ZeroizeOnDrop)]`.
+zeroize = { version = "1.8.2", features = ["derive"] }
 
 [features]
 rdev = ["dep:rdev"]

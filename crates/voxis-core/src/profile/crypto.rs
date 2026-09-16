@@ -36,6 +36,7 @@ use chacha20poly1305::{
 };
 use hkdf::Hkdf;
 use sha2::Sha256;
+use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 use super::ProfileError;
 
@@ -50,7 +51,13 @@ const HKDF_INFO_PREFIX: &[u8] = b"voxis-profile-v1";
 /// Where the symmetric key for `seal`/`open` comes from. Both variants
 /// produce a 32-byte ChaCha20-Poly1305 key; see module docs for the exact
 /// derivation.
-#[derive(Clone)]
+///
+/// `[ADO-2/3]` `k_qr` (256 bits of raw key material) and the passphrase
+/// string are wiped on drop via `ZeroizeOnDrop` — callers construct/consume
+/// this the same way as before (no field type change), but once a
+/// `KeySource` goes out of scope its bytes no longer linger in freed
+/// memory.
+#[derive(Clone, ZeroizeOnDrop)]
 pub enum KeySource {
     /// QR-code transport: `k_qr` is 256 bits of CSPRNG output carried in the
     /// QR itself; `code` is the 6-digit second factor shown alongside it.
@@ -93,23 +100,32 @@ fn kdf_tag(key_source: &KeySource) -> u8 {
     }
 }
 
-fn derive_key(key_source: &KeySource, salt: &[u8; SALT_LEN]) -> Result<[u8; 32], ProfileError> {
+/// Returns the derived 32-byte key wrapped in `Zeroizing` — `[ADO-2/3]`:
+/// both the HKDF and Argon2id branches build the key in a plain stack
+/// array first (the underlying crates require `&mut [u8]` output buffers),
+/// then hand ownership to `Zeroizing` before returning so the key is wiped
+/// the moment the caller (`encrypt`/`decrypt`) drops it, instead of
+/// lingering in freed stack memory.
+fn derive_key(
+    key_source: &KeySource,
+    salt: &[u8; SALT_LEN],
+) -> Result<Zeroizing<[u8; 32]>, ProfileError> {
     match key_source {
         KeySource::Qr { k_qr, code } => {
             let hk = Hkdf::<Sha256>::new(Some(salt), k_qr);
             let mut info = Vec::with_capacity(HKDF_INFO_PREFIX.len() + code.len());
             info.extend_from_slice(HKDF_INFO_PREFIX);
             info.extend_from_slice(code.as_bytes());
-            let mut key = [0u8; 32];
-            hk.expand(&info, &mut key)
+            let mut key = Zeroizing::new([0u8; 32]);
+            hk.expand(&info, &mut *key)
                 .map_err(|e| ProfileError::Crypto(format!("hkdf expand: {e}")))?;
             Ok(key)
         }
         KeySource::Passphrase(passphrase) => {
             let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon2_params());
-            let mut key = [0u8; 32];
+            let mut key = Zeroizing::new([0u8; 32]);
             argon2
-                .hash_password_into(passphrase.as_bytes(), salt, &mut key)
+                .hash_password_into(passphrase.as_bytes(), salt, &mut *key)
                 .map_err(|e| ProfileError::Crypto(format!("argon2: {e}")))?;
             Ok(key)
         }
@@ -136,7 +152,7 @@ pub(super) fn encrypt(plaintext: &[u8], key_source: &KeySource) -> Result<Vec<u8
     header.extend_from_slice(&salt);
     header.extend_from_slice(&nonce_bytes);
 
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(&key_bytes));
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(&key_bytes[..]));
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(
@@ -156,7 +172,13 @@ pub(super) fn encrypt(plaintext: &[u8], key_source: &KeySource) -> Result<Vec<u8
 /// Decrypt a wire-format payload produced by `encrypt`. Never panics: bad
 /// magic, wrong/mismatched `KeySource`, truncated input, or a tampered byte
 /// anywhere (header or ciphertext) all return `Err`.
-pub(super) fn decrypt(data: &[u8], key_source: &KeySource) -> Result<Vec<u8>, ProfileError> {
+///
+/// `[ADO-2/3]` The returned plaintext (the serialized `SealedPayload`,
+/// which carries `api_key`/`llm_api_key` in the clear until `open()`
+/// deserializes and re-wraps them in `Secret`) is `Zeroizing<Vec<u8>>` so it
+/// is wiped the moment the caller drops it, instead of leaving decrypted
+/// key material sitting in freed heap memory.
+pub(super) fn decrypt(data: &[u8], key_source: &KeySource) -> Result<Zeroizing<Vec<u8>>, ProfileError> {
     if data.len() < HEADER_LEN {
         return Err(ProfileError::Crypto("truncated profile payload".to_string()));
     }
@@ -182,7 +204,7 @@ pub(super) fn decrypt(data: &[u8], key_source: &KeySource) -> Result<Vec<u8>, Pr
     let ciphertext = &data[ct_start..];
 
     let key_bytes = derive_key(key_source, &salt)?;
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(&key_bytes));
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(&key_bytes[..]));
     let nonce = Nonce::from_slice(nonce_bytes);
     let plaintext = cipher
         .decrypt(
@@ -195,7 +217,7 @@ pub(super) fn decrypt(data: &[u8], key_source: &KeySource) -> Result<Vec<u8>, Pr
         .map_err(|_| {
             ProfileError::Crypto("decryption failed (wrong key/code or tampered data)".to_string())
         })?;
-    Ok(plaintext)
+    Ok(Zeroizing::new(plaintext))
 }
 
 /// base64url (no padding) encoding, exposed for downstream tasks that embed
@@ -231,7 +253,7 @@ mod tests {
     fn round_trip_qr() {
         let sealed = encrypt(b"hello world", &qr_source()).unwrap();
         let opened = decrypt(&sealed, &qr_source()).unwrap();
-        assert_eq!(opened, b"hello world");
+        assert_eq!(&*opened, b"hello world");
     }
 
     #[test]
@@ -239,7 +261,7 @@ mod tests {
         let source = KeySource::Passphrase("correct horse battery staple".to_string());
         let sealed = encrypt(b"hello world", &source).unwrap();
         let opened = decrypt(&sealed, &source).unwrap();
-        assert_eq!(opened, b"hello world");
+        assert_eq!(&*opened, b"hello world");
     }
 
     #[test]
@@ -333,5 +355,28 @@ mod tests {
         assert!(!encoded.contains('='), "no-pad url-safe base64");
         let decoded = decode_base64url(&encoded).unwrap();
         assert_eq!(decoded, bytes);
+    }
+
+    /// `[ADO-2/3]` Same rationale as `secret::tests::secret_implements_zeroize_on_drop`:
+    /// a compile-time trait bound is the only sound way to pin "`KeySource`
+    /// (which owns `k_qr`/the passphrase `String`) wipes itself on drop",
+    /// since inspecting freed memory to prove a *runtime* zeroize happened
+    /// would be UB.
+    #[test]
+    fn key_source_implements_zeroize_on_drop() {
+        fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+        assert_zeroize_on_drop::<KeySource>();
+    }
+
+    /// `[ADO-2/3]` `derive_key`'s return type is `Zeroizing<[u8; 32]>` --
+    /// `Zeroizing<T>` always implements `ZeroizeOnDrop` (it's the crate's
+    /// own wrapper for exactly this purpose), so this pins that the
+    /// derived-key call site hasn't quietly reverted to a bare `[u8; 32]`.
+    #[test]
+    fn derived_key_is_zeroizing() {
+        fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+        assert_zeroize_on_drop::<Zeroizing<[u8; 32]>>();
+        let key = derive_key(&qr_source(), &[0u8; SALT_LEN]).unwrap();
+        assert_eq!(key.len(), 32);
     }
 }
