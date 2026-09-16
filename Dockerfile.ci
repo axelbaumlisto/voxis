@@ -9,7 +9,7 @@ RUN apt-get update -q && \
       libayatana-appindicator3-dev librsvg2-dev libasound2-dev patchelf \
       git curl ca-certificates \
       python3 \
-      xvfb xclip \
+      xvfb xauth xclip \
     && rm -rf /var/lib/apt/lists/*
 
 # docker CLI + compose (drive sibling containers via mounted socket)
