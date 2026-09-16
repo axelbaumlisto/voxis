@@ -56,3 +56,22 @@ F3. Drag пилюли пальцем (A3) и фото Live Activity (C2).
 - naked: `SftpPanel` refresh сбрасывает скролл (вакуумный `theListKeepsItsPlace` вскрыт честным моком); `playwright.config` webServer `--host 127.0.0.1`;
   `ios-device-deploy.sh` без `xcodegen` → правило «project.yml изменил — xcodegen — commit»; краш по raw-тапу Settings (WDA) не воспроизведён.
 - voxis: `[ADO-*]` оставшиеся миноры (см. tauri-plugin-voxis.md Follow-ups); `.vxp` UTI/Share-sheet регистрация; host-driven QR-импорт UI на iOS.
+
+
+## Phase SDK — SOLID/DRY/KISS refactor (blind design review 3×REFACTOR-FIRST, 2026-09-17; reports research/plugin-plan/BLIND_SDK_{rust,ts,swift}.md)
+Правило: правим то, что снижает цену поддержки; поведение фиксируют существующие тесты (должны остаться зелёными), новые тесты — на новые seams.
+R1 (L) `do_start`: handles создаются и `attach_handles` ДО `spawn_blocking(capture.start)`; pipeline-таск ждёт «capture ready/failed». Удалить `pending`, `stop_waiters`, `StopRequest`, ветки в `trigger_stop/request_stop`, 4 blocking-window теста + `BlockingStartCapture`.
+R2 (M) удалить production-dead `SessionGuard::signal()`; тесты через `request_stop/request_cancel`.
+R3 (M) одна точка решения «cancelled»: `ExternalCancel` как обычный Trigger до finalize; убрать повторные `cancelled.load()` в run_transcription (или хотя бы override внутрь `decide`).
+R4 (M) `BlockingLatch` helper + `spawn_session(deps)` test helper вместо трёх дублей и 12 прологов.
+R5 (S/M) `finish(result, file, id, sessions, events)` — порядок drop→end→emit→send закреплён структурой.
+T2 (S) host-mode: убрать недостижимый `voxis-overlay-press` (host = чисто визуал) — или честно пометить.
+T3 (M) `<voxis-overlay>`: `setPosition(p)` и `setTheme(id)` — без пересоздания элемента/WebGL; naked `useVoxisOverlayMount` использует их вместо remount.
+T4 (M) naked: `voxisHoldChip` мёртв? → удалить или `voxisPillPress` компонует его; один release-funnel.
+T1 (L) `overlay.ts` split: `OverlaySessionController` (client-only) + чистая геометрия (`anchorGrow`/grow/shrink) вне элемента.
+T5 (L) naked `useVoxisRuntime` → `useVoxisSession` + `useVoxisSettings` (+ consent hook); дубль гонки pendingStart/stopRequested — один владелец.
+S1 (S) iOS PERMISSION_DENIED доходит до фронта как `permissionDenied`: `mobile.rs::map_invoke_error` маппит `code`, лишний `data: settingsUrl` убрать.
+S2 (M) Swift: чистые функции (sub-chunk RMS, self-cap, mute-heuristic) + SwiftPM test target на тех же фикстурах, `WavWriter.selfCheck` → XCTest.
+S3 (M) `VoxisAudioCapture` SRP: permission resolver + level/cap math вынести.
+S4 (L) wire-структуры Swift↔Rust: принять + задокументировать (без генератора).
+Порядок: R1→R2→R3→R4→R5 одним воркером (Rust); S1→S2→S3 (Swift); T2→T3 (guest-js) → naked T3-хост+T4; затем T1, T5. Каждый шаг — fresh reviewer.
