@@ -61,7 +61,15 @@
   possible: the plugin and Voxis desktop now share one engine instead of
   two copies of it.
 
-## `tauri-plugin-voxis` 0.1.0 / `@voxis/tauri-plugin-voxis` (guest-js) 0.1.1
+## `tauri-plugin-voxis` 0.1.0 / `@voxis/tauri-plugin-voxis` (guest-js) 0.2.0
+
+guest-js 0.2.0 (was 0.1.1): `<voxis-overlay>` renders every Voxis theme at its
+manifest size (`overlay_width`/`overlay_height`, e.g. Lava Lamp 120×120,
+Vorticella 240×240) while recording/transcribing and rests as a compact 56×56
+handle with no theme mounted (no WebGL loop while idle); `idleTheme` opt-in,
+`voxis-overlay-resize` event, `el.size`/`el.lifecycle`. iOS floor is **16.0**;
+17+ APIs (mic-mute signal, Live Activity Stop) are gated at their call sites.
+
 
 New, separate artifacts — not part of the Voxis desktop app release above.
 Voxis's dictation engine (hotkey/tap → record → silence/duration guard →

@@ -59,8 +59,9 @@ voxis-core = { git = "https://clipshot.cc/git/zverozabr/voxis.git", rev = "<comm
   `project.yml`) is the host's own responsibility — see
   `docs/PLUGIN_IOS_HOST.md` for the full checklist (`Info.plist` keys,
   `xcodegen generate` gotchas, Live Activity wiring). Minimum iOS version is
-  **17.0** (`ios/Package.swift`'s `platforms: [.iOS(.v17)]` — the plugin
-  uses `AVAudioApplication` APIs unconditionally).
+  **16.0** (`ios/Package.swift`'s `platforms: [.iOS(.v16)]`); iOS 17+ adds
+  the system mic-mute signal and the Live Activity Stop button, each gated
+  with `#available(iOS 17.0, *)` at its call site.
 
 ## Registering the plugin (`init*` variants)
 

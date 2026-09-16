@@ -13,9 +13,15 @@ the *why* behind these requirements — this file is the host-facing *how*.
 
 ## Minimum iOS version
 
-**iOS 17.0.** Fixed by `ios/Package.swift`'s `platforms: [.iOS(.v17)]` — the plugin uses
-`AVAudioApplication` (permission API + `inputMuteStateChangeNotification`, both iOS 17+)
-unconditionally. A host targeting an older minimum cannot embed this plugin.
+**iOS 16.0** (`ios/Package.swift` `platforms: [.iOS(.v16)]`; owner decision 2026-09-16:
+iOS 16 stays supported). Everything newer is gated at its call site with
+`#available(iOS 17.0, *)`, so a 16.x host embeds the plugin unchanged; what differs on 16:
+
+| Feature | iOS 17+ | iOS 16 |
+|---|---|---|
+| Mic permission | `AVAudioApplication.requestRecordPermission` | `AVAudioSession.requestRecordPermission` (same three states) |
+| System mic-mute (Control Center) | `inputMuteStateChangeNotification` → `muted` on `voxis://level` | no system signal; recording continues, silence guard ends it |
+| Live Activity + lock-screen **Stop** | shown (`LiveActivityIntent`) | not shown (`[voxis] Live Activity unavailable (iOS < 17.0)` in the log); stop from the app |
 
 ## `Info.plist` keys
 

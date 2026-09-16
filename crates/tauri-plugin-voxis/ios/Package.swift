@@ -1,16 +1,18 @@
 // swift-tools-version:5.9
 import PackageDescription
 
-// Task 8 [R1-iOS S5]: iOS 17 is the floor -- `AVAudioApplication`
-// (permission API + `inputMuteStateChangeNotification`, both used by
-// `Sources/AudioCapture.swift`) is iOS 17+. Anything gated to iOS 18+
-// (none of this task's own surface, but noted for future Task 9a/b
-// Live Activity work) must use `#available(iOS 18, *)` at the call site
-// instead of raising this floor.
+// iOS 16 is the floor (owner decision 2026-09-16: keep iOS 16 working).
+// Everything 17+ is gated at its call site with `#available(iOS 17.0, *)`:
+// `AVAudioApplication` (permission API -> AVAudioSession fallback on 16;
+// `inputMuteStateChangeNotification` / `isInputMuted` -> no system-mute
+// signal on 16) in `Sources/AudioCapture.swift`, and the Live Activity +
+// `LiveActivityIntent` Stop button (`Sources/LiveActivity.swift`,
+// `LiveActivityWidget/`) which simply does not show on 16. Never raise
+// this floor for a single API -- gate the call site.
 let package = Package(
     name: "tauri-plugin-voxis",
     platforms: [
-        .iOS(.v17)
+        .iOS(.v16)
     ],
     products: [
         .library(

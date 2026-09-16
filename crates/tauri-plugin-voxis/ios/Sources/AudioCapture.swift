@@ -233,9 +233,22 @@ final class VoxisAudioCapture {
                 completion(false)
             }
         } else {
-            // Package.swift pins `platforms: [.iOS(.v17)]` -- unreachable
-            // at runtime, kept only so the function is total.
-            completion(false)
+            // iOS 16 (owner 2026-09-16: «пусть работает и на 16-й»): the
+            // pre-17 permission API lives on AVAudioSession. Deprecated in
+            // 17 but still the only one available on 16 -- same three states.
+            let session = AVAudioSession.sharedInstance()
+            switch session.recordPermission {
+            case .granted:
+                completion(true)
+            case .denied:
+                completion(false)
+            case .undetermined:
+                session.requestRecordPermission { granted in
+                    completion(granted)
+                }
+            @unknown default:
+                completion(false)
+            }
         }
     }
 

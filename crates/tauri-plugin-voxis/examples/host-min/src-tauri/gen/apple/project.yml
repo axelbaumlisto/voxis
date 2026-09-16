@@ -2,7 +2,7 @@ name: host-min
 options:
   bundleIdPrefix: top.voxis.hostmin
   deploymentTarget:
-    iOS: 17.0
+    iOS: 16.0
 fileGroups: [../../src]
 configs:
   debug: debug
