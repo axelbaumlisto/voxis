@@ -24,6 +24,6 @@ RUN bun run build
 RUN cd src-tauri && cargo build --release --bin voice
 RUN bun run tauri build --bundles deb,rpm --ci
 
-RUN cp src-tauri/target/release/voice /voxis && \
+RUN cp target/release/voice /voxis && \
     mkdir -p /bundle && \
-    find src-tauri/target/release/bundle -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -exec cp {} /bundle/ \; 2>/dev/null || true
+    find target/release/bundle -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -exec cp {} /bundle/ \; 2>/dev/null || true

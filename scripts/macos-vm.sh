@@ -271,7 +271,7 @@ cmd_build() {
   ssh_vm "$vmenv; cd ~/voxis/src-tauri && rustup target add aarch64-apple-darwin >/dev/null 2>&1 || true; cargo build --release --target aarch64-apple-darwin --bin voice"
   echo "Pulling artifacts ..."
   local scp="sshpass -p $VM_PASS scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P $SSH_HOST_PORT"
-  $scp "$VM_USER@localhost:/Users/$VM_USER/voxis/src-tauri/target/aarch64-apple-darwin/release/voice" "$proj_dir/artifacts/voxis-macos-arm64"
+  $scp "$VM_USER@localhost:/Users/$VM_USER/voxis/target/aarch64-apple-darwin/release/voice" "$proj_dir/artifacts/voxis-macos-arm64"
   chmod +x "$proj_dir"/artifacts/voxis-macos-* 2>/dev/null || true
   echo "macOS artifacts in artifacts/:"
   ls -lh "$proj_dir"/artifacts/voxis-macos-* 2>/dev/null
@@ -329,7 +329,7 @@ cmd_build_gui() {
   # only rebuilds tauri-dependent crates instead of a full cold build —
   # keeps both lanes inside the CI step's timeout. First-ever run (no prior
   # target/) is a harmless no-op on both sides of the move.
-  ssh_vm 'mkdir -p ~/voxis-target-stash && ( [ -d ~/voxis/src-tauri/target ] && mv ~/voxis/src-tauri/target ~/voxis-target-stash/target || true ); rm -rf ~/voxis && mkdir -p ~/voxis && tar xzf /tmp/voxis-src.tar.gz -C ~/voxis && ( [ -d ~/voxis-target-stash/target ] && mv ~/voxis-target-stash/target ~/voxis/src-tauri/target || true )'
+  ssh_vm 'mkdir -p ~/voxis-target-stash && ( [ -d ~/voxis/target ] && mv ~/voxis/target ~/voxis-target-stash/target || ( [ -d ~/voxis/src-tauri/target ] && mv ~/voxis/src-tauri/target ~/voxis-target-stash/target ) || true ); rm -rf ~/voxis && mkdir -p ~/voxis && tar xzf /tmp/voxis-src.tar.gz -C ~/voxis && ( [ -d ~/voxis-target-stash/target ] && mv ~/voxis-target-stash/target ~/voxis/target || true )'
 
   local vmenv='export PATH="$HOME/.bun/bin:$HOME/.cargo/bin:$PATH"; source ~/.cargo/env 2>/dev/null || true'
   ssh_vm "$vmenv; cd ~/voxis && bun install --frozen-lockfile"
@@ -350,7 +350,7 @@ cmd_build_gui() {
   ssh_vm "$vmenv; cd ~/voxis && cargo tauri build --target aarch64-apple-darwin --bundles app" \
     || echo "WARN: cargo-tauri exited non-zero — verifying Voxis.app below"
 
-  local app_path="/Users/$VM_USER/voxis/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Voxis.app"
+  local app_path="/Users/$VM_USER/voxis/target/aarch64-apple-darwin/release/bundle/macos/Voxis.app"
   ssh_vm "test -d '$app_path'" || { echo "ERROR: Voxis.app not produced at $app_path"; exit 1; }
 
   # Verify WITHOUT running the binary (no Rosetta in the x86_64 VM).
@@ -559,7 +559,7 @@ KEY=\$(ls ~/.appstoreconnect/private_keys/AuthKey_*.p8 | head -1)
 KEY_ID=\$(basename "\$KEY" .p8 | sed 's/^AuthKey_//')
 ISSUER="${APPLE_API_ISSUER}"
 ID="${SIGNING_IDENTITY}"
-APP="/Users/$VM_USER/voxis/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Voxis.app"
+APP="/Users/$VM_USER/voxis/target/aarch64-apple-darwin/release/bundle/macos/Voxis.app"
 while true; do
   ST=\$(xcrun notarytool info "$sub_id" --key "\$KEY" --key-id "\$KEY_ID" --issuer "\$ISSUER" 2>/dev/null | awk '/status:/{print \$2\$3; exit}')
   echo "  status: \$ST"
