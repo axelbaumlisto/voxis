@@ -57,8 +57,11 @@ bash "$host_min_dir/scripts/bundle-overlay.sh"
 echo "=== building voxis-fake-stt + host-min ==="
 cargo build -p voxis-fake-stt -p host-min
 
-fake_stt_bin="target/debug/voxis-fake-stt"
-host_min_bin="target/debug/host-min"
+# Honour CARGO_TARGET_DIR (CI builds into /tmp/ci-target, ci.yml) -- the
+# binaries are wherever cargo just put them, not necessarily ./target.
+target_dir="${CARGO_TARGET_DIR:-target}"
+fake_stt_bin="$target_dir/debug/voxis-fake-stt"
+host_min_bin="$target_dir/debug/host-min"
 fake_stt_log="$(mktemp)"
 host_min_log="$(mktemp)"
 
