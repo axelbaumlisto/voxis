@@ -5,6 +5,7 @@
 
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use voxis_core::audio_wav::{downsample, samples_to_wav, TRANSCRIPTION_SAMPLE_RATE};
 
@@ -106,6 +107,25 @@ pub mod stage {
     pub const RUNNING: u8 = 1;
     pub const FAILED: u8 = 2;
     pub const STOPPED: u8 = 3;
+}
+
+/// Sleeps `total` in `slice`-sized increments via `sleep_fn`, checking
+/// `stage_flag` after every slice and returning as soon as it no longer
+/// reads `RUNNING` (`[ADO-4]`: previously a single fixed
+/// `thread::sleep(LEVEL_INTERVAL)` — 250ms — meant `stop()`'s
+/// `level_thread.join()` could block for up to that whole interval even
+/// though `stage` flips to `STOPPED` immediately at the start of
+/// `stop()`). `sleep_fn` is injected so this is unit-testable with a
+/// counting stub instead of real wall-clock sleeps.
+pub fn sleep_while_running(stage_flag: &AtomicU8, total: Duration, slice: Duration, mut sleep_fn: impl FnMut(Duration)) {
+    let mut waited = Duration::ZERO;
+    while waited < total {
+        sleep_fn(slice);
+        waited = waited.saturating_add(slice);
+        if stage_flag.load(Ordering::SeqCst) != stage::RUNNING {
+            return;
+        }
+    }
 }
 
 /// Records a stream runtime error (cpal's own `err_fn`, or any other
@@ -257,6 +277,33 @@ mod tests {
 
         assert_eq!(*last_error.lock().unwrap(), Some("device unplugged".to_string()));
         assert_eq!(stage_flag.load(Ordering::SeqCst), stage::FAILED);
+    }
+
+    /// `[ADO-4]` happy path: while `stage` stays `RUNNING` the whole
+    /// time, `sleep_while_running` must sleep the full `total` in
+    /// `slice`-sized increments (same cadence as today's fixed sleep).
+    #[test]
+    fn sleep_while_running_sleeps_the_full_interval_when_stage_stays_running() {
+        let stage_flag = AtomicU8::new(stage::RUNNING);
+        let mut slices = Vec::new();
+        sleep_while_running(&stage_flag, Duration::from_millis(250), Duration::from_millis(25), |d| slices.push(d));
+        assert_eq!(slices, vec![Duration::from_millis(25); 10], "10 * 25ms == 250ms, same total cadence as before");
+    }
+
+    /// `[ADO-4]` regression: once `stage` flips away from `RUNNING`
+    /// (`stop()` sets it to `STOPPED` before joining this thread),
+    /// `sleep_while_running` must return after at most one slice instead
+    /// of completing the full interval -- this is what bounds `stop()`'s
+    /// `level_thread.join()` wait to one slice instead of the whole 250ms.
+    #[test]
+    fn sleep_while_running_stops_early_once_stage_leaves_running() {
+        let stage_flag = AtomicU8::new(stage::RUNNING);
+        let mut slept = 0;
+        sleep_while_running(&stage_flag, Duration::from_millis(250), Duration::from_millis(25), |_| {
+            slept += 1;
+            stage_flag.store(stage::STOPPED, Ordering::SeqCst);
+        });
+        assert_eq!(slept, 1, "must stop after the first slice once stage is no longer RUNNING");
     }
 
     #[test]

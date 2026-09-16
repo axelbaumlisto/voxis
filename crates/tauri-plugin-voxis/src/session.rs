@@ -79,13 +79,41 @@ pub struct ActiveSession {
     pub id: SessionId,
     pub mode: Mode,
     pub stage: Stage,
-    /// `None` only in the brief window between `SessionGuard::begin`
-    /// returning an id and `attach_handles` being called for it \u2014 both
-    /// happen inside the same non-yielding stretch of `do_start` (no
-    /// `.await` in between), and the id isn't handed to any other caller
-    /// until `do_start` returns it, so nothing outside `do_start` can
-    /// ever observe `handles == None`.
+    /// `None` between `SessionGuard::begin` returning an id and
+    /// `attach_handles` being called for it. This window is NOT
+    /// synchronous: `commands::do_start` now `.await`s
+    /// `spawn_blocking(capture.start)` in between the two (`[ADO-8]`,
+    /// moving a possibly-blocking capture backend call off the async
+    /// worker thread), so another task (a concurrent `cancel()`, or
+    /// `cancel_all_hold()` firing from a webview-destroyed/app-exit hook)
+    /// CAN observe `handles == None` for `id` while it is still the
+    /// active session (hardening-sweep review finding F1 \u2014 this doc
+    /// comment used to claim the opposite). `pending` below is what
+    /// makes that window safe \u2014 for both `Cancel` (F1) and `Stop`
+    /// (F-NEW, since `SessionGuard::signal`/`commands::do_stop` had the
+    /// exact same gap).
     pub handles: Option<SessionHandles>,
+    /// The control signal to apply retroactively once `handles` exists,
+    /// if `Cancel`/`Stop` arrives while it's still `None` (see that
+    /// field's doc) \u2014 `attach_handles` checks this and immediately
+    /// applies it the moment handles exist, instead of the request
+    /// silently being a no-op.
+    ///
+    /// Originally a plain `cancel_requested: bool` (review finding F1:
+    /// previously `trigger_cancel` just returned early when `handles`
+    /// was `None`, so a `cancel()`/`cancel_all_hold()` landing in this
+    /// window reported success but never actually cancelled anything
+    /// \u2014 a real regression of `[R1-Safety S4]`, Hold-mode
+    /// mic-safety-on-webview-death). Generalised to `Option<ControlSignal>`
+    /// (review finding F-NEW) once `SessionGuard::signal`/`do_stop` was
+    /// found to have exactly the same gap for `Stop`: an `.expect()`
+    /// panic instead of silently no-op'ing, which is arguably worse
+    /// (with the workspace's `panic = "abort"` release profile, a Live
+    /// Activity Stop tapped in this window crashed the whole app). A
+    /// pending `Cancel` is never downgraded back to a plain `Stop` by a
+    /// later/duplicate `stop()` landing in the same window \u2014 see
+    /// `trigger_stop`.
+    pub pending: Option<ControlSignal>,
 }
 
 /// Holds at most one `ActiveSession` \u2014 single-flight across the whole
@@ -112,19 +140,29 @@ impl SessionGuard {
             return Err(PluginError::AlreadyRecording);
         }
         let id = SessionId::new();
-        *guard = Some(ActiveSession { id: id.clone(), mode, stage: Stage::Recording, handles: None });
+        *guard = Some(ActiveSession { id: id.clone(), mode, stage: Stage::Recording, handles: None, pending: None });
         Ok(id)
     }
 
     /// Attaches the handles `pipeline::spawn` produced for `id`. A no-op
     /// if `id` is no longer the active session (defensive only \u2014 see
-    /// `ActiveSession::handles`'s doc for why this never actually races
-    /// in practice).
+    /// `ActiveSession::handles`'s doc: `do_start` can only reach this
+    /// call for the same `id` it got from `begin()`, and single-flight
+    /// means no other session can have claimed the slot in between).
+    /// If a `cancel()`/`cancel_all_hold()`/`stop()` arrived while
+    /// `handles` was still `None` (`pending`, review findings F1/F-NEW),
+    /// applies it immediately \u2014 right here, before any caller can
+    /// observe the newly attached handles as un-cancelled/un-stopped.
     pub fn attach_handles(&self, id: &SessionId, handles: SessionHandles) {
         let mut guard = self.active.lock().unwrap();
         if let Some(active) = guard.as_mut() {
             if &active.id == id {
                 active.handles = Some(handles);
+                match active.pending.take() {
+                    Some(ControlSignal::Cancel) => Self::trigger_cancel(active),
+                    Some(ControlSignal::Stop) => Self::trigger_stop(active),
+                    Some(ControlSignal::None) | None => {}
+                }
             }
         }
     }
@@ -136,10 +174,31 @@ impl SessionGuard {
     /// session. Shared by `commands::do_cancel` and `cancel_all_hold` so
     /// the two can't drift (review findings F1/F2).
     pub fn request_cancel(&self, id: &SessionId) -> bool {
-        let guard = self.active.lock().unwrap();
-        match guard.as_ref() {
+        let mut guard = self.active.lock().unwrap();
+        match guard.as_mut() {
             Some(active) if &active.id == id => {
                 Self::trigger_cancel(active);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// `Stop` counterpart to `request_cancel` (review finding F-NEW):
+    /// used by `commands::do_stop` instead of `signal()` so that a
+    /// `stop()`/Live Activity Stop intent arriving while `id`'s handles
+    /// are still `None` (`do_start`'s `spawn_blocking(capture.start)`
+    /// window, `ActiveSession::handles`'s doc) is recorded (`pending`)
+    /// and applied by `attach_handles`, instead of `signal()`'s old
+    /// `.expect()` panicking there (which, under the workspace's
+    /// `panic = "abort"` release profile, crashed the whole app).
+    /// Returns `false` if `id` isn't the active session (same
+    /// `UnknownSession` contract `signal()` had for that case).
+    pub fn request_stop(&self, id: &SessionId) -> bool {
+        let mut guard = self.active.lock().unwrap();
+        match guard.as_mut() {
+            Some(active) if &active.id == id => {
+                Self::trigger_stop(active);
                 true
             }
             _ => false,
@@ -157,8 +216,8 @@ impl SessionGuard {
     /// sessions are untouched (plan: Toggle mode needs no lease -- same
     /// reasoning extends to this hook).
     pub fn cancel_all_hold(&self) {
-        let guard = self.active.lock().unwrap();
-        if let Some(active) = guard.as_ref() {
+        let mut guard = self.active.lock().unwrap();
+        if let Some(active) = guard.as_mut() {
             if active.mode == Mode::Hold {
                 Self::trigger_cancel(active);
             }
@@ -175,8 +234,20 @@ impl SessionGuard {
     /// (the loop already finalized on its own tick; the abort handle
     /// isn't stored yet) still can't result in a real transcription
     /// being reported for a cancelled session.
-    fn trigger_cancel(active: &ActiveSession) {
-        let Some(handles) = active.handles.as_ref() else { return };
+    ///
+    /// If `active.handles` is still `None` (review finding F1 \u2014 the
+    /// `do_start`/`spawn_blocking(capture.start)` window,
+    /// `ActiveSession::handles`'s doc), there is nothing to signal/abort
+    /// yet: sets `pending = Some(Cancel)` instead (unconditionally \u2014
+    /// `Cancel` always wins over an already-pending `Stop`, see
+    /// `pending`'s doc), so `attach_handles` applies the cancellation
+    /// retroactively the moment handles exist, rather than the request
+    /// silently vanishing.
+    fn trigger_cancel(active: &mut ActiveSession) {
+        let Some(handles) = active.handles.as_ref() else {
+            active.pending = Some(ControlSignal::Cancel);
+            return;
+        };
         handles.cancelled.store(true, Ordering::SeqCst);
         match active.stage {
             Stage::Recording => {
@@ -188,6 +259,27 @@ impl SessionGuard {
                 }
             }
         }
+    }
+
+    /// `Stop` counterpart to `trigger_cancel` (review finding F-NEW):
+    /// sends `Stop` into the Recording-phase control channel if handles
+    /// are already attached (a harmless no-op if the loop already moved
+    /// on into `Transcribing`, exactly like `signal()`'s own doc), or, if
+    /// `active.handles` is still `None`, records the intent as `pending`
+    /// so `attach_handles` applies it retroactively instead of this
+    /// request silently vanishing or (pre-fix) panicking `signal()`'s
+    /// `.expect()`. Deliberately does NOT overwrite an already-pending
+    /// `Cancel`: a later/duplicate `stop()` landing in this same window
+    /// must not downgrade an already-requested cancellation back into
+    /// "finalize and transcribe normally".
+    fn trigger_stop(active: &mut ActiveSession) {
+        let Some(handles) = active.handles.as_ref() else {
+            if active.pending != Some(ControlSignal::Cancel) {
+                active.pending = Some(ControlSignal::Stop);
+            }
+            return;
+        };
+        let _ = handles.control_tx.send(ControlSignal::Stop);
     }
 
     /// Moves `id` from `Recording` to `Transcribing` \u2014 called by
@@ -264,13 +356,31 @@ impl SessionGuard {
     /// `finalize` is already in the middle of producing) \u2014 this is what
     /// makes a second/late `stop()` call "no-op, not error" instead of
     /// needing a special case.
+    ///
+    /// A third case exists in principle \u2014 `handles` still `None`
+    /// (`ActiveSession::handles`'s doc: `do_start`'s
+    /// `spawn_blocking(capture.start)` window) \u2014 which this function's
+    /// `.expect()` cannot handle without a receiver to hand back (there
+    /// is no pipeline task/outcome channel yet). That case used to be
+    /// reachable through `commands::do_stop`, which panicked here on a
+    /// real (if narrow) production timing window \u2014 with the workspace's
+    /// `panic = "abort"` release profile, a crash (hardening-sweep review
+    /// finding F-NEW). Fixed not by changing this function (its
+    /// `Result<watch::Receiver<..>, _>` signature is also relied on by
+    /// `pipeline.rs`'s own tests, always called after `attach_handles`)
+    /// but by giving `do_stop` a `signal()`-free path for that window:
+    /// `request_stop`/`outcome_receiver`, mirroring `do_cancel`/
+    /// `request_cancel`. `signal()` itself is therefore only ever called
+    /// once `handles` is known `Some` \u2014 the `.expect()`'s premise holds
+    /// for every remaining caller, it just no longer includes `do_stop`.
     pub fn signal(&self, id: &SessionId, signal: ControlSignal) -> Result<watch::Receiver<Option<Outcome>>, PluginError> {
         let guard = self.active.lock().unwrap();
         match guard.as_ref() {
             Some(active) if &active.id == id => {
                 let handles = active.handles.as_ref().expect(
                     "handles are attached before do_start returns the session id to any caller \
-                     that could reach signal() for it",
+                     that could reach signal() for it -- do_stop no longer calls signal() until \
+                     it has confirmed handles are attached, see this function's doc",
                 );
                 let _ = handles.control_tx.send(signal);
                 Ok(handles.outcome_rx.clone())
@@ -281,7 +391,11 @@ impl SessionGuard {
 
     /// The shared abort-handle cell for `id`'s (possibly not-yet-started)
     /// transcription task \u2014 `do_cancel` uses this to abort directly when
-    /// `id` is already `Transcribing`.
+    /// `id` is already `Transcribing`. Degrades to `None` (rather than
+    /// `signal()`'s `.expect()`-panic pre-F-NEW-fix approach) when
+    /// `handles` is still `None` \u2014 intentionally lenient, unlike
+    /// `signal()`: `do_cancel`'s own caller already treats "no abort cell
+    /// yet" as just another shape of "nothing to abort yet", not an error.
     pub fn transcribe_abort_cell(&self, id: &SessionId) -> Option<Arc<StdMutex<Option<AbortHandle>>>> {
         self.active
             .lock()
@@ -292,14 +406,23 @@ impl SessionGuard {
             .map(|h| h.transcribe_abort.clone())
     }
 
-    /// `id`'s lease tracker, if it has one (`Mode::Hold` only).
+    /// `id`'s lease tracker, if it has one (`Mode::Hold` only). Degrades
+    /// to `None` when `handles` is still `None`, same intentional
+    /// leniency as `transcribe_abort_cell` above (`do_hold_lease` already
+    /// treats "no tracker" as a no-op, not an error).
     pub fn lease_tracker(&self, id: &SessionId) -> Option<Arc<StdMutex<LeaseTracker>>> {
         self.active.lock().unwrap().as_ref().filter(|a| &a.id == id).and_then(|a| a.handles.as_ref()).and_then(|h| h.lease.clone())
     }
 
     /// A clone of `id`'s outcome receiver without sending any signal
     /// (used by `do_cancel`'s `Transcribing` branch, which aborts the
-    /// HTTP future directly rather than going through `signal`).
+    /// HTTP future directly rather than going through `signal`; also
+    /// used by `do_stop`, alongside `request_stop`, review finding
+    /// F-NEW). Returns `None` both when `id` isn't the active session
+    /// and when it is but `handles` isn't attached yet \u2014 callers that
+    /// need to tell those two apart check `is_active`/`has_active`
+    /// separately (`do_stop` does, to know whether to keep polling for
+    /// handles to attach or give up because the session is simply gone).
     pub fn outcome_receiver(&self, id: &SessionId) -> Option<watch::Receiver<Option<Outcome>>> {
         self.active.lock().unwrap().as_ref().filter(|a| &a.id == id).and_then(|a| a.handles.as_ref()).map(|h| h.outcome_rx.clone())
     }
@@ -417,6 +540,7 @@ mod tests {
         guard.attach_handles(&id, session_handles);
         guard.mark_transcribing(&id);
         outcome_tx.send(Some(Ok(DictationResult {
+            session_id: id.clone(),
             text: "hi".into(),
             language: None,
             duration_ms: 10,

@@ -76,8 +76,20 @@ export type GuardOutcome =
   | "cancelled"
   | "streamDied";
 
-/** `models::DictationResult` — `stop()`'s return value / `voxis://result` payload. */
+/**
+ * `models::DictationResult` — `stop()`'s return value / `voxis://result`
+ * payload.
+ *
+ * `sessionId` (hardening-sweep review finding F2): the plugin emits
+ * `voxis://result` *after* freeing its single-flight session slot, so a
+ * second `start()` can, in principle, succeed in the small window before
+ * this event actually fires. Always correlate a `voxis://result` payload
+ * against a known session id via this field — never by assuming "the
+ * next result event after my start()" is necessarily mine (see
+ * `client.ts`'s `dictate()` doc comment).
+ */
 export interface DictationResult {
+  sessionId: SessionId;
   text: string;
   language: string | null;
   durationMs: number;
@@ -258,6 +270,7 @@ function expectGuardOutcome(v: unknown, path: string): GuardOutcome {
 /** Parses `contract/fixtures/dictation-result.json` — a `DictationResult`. */
 export function parseDictationResult(value: unknown): DictationResult {
   if (!isRecord(value)) fail("dictationResult", "expected an object");
+  const sessionId = expectString(value.sessionId, "dictationResult.sessionId");
   const text = expectString(value.text, "dictationResult.text");
   const language =
     value.language === null || value.language === undefined
@@ -265,7 +278,7 @@ export function parseDictationResult(value: unknown): DictationResult {
       : expectString(value.language, "dictationResult.language");
   const durationMs = expectNumber(value.durationMs, "dictationResult.durationMs");
   const guardOutcome = expectGuardOutcome(value.guardOutcome, "dictationResult.guardOutcome");
-  return { text, language, durationMs, guardOutcome };
+  return { sessionId, text, language, durationMs, guardOutcome };
 }
 
 function parseLlmModel(value: unknown, path: string): LlmModelDto {

@@ -174,25 +174,7 @@ impl DictionaryStorage {
     /// Returns the text with all dictionary replacements applied.
     pub fn apply(&self, text: &str) -> Result<String, Box<dyn std::error::Error>> {
         let entries = self.load()?;
-        if entries.is_empty() {
-            return Ok(text.to_string());
-        }
-
-        let mut result = text.to_string();
-
-        for (source, replacement) in entries {
-            // Build regex for case-insensitive word boundary match
-            // Escape regex special characters in source
-            let escaped = regex::escape(&source);
-            // Use word boundaries for proper matching
-            let pattern = format!(r"(?i)\b{}\b", escaped);
-
-            if let Ok(re) = regex::Regex::new(&pattern) {
-                result = re.replace_all(&result, replacement.as_str()).to_string();
-            }
-        }
-
-        Ok(result)
+        Ok(apply_entries(text, &entries))
     }
 
     /// Check if a source word already exists in dictionary (case-insensitive).
@@ -203,6 +185,29 @@ impl DictionaryStorage {
             .iter()
             .any(|(s, _)| s.to_lowercase() == source_lower))
     }
+}
+
+/// `[ADO-3b]` DRY: the actual case-insensitive, word-boundary regex
+/// replacement, pulled out of `DictionaryStorage::apply` as a free, pure
+/// function (no file I/O, no `self`) so `tauri-plugin-voxis`'s
+/// `pipeline.rs` -- which applies an in-memory `Vec<(String, String)>`
+/// snapshot from a `VoxisProfile` rather than `DictionaryStorage`'s own
+/// `dictionary.txt` -- can call this instead of keeping a byte-for-byte
+/// copy of the same regex logic in sync by hand.
+pub fn apply_entries(text: &str, entries: &[(String, String)]) -> String {
+    if entries.is_empty() {
+        return text.to_string();
+    }
+
+    let mut result = text.to_string();
+    for (source, replacement) in entries {
+        let escaped = regex::escape(source);
+        let pattern = format!(r"(?i)\b{escaped}\b");
+        if let Ok(re) = regex::Regex::new(&pattern) {
+            result = re.replace_all(&result, replacement.as_str()).to_string();
+        }
+    }
+    result
 }
 
 // =============================================================================

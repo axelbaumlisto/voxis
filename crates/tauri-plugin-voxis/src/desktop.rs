@@ -112,6 +112,12 @@ pub struct CpalCapture {
 /// fixed by `capture.rs`'s `AudioCapture` contract doc (guard_adapter's
 /// liveness poll assumes this cadence).
 const LEVEL_INTERVAL: Duration = Duration::from_millis(250);
+/// `[ADO-4]`: the level thread sleeps `LEVEL_INTERVAL` in this many
+/// increments (via `pure::sleep_while_running`) so `stop()`'s
+/// `level_thread.join()` blocks for at most one slice, not the whole
+/// interval, once `stop()` has already flipped `stage` away from
+/// `RUNNING`.
+const LEVEL_SLEEP_SLICE: Duration = Duration::from_millis(25);
 
 impl CpalCapture {
     /// Opens the platform's default input device.
@@ -223,7 +229,7 @@ impl AudioCapture for CpalCapture {
                     // `capture.rs`'s doc) -- always `false` here.
                     let sample = pure::level_sample_from_peak(peak, false, cap_hit.load(Ordering::SeqCst));
                     let _ = level_tx.send(Some(sample));
-                    std::thread::sleep(LEVEL_INTERVAL);
+                    pure::sleep_while_running(&stage, LEVEL_INTERVAL, LEVEL_SLEEP_SLICE, std::thread::sleep);
                 }
                 s if s == pure::stage::STARTING => {
                     // Review fix M3: no fixed startup delay -- keep

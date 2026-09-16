@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use voxis_core::profile::Secret;
@@ -95,32 +95,62 @@ impl FileSecretStore {
         }
     }
 
-    /// Writes `map` to `self.path` as 0600 from the moment the file is
-    /// created, on unix — `OpenOptions::mode(0o600)` applies the
-    /// permission atomically as part of `open(2)`'s `O_CREAT`, unlike a
-    /// separate `create()` + `set_permissions()` pair, which leaves a
-    /// window (however brief) where the file exists with the process's
-    /// default umask-derived permissions before the chmod lands.
+    /// Writes `map` to `self.path` via a temp-file-then-rename
+    /// (`[ADO-2/3]`): the temp file is created 0600 from the moment it
+    /// exists (on unix — same `OpenOptions::mode(0o600)`-on-`O_CREAT`
+    /// reasoning as `RecFile::create` in `capture.rs`), written in full,
+    /// `sync_all()`'d, then `fs::rename`d over `self.path`. `rename(2)`
+    /// within the same directory is atomic **for visibility**: a
+    /// crash/kill mid-write can never expose a half-written
+    /// `secrets.json` to a concurrent `load()` — the rename either
+    /// hasn't happened yet (previous file, fully intact) or has already
+    /// completed (new file, fully written). This is a claim about what
+    /// `load()` can ever *observe*, not about durability: `sync_all()`
+    /// before the rename is what protects against the new file's bytes
+    /// still sitting in a dirty page cache (and therefore vanishing) if
+    /// the machine loses power between the rename returning and the OS
+    /// actually flushing it — without it, `rename`'s atomicity alone
+    /// would only guarantee "never half-written", not "never reverted to
+    /// missing/stale after a power loss". On Windows, this same
+    /// same-directory `fs::rename` goes through `MoveFileExW` with
+    /// `MOVEFILE_REPLACE_EXISTING` (current Rust std behaviour) to get
+    /// the equivalent "replace the destination atomically" semantics.
+    /// The temp file lives alongside the real one (same directory)
+    /// precisely so the rename is same-filesystem rather than a cross-
+    /// filesystem copy.
     fn save(&self, map: &HashMap<String, String>) -> SecretResult<()> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        let parent = self.path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+        fs::create_dir_all(&parent)?;
         let json = serde_json::to_string_pretty(map)?;
-        #[cfg(unix)]
-        {
+
+        let file_name = self.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "secrets.json".to_string());
+        let tmp_path = parent.join(format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4()));
+
+        let write_result: SecretResult<()> = (|| {
             use std::io::Write;
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&self.path)?;
+            #[cfg(unix)]
+            let mut file = {
+                use std::os::unix::fs::OpenOptionsExt;
+                fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp_path)?
+            };
+            #[cfg(not(unix))]
+            let mut file = fs::OpenOptions::new().write(true).create(true).truncate(true).open(&tmp_path)?;
             file.write_all(json.as_bytes())?;
+            // Flush to disk before the rename below makes this the
+            // visible `secrets.json` — see this function's own doc
+            // comment on why `rename`'s atomicity alone isn't durability.
+            file.sync_all()?;
+            Ok(())
+        })();
+
+        if let Err(e) = write_result {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(e);
         }
-        #[cfg(not(unix))]
-        {
-            fs::write(&self.path, json)?;
+
+        if let Err(e) = fs::rename(&tmp_path, &self.path) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(Box::new(e));
         }
         Ok(())
     }
@@ -174,6 +204,22 @@ mod tests {
         store.delete("api_key").unwrap();
         assert_eq!(store.get("api_key").unwrap(), None);
         assert_eq!(store.get("other").unwrap().map(|s| s.expose().to_string()), Some("value".to_string()));
+    }
+
+    /// `[ADO-2/3]`: `save()` must not leave its temp file behind, on
+    /// success -- the directory must contain exactly the real
+    /// `secrets.json`, nothing else (no `.secrets.json.<uuid>.tmp`
+    /// orphan).
+    #[test]
+    fn file_secret_store_save_leaves_no_temp_file_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secrets.json");
+        let store = FileSecretStore::new(path.clone());
+
+        store.set("api_key", &Secret::new("sk-abc")).unwrap();
+
+        let entries: Vec<_> = fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(entries, vec![std::ffi::OsString::from("secrets.json")], "no temp file must survive a successful save()");
     }
 
     #[test]

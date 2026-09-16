@@ -100,7 +100,15 @@ private struct LevelSampleWire: Encodable {
 final class VoxisAudioCapture {
     static let sampleRate: Double = 16_000
 
-    private let engine = AVAudioEngine()
+    // `[ADO-8]`: `var`, not `let` -- a `mediaServicesWereReset`
+    // notification documents every `AVAudioSession`-related object
+    // (including a previously-built `AVAudioEngine`) as invalid
+    // afterwards; `engineNeedsRebuildAfterReset` (set by that
+    // notification's handler) makes the *next* `startEngine()` replace
+    // this with a fresh instance instead of reusing the now-possibly-
+    // invalid one, rather than being permanently stuck failing until the
+    // whole process restarts.
+    private var engine = AVAudioEngine()
     private var converter: AVAudioConverter?
     private var outputFormat: AVAudioFormat!
 
@@ -119,6 +127,10 @@ final class VoxisAudioCapture {
     /// acceptance #2).
     private var interruptionReason: String?
     private var currentPath: String?
+    /// Set by the `mediaServicesWereResetNotification` handler; consumed
+    /// (and cleared) at the top of the next `startEngine()` -- see
+    /// `engine`'s own doc comment above.
+    private var engineNeedsRebuildAfterReset = false
 
     private let windowPeak = WindowPeakAccumulator()
     private var levelChannel: Channel?
@@ -241,6 +253,15 @@ final class VoxisAudioCapture {
         } catch {
             completion(.failure(.backend("AVAudioSession activation failed: \(error)")))
             return
+        }
+
+        // `[ADO-8]`: rebuild `engine` now, before anything below reads
+        // `engine.inputNode`/calls `engine.prepare()`/`engine.start()`,
+        // if the previous instance was invalidated by a media services
+        // reset -- see `engine`'s own doc comment.
+        if engineNeedsRebuildAfterReset {
+            engine = AVAudioEngine()
+            engineNeedsRebuildAfterReset = false
         }
 
         let input = engine.inputNode
@@ -540,19 +561,16 @@ final class VoxisAudioCapture {
             queue: .main
         ) { [weak self] _ in
             self?.queue.async {
-                // Rebuilding `engine`/`converter` in place after a media
-                // services reset (Apple's own recommendation -- every
-                // AVAudioSession-related object is documented invalid
-                // afterwards) is a follow-up, not implemented here:
-                // `engine` is a `let` reused across sessions by
-                // `teardownEngine`/`startEngine`, and a real reset would
-                // need it replaced, not just stopped. For now this only
-                // ends the current session the same way any other
-                // interruption does -- correct (no silent truncation
-                // reported as success) but the *next* `start()` on the
-                // same process may still fail if the reused `engine`
-                // instance itself is now invalid; T8.5 measures whether
-                // that actually happens on real hardware.
+                // `[ADO-8]`: ends the current session the same way any
+                // other interruption does (no silent truncation reported
+                // as success) AND marks `engine` for rebuild -- every
+                // `AVAudioSession`-related object, including this class's
+                // long-lived `engine`, is documented by Apple as invalid
+                // after this notification. Without the flag, `engine` was
+                // a `let` reused as-is by the next `startEngine()`, which
+                // could then fail every session from here on (until the
+                // whole process restarts) instead of just this one.
+                self?.engineNeedsRebuildAfterReset = true
                 self?.failWithInterruption(reason: "media services reset")
             }
         }

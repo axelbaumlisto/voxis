@@ -67,10 +67,18 @@ export interface VoxisClient {
    * overlay's pointer/hotkey handling, or a host driving the API
    * directly) is expected to call `stop()`/`cancel()` to end the
    * session, at which point the plugin emits `voxis://result` and this
-   * promise resolves. Given the plugin's own single-flight guarantee
-   * (a second `start()` while active fails with `AlreadyRecording`),
-   * "the next result event after this start()" can only be *this*
-   * session's result.
+   * promise resolves.
+   *
+   * `[fixed per REJECT-FIX F2]` The plugin's single-flight guarantee (a
+   * second `start()` while active fails with `AlreadyRecording`) does
+   * NOT by itself make "the next result event after this start()"
+   * this session's result: `voxis://result` fires *after* the plugin
+   * frees its session slot, so a second `start()` can, in principle,
+   * succeed in the small window before a first session's own result
+   * event actually arrives. `dictate()` therefore correlates explicitly
+   * by `DictationResult.sessionId` (the id `start()` itself returned),
+   * not by ordering — a `voxis://result` for any other session id is
+   * ignored rather than mistakenly resolving this call.
    *
    * Rejects instead of hanging forever if the session ends without ever
    * producing a result: `voxis://state` turning `"error"` (a
@@ -135,6 +143,10 @@ export function createClient(deps: VoxisClientDeps = {}): VoxisClient {
     async dictate({ mode }) {
       return new Promise<DictationResult>((resolve, reject) => {
         let settled = false;
+        // Set once `client.start(mode)` resolves — see this method's own
+        // doc comment (`[fixed per REJECT-FIX F2]`): `voxis://result` is
+        // correlated against this id, not against arrival order.
+        let sessionId: SessionId | undefined;
         let unlistenResult: UnlistenFn | undefined;
         let unlistenState: UnlistenFn | undefined;
         let idleGraceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -158,7 +170,15 @@ export function createClient(deps: VoxisClientDeps = {}): VoxisClient {
         };
 
         Promise.all([
-          listen<DictationResult>(RESULT_EVENT, (event) => settleResolve(event.payload)),
+          listen<DictationResult>(RESULT_EVENT, (event) => {
+            // A result for a session other than the one this call started
+            // (including one that arrives before `start()` itself has
+            // resolved, i.e. `sessionId` isn't known yet — it necessarily
+            // belongs to some earlier session in that case) must be
+            // ignored, not mistaken for this call's own outcome.
+            if (sessionId === undefined || event.payload.sessionId !== sessionId) return;
+            settleResolve(event.payload);
+          }),
           listen<PluginState>(STATE_EVENT, (event) => {
             if (settled) return;
             if (event.payload === "error") {
@@ -183,6 +203,9 @@ export function createClient(deps: VoxisClientDeps = {}): VoxisClient {
             unlistenResult = resultUnlisten;
             unlistenState = stateUnlisten;
             return client.start(mode);
+          })
+          .then((id) => {
+            sessionId = id;
           })
           .catch(settleReject);
       });

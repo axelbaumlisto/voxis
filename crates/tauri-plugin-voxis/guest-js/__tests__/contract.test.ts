@@ -48,6 +48,7 @@ describe("contract fixtures", () => {
   it("dictation-result.json parses to a DictationResult", () => {
     const parsed = parseDictationResult(loadFixture("dictation-result.json"));
     expect(parsed).toEqual({
+      sessionId: "11111111-1111-1111-1111-111111111111",
       text: "hello world",
       language: "en",
       durationMs: 1500,
@@ -56,9 +57,9 @@ describe("contract fixtures", () => {
   });
 
   it("dictation-result.json's guardOutcome must be a known GuardOutcome variant", () => {
-    expect(() => parseDictationResult({ text: "", language: null, durationMs: 0, guardOutcome: "bogus" })).toThrow(
-      ContractError
-    );
+    expect(() =>
+      parseDictationResult({ sessionId: "x", text: "", language: null, durationMs: 0, guardOutcome: "bogus" })
+    ).toThrow(ContractError);
   });
 
   it("profile-v1.json parses to a VoxisProfileDto", () => {

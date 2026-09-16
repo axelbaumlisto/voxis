@@ -165,7 +165,16 @@ impl RecDir {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_file() {
-                        let _ = fs::remove_file(&path);
+                        // `[ADO-2/3]`: a per-file removal failure (e.g. an
+                        // unreadable/permission-denied orphan) must not be
+                        // swallowed silently — it's exactly the kind of
+                        // leftover audio file this sweep exists to catch,
+                        // so a failure to actually delete it deserves a
+                        // loud `warn!` with the path, not a mystery orphan
+                        // that quietly survives every future startup.
+                        if let Err(e) = fs::remove_file(&path) {
+                            tracing::warn!(path = %path.display(), error = %e, "RecDir::sweep: failed to delete orphaned rec file");
+                        }
                     }
                 }
                 Ok(())
@@ -456,6 +465,37 @@ mod tests {
 
         assert!(!orphan.exists());
         assert!(rec_dir.path().is_dir(), "sweep must not remove the dir itself");
+    }
+
+    /// `[ADO-2/3]`: a per-file deletion failure during `sweep()` must not
+    /// abort the whole sweep or propagate as an `Err` — it's logged
+    /// (`tracing::warn!`, see `sweep`'s own doc comment; not asserted
+    /// here, no tracing-capture harness in this crate) and the sweep
+    /// simply moves on. Simulated without root by making the rec dir
+    /// itself read-only (unlink requires write permission on the parent
+    /// directory on unix, not on the file itself).
+    #[test]
+    #[cfg(unix)]
+    fn sweep_does_not_fail_the_whole_sweep_when_one_file_cannot_be_deleted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let base = tempfile::tempdir().unwrap();
+        let rec_dir = RecDir::new(base.path().to_path_buf());
+        fs::create_dir_all(rec_dir.path()).unwrap();
+        let stuck = rec_dir.path().join("stuck.wav");
+        fs::write(&stuck, b"leftover").unwrap();
+
+        let original_mode = fs::metadata(rec_dir.path()).unwrap().permissions().mode();
+        fs::set_permissions(rec_dir.path(), fs::Permissions::from_mode(0o500)).unwrap();
+
+        let result = rec_dir.sweep();
+
+        // Restore write permission unconditionally (even on assertion
+        // failure below) so the tempdir can still be cleaned up.
+        fs::set_permissions(rec_dir.path(), fs::Permissions::from_mode(original_mode)).unwrap();
+
+        assert!(result.is_ok(), "a single undeletable file must not turn sweep() itself into an Err");
+        assert!(stuck.exists(), "the file really was left behind (proves this test actually exercised the failure path)");
     }
 
     #[test]

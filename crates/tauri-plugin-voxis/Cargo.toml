@@ -42,14 +42,13 @@ tracing = "0.1"
 # already used by `capture.rs`'s `tokio::sync::watch`.
 tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
 uuid = { version = "1", features = ["v4"] }
-# Dictionary-replacement application (Task 3b `pipeline.rs`): same
-# case-insensitive word-boundary regex approach as
-# `voxis_core::storage::dictionary::DictionaryStorage::apply`, which is
-# coupled to reading its own file from disk on every call and so isn't a
-# pure function this crate can reuse directly — the plugin instead
-# applies a plain in-memory `Vec<(String, String)>` snapshot (Task 2/6/7
-# own actually populating it from a `VoxisProfile`).
-regex = "1"
+# Dictionary-replacement application (Task 3b `pipeline.rs`) used to
+# duplicate `voxis_core::storage::dictionary::DictionaryStorage::apply`'s
+# case-insensitive word-boundary regex directly against its own `regex`
+# dependency; that logic now lives in `voxis_core::storage::dictionary::
+# apply_entries` (shared by both crates), and this crate calls it rather
+# than building its own `Regex` — no direct `regex` dependency needed
+# here any more (`voxis-core` still depends on it for that shared impl).
 
 # Task 6: `import_profile_from_qr`'s plain-HTTP GET to the desktop's
 # on-LAN profile-share server (Task 7, `[R1-Safety T1]` — that server is

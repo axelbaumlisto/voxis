@@ -392,17 +392,24 @@ impl hotkey_desktop::HotkeyActions for PluginHotkeySink {
     }
 }
 
+/// `events` is the SAME `Arc<dyn EventSink>` `build`'s `setup` hook
+/// passes to `PluginState` (review minor: previously this constructed
+/// its own independent `TauriEventSink` instance — harmless today since
+/// that type is stateless, but against the grain of "`events` is the
+/// one injectable seam" elsewhere in this crate, and a future stateful
+/// `EventSink` would silently develop two independent states).
 #[cfg(feature = "desktop")]
-fn desktop_hotkey_factory<R: Runtime>(app: tauri::AppHandle<R>) -> Arc<dyn HotkeyController> {
+fn desktop_hotkey_factory<R: Runtime>(app: tauri::AppHandle<R>, events: Arc<dyn EventSink>) -> Arc<dyn HotkeyController> {
     let actions: Arc<dyn hotkey_desktop::HotkeyActions> = Arc::new(PluginHotkeySink::new(app));
-    Arc::new(hotkey_desktop::RdevHotkey::new(actions))
+    Arc::new(hotkey_desktop::RdevHotkey::new(actions, events))
 }
 
-/// Builds a `HotkeyController` from the plugin's `AppHandle` once it's
-/// available (`build`'s `setup` hook) — a plain fn pointer (not a
-/// capturing closure) so `init`/`init_desktop` can each pass a different
-/// one without `build` itself needing to be generic over a closure type.
-type HotkeyFactory<R> = fn(tauri::AppHandle<R>) -> Arc<dyn HotkeyController>;
+/// Builds a `HotkeyController` from the plugin's `AppHandle` and the
+/// same `Arc<dyn EventSink>` `PluginState` uses, once both are available
+/// (`build`'s `setup` hook) — a plain fn pointer (not a capturing
+/// closure) so `init`/`init_desktop` can each pass a different one
+/// without `build` itself needing to be generic over a closure type.
+type HotkeyFactory<R> = fn(tauri::AppHandle<R>, Arc<dyn EventSink>) -> Arc<dyn HotkeyController>;
 
 /// The invoke-handler/`on_page_load`/`on_event` chain shared by every
 /// `TauriPlugin` this crate builds (`build`, `init_ios`) — the eleven
@@ -478,8 +485,8 @@ fn build<R: Runtime>(
                     as Arc<dyn SecretStore>
             });
             let capture: Arc<dyn AudioCapture> = capture_factory();
-            let hotkey = hotkey_factory.map(|f| f(app.app_handle().clone()));
             let events: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.app_handle().clone()));
+            let hotkey = hotkey_factory.map(|f| f(app.app_handle().clone(), events.clone()));
             let state = PluginState::new(config_dir, cache_dir, secrets, capture, events, hotkey);
 
             // `[R1-Safety S5]`: any file left in `rec/` at startup is an

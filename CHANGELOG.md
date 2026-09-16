@@ -165,3 +165,19 @@ clipboard or auto-typing.
 - **macOS**: unsigned Apple Silicon binary (`voxis-macos-arm64`) — DMG signing/notarization to follow
 
 Binaries are unsigned in this release.
+### tauri-plugin-voxis hardening (2026-09-16, before the first hosted release)
+- `AudioCapture::start`/`stop` run on `spawn_blocking` (a slow capture backend / mobile IPC no
+  longer blocks the plugin's async worker). A `cancel()`/`stop()` (incl. Hold-mode cancel on
+  webview death and the iOS Live Activity Stop) arriving while `start()` is still opening the
+  device is queued and applied the instant the session attaches — previously it would have been
+  dropped (cancel) or, for Stop via Live Activity, panicked (aborting the app in release).
+- `voxis://result` now carries `sessionId`; hosts correlate results by id (guest-js `dictate()`
+  does), not by "the next result after my start()". The event fires after the session slot is
+  freed, so a `start()` triggered by the result never hits `AlreadyRecording`.
+- New `voxis://error {kind:"permissionDenied"}` when the desktop global-hotkey listener fails
+  after registration (macOS Accessibility revoked) — was invisible to hosts.
+- `secrets.json` written temp → fsync → rename (never half-written); `RecDir` sweep logs and
+  continues past a stuck file; `CpalCapture::stop()` returns in ≤25 ms instead of up to 250 ms.
+- iOS: `AVAudioEngine` is rebuilt after `mediaServicesWereReset` (was Failed until app restart).
+- Dead `hound`/`regex` dependencies dropped; dictionary application shared with voxis-core.
+

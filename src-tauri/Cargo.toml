@@ -1,6 +1,6 @@
 [package]
 name = "voice"
-version = "0.1.5"
+version = "0.1.6"
 description = "Voice dictation app"
 authors = ["Voxis"]
 license = "MIT"
@@ -76,10 +76,12 @@ tempfile = "3"
 
 # Audio recording
 cpal = "0.15"
-# `audio_wav` (WAV encoding) itself moved to voxis-core in Task 1b; kept as
-# a direct dependency here too since it's still a small, self-contained
-# crate with no downside to declaring directly (matches `rdev` below).
-hound = "3.5"
+# `[ADO-1b]`: the direct `hound` dependency here was dead — no `hound::`
+# usage anywhere in `src-tauri/src` (`audio_wav`/WAV encoding moved to
+# voxis-core in Task 1b and stayed there); `hound` remains in the build
+# graph transitively via `rodio` (below) and via `voxis-core` itself, so
+# nothing here actually loses WAV support by dropping the redundant
+# direct declaration.
 
 # Audio feedback playback (start/stop/error beeps). Small, well-tested
 # wrapper over cpal; no GUI deps. Only used by `audio_feedback` module.

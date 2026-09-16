@@ -703,79 +703,48 @@ mod tests {
         assert!(path.exists());
     }
 
+    /// `[ADO-6c]`: replaces the deleted `test_save_and_load_cycle_all_fields`,
+    /// which was weaker than its name claimed on two counts — it built
+    /// `AppConfig` with `..AppConfig::default()`, so any field the test
+    /// author forgot to list (or any field added to `AppConfig` later)
+    /// silently rode on the default instead of actually being exercised;
+    /// and several fields it DID set (`backend`, `text_processing`,
+    /// `overlay.size`, `overlay.margin`, `llm.provider`,
+    /// `dictionary.learning_mode`) were never asserted on the loaded copy
+    /// at all — a regression in any of those six round-trips would have
+    /// passed silently. This test picks up exactly that gap: every field
+    /// set here is also asserted, no `..Default()`. Other fields already
+    /// have their own focused round-trip tests (e.g.
+    /// `test_overlay_backend_persists_through_roundtrip`,
+    /// `test_partial_update_preserves_other_values`) — this one doesn't
+    /// re-cover those, only the six that had none.
+    // Deliberately field-by-field, not `AppConfig { .. , ..Default::default() }`
+    // -- see this test's own doc comment above (`[ADO-6c]`) on why the
+    // predecessor test's `..Default()` usage was exactly the problem.
+    #[allow(clippy::field_reassign_with_default)]
     #[test]
-    fn test_save_and_load_cycle_all_fields() {
+    fn test_backend_text_processing_overlay_size_margin_llm_provider_and_dictionary_learning_mode_persist_through_roundtrip(
+    ) {
         let file = NamedTempFile::new().unwrap();
         let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
 
-        let mut config = AppConfig {
-            api_key: "api-123".to_string(),
-            model: "custom-model".to_string(),
-            language: "ru".to_string(),
-            hotkey: "ctrl+shift+r".to_string(),
-            hotkey_hold_ms: 750,
-            silence_timeout_ms: 45_000,
-            max_recording_ms: 300_000,
-            auto_type: false,
-            auto_enter: true,
-            typing_delay: 50,
-            notifications: false,
-            backend: "custom-backend".to_string(),
-            debug: true,
-            audio_device: "USB Mic".to_string(),
-            history_enabled: false,
-            history_days: 90,
-            active_provider: "local".to_string(),
-            text_processing: false,
-            ..AppConfig::default()
-        };
-        config.vad.enabled = true;
-        config.vad.threshold = 0.75;
-        config.overlay.enabled = true;
-        config.overlay.position = "top-left".to_string();
+        let mut config = AppConfig::default();
+        config.backend = "custom-backend".to_string();
+        config.text_processing = false;
         config.overlay.size = "large".to_string();
         config.overlay.margin = 50;
-        config.llm.enabled = true;
         config.llm.provider = "custom-llm".to_string();
-        config.llm.api_key = "llm-secret".to_string();
         config.dictionary.learning_mode = "manual".to_string();
-        config.dictionary.learning_threshold = 10;
 
         storage.save(&config).unwrap();
         let loaded = storage.load().unwrap();
 
-        assert_eq!(loaded.api_key, "api-123");
-        assert_eq!(loaded.model, "custom-model");
-        assert_eq!(loaded.language, "ru");
-        assert_eq!(loaded.hotkey, "ctrl+shift+r");
-        assert_eq!(
-            loaded.hotkey_hold_ms, 750,
-            "custom hotkey hold threshold must persist across save/load"
-        );
-        assert_eq!(
-            loaded.silence_timeout_ms, 45_000,
-            "silence_timeout_ms must persist across save/load (Layer 5 test 24)"
-        );
-        assert_eq!(
-            loaded.max_recording_ms, 300_000,
-            "max_recording_ms must persist across save/load (Layer 5 test 24)"
-        );
-        assert!(!loaded.auto_type);
-        assert!(loaded.auto_enter);
-        assert_eq!(loaded.typing_delay, 50);
-        assert!(!loaded.notifications);
-        assert!(loaded.debug);
-        assert_eq!(loaded.audio_device, "USB Mic");
-        assert!(!loaded.history_enabled);
-        assert_eq!(loaded.history_days, 90);
-        assert_eq!(loaded.active_provider, "local");
-        assert!(loaded.vad.enabled);
-        assert!((loaded.vad.threshold - 0.75).abs() < 0.001);
-        assert!(loaded.overlay.enabled);
-        assert_eq!(loaded.overlay.position, "top-left");
-        assert!(loaded.llm.enabled);
-        assert_eq!(loaded.llm.api_key, "llm-secret");
-        assert_eq!(loaded.dictionary.learning_threshold, 10);
+        assert_eq!(loaded.backend, "custom-backend");
+        assert!(!loaded.text_processing);
+        assert_eq!(loaded.overlay.size, "large");
+        assert_eq!(loaded.overlay.margin, 50);
+        assert_eq!(loaded.llm.provider, "custom-llm");
+        assert_eq!(loaded.dictionary.learning_mode, "manual");
     }
 
     /// Regression: `overlay.backend` must be persisted by `save()`.

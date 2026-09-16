@@ -122,9 +122,21 @@ pub enum GuardOutcome {
 }
 
 /// `stop()`'s return value and `voxis://result`'s payload.
+///
+/// `session_id` (hardening-sweep review finding F2): `voxis://result` is
+/// emitted AFTER the session slot is freed (`pipeline.rs::finalize`, so
+/// a waiting `stop()`/`cancel()` caller observes the cleanup as already
+/// visible the moment it resolves) -- which means a second session's
+/// `start()` can, in principle, succeed in the small window between the
+/// slot being freed and this event actually firing. Without a
+/// disambiguator, a listener would have no way to tell which session a
+/// given `voxis://result` belongs to in that window. Callers correlate
+/// by this field, never by "the next result event after my start()" --
+/// see `guest-js`'s `client.ts::dictate()` doc comment.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DictationResult {
+    pub session_id: SessionId,
     pub text: String,
     pub language: Option<String>,
     pub duration_ms: u64,
@@ -198,6 +210,15 @@ pub const STATE_EVENT: &str = "voxis://state";
 pub const LEVEL_EVENT: &str = "voxis://level";
 /// `voxis://result` event name.
 pub const RESULT_EVENT: &str = "voxis://result";
+/// `voxis://error` event name -- an out-of-band error notification for
+/// failures that don't have any in-flight command to reject (`[ADO-4]`:
+/// `hotkey_desktop.rs`'s OS-level listener thread dying *after* its own
+/// `set_hotkey` call already returned `Ok`, with no guarantee a later
+/// `set_hotkey` call will ever happen to surface it). Not part of the
+/// `contract/fixtures/events.json` snapshot (that fixture documents only
+/// the three lifecycle events every session emits); this one is
+/// deliberately out of band and best-effort.
+pub const ERROR_EVENT: &str = "voxis://error";
 
 #[cfg(test)]
 mod tests {
@@ -333,6 +354,7 @@ mod tests {
     #[test]
     fn dictation_result_snapshot_matches_fixture() {
         let result = DictationResult {
+            session_id: SessionId("11111111-1111-1111-1111-111111111111".to_string()),
             text: "hello world".to_string(),
             language: Some("en".to_string()),
             duration_ms: 1500,

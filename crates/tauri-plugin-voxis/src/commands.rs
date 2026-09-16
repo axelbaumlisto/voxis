@@ -25,7 +25,6 @@ use crate::error::PluginError;
 use crate::models::{DictationResult, HotkeySpec, ImportSummary, KeySourceDto, Mode, SessionId};
 use crate::pipeline;
 use crate::profile_source;
-use crate::session::ControlSignal;
 use crate::PluginState;
 
 pub(crate) async fn do_start(state: &PluginState, mode: Mode) -> Result<SessionId, PluginError> {
@@ -48,7 +47,21 @@ pub(crate) async fn do_start(state: &PluginState, mode: Mode) -> Result<SessionI
     let cap_samples =
         voxis_core::guard::native_cap_samples(deps.app_config.max_recording_ms, voxis_core::audio_wav::TRANSCRIPTION_SAMPLE_RATE);
 
-    if let Err(capture_err) = state.capture.start(&path, cap_samples) {
+    // `[ADO-8]`: on mobile this dispatches to `run_mobile_plugin` (an IPC
+    // round-trip to the Swift/Kotlin side); on desktop `CpalCapture::start`
+    // itself returns quickly, but no `AudioCapture::start` implementation
+    // is contractually guaranteed non-blocking. Never run it inline on
+    // the async command's own tokio worker thread -- `spawn_blocking`
+    // moves it to the blocking-pool, keeping the runtime free to make
+    // progress on unrelated tasks (other commands, other sessions' guard
+    // polling) for however long it takes.
+    let capture = state.capture.clone();
+    let start_path = path.clone();
+    let start_result = tokio::task::spawn_blocking(move || capture.start(&start_path, cap_samples))
+        .await
+        .unwrap_or_else(|join_err| Err(crate::capture::CaptureError::Backend(format!("capture.start() task panicked: {join_err}"))));
+
+    if let Err(capture_err) = start_result {
         // Roll back the reservation so a capture-backend failure doesn't
         // permanently wedge the single-flight guard; dropping `file`
         // deletes the just-created rec file.
@@ -69,9 +82,53 @@ pub(crate) async fn do_start(state: &PluginState, mode: Mode) -> Result<SessionI
 /// entirely), the signal is a harmless no-op and this just waits on (or
 /// immediately reads) the same result \u2014 "stop during Transcribing =
 /// no-op, not error".
+///
+/// **Hardening-sweep review finding F-NEW**: this used to call
+/// `state.sessions.signal(id, ControlSignal::Stop)` directly, which
+/// `.expect()`-panics if `id`'s session is still inside `do_start`'s
+/// `spawn_blocking(capture.start)` window (`session::ActiveSession::
+/// handles` still `None`) \u2014 with the workspace's `panic = "abort"`
+/// release profile, that panic crashes the whole app. This is a real
+/// window `handle_live_activity_stop_intent` (`lib.rs`, Task 9a) can hit:
+/// it reads `state.sessions.active_id()`, which is populated the instant
+/// `begin()` runs, before `attach_handles`. Fixed the same way F1 fixed
+/// the analogous gap for `cancel()`: `request_stop` (mirroring
+/// `request_cancel`) records the intent if handles aren't attached yet,
+/// applied retroactively by `attach_handles`; this function then polls
+/// `outcome_receiver` (never `signal()` directly) until the receiver
+/// exists, bounded by the session still being active at all (covers
+/// `do_start`'s own rollback of a capture-backend failure, which frees
+/// the slot without ever attaching handles).
 pub(crate) async fn do_stop(state: &PluginState, id: &SessionId) -> Result<DictationResult, PluginError> {
-    let mut outcome_rx = state.sessions.signal(id, ControlSignal::Stop)?;
+    if !state.sessions.request_stop(id) {
+        return Err(PluginError::UnknownSession { session_id: id.to_string() });
+    }
+    let mut outcome_rx = wait_for_outcome_receiver(state, id).await?;
     await_outcome(&mut outcome_rx).await
+}
+
+/// Polls for `id`'s outcome receiver to become available \u2014 covers the
+/// narrow window (review finding F-NEW) where `request_stop` succeeded
+/// but `handles` isn't attached yet, so there is no pipeline task/
+/// outcome channel to hand back yet. `attach_handles` applies the
+/// pending `Stop`/`Cancel` the instant handles exist (`SessionGuard::
+/// request_stop`/`request_cancel`'s docs), so this just waits for that
+/// to happen. Bails out with `UnknownSession` if `id` stops being the
+/// active session before that (e.g. `do_start`'s own rollback on a
+/// capture-backend failure) instead of polling forever.
+async fn wait_for_outcome_receiver(
+    state: &PluginState,
+    id: &SessionId,
+) -> Result<tokio::sync::watch::Receiver<Option<Result<DictationResult, PluginError>>>, PluginError> {
+    loop {
+        if let Some(rx) = state.sessions.outcome_receiver(id) {
+            return Ok(rx);
+        }
+        if !state.sessions.is_active(id) {
+            return Err(PluginError::UnknownSession { session_id: id.to_string() });
+        }
+        tokio::task::yield_now().await;
+    }
 }
 
 /// Cancels `id`: marks it cancelled and performs the stage-appropriate
@@ -84,6 +141,20 @@ pub(crate) async fn do_stop(state: &PluginState, id: &SessionId) -> Result<Dicta
 /// slot freed) -- not just once the abort/signal was issued -- so
 /// callers can rely on the cleanup being visible immediately after this
 /// resolves.
+///
+/// **Documented exception** (hardening-sweep review finding F1): if
+/// `id`'s session is still inside `do_start`'s `spawn_blocking(capture.
+/// start)` window (`session::ActiveSession::handles` is `None`),
+/// `request_cancel` records the request (`cancel_requested`) and
+/// returns `true`, but `outcome_receiver(id)` has nothing to hand back
+/// yet -- there is no pipeline task, no `outcome_tx`, nothing to await.
+/// This function returns `Ok(())` immediately in that case rather than
+/// spin-waiting for handles to attach: the cancellation itself is not
+/// lost (`attach_handles` applies `cancel_requested` the moment the
+/// pipeline task exists, see that function's doc), only this call's
+/// "cleanup already visible" guarantee is relaxed for this one narrow,
+/// short-lived window -- a caller that needs to observe the freed slot
+/// can simply poll `state()`/`is_active` if it matters for that caller.
 pub(crate) async fn do_cancel(state: &PluginState, id: &SessionId) -> Result<(), PluginError> {
     if !state.sessions.request_cancel(id) {
         return Err(PluginError::UnknownSession { session_id: id.to_string() });
@@ -267,6 +338,50 @@ mod tests {
         assert!(!state.sessions.has_active(), "a refused start must not claim the session slot");
     }
 
+    /// `[ADO-8]` regression: `do_start` must run `AudioCapture::start`
+    /// off the tokio worker thread (`spawn_blocking`), not inline on the
+    /// async task's own thread -- a synchronous, possibly-slow backend
+    /// call (mobile's `run_mobile_plugin` IPC round-trip, or any future
+    /// backend that blocks opening a device) must not stall the whole
+    /// single-worker runtime for its duration. Deterministic (no sleeps/
+    /// timing): records the thread id `AudioCapture::start` actually runs
+    /// on and compares it against the runtime's one async worker thread.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn do_start_runs_capture_start_off_the_async_worker_thread() {
+        struct ThreadRecordingCapture {
+            inner: Arc<MockCapture>,
+            thread_id: std::sync::Mutex<Option<std::thread::ThreadId>>,
+        }
+        impl AudioCapture for ThreadRecordingCapture {
+            fn start(&self, path: &std::path::Path, cap_samples: usize) -> Result<(), crate::capture::CaptureError> {
+                *self.thread_id.lock().unwrap() = Some(std::thread::current().id());
+                self.inner.start(path, cap_samples)
+            }
+            fn stop(&self) -> Result<crate::capture::CaptureStats, crate::capture::CaptureError> {
+                self.inner.stop()
+            }
+            fn level_rx(&self) -> tokio::sync::watch::Receiver<Option<crate::capture::LevelSample>> {
+                self.inner.level_rx()
+            }
+        }
+
+        let async_worker_thread_id = tokio::spawn(async { std::thread::current().id() }).await.unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (mut state, _mock) = test_state_with_mock(&tmp);
+        let recorder = Arc::new(ThreadRecordingCapture { inner: Arc::new(MockCapture::new()), thread_id: std::sync::Mutex::new(None) });
+        state.capture = recorder.clone();
+        state.consent.set_consent("test-host", "api.groq.com", true).unwrap();
+
+        do_start(&state, Mode::Hold).await.unwrap();
+
+        let capture_thread_id = recorder.thread_id.lock().unwrap().unwrap();
+        assert_ne!(
+            capture_thread_id, async_worker_thread_id,
+            "AudioCapture::start() must run on a spawn_blocking thread, not the single async worker thread"
+        );
+    }
+
     #[tokio::test]
     async fn start_succeeds_after_consent_and_creates_a_rec_file() {
         let tmp = tempfile::tempdir().unwrap();
@@ -356,6 +471,260 @@ mod tests {
         do_cancel(&state, &id).await.unwrap();
 
         assert!(!state.sessions.has_active());
+        assert_eq!(std::fs::read_dir(state.rec_dir.path()).unwrap().count(), 0);
+    }
+
+    /// A capture backend whose `start()` blocks on a real channel until
+    /// released — the F1 regression double: pins down the exact window
+    /// `commands::do_start` opens between `sessions.begin(mode)` and
+    /// `sessions.attach_handles`, same channel-handshake pattern as
+    /// `pipeline.rs`'s round-2-review `BlockingStopCapture`/
+    /// `BlockingSecretStore` (a real OS thread blocks inside a
+    /// synchronous trait method; the "ready"/"release" handshake is a
+    /// non-blocking `tokio::sync::oneshot::Sender::send` paired with a
+    /// blocking `std::sync::mpsc::Receiver::recv()` — requires the
+    /// multi-thread test runtime).
+    struct BlockingStartCapture {
+        inner: Arc<MockCapture>,
+        ready_tx: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+        release_rx: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    }
+
+    impl AudioCapture for BlockingStartCapture {
+        fn start(&self, path: &std::path::Path, cap_samples: usize) -> Result<(), crate::capture::CaptureError> {
+            if let Some(tx) = self.ready_tx.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+            if let Some(rx) = self.release_rx.lock().unwrap().take() {
+                let _ = rx.recv();
+            }
+            self.inner.start(path, cap_samples)
+        }
+        fn stop(&self) -> Result<crate::capture::CaptureStats, crate::capture::CaptureError> {
+            self.inner.stop()
+        }
+        fn level_rx(&self) -> tokio::sync::watch::Receiver<Option<crate::capture::LevelSample>> {
+            self.inner.level_rx()
+        }
+    }
+
+    fn blocking_start_state(
+        tmp: &tempfile::TempDir,
+    ) -> (Arc<PluginState>, Arc<MockCapture>, tokio::sync::oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let mock = Arc::new(MockCapture::new());
+        let (mut state, _) = test_state_with_mock(tmp);
+        state.consent.set_consent("test-host", "api.groq.com", true).unwrap();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let capture: Arc<dyn AudioCapture> = Arc::new(BlockingStartCapture {
+            inner: mock.clone(),
+            ready_tx: std::sync::Mutex::new(Some(ready_tx)),
+            release_rx: std::sync::Mutex::new(Some(release_rx)),
+        });
+        state.capture = capture;
+        (Arc::new(state), mock, ready_rx, release_tx)
+    }
+
+    /// F1 (a): `cancel()` arrives while `do_start` is parked inside
+    /// `spawn_blocking(capture.start)` — i.e. `sessions.begin(mode)` has
+    /// already claimed the slot but `attach_handles` hasn't run yet
+    /// (`session::ActiveSession::handles` is still `None`). Before the
+    /// fix this silently no-op'd (`trigger_cancel` returned early,
+    /// `do_cancel` returned `Ok` immediately) and the session proceeded
+    /// as if nothing happened — mic left open, a real regression of
+    /// `[R1-Safety S4]`. After the fix, `attach_handles` applies the
+    /// pending `cancel_requested` the instant handles exist: no
+    /// transcription HTTP call, state ends at `Idle`, the slot is freed,
+    /// and the capture backend is actually stopped.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancel_arriving_while_capture_start_is_blocked_still_cancels_the_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, mock, ready_rx, release_tx) = blocking_start_state(&tmp);
+
+        let start_state = state.clone();
+        let start_task = tokio::spawn(async move { do_start(&start_state, Mode::Hold).await });
+
+        ready_rx.await.unwrap();
+        let id = state.sessions.active_id().expect("begin() must have claimed the slot before capture.start() blocks");
+        assert!(state.sessions.is_active(&id), "handles are not attached yet, but is_active must still see the reserved slot");
+
+        let cancel_result = do_cancel(&state, &id).await;
+        assert!(cancel_result.is_ok(), "cancel() arriving in this window must still be accepted, not UnknownSession");
+
+        release_tx.send(()).unwrap();
+        let start_result = start_task.await.unwrap();
+        assert!(start_result.is_ok(), "do_start itself still succeeds once capture.start() unblocks");
+
+        // The pipeline task now runs concurrently on the other worker
+        // thread; give it a bounded number of yields to observe the
+        // already-pending cancel signal and finalize.
+        for _ in 0..500 {
+            if !state.sessions.has_active() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+
+        assert!(!state.sessions.has_active(), "the session must end (cancelled), not stay wedged as active");
+        assert!(!mock.is_running(), "the capture backend must actually be stopped, not left open");
+        assert_eq!(
+            std::fs::read_dir(state.rec_dir.path()).unwrap().count(),
+            0,
+            "the rec file must be deleted, same as any other cancelled session"
+        );
+    }
+
+    /// F1 (b): same window as (a), but the safety-net path
+    /// (`cancel_all_hold`, what the webview-destroyed/app-exit hooks call
+    /// for `[R1-Safety S4]`) instead of an explicit `cancel()` command.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancel_all_hold_arriving_while_capture_start_is_blocked_still_cancels_the_hold_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, mock, ready_rx, release_tx) = blocking_start_state(&tmp);
+
+        let start_state = state.clone();
+        let start_task = tokio::spawn(async move { do_start(&start_state, Mode::Hold).await });
+
+        ready_rx.await.unwrap();
+        let id = state.sessions.active_id().expect("begin() must have claimed the slot before capture.start() blocks");
+
+        // Simulate the webview-destroyed/app-exit hook firing in this window.
+        state.sessions.cancel_all_hold();
+
+        release_tx.send(()).unwrap();
+        let start_result = start_task.await.unwrap();
+        assert!(start_result.is_ok());
+
+        for _ in 0..500 {
+            if !state.sessions.has_active() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+
+        assert!(!state.sessions.has_active(), "cancel_all_hold arriving in this window must still cancel the Hold session, not leave the mic open");
+        assert!(!mock.is_running());
+        assert_eq!(std::fs::read_dir(state.rec_dir.path()).unwrap().count(), 0);
+        let _ = id; // kept for clarity/debuggability, no further assertions needed on it
+    }
+
+    /// F1 (c): the same blocking-start harness with NO cancel arriving at
+    /// all — the normal-path regression check for the `cancel_requested`
+    /// change: a start with nothing racing it must be completely
+    /// unaffected (no spurious cancellation, capture actually recording).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn start_with_no_cancel_in_the_blocking_window_is_unaffected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, mock, ready_rx, release_tx) = blocking_start_state(&tmp);
+
+        let start_state = state.clone();
+        let start_task = tokio::spawn(async move { do_start(&start_state, Mode::Hold).await });
+
+        ready_rx.await.unwrap();
+        release_tx.send(()).unwrap();
+
+        let id = start_task.await.unwrap().unwrap();
+
+        assert!(state.sessions.is_active(&id));
+        assert!(mock.is_running(), "an uncancelled start must leave the capture backend actually recording");
+
+        do_cancel(&state, &id).await.unwrap();
+    }
+
+    /// F-NEW (a): `stop()` arriving while `do_start` is parked inside
+    /// `spawn_blocking(capture.start)` \u2014 same window as F1's cancel
+    /// tests above, but for `Stop`. Before the fix, `do_stop` called
+    /// `session::SessionGuard::signal` directly, whose `.expect()`
+    /// panics when `handles` is still `None` here \u2014 under the
+    /// workspace's `panic = "abort"` release profile, that's a full app
+    /// crash. After the fix (`request_stop`, mirroring F1's
+    /// `request_cancel`), `do_stop` never calls `signal()` in this
+    /// window: it records the pending `Stop`, which `attach_handles`
+    /// applies the moment handles exist, and polls for the outcome
+    /// receiver instead of assuming it already exists. No panic, and
+    /// once `capture.start()` unblocks the session finalizes normally
+    /// (a real result or a transcription error \u2014 never a crash).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn do_stop_arriving_while_capture_start_is_blocked_finalizes_normally_no_panic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, mock, ready_rx, release_tx) = blocking_start_state(&tmp);
+
+        let start_state = state.clone();
+        let start_task = tokio::spawn(async move { do_start(&start_state, Mode::Hold).await });
+
+        ready_rx.await.unwrap();
+        let id = state.sessions.active_id().expect("begin() must have claimed the slot before capture.start() blocks");
+        assert!(state.sessions.is_active(&id), "handles are not attached yet, but is_active must still see the reserved slot");
+
+        let stop_state = state.clone();
+        let stop_id = id.clone();
+        let stop_task = tokio::spawn(async move { do_stop(&stop_state, &stop_id).await });
+        // Give do_stop a chance to actually start polling inside
+        // wait_for_outcome_receiver before releasing capture.start() --
+        // not load-bearing for correctness, just makes the test actually
+        // exercise the race instead of getting lucky with scheduling.
+        tokio::task::yield_now().await;
+
+        release_tx.send(()).unwrap();
+        let start_result = start_task.await.unwrap();
+        assert!(start_result.is_ok(), "do_start itself still succeeds once capture.start() unblocks");
+
+        let stop_result = stop_task.await.unwrap();
+        assert!(
+            stop_result.is_ok() || matches!(stop_result, Err(PluginError::Transcription { .. })),
+            "stop() must resolve with a real result or a Transcription error, not any other error and never a panic: {stop_result:?}"
+        );
+
+        assert!(!state.sessions.has_active(), "the session must end (finalized), not stay wedged as active");
+        assert!(!mock.is_running(), "the capture backend must actually be stopped, not left open");
+        assert_eq!(
+            std::fs::read_dir(state.rec_dir.path()).unwrap().count(),
+            0,
+            "the rec file must be deleted, same as any other finalized session"
+        );
+    }
+
+    /// F-NEW (b): the same window as (a), but driving it the way
+    /// `lib.rs::handle_live_activity_stop_intent` (Task 9a, the iOS Live
+    /// Activity/Dynamic Island Stop button) actually does: read
+    /// `active_id()` fresh at the call site and pass that straight into
+    /// `do_stop`, rather than reusing the id `do_start`'s own
+    /// (still in-flight) task will eventually return \u2014 this is the
+    /// concrete real-world trigger the review named: a Stop intent
+    /// tapped in the small window right after starting a Hold recording.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn live_activity_style_stop_arriving_while_capture_start_is_blocked_finalizes_normally_no_panic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, mock, ready_rx, release_tx) = blocking_start_state(&tmp);
+
+        let start_state = state.clone();
+        let start_task = tokio::spawn(async move { do_start(&start_state, Mode::Hold).await });
+
+        ready_rx.await.unwrap();
+        assert!(state.sessions.active_id().is_some(), "begin() must have claimed the slot before capture.start() blocks");
+
+        let stop_state = state.clone();
+        let stop_task = tokio::spawn(async move {
+            let id = stop_state
+                .sessions
+                .active_id()
+                .expect("the Live Activity Stop path reads active_id() fresh, exactly like lib.rs's handle_live_activity_stop_intent");
+            do_stop(&stop_state, &id).await
+        });
+        tokio::task::yield_now().await;
+
+        release_tx.send(()).unwrap();
+        let start_result = start_task.await.unwrap();
+        assert!(start_result.is_ok());
+
+        let stop_result = stop_task.await.unwrap();
+        assert!(
+            stop_result.is_ok() || matches!(stop_result, Err(PluginError::Transcription { .. })),
+            "stop() must resolve with a real result or a Transcription error, not any other error and never a panic: {stop_result:?}"
+        );
+
+        assert!(!state.sessions.has_active());
+        assert!(!mock.is_running());
         assert_eq!(std::fs::read_dir(state.rec_dir.path()).unwrap().count(), 0);
     }
 

@@ -72,6 +72,16 @@ describe("createClient() profile commands [REJECT-FIX F1]", () => {
   });
 });
 
+/** Advances the microtask queue enough ticks for `dictate()`'s own
+ * `start()` promise chain to resolve and record `sessionId` — more
+ * robust than counting exact tick counts by hand (`[fixed per
+ * REJECT-FIX F2]` added one more `.then()` link to that chain). */
+async function flushMicrotasks(times = 6): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await Promise.resolve();
+  }
+}
+
 describe("createClient().dictate", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -82,9 +92,9 @@ describe("createClient().dictate", () => {
     const client = createClient({ invoke: ipc.invoke, listen: ipc.listen });
 
     const promise = client.dictate({ mode: "hold" });
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushMicrotasks();
     ipc.emit<DictationResult>("voxis://result", {
+      sessionId: "session-1",
       text: "hi",
       language: null,
       durationMs: 10,
@@ -107,12 +117,50 @@ describe("createClient().dictate", () => {
     const client = createClient({ invoke: ipc.invoke, listen: ipc.listen });
 
     const promise = client.dictate({ mode: "toggle" });
-    await Promise.resolve();
-    await Promise.resolve();
-    const result: DictationResult = { text: "hello", language: "en", durationMs: 500, guardOutcome: "finalized" };
+    await flushMicrotasks();
+    const result: DictationResult = {
+      sessionId: "session-1",
+      text: "hello",
+      language: "en",
+      durationMs: 500,
+      guardOutcome: "finalized",
+    };
     ipc.emit("voxis://result", result);
 
     await expect(promise).resolves.toEqual(result);
+  });
+
+  it("ignores a voxis://result event carrying a foreign session id [F2]", async () => {
+    const ipc = createFakeIpc();
+    const client = createClient({ invoke: ipc.invoke, listen: ipc.listen });
+
+    const promise = client.dictate({ mode: "toggle" });
+    await flushMicrotasks();
+
+    // A leftover result from some other (earlier or racing) session --
+    // `voxis://result` now fires after the plugin's slot is freed, so
+    // this can arrive for a foreign id in the same window as this call's
+    // own (review finding F2) -- must not resolve this dictate() call.
+    const foreign: DictationResult = {
+      sessionId: "session-0-not-mine",
+      text: "someone else's result",
+      language: null,
+      durationMs: 999,
+      guardOutcome: "finalized",
+    };
+    ipc.emit("voxis://result", foreign);
+
+    let settled = false;
+    promise.then(() => {
+      settled = true;
+    });
+    await flushMicrotasks();
+    expect(settled).toBe(false);
+
+    const mine: DictationResult = { sessionId: "session-1", text: "mine", language: null, durationMs: 10, guardOutcome: "finalized" };
+    ipc.emit("voxis://result", mine);
+
+    await expect(promise).resolves.toEqual(mine);
   });
 
   it("rejects immediately when voxis://state turns \"error\" with no result [REJECT-FIX L4]", async () => {
@@ -151,8 +199,15 @@ describe("createClient().dictate", () => {
     const promise = client.dictate({ mode: "hold" });
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
     ipc.emit<PluginState>("voxis://state", "idle");
-    const result: DictationResult = { text: "", language: null, durationMs: 10, guardOutcome: "cancelled" };
+    const result: DictationResult = {
+      sessionId: "session-1",
+      text: "",
+      language: null,
+      durationMs: 10,
+      guardOutcome: "cancelled",
+    };
     ipc.emit("voxis://result", result);
 
     await vi.advanceTimersByTimeAsync(200);

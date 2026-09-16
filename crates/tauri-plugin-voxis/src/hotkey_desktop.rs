@@ -34,7 +34,8 @@ use rdev::Key;
 use voxis_core::hotkey::{parse_hotkey, HotkeyCombo, HotkeyModifier};
 
 use crate::error::PluginError;
-use crate::models::{HotkeySpec, Mode};
+use crate::events::EventSink;
+use crate::models::{HotkeySpec, Mode, ERROR_EVENT};
 
 /// A parsed, rdev-ready hotkey target: the trailing trigger key plus any
 /// modifiers that must be held (empty for a plain single-key spec like
@@ -120,6 +121,23 @@ fn letter_or_digit_key(c: char) -> Option<Key> {
         '9' => Num9,
         _ => return None,
     })
+}
+
+/// Records a failed `rdev::listen` outcome and notifies the host app.
+/// `set_hotkey`'s own bounded (300ms) wait only catches this if it's
+/// still polling (first call) or if a *later* `set_hotkey` call happens
+/// to check `startup_result` again (the "L2" branch in `set_hotkey`) --
+/// neither is guaranteed for a listener that dies well after
+/// registration with no further `set_hotkey` call ever coming in
+/// (`[ADO-4]`). Emitting `ERROR_EVENT` here means the host app learns
+/// about it either way, instead of the user quietly believing the
+/// hotkey still works. Split out from `spawn_listener`'s closure so it's
+/// callable directly from a test with a fabricated error string, no real
+/// `rdev::listen`/OS permission dependency required.
+fn report_listen_failure(startup_result: &Mutex<Option<Result<(), String>>>, events: &Arc<dyn EventSink>, message: String) {
+    tracing::error!(message = %message, "rdev::listen failed to start (Accessibility/Input Monitoring permission?)");
+    *startup_result.lock().unwrap() = Some(Err(message.clone()));
+    events.emit(ERROR_EVENT, serde_json::to_value(PluginError::PermissionDenied { message }).unwrap());
 }
 
 fn modifier_matches(modifier: HotkeyModifier, key: Key) -> bool {
@@ -219,6 +237,7 @@ pub trait HotkeyActions: Send + Sync + 'static {
 pub struct RdevHotkey {
     tracker: Arc<Mutex<Option<HotkeyTracker>>>,
     actions: Arc<dyn HotkeyActions>,
+    events: Arc<dyn EventSink>,
     started: AtomicBool,
     startup_result: Arc<Mutex<Option<Result<(), String>>>>,
     thread_handle: Mutex<Option<JoinHandle<()>>>,
@@ -230,10 +249,11 @@ pub struct RdevHotkey {
 const STARTUP_GRACE: Duration = Duration::from_millis(300);
 
 impl RdevHotkey {
-    pub fn new(actions: Arc<dyn HotkeyActions>) -> Self {
+    pub fn new(actions: Arc<dyn HotkeyActions>, events: Arc<dyn EventSink>) -> Self {
         Self {
             tracker: Arc::new(Mutex::new(None)),
             actions,
+            events,
             started: AtomicBool::new(false),
             startup_result: Arc::new(Mutex::new(None)),
             thread_handle: Mutex::new(None),
@@ -286,6 +306,7 @@ impl RdevHotkey {
         let tracker = self.tracker.clone();
         let actions = self.actions.clone();
         let startup_result = self.startup_result.clone();
+        let events = self.events.clone();
         let handle = std::thread::spawn(move || {
             #[cfg(target_os = "macos")]
             rdev::set_is_main_thread(false);
@@ -310,8 +331,7 @@ impl RdevHotkey {
             };
 
             if let Err(e) = rdev::listen(callback) {
-                tracing::error!(error = ?e, "rdev::listen failed to start (Accessibility/Input Monitoring permission?)");
-                *startup_result.lock().unwrap() = Some(Err(format!("{e:?}")));
+                report_listen_failure(&startup_result, &events, format!("{e:?}"));
             }
         });
         *self.thread_handle.lock().unwrap() = Some(handle);
@@ -516,9 +536,34 @@ mod tests {
     #[test]
     fn set_hotkey_rejects_invalid_spec_without_starting_a_listener() {
         let actions = Arc::new(RecordingActions::new());
-        let hotkey = RdevHotkey::new(actions);
+        let events = Arc::new(crate::events::RecordingSink::new());
+        let hotkey = RdevHotkey::new(actions, events);
         let result = hotkey.set_hotkey(&spec("not+a+valid+combo+at+all+extra", Mode::Hold));
         assert!(result.is_err());
         assert!(!hotkey.started.load(Ordering::SeqCst), "an invalid spec must not spawn the listener thread");
+    }
+
+    /// `[ADO-4]`: a late `rdev::listen` failure (after the 300ms grace
+    /// window this test drives directly by calling `spawn_listener`, no
+    /// real OS listener/permission dependency) must emit `voxis://error`
+    /// with `kind: "permissionDenied"` on the injected `EventSink`, not
+    /// just update the (possibly never re-checked) internal
+    /// `startup_result`.
+    #[test]
+    fn late_listener_failure_emits_an_error_event() {
+        // Exercises the actual production helper `spawn_listener`'s
+        // closure calls on a real `rdev::listen` failure -- no real OS
+        // listener/permission dependency needed since `report_listen_failure`
+        // takes the error message directly.
+        let startup_result: Mutex<Option<Result<(), String>>> = Mutex::new(None);
+        let recording = Arc::new(crate::events::RecordingSink::new());
+        let events: Arc<dyn EventSink> = recording.clone();
+        let message = "simulated listener failure".to_string();
+
+        report_listen_failure(&startup_result, &events, message.clone());
+
+        assert_eq!(*startup_result.lock().unwrap(), Some(Err(message.clone())));
+        let last = recording.last(ERROR_EVENT).expect("an error event must have been emitted");
+        assert_eq!(last, serde_json::json!({"kind": "permissionDenied", "message": message}));
     }
 }
