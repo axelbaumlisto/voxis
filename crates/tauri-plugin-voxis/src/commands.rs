@@ -25,6 +25,7 @@ use crate::error::PluginError;
 use crate::models::{DictationResult, HotkeySpec, ImportSummary, KeySourceDto, Mode, SessionId};
 use crate::pipeline;
 use crate::profile_source;
+use crate::session::StopRequest;
 use crate::PluginState;
 
 pub(crate) async fn do_start(state: &PluginState, mode: Mode) -> Result<SessionId, PluginError> {
@@ -76,68 +77,23 @@ pub(crate) async fn do_start(state: &PluginState, mode: Mode) -> Result<SessionI
     Ok(id)
 }
 
-/// Sends `Stop` to `id`'s pipeline task and awaits the eventual outcome.
-/// Safe to call more than once for the same id: if the session has
-/// already moved past `Recording` (into `Transcribing`, or finished
-/// entirely), the signal is a harmless no-op and this just waits on (or
-/// immediately reads) the same result \u2014 "stop during Transcribing =
-/// no-op, not error".
-///
-/// **Hardening-sweep review finding F-NEW**: this used to call
-/// `state.sessions.signal(id, ControlSignal::Stop)` directly, which
-/// `.expect()`-panics if `id`'s session is still inside `do_start`'s
-/// `spawn_blocking(capture.start)` window (`session::ActiveSession::
-/// handles` still `None`) \u2014 with the workspace's `panic = "abort"`
-/// release profile, that panic crashes the whole app. This is a real
-/// window `handle_live_activity_stop_intent` (`lib.rs`, Task 9a) can hit:
-/// it reads `state.sessions.active_id()`, which is populated the instant
-/// `begin()` runs, before `attach_handles`. Fixed the same way F1 fixed
-/// the analogous gap for `cancel()`: `request_stop` (mirroring
-/// `request_cancel`) records the intent if handles aren't attached yet,
-/// applied retroactively by `attach_handles`; this function then polls
-/// `outcome_receiver` (never `signal()` directly) until the receiver
-/// exists, bounded by the session still being active at all (covers
-/// `do_start`'s own rollback of a capture-backend failure, which frees
-/// the slot without ever attaching handles).
 pub(crate) async fn do_stop(state: &PluginState, id: &SessionId) -> Result<DictationResult, PluginError> {
-    if !state.sessions.request_stop(id) {
-        return Err(PluginError::UnknownSession { session_id: id.to_string() });
-    }
-    let mut outcome_rx = wait_for_outcome_receiver(state, id).await?;
+    let mut outcome_rx = match state.sessions.request_stop(id) {
+        None => return Err(PluginError::UnknownSession { session_id: id.to_string() }),
+        Some(StopRequest::Now(rx)) => rx,
+        // The `Stop` landed in `do_start`'s `spawn_blocking(capture.start)`
+        // window (review finding F-NEW): `attach_handles` applies it and
+        // resolves this receiver under the same lock, before the pipeline
+        // can finalise -- no polling, no `UnknownSession` for a stop that
+        // was honoured. The oneshot is dropped unresolved only when the
+        // session is rolled back before handles ever attach (capture
+        // failure), which IS an unknown session by then.
+        Some(StopRequest::Pending(rx)) => match rx.await {
+            Ok(rx) => rx,
+            Err(_) => return Err(PluginError::UnknownSession { session_id: id.to_string() }),
+        },
+    };
     await_outcome(&mut outcome_rx).await
-}
-
-/// Polls for `id`'s outcome receiver to become available \u2014 covers the
-/// narrow window (review finding F-NEW) where `request_stop` succeeded
-/// but `handles` isn't attached yet, so there is no pipeline task/
-/// outcome channel to hand back yet. `attach_handles` applies the
-/// pending `Stop`/`Cancel` the instant handles exist (`SessionGuard::
-/// request_stop`/`request_cancel`'s docs), so this just waits for that
-/// to happen. Bails out with `UnknownSession` if `id` stops being the
-/// active session before that (e.g. `do_start`'s own rollback on a
-/// capture-backend failure) instead of polling forever.
-async fn wait_for_outcome_receiver(
-    state: &PluginState,
-    id: &SessionId,
-) -> Result<tokio::sync::watch::Receiver<Option<Result<DictationResult, PluginError>>>, PluginError> {
-    loop {
-        if let Some(rx) = state.sessions.outcome_receiver(id) {
-            return Ok(rx);
-        }
-        if !state.sessions.is_active(id) {
-            return Err(PluginError::UnknownSession { session_id: id.to_string() });
-        }
-        // Deliberately `yield_now`, not a timed sleep: a coarser poll lets a
-        // pending Stop applied at `attach_handles` run the whole finalize
-        // (mock capture: microseconds) between two polls, after which
-        // `is_active` is false and the stop caller gets `UnknownSession` even
-        // though its stop was honoured (`do_stop_arriving_while_capture_start_
-        // is_blocked_*` fail deterministically with a 1 ms sleep). The tight
-        // cooperative spin is bounded by the `spawn_blocking(capture.start)`
-        // window. Proper fix (follow-up): hand the outcome receiver to a
-        // pending stop directly in `attach_handles` instead of polling.
-        tokio::task::yield_now().await;
-    }
 }
 
 /// Cancels `id`: marks it cancelled and performs the stage-appropriate
@@ -677,6 +633,13 @@ mod tests {
         release_tx.send(()).unwrap();
         let start_result = start_task.await.unwrap();
         assert!(start_result.is_ok(), "do_start itself still succeeds once capture.start() unblocks");
+        // Let the pipeline finalise COMPLETELY (slot freed) before the stop
+        // task gets scheduled again: with the old poll-for-handles design
+        // this window produced `UnknownSession` for an honoured stop (CI
+        // task 6882); `StopRequest::Pending` hands the receiver over inside
+        // `attach_handles`' lock, so the outcome survives the slot being freed.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!state.sessions.is_active(&id), "test premise: the session already finalised and freed its slot");
 
         let stop_result = stop_task.await.unwrap();
         assert!(

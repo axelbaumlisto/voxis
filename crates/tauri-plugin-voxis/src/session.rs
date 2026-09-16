@@ -114,6 +114,25 @@ pub struct ActiveSession {
     /// later/duplicate `stop()` landing in the same window \u2014 see
     /// `trigger_stop`.
     pub pending: Option<ControlSignal>,
+    /// `do_stop` callers whose `Stop` landed while `handles` was still
+    /// `None`. Each gets the session's outcome receiver the instant
+    /// `attach_handles` runs -- inside the same lock hold, BEFORE the
+    /// pending `Stop` is triggered -- so a stop honoured in the start
+    /// window can never be answered with `UnknownSession` just because the
+    /// pipeline finalised (mock capture: microseconds; CI: observed) before
+    /// the caller's next poll saw the handles.
+    pub stop_waiters: Vec<tokio::sync::oneshot::Sender<watch::Receiver<Option<Outcome>>>>,
+}
+
+/// What `SessionGuard::request_stop` hands back to `commands::do_stop`.
+pub enum StopRequest {
+    /// Handles were attached: the `Stop` has been signalled; await this.
+    Now(watch::Receiver<Option<Outcome>>),
+    /// Handles not attached yet: the `Stop` is pending and will be applied
+    /// by `attach_handles`, which also resolves this with the receiver.
+    /// Dropped without a value only if the session is rolled back before
+    /// handles ever attach (`do_start`'s capture-failure path).
+    Pending(tokio::sync::oneshot::Receiver<watch::Receiver<Option<Outcome>>>),
 }
 
 /// Holds at most one `ActiveSession` \u2014 single-flight across the whole
@@ -140,7 +159,7 @@ impl SessionGuard {
             return Err(PluginError::AlreadyRecording);
         }
         let id = SessionId::new();
-        *guard = Some(ActiveSession { id: id.clone(), mode, stage: Stage::Recording, handles: None, pending: None });
+        *guard = Some(ActiveSession { id: id.clone(), mode, stage: Stage::Recording, handles: None, pending: None, stop_waiters: Vec::new() });
         Ok(id)
     }
 
@@ -158,6 +177,12 @@ impl SessionGuard {
         if let Some(active) = guard.as_mut() {
             if &active.id == id {
                 active.handles = Some(handles);
+                let rx = active.handles.as_ref().map(|h| h.outcome_rx.clone());
+                for waiter in active.stop_waiters.drain(..) {
+                    if let Some(rx) = rx.clone() {
+                        let _ = waiter.send(rx);
+                    }
+                }
                 match active.pending.take() {
                     Some(ControlSignal::Cancel) => Self::trigger_cancel(active),
                     Some(ControlSignal::Stop) => Self::trigger_stop(active),
@@ -194,14 +219,21 @@ impl SessionGuard {
     /// `panic = "abort"` release profile, crashed the whole app).
     /// Returns `false` if `id` isn't the active session (same
     /// `UnknownSession` contract `signal()` had for that case).
-    pub fn request_stop(&self, id: &SessionId) -> bool {
+    pub fn request_stop(&self, id: &SessionId) -> Option<StopRequest> {
         let mut guard = self.active.lock().unwrap();
         match guard.as_mut() {
             Some(active) if &active.id == id => {
                 Self::trigger_stop(active);
-                true
+                match active.handles.as_ref() {
+                    Some(handles) => Some(StopRequest::Now(handles.outcome_rx.clone())),
+                    None => {
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        active.stop_waiters.push(tx);
+                        Some(StopRequest::Pending(rx))
+                    }
+                }
             }
-            _ => false,
+            _ => None,
         }
     }
 
