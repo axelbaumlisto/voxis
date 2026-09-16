@@ -97,8 +97,16 @@ jobs:
           echo "=== Disk ==="
           FREE_GB=$(df -BG /home/spex --output=avail | tail -1 | tr -d ' G')
           echo "free: ${FREE_GB}G"
-          if [ "$FREE_GB" -lt 100 ]; then
-            echo "ERROR: only ${FREE_GB}G free (need >= 100G)"
+          # 60G, not 100G: a warm full build (Linux image + Windows target +
+          # VM overlay writes + artifacts) measured well under 30G on
+          # 2026-09-17 (task 6937 ran to the DMG with 106G free at start and
+          # ended with 87G). The host is shared with other projects' CI
+          # worktrees, so free space swings ±15G within minutes; three v0.1.6
+          # attempts died at 92G/92G/99G against the old 100G line for no
+          # real reason. Below 60G the risk is genuine (the qcow2 overlay
+          # and docker layers can no longer grow) -- keep that as the floor.
+          if [ "$FREE_GB" -lt 60 ]; then
+            echo "ERROR: only ${FREE_GB}G free (need >= 60G)"
             exit 1
           fi
           echo "=== Docker ==="
