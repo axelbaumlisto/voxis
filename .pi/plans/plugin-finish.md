@@ -13,6 +13,7 @@ A4. Review пилюли раунд 2 (fresh) → commit. ✅ A1/A2 `naked@8ebd9e
 A5. ✅ `naked@dcce7737`→rebased. (владелец) **Клавиатура**: когда экранная клавиатура перекрывает пилюлю, она должна подниматься РОВНО на высоту, нужную чтобы быть видимой
     (прилипнуть к верхнему краю клавиатуры/нижнему краю видимой области панелей), а не прыгать вверх на пол-экрана. Разобраться, что сейчас
     двигает её (visualViewport vs layout viewport vs `--keyboard-inset` naked) — замерить на iPad через CDP при открытой клавиатуре.
+A7. ✅ селектор тем в naked Settings `e6c21b72` (корень: deps.theme не доходил до пилюли). A5b. ✅ KeyPanel-зазор от реального top `.keypanel` `b50f6b7d`+`bb0e5db9` (iPad: 632 vs 644). iOS floor обратно 16 (владелец): voxis `0a7ac08`, naked `9fcdc014` — собрано на 16.1, установлено.
 A6. ✅ voxis `616cc2c` (guest-js 0.2.0, review R1 REJECT-FIX→fixed) + naked контейнер. **PR naked#1** `voxis-plugin→main` открыт (rebased на 4d7f5812). (владелец) **Полная поддержка тем Voxis** в пилюле: размер из манифеста темы (`overlay_width/height`, напр. lavalamp 120×120,
     all_aquarium 340×170), тема рендерится как в Voxis desktop (WebGL и т.д.), а не сплющена в 64px («пунктир»). Дизайн: idle = компактная
     ручка (кольцо в цвете темы, 44–64px, без GPU-анимации → батарея); recording/transcribing = раскрытие до размера темы, рост от угла
