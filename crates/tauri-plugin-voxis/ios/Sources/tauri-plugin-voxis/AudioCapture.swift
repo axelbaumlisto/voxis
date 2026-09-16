@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import Tauri
 import UIKit
+import VoxisAudioMath
 
 /// Rust-facing error shape (`mobile.rs`'s `map_invoke_error` switches on
 /// `code`); `message` is what `PluginInvokeError::InvokeRejected`
@@ -12,10 +13,13 @@ struct VoxisCaptureError: Error {
 
     static let alreadyRunning = VoxisCaptureError(message: "capture already running", code: "ALREADY_RUNNING")
     static let notRunning = VoxisCaptureError(message: "capture not running", code: "NOT_RUNNING")
-    // Task 8 acceptance #4: denial carries a Settings deep-link hint
-    // (`UIApplication.openSettingsURLString`) -- `VoxisPlugin.startCapture`
-    // attaches it as `reject(...,data:)` rather than baking a URL string
-    // into this shared error type, since only that one call site needs it.
+    // Task 8 acceptance #4: denial carries a Settings deep-link hint --
+    // baked directly into `message` below (review fix, BLIND_SDK_swift.md
+    // finding #1: an earlier revision carried `UIApplication.
+    // openSettingsURLString` as reject `data` instead, but
+    // `mobile.rs::map_invoke_error` never read it, so that machinery had
+    // no reader on either side of the bridge; the message text alone is
+    // the hint the frontend actually gets).
     static let permissionDenied = VoxisCaptureError(
         message: "microphone permission denied -- open Settings to grant microphone access",
         code: "PERMISSION_DENIED"
@@ -46,33 +50,6 @@ struct CaptureStatsWire: Encodable {
     let durationMs: UInt64
     let samples: Int
     let peakRms: Float
-}
-
-/// Tracks the peak (not average) RMS observed since the last
-/// `takePeak()` -- Swift-side mirror of desktop's own
-/// `WindowPeakAccumulator` (`crates/tauri-plugin-voxis/src/desktop/pure.rs`):
-/// `observe` folds each reading in via `max`, `takePeak` drains and
-/// resets to 0. `NSLock`-guarded because `observe` runs on the capture
-/// queue (tap callbacks) while `takePeak` runs on the same queue's timer
-/// -- serialized in practice (both hop through `queue`), but the lock
-/// keeps this type correct even if that changes.
-final class WindowPeakAccumulator {
-    private var peak: Float = 0
-    private let lock = NSLock()
-
-    func observe(_ rms: Float) {
-        lock.lock()
-        defer { lock.unlock() }
-        peak = max(peak, rms)
-    }
-
-    func takePeak() -> Float {
-        lock.lock()
-        defer { lock.unlock() }
-        let value = peak
-        peak = 0
-        return value
-    }
 }
 
 /// Level sample sent through the Rust-created `Channel` every 250 ms --
@@ -198,7 +175,7 @@ final class VoxisAudioCapture {
                 return
             }
 
-            self.requestPermissionIfNeeded { granted in
+            MicPermission.resolve { granted in
                 self.queue.async {
                     guard granted else {
                         completion(.failure(.permissionDenied))
@@ -206,48 +183,6 @@ final class VoxisAudioCapture {
                     }
                     self.startEngine(path: path, capSamples: capSamples, onLevel: onLevel, completion: completion)
                 }
-            }
-        }
-    }
-
-    /// Task 8 acceptance #4: `AVAudioApplication.requestRecordPermission`
-    /// (iOS 17) is asynchronous by design -- its completion runs on an
-    /// arbitrary queue, never blocking the caller. This method never
-    /// waits on it with a semaphore/`DispatchGroup.wait()`; the whole
-    /// point of taking a `completion` closure here (rather than
-    /// returning `Bool`) is that the caller's own `queue.async` block has
-    /// already returned control to the dispatch queue by the time the
-    /// permission prompt (if shown) is answered.
-    private func requestPermissionIfNeeded(_ completion: @escaping (Bool) -> Void) {
-        if #available(iOS 17.0, *) {
-            switch AVAudioApplication.shared.recordPermission {
-            case .granted:
-                completion(true)
-            case .denied:
-                completion(false)
-            case .undetermined:
-                AVAudioApplication.requestRecordPermission { granted in
-                    completion(granted)
-                }
-            @unknown default:
-                completion(false)
-            }
-        } else {
-            // iOS 16 (owner 2026-09-16: «пусть работает и на 16-й»): the
-            // pre-17 permission API lives on AVAudioSession. Deprecated in
-            // 17 but still the only one available on 16 -- same three states.
-            let session = AVAudioSession.sharedInstance()
-            switch session.recordPermission {
-            case .granted:
-                completion(true)
-            case .denied:
-                completion(false)
-            case .undetermined:
-                session.requestRecordPermission { granted in
-                    completion(granted)
-                }
-            @unknown default:
-                completion(false)
             }
         }
     }
@@ -306,8 +241,8 @@ final class VoxisAudioCapture {
         // the compiler flags they pass -- explicit `#available` checks
         // around every `AVAudioApplication` use keep this file correct
         // either way, matching the style already used for the mute
-        // notification observer in `init()` and
-        // `requestPermissionIfNeeded` below.
+        // notification observer in `init()` and `MicPermission.resolve`
+        // (`MicPermission.swift`).
         if #available(iOS 17.0, *) {
             muted = AVAudioApplication.shared.isInputMuted
         }
@@ -396,19 +331,15 @@ final class VoxisAudioCapture {
         // `installTap` buffer size varies by device/route, so this
         // explicit re-chunking of the (already-converted, 16kHz) signal
         // keeps the level metric's granularity comparable across
-        // backends regardless of the native tap buffer size.
-        let subChunkSamples = max(1, Int(Self.sampleRate * 0.010))
-        var index = 0
-        var peakSinceLastEmit: Float = 0
-        while index < chunk.count {
-            let end = min(index + subChunkSamples, chunk.count)
-            let sub = chunk[index..<end]
-            let sumSquares = sub.reduce(Float(0)) { $0 + $1 * $1 }
-            let rms = (sumSquares / Float(sub.count)).squareRoot()
-            windowPeak.observe(rms)
-            peakSinceLastEmit = max(peakSinceLastEmit, rms)
-            index = end
-        }
+        // backends regardless of the native tap buffer size. S2
+        // (BLIND_SDK_swift.md finding #2): the actual sub-chunking/RMS math
+        // now lives in `LevelMath.subChunkPeakRMS` (`VoxisAudioMath`
+        // target), tested against the same fixture numbers
+        // `desktop/pure.rs` uses -- `observe`'s own max-fold makes
+        // observing this single pre-reduced peak equivalent to observing
+        // every sub-chunk RMS individually, so behaviour is unchanged.
+        let peakSinceLastEmit = LevelMath.subChunkPeakRMS(chunk, sampleRate: Self.sampleRate)
+        windowPeak.observe(peakSinceLastEmit)
 
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -427,16 +358,12 @@ final class VoxisAudioCapture {
         // (`capture.rs`'s own doc on `AudioCapture::start`) and this
         // buffer is already the 16kHz-converted signal, so no rate
         // scaling is needed here (unlike desktop's `CpalCapture`, whose
-        // native device rate is unknown ahead of time).
-        if samples.count + chunk.count >= capSamples {
-            let remaining = capSamples - samples.count
-            if remaining > 0 {
-                samples.append(contentsOf: chunk.prefix(remaining))
-            }
-            capHit = true
-        } else {
-            samples.append(contentsOf: chunk)
-        }
+        // native device rate is unknown ahead of time). Slicing itself is
+        // `LevelMath.selfCapSlice` (S2), tested against the same
+        // `accumulate_capped` fixture numbers `desktop/pure.rs` uses.
+        let (toAppend, hit) = LevelMath.selfCapSlice(existingCount: samples.count, chunk: chunk, capSamples: capSamples)
+        samples.append(contentsOf: toAppend)
+        capHit = hit
     }
 
     // MARK: - level ticks (250ms)
@@ -494,13 +421,16 @@ final class VoxisAudioCapture {
         // yet, which is NOT the same condition as "muted" and must not
         // flash `muted: true` in the overlay before any audio has had a
         // chance to arrive.
-        let nearSilentThreshold: Float = 0.0005
-        if heuristicEligible && peak < nearSilentThreshold {
-            consecutiveNearSilentWindows += 1
-        } else {
-            consecutiveNearSilentWindows = 0
-        }
-        isMuted = isMuted || (heuristicEligible && consecutiveNearSilentWindows >= 2)
+        // S2 (BLIND_SDK_swift.md finding #2): the counter/threshold logic
+        // itself now lives in `LevelMath.advanceNearSilentWindowCount`/
+        // `muteHeuristicTriggered` (`VoxisAudioMath` target) -- same
+        // `nearSilentThreshold`/2-window rule, tested in isolation.
+        consecutiveNearSilentWindows = LevelMath.advanceNearSilentWindowCount(
+            current: consecutiveNearSilentWindows,
+            peak: peak,
+            eligible: heuristicEligible
+        )
+        isMuted = isMuted || LevelMath.muteHeuristicTriggered(consecutiveNearSilentWindows: consecutiveNearSilentWindows, eligible: heuristicEligible)
 
         let sample = LevelSampleWire(rms: peak, peak: peak, muted: isMuted, capHit: hit)
         try? levelChannel?.send(sample)

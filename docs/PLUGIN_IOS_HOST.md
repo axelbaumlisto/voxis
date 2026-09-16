@@ -124,6 +124,35 @@ first `cargo tauri ios build` too:
   produce libapp.a" ordering issues apply yet. Task 9a's Live Activity work **will**
   need a WidgetBundle target and inherits those lessons at that point, not before.
 
+## Running the pure-math Swift tests (`swift test`, no device/Tauri needed)
+
+`ios/Sources/VoxisAudioMath` (S2, `research/plugin-plan/BLIND_SDK_swift.md` finding #2)
+holds the level/cap/WAV rules lifted out of `AudioCapture.swift` — `LevelMath`
+(sub-chunk peak RMS, self-cap slicing, the near-silent/mute 2-window heuristic) and
+`WavWriter.encode` (byte-for-byte mirror of `voxis_core::audio_wav::samples_to_wav`) —
+as a Tauri-free library target, asserted by `ios/Tests/tauri-plugin-voxisTests` against
+the SAME fixture numbers `src/desktop/pure.rs`/`voxis_core::audio_wav`'s own Rust tests
+use. Plain `cd ios && swift test` does **not** work for this package: SwiftPM plans a
+build of every target in the manifest regardless of which target you're testing, which
+includes the main `tauri-plugin-voxis` target and its `Tauri` dependency — both `import
+UIKit`, which does not exist for a macOS host build, so a bare `swift test` always fails
+trying to compile them. Build the test bundle *product* by name first (that only pulls
+in `VoxisAudioMath` + the test target, never `tauri-plugin-voxis`/`Tauri`), then run the
+already-built bundle:
+
+```bash
+cd crates/tauri-plugin-voxis/ios
+swift build --product tauri-plugin-voxisPackageTests
+swift test --skip-build
+```
+
+On a Mac where the invoking shell itself is running under Rosetta translation (`arch`
+prints `i386`/`x86_64` on Apple Silicon), prefix both commands with `arch -arm64` — the
+SwiftPM XCTest harness otherwise builds/loads an arm64 bundle but expects (and fails to
+dlopen) an x86_64 one, unrelated to this package's own code. `scripts/check-ios-build.sh`
+runs both commands (with the `arch -arm64` prefix) after its existing `cargo build
+--target aarch64-apple-ios*` gates.
+
 ## `[T8.5]` device checklist (Simulator first, then iPad stand)
 
 Not run yet — owned by Task 8.5, listed here as the draft checklist this document

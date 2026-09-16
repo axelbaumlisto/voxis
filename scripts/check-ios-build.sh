@@ -20,3 +20,19 @@ cargo build -p tauri-plugin-voxis --target aarch64-apple-ios-sim
 
 # Spotlight indexing the target dir slows/derails iOS cross-builds; skip it.
 [ -d ../target ] && touch ../target/.metadata_never_index || true
+
+# S2/S3 (BLIND_SDK_swift.md finding #2): the pure numeric level/cap/WAV
+# rules live in the Tauri-free `VoxisAudioMath` SwiftPM target
+# (`ios/Sources/VoxisAudioMath`) precisely so they're testable on a plain
+# macOS host -- but `swift test` with no arguments still plans a build of
+# EVERY target in the package (a SwiftPM default, not specific to this
+# package), including the main `tauri-plugin-voxis` target and its `Tauri`
+# dependency, both of which `import UIKit` and cannot compile for a macOS
+# host at all. Building the test bundle PRODUCT by name first (which only
+# pulls in its own dependency graph -- `VoxisAudioMath` + the test target,
+# never `tauri-plugin-voxis`/`Tauri`) and then running `swift test
+# --skip-build` against that already-built bundle is the one invocation
+# order that actually stays inside the Tauri-free subgraph.
+cd ../crates/tauri-plugin-voxis/ios
+arch -arm64 swift build --product tauri-plugin-voxisPackageTests
+arch -arm64 swift test --skip-build

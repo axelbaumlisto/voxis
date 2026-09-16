@@ -1,6 +1,5 @@
 import Foundation
 import Tauri
-import UIKit
 import WebKit
 
 /// `startCapture` args -- field names match `mobile.rs`'s
@@ -76,9 +75,12 @@ class VoxisPlugin: Plugin {
         // `VoxisLiveActivityBridge.shared`'s own doc for why
         // `StopDictationIntent.perform()` needs a static handle onto it.
         VoxisLiveActivityBridge.shared = liveActivity
-        #if DEBUG
-        WavWriter.selfCheck()
-        #endif
+        // S2 (BLIND_SDK_swift.md finding #2): `WavWriter.selfCheck()` used
+        // to run here as a DEBUG-only `assert()` -- compiled out in
+        // release, not a CI gate, and only exercised once an app actually
+        // launched in a debug host. It is now a real XCTest
+        // (`Tests/tauri-plugin-voxisTests/WavWriterTests.swift`, run via
+        // `swift test`), so there is nothing left to call here.
     }
 
     @objc func startCapture(_ invoke: Invoke) throws {
@@ -88,19 +90,16 @@ class VoxisPlugin: Plugin {
             case .success:
                 invoke.resolve()
             case .failure(let error):
-                if error.code == "PERMISSION_DENIED" {
-                    // Task 8 acceptance #4: deep-link hint to Settings,
-                    // carried as reject `data` (not baked into `message`)
-                    // so the Rust/JS side can build its own UI copy
-                    // around the raw URL string.
-                    invoke.reject(
-                        error.message,
-                        code: error.code,
-                        data: .dictionary(["settingsUrl": UIApplication.openSettingsURLString])
-                    )
-                } else {
-                    invoke.reject(error.message, code: error.code)
-                }
+                // Review fix (BLIND_SDK_swift.md finding #1): the Settings
+                // deep-link used to ride along as reject `data` here, but
+                // `mobile.rs::map_invoke_error` only ever read `code`/
+                // `message` -- the `data` dictionary reached no consumer
+                // on either side of the bridge. `error.message` already
+                // spells out "open Settings to grant microphone access"
+                // (`AudioCapture.swift`'s `VoxisCaptureError.permissionDenied`),
+                // so this reject needs nothing beyond the plain message/code
+                // every other command here already sends.
+                invoke.reject(error.message, code: error.code)
             }
         }
     }

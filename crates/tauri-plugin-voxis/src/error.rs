@@ -88,7 +88,15 @@ impl From<voxis_core::profile::ProfileError> for PluginError {
 
 impl From<CaptureError> for PluginError {
     fn from(e: CaptureError) -> Self {
-        PluginError::Capture { message: e.to_string() }
+        match e {
+            // Same `kind: "permissionDenied"` tag as the desktop hotkey
+            // path's own `PluginError::PermissionDenied`
+            // (`hotkey_desktop.rs`) -- one OS-permission-denial shape for
+            // the frontend regardless of which platform/subsystem said no
+            // (S1: iOS mic permission via `mobile.rs::map_invoke_error`).
+            CaptureError::PermissionDenied(message) => PluginError::PermissionDenied { message },
+            other => PluginError::Capture { message: other.to_string() },
+        }
     }
 }
 

@@ -98,18 +98,79 @@ fn map_invoke_error(e: PluginInvokeError) -> CaptureError {
             match err.code.as_deref() {
                 Some("ALREADY_RUNNING") => CaptureError::AlreadyRunning,
                 Some("NOT_RUNNING") => CaptureError::NotRunning,
-                // `capture.rs`'s `CaptureError` has no dedicated
-                // permission/interruption variant (Task 8's allowed
-                // edits to that file are a single doc line, not new
-                // variants) -- both fold into `Backend` with the
-                // original Swift-side message preserved, same as
-                // `PermissionDenied`/`Interrupted` would read if they
-                // existed. `PluginError::from(CaptureError)` still
-                // surfaces the message text to the frontend either way.
+                // S1: the one Swift reject code that has a matching
+                // `CaptureError`/`PluginError` variant to surface through
+                // (`error.rs`'s `From<CaptureError>` routes this to
+                // `PluginError::PermissionDenied`, the SAME `kind` tag
+                // desktop's OS-permission path already uses) -- previously
+                // collapsed into `Backend`, silently losing the fact that
+                // this is a permission denial and not a generic backend
+                // failure.
+                Some("PERMISSION_DENIED") => CaptureError::PermissionDenied(message),
+                // Every reject code `ios/Sources/VoxisPlugin.swift` can
+                // actually produce (from `AudioCapture.swift`'s
+                // `VoxisCaptureError` statics), enumerated for the record:
+                // ALREADY_RUNNING, NOT_RUNNING, PERMISSION_DENIED (all
+                // mapped above), INTERRUPTED, and BACKEND -- neither of the
+                // last two has a dedicated `CaptureError` variant (an
+                // interrupted session is still reported as a backend
+                // failure to `stop()`'s caller, same as today), so both
+                // fold into `Backend` with the original Swift-side message
+                // preserved.
                 _ => CaptureError::Backend(message),
             }
         }
         other => CaptureError::Backend(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri::plugin::mobile::ErrorResponse;
+
+    use crate::error::PluginError;
+
+    fn rejected(code: &str, message: &str) -> PluginInvokeError {
+        PluginInvokeError::InvokeRejected(ErrorResponse {
+            code: Some(code.to_string()),
+            message: Some(message.to_string()),
+            data: (),
+        })
+    }
+
+    /// S1 acceptance test: a Swift `PERMISSION_DENIED` reject must reach
+    /// the frontend as `PluginError`'s `permissionDenied` `kind` tag --
+    /// the SAME shape desktop's own OS-permission-denial path
+    /// (`hotkey_desktop.rs`'s `PluginError::PermissionDenied`) already
+    /// serializes, not collapsed into the generic `capture` kind.
+    #[test]
+    fn permission_denied_reject_maps_to_permission_denied_capture_error() {
+        let err = map_invoke_error(rejected("PERMISSION_DENIED", "microphone permission denied"));
+        assert!(matches!(err, CaptureError::PermissionDenied(ref m) if m == "microphone permission denied"));
+    }
+
+    #[test]
+    fn permission_denied_capture_error_serializes_with_permission_denied_kind() {
+        let err = map_invoke_error(rejected("PERMISSION_DENIED", "microphone permission denied"));
+        let plugin_err: PluginError = err.into();
+        let value = serde_json::to_value(plugin_err).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({"kind": "permissionDenied", "message": "microphone permission denied"})
+        );
+    }
+
+    #[test]
+    fn already_running_and_not_running_codes_still_map_as_before() {
+        assert!(matches!(map_invoke_error(rejected("ALREADY_RUNNING", "x")), CaptureError::AlreadyRunning));
+        assert!(matches!(map_invoke_error(rejected("NOT_RUNNING", "x")), CaptureError::NotRunning));
+    }
+
+    #[test]
+    fn interrupted_and_unknown_codes_still_collapse_into_backend() {
+        assert!(matches!(map_invoke_error(rejected("INTERRUPTED", "session interruption")), CaptureError::Backend(ref m) if m == "session interruption"));
+        assert!(matches!(map_invoke_error(rejected("BACKEND", "boom")), CaptureError::Backend(ref m) if m == "boom"));
     }
 }
 
