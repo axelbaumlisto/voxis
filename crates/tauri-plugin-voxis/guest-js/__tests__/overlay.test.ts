@@ -349,41 +349,24 @@ describe("<voxis-overlay> driver: \"host\" [T10-overlay]", () => {
     otherContainer.remove();
   });
 
-  it("pill press dispatches voxis-overlay-press and never starts/stops a session", async () => {
+  it("pill press is pure visual: never starts/stops a session and emits no voxis-overlay-press event (host owns press)", async () => {
     const { client } = createMockClient();
     const el = mountOverlay(container, { driver: "host", client });
     const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
-    const phases: string[] = [];
-    el.addEventListener("voxis-overlay-press", (e) => {
-      phases.push((e as CustomEvent<{ phase: string }>).detail.phase);
+    let pressEvents = 0;
+    el.addEventListener("voxis-overlay-press", () => {
+      pressEvents += 1;
     });
 
     pill.dispatchEvent(pointerEvent("pointerdown"));
     pill.dispatchEvent(pointerEvent("pointerup"));
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(phases).toEqual(["down", "up"]);
-    expect(client.start).not.toHaveBeenCalled();
-    expect(client.stop).not.toHaveBeenCalled();
-  });
-
-  it("pointercancel/lostpointercapture also dispatch an 'up' phase, never start/stop", async () => {
-    const { client } = createMockClient();
-    const el = mountOverlay(container, { driver: "host", client });
-    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
-    const phases: string[] = [];
-    el.addEventListener("voxis-overlay-press", (e) => {
-      phases.push((e as CustomEvent<{ phase: string }>).detail.phase);
-    });
-
     pill.dispatchEvent(pointerEvent("pointerdown"));
     pill.dispatchEvent(pointerEvent("pointercancel"));
-    pill.dispatchEvent(pointerEvent("pointerdown"));
     pill.dispatchEvent(pointerEvent("lostpointercapture"));
     await Promise.resolve();
+    await Promise.resolve();
 
-    expect(phases).toEqual(["down", "up", "down", "up"]);
+    expect(pressEvents).toBe(0);
     expect(client.start).not.toHaveBeenCalled();
     expect(client.stop).not.toHaveBeenCalled();
   });
@@ -861,6 +844,115 @@ describe("<voxis-overlay> compact<->expanded lifecycle [A6]", () => {
     const pill2 = el2.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
     expect({ x: parseFloat(pill2.style.left), y: parseFloat(pill2.style.top) }).toEqual(compactPos);
     el2.remove();
+  });
+});
+
+describe("<voxis-overlay> live seams setPosition/setTheme [T3]", () => {
+  let container: HTMLDivElement;
+
+  function countingThemeModule() {
+    const calls = { mount: 0, unmount: 0 };
+    const module = {
+      mount: vi.fn(() => {
+        calls.mount += 1;
+        return { unmount: vi.fn(() => { calls.unmount += 1; }) };
+      }),
+    };
+    return { module, calls };
+  }
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("setPosition while compact moves the pill (clamped with the compact size) and records the resting spot, without mounting a theme", () => {
+    const { module, calls } = countingThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+
+    el.setPosition({ x: 30, y: 40 });
+    expect(el.lifecycle).toBe("compact");
+    expect(parseFloat(pill.style.left)).toBe(30);
+    expect(parseFloat(pill.style.top)).toBe(40);
+    expect(calls.mount).toBe(0);
+  });
+
+  it("setPosition clamps to the CURRENT size (expanded uses the theme size) and leaves the pre-grow compact spot intact for shrink", () => {
+    const { module } = countingThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+
+    el.setPosition({ x: 20, y: 20 });
+    const compactSpot = { x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) };
+
+    el.applyState("recording"); // expanded, 120x120
+    // Overshoot far right — the clamp must use the expanded (120px) width.
+    el.setPosition({ x: 100000, y: 20 });
+    expect(parseFloat(pill.style.left)).toBe(window.innerWidth - 120);
+
+    el.applyState("idle"); // shrink: returns to the pre-grow compact spot, not the expanded setPosition
+    expect({ x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) }).toEqual(compactSpot);
+  });
+
+  it("setTheme while compact only records the new theme/size (no mount, no resize event); the next expansion adopts it", () => {
+    const { module, calls } = countingThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
+    const resizes: unknown[] = [];
+    el.addEventListener("voxis-overlay-resize", () => resizes.push(1));
+
+    el.setTheme("all_aquarium");
+    expect(calls.mount).toBe(0);
+    expect(el.lifecycle).toBe("compact");
+    expect(resizes.length).toBe(0);
+
+    el.applyState("recording");
+    expect(el.size).toEqual({ width: 340, height: 170 });
+    expect(calls.mount).toBe(1);
+  });
+
+  it("setTheme while expanded swaps in place: exactly one unmount + one mount, a fresh theme container, a resize when the manifest size differs, and no element re-creation", () => {
+    const { module, calls } = countingThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
+
+    el.applyState("recording"); // expanded, lavalamp 120x120, mount #1
+    expect(calls.mount).toBe(1);
+    expect(el.size).toEqual({ width: 120, height: 120 });
+    const containerBefore = el.shadowRoot!.querySelector(".theme-container");
+
+    const resizes: Array<{ width: number; height: number; state: string }> = [];
+    el.addEventListener("voxis-overlay-resize", (e) => {
+      resizes.push((e as CustomEvent<{ width: number; height: number; state: string }>).detail);
+    });
+
+    el.setTheme("all_aquarium"); // 340x170, differs
+    expect(calls.unmount).toBe(1);
+    expect(calls.mount).toBe(2);
+    const containerAfter = el.shadowRoot!.querySelector(".theme-container");
+    expect(containerAfter).not.toBe(containerBefore);
+    expect(el.size).toEqual({ width: 340, height: 170 });
+    expect(resizes).toEqual([{ width: 340, height: 170, state: "expanded" }]);
+    expect(container.querySelectorAll("voxis-overlay").length).toBe(1);
+    expect(el.isConnected).toBe(true);
+  });
+
+  it("setTheme while expanded to a same-sized theme still remounts once but dispatches no resize event", () => {
+    const { module, calls } = countingThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
+    el.applyState("recording"); // lavalamp 120x120
+    const resizes: unknown[] = [];
+    el.addEventListener("voxis-overlay-resize", () => resizes.push(1));
+
+    el.setTheme("metaballs"); // also 120x120
+    expect(calls.mount).toBe(2);
+    expect(calls.unmount).toBe(1);
+    expect(resizes.length).toBe(0);
   });
 });
 

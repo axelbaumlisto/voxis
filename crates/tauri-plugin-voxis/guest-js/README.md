@@ -112,14 +112,28 @@ webview unmodified).
   client.onResult((r) => el.applyResult(r));
   ```
 
-  In this mode the pill's pointer handlers only arm dragging and dispatch a
-  `"voxis-overlay-press"` `CustomEvent` (`detail: { phase: "down" | "up" }`)
-  for a host driving hold-to-talk itself; window `blur` is a no-op. **Use
-  this mode whenever a host already has its own event subscription** — the
-  default mode's own subscription and a host's own subscription would
-  otherwise both react to the same events independently (two controllers,
-  one session), which is the class of bug the "host" driver exists to rule
-  out entirely, not just discourage.
+  This mode is a pure visual/indicator: the pill's pointer handling only
+  arms dragging — no session is started here and no press event is
+  emitted. A host driving hold-to-talk wires press from its own container
+  handlers (its `setPointerCapture` on a light-DOM ancestor retargets the
+  pointer away from the shadow-DOM pill, so a press event dispatched from
+  the element could not reach the host reliably anyway); window `blur` is
+  a no-op. **Use this mode whenever a host already has its own event
+  subscription** — the default mode's own subscription and a host's own
+  subscription would otherwise both react to the same events
+  independently (two controllers, one session), which is the class of bug
+  the "host" driver exists to rule out entirely, not just discourage.
+
+  Position and theme are live seams — a host repositions or re-themes the
+  running element instead of remounting it:
+
+  ```ts
+  el.setPosition({ x, y }); // clamped with the current size; no remount
+  el.setTheme("lavalamp");  // re-resolves module + manifest size; while
+                            // expanded, swaps only the theme container
+                            // (fresh WebGL context) and emits
+                            // "voxis-overlay-resize" if the size changed
+  ```
 
 ### Other `MountOverlayOptions`
 

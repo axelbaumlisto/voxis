@@ -31,19 +31,24 @@
  *   call `start`/`stop`/`holdLease` directly.
  * - `"host"`: for a host app that already holds its own long-lived
  *   `voxis://state`/`voxis://result` subscription (e.g. a `useVoxisRuntime`-
- *   style hook) and only wants this element as a *visual* indicator +
- *   drag-positioned pill, without a second competing subscriber/
- *   controller. No client is created or required; the pill's pointer
- *   handlers only arm the drag controller and dispatch a
- *   `"voxis-overlay-press"` `CustomEvent` (`detail: {phase: "down" |
- *   "up"}}`) on the element itself — the host can listen for that to
- *   implement its own hold-to-talk if it wants one, or ignore it
- *   entirely and just call `start`/`stop` from its own UI. The host
- *   drives the indicator/theme by calling `applyState`/`applyLevel`/
- *   `applyResult` with whatever it already receives from its own
- *   subscription — the exact same internal update path `wireClientEvents`
- *   uses in `"client"` mode (single code path, see `applyState` etc.
- *   below). Window `blur` is a no-op in this mode (nothing here is
+ *   style hook) and only wants this element as a pure *visual*
+ *   indicator + drag-positioned pill, without a second competing
+ *   subscriber/controller. No client is created or required, and no
+ *   session is ever started here — pointer handling is left entirely to
+ *   `wireDrag` (drag/position), with no `"voxis-overlay-press"` event or
+ *   any other session/press signal emitted. A host that wants
+ *   hold-to-talk drives press from its own container handlers: the
+ *   host's own `setPointerCapture` on a light-DOM ancestor retargets the
+ *   pointer away from the shadow-DOM `.pill`, so a `pointerup` dispatched
+ *   from here would never reliably reach the host anyway (see naked's
+ *   `useVoxisOverlayMount` doc) — the element does not pretend to offer
+ *   an API the only real host cannot consume. The host drives the
+ *   indicator/theme by calling `applyState`/`applyLevel`/`applyResult`
+ *   with whatever it already receives from its own subscription — the
+ *   exact same internal update path `wireClientEvents` uses in `"client"`
+ *   mode (single code path, see `applyState` etc. below), and repositions
+ *   or re-themes the live element via `setPosition`/`setTheme` (no
+ *   remount). Window `blur` is a no-op in this mode (nothing here is
  *   started, so nothing here needs stopping).
  *
  * Compact/expanded lifecycle (A6 — full theme support):
@@ -451,6 +456,57 @@ export class VoxisOverlayElement extends HTMLElement {
     return this.lifecycleState;
   }
 
+  /**
+   * Live-move the pill to a new top-left `{x, y}` without tearing the
+   * element (or its mounted theme/WebGL context) down — the host-facing
+   * seam a `driver: "host"` caller uses on every placement drag-commit,
+   * in place of remounting. Clamps to the viewport/safe area using the
+   * *current* on-screen size (`currentSize()`, i.e. compact vs expanded),
+   * exactly like every other position this element computes. While
+   * compact, this also becomes the pill's resting spot, so it's recorded
+   * as `compactPosition`; while expanded, `compactPosition` is left alone
+   * so a later `shrinkToCompact` still returns to the pre-grow spot.
+   */
+  setPosition(p: Point): void {
+    if (!this.pillEl || !this.config) return;
+    const clamped = clampToViewport(p, this.currentSize(), this.safeArea(), readEffectiveViewport());
+    this.pillEl.style.left = `${clamped.x}px`;
+    this.pillEl.style.top = `${clamped.y}px`;
+    if (this.lifecycleState === "compact") {
+      this.compactPosition = clamped;
+    }
+  }
+
+  /**
+   * Live-swap the theme without re-creating the element — the host-facing
+   * seam a `driver: "host"` caller uses on a theme change, in place of
+   * remounting. Re-resolves the theme module (dropping the cached one so
+   * the next mount picks up the new id) and its manifest size. While
+   * compact the theme isn't mounted, so this only records the new theme/
+   * size for the next `growToExpanded`; while expanded it swaps in a
+   * *fresh* theme container (so a prior theme's WebGL context/canvas
+   * can't leak into the new mount), re-mounts the theme, resizes the
+   * pill, and dispatches `"voxis-overlay-resize"` if the manifest size
+   * changed. Exactly one unmount + one mount per expanded swap.
+   */
+  setTheme(id: string): void {
+    if (!this.config) return;
+    this.config.theme = id;
+    this.resolvedThemeModule = null;
+    const newSize = resolveThemeSize(id);
+    const sizeChanged = newSize.width !== this.expandedSize.width || newSize.height !== this.expandedSize.height;
+    this.expandedSize = newSize;
+    if (this.lifecycleState !== "expanded") return;
+    this.unmountThemeInstance();
+    const fresh = document.createElement("div");
+    fresh.className = "theme-container";
+    this.themeContainerEl.replaceWith(fresh);
+    this.themeContainerEl = fresh;
+    this.applyPillSize(this.currentSize());
+    this.mountThemeInstance();
+    if (sizeChanged) this.dispatchResize();
+  }
+
   private handleViewportChange = (): void => {
     if (!this.pillEl || !this.config) return;
     const snapped = snapToNearestEdge(this.currentPillPos(), this.currentSize(), this.safeArea(), readEffectiveViewport());
@@ -625,10 +681,12 @@ export class VoxisOverlayElement extends HTMLElement {
   }
 
   private wirePointerHandling(config: OverlayConfig): void {
-    if (config.driver === "host") {
-      this.wirePointerHandlingHostDriven();
-      return;
-    }
+    // `driver: "host"` is a pure visual/indicator mode: the host owns the
+    // session and drives press from its own container handlers, so this
+    // element wires no session-controlling pointer handlers at all (drag
+    // arming is handled separately by `wireDrag`). See the module doc
+    // comment's "Driver model" section.
+    if (config.driver === "host") return;
 
     let pointerId: number | null = null;
     let dragThresholdExceeded = false;
@@ -671,26 +729,6 @@ export class VoxisOverlayElement extends HTMLElement {
     this.pillEl.addEventListener("lostpointercapture", endGesture as EventListener);
 
     window.addEventListener("blur", this.handleWindowBlur);
-  }
-
-  /**
-   * `driver: "host"` pointer wiring: never starts/stops a session (the
-   * host owns that) — only dispatches `"voxis-overlay-press"` so a host
-   * that wants hold-to-talk driven by this pill can wire its own
-   * start/stop off it, and leaves drag arming to `wireDrag`'s own
-   * `pointerdown` listener on the same element. No `window` "blur"
-   * listener is added here (nothing is started on this side, so there's
-   * nothing to stop on blur) — `disconnectedCallback` therefore has
-   * nothing session-related to unwind for this driver either.
-   */
-  private wirePointerHandlingHostDriven(): void {
-    const dispatchPress = (phase: "down" | "up") => {
-      this.dispatchEvent(new CustomEvent("voxis-overlay-press", { detail: { phase } }));
-    };
-    this.pillEl.addEventListener("pointerdown", () => dispatchPress("down"));
-    this.pillEl.addEventListener("pointerup", () => dispatchPress("up"));
-    this.pillEl.addEventListener("pointercancel", () => dispatchPress("up"));
-    this.pillEl.addEventListener("lostpointercapture", () => dispatchPress("up"));
   }
 
   private handleWindowBlur = (): void => {
