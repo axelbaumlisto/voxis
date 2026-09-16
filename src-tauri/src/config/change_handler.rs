@@ -42,9 +42,12 @@ impl ConfigChangeHandler for HotkeyChangeHandler {
         _orchestrator_state: &OrchestratorState,
         new: &AppConfig,
     ) -> Result<(), String> {
-        tracing::info!("Hotkey changed, restarting listener");
-        let mut listener = hotkey_state.hotkey_listener.lock().await;
-        listener.restart(app.clone(), &new.hotkey);
+        tracing::info!("Hotkey changed, applying the configured hotkey");
+        let listener = hotkey_state.hotkey_listener.lock().await;
+        // Cleared hotkey => the OS-level hook is DISARMED, not rebound to
+        // some default: while it is armed the process sees every keystroke on
+        // the machine. See `hotkey::HotkeyListener::apply_configured`.
+        listener.apply_configured(app.clone(), &new.hotkey);
         Ok(())
     }
 }

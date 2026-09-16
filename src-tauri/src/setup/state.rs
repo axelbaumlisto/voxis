@@ -127,11 +127,24 @@ pub(super) fn create_app_state(
 
     if enable_hotkey {
         tracing::debug!("Setup: starting hotkey listener for '{}'...", hotkey_str);
-        {
+        let armed = {
             let listener = hotkey_listener.blocking_lock();
-            listener.start(app.handle().clone(), hotkey_str);
+            listener.start(app.handle().clone(), hotkey_str)
+        };
+        if armed {
+            tracing::info!("Hotkey listener started: {}", hotkey_str);
+        } else {
+            // Two refusals land here (see `HotkeyListener::start`): no hotkey is
+            // configured at all, or one is already running. In both cases NO
+            // OS-level hook was installed — and while one IS installed this
+            // process sees every keystroke on the machine — so claiming
+            // "started" would be a lie about the privacy-relevant state.
+            tracing::warn!(
+                "Setup: hotkey listener NOT armed for '{}' \
+                 (no hotkey configured, or a listener is already running)",
+                hotkey_str
+            );
         }
-        tracing::info!("Hotkey listener started: {}", hotkey_str);
     } else {
         tracing::warn!("Setup: hotkey listener NOT started (missing permissions)");
     }
