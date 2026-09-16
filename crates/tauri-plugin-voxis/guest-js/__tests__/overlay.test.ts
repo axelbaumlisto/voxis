@@ -16,7 +16,8 @@
  * value, not as the CSP guarantee itself.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { anchorGrow, cornerPosition, COMPACT_SIZE, mountOverlay, shapeRadius, VoxisOverlayElement, type OverlayCorner } from "../src/overlay";
+import { cornerPosition, COMPACT_SIZE, mountOverlay, VoxisOverlayElement, type OverlayCorner } from "../src/overlay";
+import { OverlaySessionController } from "../src/overlay-session";
 import { clampToViewport, loadPosition, savePosition } from "../src/drag";
 import type { DictationResult, LevelEvent, PluginState } from "../src/types/contract";
 import type { VoxisClient } from "../src/client";
@@ -349,6 +350,18 @@ describe("<voxis-overlay> driver: \"host\" [T10-overlay]", () => {
     otherContainer.remove();
   });
 
+  it("instantiates NO OverlaySessionController (host owns the session); the client driver instantiates exactly one", () => {
+    const { client } = createMockClient();
+    const hostEl = mountOverlay(container, { driver: "host", client }) as unknown as { session: unknown };
+    expect(hostEl.session).toBeNull();
+
+    const clientContainer = document.createElement("div");
+    document.body.appendChild(clientContainer);
+    const clientEl = mountOverlay(clientContainer, { client }) as unknown as { session: unknown };
+    expect(clientEl.session).toBeInstanceOf(OverlaySessionController);
+    clientContainer.remove();
+  });
+
   it("pill press is pure visual: never starts/stops a session and emits no voxis-overlay-press event (host owns press)", async () => {
     const { client } = createMockClient();
     const el = mountOverlay(container, { driver: "host", client });
@@ -466,27 +479,6 @@ describe("<voxis-overlay> under naked's CSP meta tag", () => {
   });
 });
 
-describe("cornerPosition [initialPosition]", () => {
-  const size = { width: 64, height: 64 };
-  const viewport = { width: 390, height: 844 }; // the naked repro's phone viewport
-
-  it("top-left", () => {
-    expect(cornerPosition("top-left", size, viewport)).toEqual({ x: 16, y: 16 });
-  });
-
-  it("top-right", () => {
-    expect(cornerPosition("top-right", size, viewport)).toEqual({ x: 390 - 64 - 16, y: 16 });
-  });
-
-  it("bottom-left", () => {
-    expect(cornerPosition("bottom-left", size, viewport)).toEqual({ x: 16, y: 844 - 64 - 16 });
-  });
-
-  it("bottom-right — same math the element's default has always used", () => {
-    expect(cornerPosition("bottom-right", size, viewport)).toEqual({ x: 390 - 64 - 16, y: 844 - 64 - 16 });
-  });
-});
-
 describe("<voxis-overlay> initialPosition option", () => {
   let container: HTMLDivElement;
   // The overlay's default (idle) size is the compact handle, not the
@@ -569,53 +561,6 @@ describe("<voxis-overlay> initialPosition option", () => {
       initialPosition: "top-left",
     });
     expect(pillPos(el)).toEqual({ x: 12, y: 34 });
-  });
-});
-
-describe("anchorGrow [A6 compact<->expanded growth direction]", () => {
-  const viewport = { width: 400, height: 800 };
-
-  it("grows to the right/down when resting near the top-left (anchors the top-left edge)", () => {
-    const grown = anchorGrow({ x: 10, y: 10 }, COMPACT_SIZE, { width: 120, height: 120 }, viewport);
-    expect(grown).toEqual({ x: 10, y: 10 });
-  });
-
-  it("grows to the left when resting near the right edge (anchors the right edge)", () => {
-    const pos = { x: 400 - COMPACT_SIZE.width - 10, y: 10 };
-    const grown = anchorGrow(pos, COMPACT_SIZE, { width: 120, height: 120 }, viewport);
-    // Right edge stays fixed: pos.x + COMPACT_SIZE.width - 120.
-    expect(grown.x).toBe(pos.x + COMPACT_SIZE.width - 120);
-    expect(grown.y).toBe(10);
-  });
-
-  it("grows upward when resting near the bottom edge (anchors the bottom edge)", () => {
-    const pos = { x: 10, y: 800 - COMPACT_SIZE.height - 10 };
-    const grown = anchorGrow(pos, COMPACT_SIZE, { width: 120, height: 120 }, viewport);
-    expect(grown.x).toBe(10);
-    expect(grown.y).toBe(pos.y + COMPACT_SIZE.height - 120);
-  });
-
-  it("grows left AND upward when resting in the bottom-right corner", () => {
-    const pos = { x: 400 - COMPACT_SIZE.width - 10, y: 800 - COMPACT_SIZE.height - 10 };
-    const grown = anchorGrow(pos, COMPACT_SIZE, { width: 120, height: 120 }, viewport);
-    expect(grown.x).toBe(pos.x + COMPACT_SIZE.width - 120);
-    expect(grown.y).toBe(pos.y + COMPACT_SIZE.height - 120);
-  });
-});
-
-describe("shapeRadius [A6 shape rule]", () => {
-  it("a square no larger than 96px a side is a circle", () => {
-    expect(shapeRadius(COMPACT_SIZE)).toBe("50%");
-    expect(shapeRadius({ width: 96, height: 96 })).toBe("50%");
-  });
-
-  it("a square larger than 96px a side is a rounded rect", () => {
-    expect(shapeRadius({ width: 120, height: 120 })).toBe("16px");
-  });
-
-  it("any non-square size is a rounded rect, regardless of how small", () => {
-    expect(shapeRadius({ width: 64, height: 40 })).toBe("16px");
-    expect(shapeRadius({ width: 340, height: 170 })).toBe("16px");
   });
 });
 

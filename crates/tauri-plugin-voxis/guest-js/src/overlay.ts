@@ -98,73 +98,29 @@ import {
   type Point,
   type SafeArea,
   type Size,
-  type Viewport,
 } from "./drag";
-import { startHoldLease, type Lease } from "./lease";
+import {
+  COMPACT_SIZE,
+  growToExpandedPosition,
+  resolveCurrentSize,
+  resolveInitialPosition,
+  shapeRadius,
+  shrinkToCompactPosition,
+  type OverlayCorner,
+  type OverlayLifecycleState,
+} from "./overlay-geometry";
+import { OverlaySessionController } from "./overlay-session";
 import type { DictationResult, LevelEvent, Mode, PluginState, SessionId } from "./types/contract";
 import type { ThemeInstance, ThemeModule } from "./types/theme-api";
 
 export const TAG_NAME = "voxis-overlay";
 
-/** The pill's fixed idle/error size — see the module doc comment's "Compact/expanded lifecycle" section. */
-export const COMPACT_SIZE: Size = { width: 56, height: 56 };
-
-/** Named starting corners for `MountOverlayOptions.initialPosition` — see that option's doc comment. */
-export type OverlayCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
-
-const CORNER_MARGIN = 16;
-
-/** `"compact"` (idle handle, theme unmounted) or `"expanded"` (theme mounted at its manifest size) — see the module doc comment. */
-export type OverlayLifecycleState = "compact" | "expanded";
-
-/**
- * Resolves a named corner to a top-left `{x, y}` in `viewport`, inset by
- * `CORNER_MARGIN` on the relevant edges — the same math the element's
- * bottom-right default has always used (pre-`initialPosition`, this was
- * inlined as a private `defaultPosition()` method; extracted here as a
- * pure, viewport-injectable function so both `"bottom-right"`'s default
- * behaviour and every other named corner share one implementation, and
- * so it's unit-testable without mounting the custom element). The
- * caller (`connectedCallback`) still runs the result through
- * `clampToViewport` with the real safe area, so this function itself
- * doesn't need to know about safe-area insets.
- */
-export function cornerPosition(corner: OverlayCorner, size: Size, viewport: Viewport): Point {
-  const x = corner === "top-left" || corner === "bottom-left" ? CORNER_MARGIN : viewport.width - size.width - CORNER_MARGIN;
-  const y = corner === "top-left" || corner === "top-right" ? CORNER_MARGIN : viewport.height - size.height - CORNER_MARGIN;
-  return { x, y };
-}
-
-/**
- * Grows (or shrinks) a box from `fromSize` at `pos` to `toSize`, pivoting
- * around whichever edge — independently on each axis — `pos`'s center is
- * already closer to, so the box extends *away* from the nearer edge
- * instead of risking going off-screen (e.g. a pill resting near the
- * right edge grows leftward, keeping its right edge roughly fixed).
- * Pure/unclamped — the caller (`growToExpanded`/`shrinkToCompact`) still
- * runs the result through the existing `clampToViewport`, so an anchor
- * edge itself right at the viewport boundary still ends up on-screen.
- */
-export function anchorGrow(pos: Point, fromSize: Size, toSize: Size, viewport: Viewport): Point {
-  const centerX = pos.x + fromSize.width / 2;
-  const centerY = pos.y + fromSize.height / 2;
-  const nearerRight = viewport.width - centerX < centerX;
-  const nearerBottom = viewport.height - centerY < centerY;
-  const x = nearerRight ? pos.x + fromSize.width - toSize.width : pos.x;
-  const y = nearerBottom ? pos.y + fromSize.height - toSize.height : pos.y;
-  return { x, y };
-}
-
-/**
- * A circle for a square box no larger than 96px a side (the 56×56
- * compact handle, and any theme whose manifest size happens to be a
- * small square) — a rounded rect (16px radius) for everything else,
- * i.e. any non-square size or a square larger than 96px (e.g.
- * lavalamp/metaballs*'s 120×120).
- */
-export function shapeRadius(size: Size): string {
-  return size.width === size.height && size.width <= 96 ? "50%" : "16px";
-}
+// Geometry (`COMPACT_SIZE`, `cornerPosition`, `anchorGrow`, `shapeRadius`)
+// and the `OverlayCorner`/`OverlayLifecycleState` types now live in
+// `overlay-geometry.ts`; re-exported here so their long-standing import
+// paths (`./overlay`) and public names are unchanged.
+export { COMPACT_SIZE, anchorGrow, cornerPosition, shapeRadius } from "./overlay-geometry";
+export type { OverlayCorner, OverlayLifecycleState } from "./overlay-geometry";
 
 export interface MountOverlayOptions {
   theme?: string;
@@ -274,9 +230,8 @@ export class VoxisOverlayElement extends HTMLElement {
   /** Bumped on every connect; a `listen` resolving for an older generation
    * (or after disconnect) unsubscribes itself instead of storing the handle. */
   private eventGeneration = 0;
-  private lease: Lease | null = null;
-  private activeSessionId: SessionId | null = null;
-  private stopRequested = false;
+  /** Client-driver session control (start/stop/hold lease/pending-start race + the four release paths). `null` in `driver: "host"` mode, which never instantiates one. */
+  private session: OverlaySessionController | null = null;
   private currentState: PluginState = "idle";
   private visualViewportTarget: VisualViewport | null = null;
 
@@ -391,14 +346,31 @@ export class VoxisOverlayElement extends HTMLElement {
     // wait for the first compact↔expanded transition.
     this.dispatchResize();
 
-    this.wirePointerHandling(config);
+    // Client-driver session control (pointer/hold/lease + the four
+    // release paths) is delegated to `OverlaySessionController`, and only
+    // instantiated in `driver: "client"` mode. `driver: "host"` is a pure
+    // visual/indicator mode: the host owns the session and drives press
+    // from its own container handlers, so nothing session-related is
+    // constructed here (drag arming is still wired by `wireDrag`). See the
+    // module doc comment's "Driver model" section. The controller is built
+    // before `wireDrag` so its pointer listeners register first, exactly
+    // as the pre-refactor inline handlers did.
+    if (config.driver === "client" && config.client) {
+      this.session = new OverlaySessionController({
+        pill: this.pillEl,
+        mode: config.mode,
+        client: config.client,
+        isDragging: () => this.dragController?.isDragging ?? false,
+      });
+    }
     this.wireDrag(config);
     this.wireClientEvents(config);
 
     // Initial position — `env(safe-area-inset-*)` isn't computable until
     // connected (needs `document.body`); harmless default (bottom-right,
     // clamped) until the first `reposition()`.
-    const initial = loadPosition(config.storageKey) ?? this.resolveInitialPosition(config.initialPosition);
+    const initial =
+      loadPosition(config.storageKey) ?? resolveInitialPosition(config.initialPosition, this.currentSize(), readEffectiveViewport());
     const clamped = clampToViewport(initial, this.currentSize(), this.safeArea(), readEffectiveViewport());
     this.pillEl.style.left = `${clamped.x}px`;
     this.pillEl.style.top = `${clamped.y}px`;
@@ -416,10 +388,9 @@ export class VoxisOverlayElement extends HTMLElement {
     this.unlistenLevel = null;
     this.unlistenResult?.();
     this.unlistenResult = null;
-    this.lease?.stop();
-    this.lease = null;
+    this.session?.destroy();
+    this.session = null;
     this.unmountThemeInstance();
-    window.removeEventListener("blur", this.handleWindowBlur);
     this.visualViewportTarget?.removeEventListener("resize", this.handleViewportChange);
     this.visualViewportTarget?.removeEventListener("scroll", this.handleViewportChange);
     this.visualViewportTarget = null;
@@ -443,7 +414,7 @@ export class VoxisOverlayElement extends HTMLElement {
 
   /** The pill's current on-screen size — `COMPACT_SIZE` or the resolved theme's manifest size, whichever `lifecycleState` is active. Every drag/clamp/snap/corner computation reads this instead of a fixed constant. */
   private currentSize(): Size {
-    return this.lifecycleState === "expanded" ? this.expandedSize : COMPACT_SIZE;
+    return resolveCurrentSize(this.lifecycleState, this.expandedSize);
   }
 
   /** Public read-only mirror of `currentSize()` — for a host that wants to size its own container/layout around the pill (`MountOverlayOptions`/module doc comment's "host-driven mode" note); also carried in the `"voxis-overlay-resize"` event's `detail`. */
@@ -517,13 +488,6 @@ export class VoxisOverlayElement extends HTMLElement {
     }
   };
 
-  /** Resolves `MountOverlayOptions.initialPosition` — see that option's doc comment for the persisted-position-wins contract. */
-  private resolveInitialPosition(initialPosition: Point | OverlayCorner | undefined): Point {
-    if (initialPosition === undefined) return cornerPosition("bottom-right", this.currentSize(), readEffectiveViewport());
-    if (typeof initialPosition === "string") return cornerPosition(initialPosition, this.currentSize(), readEffectiveViewport());
-    return initialPosition;
-  }
-
   private safeArea(): SafeArea {
     try {
       return readSafeAreaInsets(document);
@@ -552,9 +516,9 @@ export class VoxisOverlayElement extends HTMLElement {
     if (this.themeMounted) return;
     const themeModule = this.resolveThemeModule();
     this.themeBridge = createThemeBridge(this.expandedSize, undefined, {
-      cancel: () => {
-        if (this.activeSessionId) void this.stopActive();
-      },
+      // Routes through the session controller (no-op in `driver: "host"`,
+      // which has no controller/session).
+      cancel: () => this.session?.cancel(),
     });
     this.themeInstance = themeModule.mount(this.themeContainerEl, this.themeBridge.api);
     this.themeMounted = true;
@@ -602,9 +566,7 @@ export class VoxisOverlayElement extends HTMLElement {
   private growToExpanded(): void {
     this.compactPosition = this.currentPillPos();
     this.mountThemeInstance();
-    const viewport = readEffectiveViewport();
-    const grown = anchorGrow(this.compactPosition, COMPACT_SIZE, this.expandedSize, viewport);
-    const clamped = clampToViewport(grown, this.expandedSize, this.safeArea(), viewport);
+    const clamped = growToExpandedPosition(this.compactPosition, this.expandedSize, this.safeArea(), readEffectiveViewport());
     this.lifecycleState = "expanded";
     this.applyLifecycleClasses();
     this.applyPillSize(this.expandedSize);
@@ -629,7 +591,7 @@ export class VoxisOverlayElement extends HTMLElement {
   private shrinkToCompact(): void {
     this.unmountThemeInstance();
     const restore = this.compactPosition ?? this.currentPillPos();
-    const clamped = clampToViewport(restore, COMPACT_SIZE, this.safeArea(), readEffectiveViewport());
+    const clamped = shrinkToCompactPosition(restore, this.safeArea(), readEffectiveViewport());
     this.lifecycleState = "compact";
     this.compactPosition = null;
     this.applyLifecycleClasses();
@@ -679,63 +641,6 @@ export class VoxisOverlayElement extends HTMLElement {
       },
     });
   }
-
-  private wirePointerHandling(config: OverlayConfig): void {
-    // `driver: "host"` is a pure visual/indicator mode: the host owns the
-    // session and drives press from its own container handlers, so this
-    // element wires no session-controlling pointer handlers at all (drag
-    // arming is handled separately by `wireDrag`). See the module doc
-    // comment's "Driver model" section.
-    if (config.driver === "host") return;
-
-    let pointerId: number | null = null;
-    let dragThresholdExceeded = false;
-
-    const onPointerDown = (e: PointerEvent) => {
-      if (pointerId !== null) return;
-      pointerId = e.pointerId;
-      dragThresholdExceeded = false;
-      if (config.mode === "hold") {
-        void this.startActive("hold");
-      }
-    };
-
-    const onPointerMove = () => {
-      if (pointerId === null) return;
-      if (this.dragController?.isDragging) dragThresholdExceeded = true;
-    };
-
-    const endGesture = (e: PointerEvent) => {
-      if (e.pointerId !== pointerId) return;
-      pointerId = null;
-      if (config.mode === "hold") {
-        void this.stopActive();
-        return;
-      }
-      // Toggle: only a real tap (no drag) flips recording state.
-      if (!dragThresholdExceeded) {
-        if (this.activeSessionId) {
-          void this.stopActive();
-        } else {
-          void this.startActive("toggle");
-        }
-      }
-    };
-
-    this.pillEl.addEventListener("pointerdown", onPointerDown);
-    this.pillEl.addEventListener("pointermove", onPointerMove);
-    this.pillEl.addEventListener("pointerup", endGesture);
-    this.pillEl.addEventListener("pointercancel", endGesture);
-    this.pillEl.addEventListener("lostpointercapture", endGesture as EventListener);
-
-    window.addEventListener("blur", this.handleWindowBlur);
-  }
-
-  private handleWindowBlur = (): void => {
-    if (this.config?.mode === "hold" && this.activeSessionId) {
-      void this.stopActive();
-    }
-  };
 
   /**
    * `driver: "client"` only — subscribes to the client's own
@@ -791,7 +696,7 @@ export class VoxisOverlayElement extends HTMLElement {
     // forgotten. The next tap would then call `stop(staleId)` on a
     // dead session instead of starting a new one.
     if (state === "idle") {
-      this.clearActiveSession();
+      this.session?.clearActiveSession();
     }
   }
 
@@ -812,14 +717,7 @@ export class VoxisOverlayElement extends HTMLElement {
    * there is only ever one).
    */
   applyResult(_result: DictationResult): void {
-    this.clearActiveSession();
-  }
-
-  /** Drops the tracked session id/lease without calling `stop()`/`cancel()` — for when the plugin has already ended the session itself. */
-  private clearActiveSession(): void {
-    this.activeSessionId = null;
-    this.lease?.stop();
-    this.lease = null;
+    this.session?.clearActiveSession();
   }
 
   private updateIndicator(): void {
@@ -829,59 +727,9 @@ export class VoxisOverlayElement extends HTMLElement {
     this.applyLifecycleClasses();
   }
 
-  /**
-   * Session-controlling — `driver: "host"` never reaches this (pointer
-   * handling and window blur are no-ops for sessions in that mode, see
-   * `wirePointerHandlingHostDriven`/`handleWindowBlur`), but the theme's
-   * own `cancel` action (`mountThemeInstance`) routes through
-   * `stopActive` too, so both methods guard defensively rather than
-   * relying solely on their only current caller never calling them in
-   * that mode.
-   */
-  private async startActive(mode: Mode): Promise<void> {
-    if (!this.config || this.config.driver === "host" || !this.config.client || this.activeSessionId) return;
-    const client = this.config.client;
-    this.stopRequested = false;
-    try {
-      const id = await client.start(mode);
-      this.activeSessionId = id;
-      if (mode === "hold") {
-        this.lease = startHoldLease({
-          sendHeartbeat: () => client.holdLease(id),
-          onError: () => {
-            // Server-side lease loss already stopped the session; drop
-            // our reference so a stray stop() doesn't double-call.
-            this.activeSessionId = null;
-          },
-        });
-      }
-      if (this.stopRequested) {
-        await this.stopActive();
-      }
-    } catch {
-      this.activeSessionId = null;
-    }
-  }
-
-  private async stopActive(): Promise<void> {
-    if (!this.config || this.config.driver === "host" || !this.config.client) return;
-    const id = this.activeSessionId;
-    if (!id) {
-      this.stopRequested = true;
-      return;
-    }
-    this.clearActiveSession();
-    try {
-      await this.config.client.stop(id);
-    } catch {
-      // Best-effort — the plugin's own cleanup (RecFile drop, session
-      // guard) runs regardless of whether this call round-trips.
-    }
-  }
-
-  /** Result of the *current or most recently active* session, if any is still tracked — mainly for tests/harness introspection. */
+  /** Result of the *current or most recently active* session, if any is still tracked — mainly for tests/harness introspection. `null` in `driver: "host"` mode. */
   get activeSession(): SessionId | null {
-    return this.activeSessionId;
+    return this.session?.activeSession ?? null;
   }
 }
 
@@ -902,8 +750,8 @@ export function mountOverlay(container: HTMLElement = document.body, options: Mo
     driver,
     // `driver: "host"`: no client is created or required (per-task KISS
     // contract) — a host that also happens to pass one gets it stored but
-    // unused, since `wireClientEvents`/`startActive`/`stopActive` all
-    // check `driver` before touching it.
+    // unused, since `wireClientEvents` and `OverlaySessionController` are
+    // only reached in `driver: "client"` mode.
     client: driver === "host" ? options.client : options.client ?? createClient(),
     idleTheme: options.idleTheme ?? false,
     themeModule: options.themeModule,
