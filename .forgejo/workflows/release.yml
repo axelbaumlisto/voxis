@@ -247,7 +247,39 @@ jobs:
           else
             echo "⚠️ macOS GUI build failed (advisory — not blocking release; unsigned tar.gz above may still ship)"
           fi
-          bash scripts/macos-vm.sh stop 2>/dev/null || true
+          # VM cleanup happens in the iOS cross-build gate step below (it
+          # reuses this same still-running VM, with ~/voxis already synced
+          # by scripts/macos-vm.sh above, to run scripts/check-ios-build.sh
+          # inside it) -- that step's own trap stops the VM exactly once,
+          # whichever way it ends.
+
+      - name: iOS cross-build gate (voxis-core, blocking whenever the macOS VM is available)
+        continue-on-error: false
+        timeout-minutes: 30
+        run: |
+          set -uo pipefail
+          cd /home/spex/work/voxis
+          PREPARED="${VOXIS_MACOS_VM_DIR:-$HOME/voxis-macos-vm}/mac_hdd_ng.prepared.img"
+          if [ ! -f "$PREPARED" ] || [ ! -e /dev/kvm ]; then
+            echo "no voxis-owned macOS VM on this host -- skipping the iOS cross-build gate (same preflight as the macOS build step above)"
+            exit 0
+          fi
+          SSH_PORT="${SSH_HOST_PORT:-50923}"
+          SSH_USER="${VM_USER:-user}"
+          SSH_PASS="${VM_PASS:-alpine}"
+          ios_ssh() {
+            sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=10 -p "$SSH_PORT" "$SSH_USER@localhost" "$1"
+          }
+          cleanup() { bash scripts/macos-vm.sh stop >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          if ! ios_ssh 'echo ok' >/dev/null 2>&1; then
+            echo "macOS VM not reachable over SSH (the build step above may have skipped/failed to bring it up) -- skipping the iOS cross-build gate"
+            exit 0
+          fi
+          echo "=== iOS cross-build gate: scripts/check-ios-build.sh inside the macOS VM (voxis-core, aarch64-apple-ios[-sim]) ==="
+          ios_ssh 'cd ~/voxis && bash scripts/check-ios-build.sh'
+          echo "iOS cross-build gate passed"
 
       - name: publish to Forgejo release
         run: |

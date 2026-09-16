@@ -1,5 +1,84 @@
 # Changelog
 
+## v0.1.6 (Voxis desktop)
+
+### Fix
+- Six `AppConfig` fields were saved to `config.db` **as read-only defaults
+  every time the app restarted**, silently discarding whatever the user had
+  actually set in Settings: `api_url_override` (a configured self-hosted
+  transcription endpoint quietly reverted to the Groq default on next
+  launch), `min_recording_ms`, and `vad.backend` / `vad.onset_frames` /
+  `vad.hangover_frames` / `vad.prefill_frames`. `ConfigSqliteStorage::save`/
+  `load` write/read fields by hand (not a generic (de)serializer), and
+  these six were read but never written — found while building
+  `tauri-plugin-voxis`'s desktop-profile import path (Task 6/6b: a real
+  round-trip through the profile importer got 0 requests at the configured
+  `api_url_override`, because the value it read back from `config.db` was
+  never the one that had been saved). Fixed in `crates/voxis-core/src/
+  storage/config_sqlite.rs`. Added a guard test,
+  `every_app_config_field_round_trips_through_sqlite`, that constructs a
+  **fully non-default** `AppConfig` (including every nested struct, with
+  no `..Default::default()` anywhere in the literal) and asserts save→load
+  equality field-by-field via destructuring (so a newly-added `AppConfig`
+  field that isn't wired into the destructuring pattern fails to compile,
+  rather than silently passing an incomplete check) — the previous test
+  covering this path used `..Default::default()` for most fields, which is
+  exactly the style that let all six of these slip through unnoticed.
+
+### New
+- **"Share profile to device"** (Settings): sends the current provider,
+  model, language, guard timeouts, dictionary, LLM providers/prompts, theme
+  and hotkey to a phone/tablet running a `tauri-plugin-voxis` host, over
+  two paths — a one-time QR code + LAN transfer (single-use token, 120s
+  window or first successful fetch, whichever comes first; the QR's own
+  256-bit key travels in the code, a 6-digit code shown alongside it is a
+  second factor only, never transmitted) or a passphrase-protected `.vxp`
+  file export (Argon2id + ChaCha20-Poly1305, phrase/key shown once). API
+  keys and other secrets never touch the destination's on-disk profile
+  storage — they route through the destination's own `SecretStore`.
+
+### Dependencies
+- `h2` 0.4.19 (RUSTSEC-2026-0258), `quinn-proto` 0.11.18
+  (RUSTSEC-2026-0185), `rustls` 0.23.45 (RUSTSEC-2026-0285), `quick-xml`
+  0.42.0 via tauri-plugin-notification 2.4.0 / plist 1.10.1
+  (RUSTSEC-2026-0194, -0195) bumped. `cargo audit` is clean of
+  vulnerabilities (12 unmaintained-warnings remain, transitive via
+  tauri/gtk); policy file `.cargo/audit.toml`.
+
+### Internal
+- The engine (`AppConfig`, storage, transcription, LLM, learning, the
+  recording guard, the WAV encoder, the hotkey parser, `VoxisProfile`) moved
+  into a new pure-Rust workspace member, `voxis-core` — no `tauri`/`cpal`/
+  `rdev`/`enigo`/`arboard` dependency, buildable for `aarch64-apple-ios`
+  with zero feature flags. Voxis desktop (`voice_lib`) now consumes it via
+  `pub use` plus a small tauri-specific shim layer; behaviour is unchanged
+  (regression-gated by a full local-vs-post-split config/history/dictionary
+  data snapshot test, plus the existing `cargo test --lib` suite). The
+  Cargo workspace root moved from `src-tauri/Cargo.toml` to a new root
+  `/Cargo.toml`; **`/Cargo.lock` now lives at the repo root**, not
+  `src-tauri/Cargo.lock` — see `.pi/skills/voxis-deploy/SKILL.md`'s updated
+  release checklist. This split is what makes `tauri-plugin-voxis` (below)
+  possible: the plugin and Voxis desktop now share one engine instead of
+  two copies of it.
+
+## `tauri-plugin-voxis` 0.1.0 / `@voxis/tauri-plugin-voxis` (guest-js) 0.1.1
+
+New, separate artifacts — not part of the Voxis desktop app release above.
+Voxis's dictation engine (hotkey/tap → record → silence/duration guard →
+transcribe → dictionary → optional LLM post-process), packaged as an
+embeddable Tauri 2 plugin (desktop via `cpal`/`rdev`, iOS via
+`AVAudioEngine`/Keychain) plus a typed guest-js client and a
+`<voxis-overlay>` recording-pill web component, for third-party Tauri apps
+that want Voxis-quality dictation inside their own app rather than
+switching to the standalone Voxis app. First integration target: `naked`
+(desktop + iPad, in progress in that project's own repo). See
+**[crates/tauri-plugin-voxis/README.md](crates/tauri-plugin-voxis/README.md)**
+(Rust) and
+**[crates/tauri-plugin-voxis/guest-js/README.md](crates/tauri-plugin-voxis/guest-js/README.md)**
+(TypeScript) for the full API/integration reference, and
+**[docs/PLUGIN.md](docs/PLUGIN.md)** for the architecture/guarantees/test
+gates this changelog entry doesn't repeat.
+
 ## v0.1.5
 
 Silence guard calibrated on hardware: threshold −46 → −34 dBFS (room floor on a

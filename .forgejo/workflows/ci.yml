@@ -104,3 +104,83 @@ jobs:
               # `cargo build -p host-min` before this.
               xvfb-run -a bash crates/tauri-plugin-voxis/examples/host-min/scripts/host-min-smoke.sh
             '
+
+  # Task 12: `voxis-core`/`tauri-plugin-voxis` had ZERO cargo-test/clippy
+  # coverage in this file before this job -- `fast`'s clippy/test steps
+  # above run from `src-tauri` without `--workspace`, so they only ever
+  # touch the `voice` package; `host-min-e2e` above only runs
+  # `cargo test -p voxis-fake-stt` (plus the real-binary smoke, which
+  # exercises the plugin but not via `cargo test`/clippy). Deliberately
+  # NOT `cargo test --workspace`: this workspace also has `host-min` as a
+  # member (a full Tauri app example), which would pull it into every
+  # run's compile time for no benefit here (`[ADO-4 minors]`).
+  core-plugin:
+    runs-on: host
+    timeout-minutes: 30
+    env:
+      GIT_PAGER: cat
+      PAGER: cat
+    steps:
+      - name: checkout (manual; Forgejo /git subpath breaks actions/checkout URL)
+        run: |
+          set -euo pipefail
+          base="${CI_GIT_BASE:-$GITHUB_SERVER_URL}"
+          git init -q .
+          git remote add origin "${base}/${GITHUB_REPOSITORY}.git"
+          git -c http.extraheader="Authorization: basic $(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 -w0)" \
+            -c protocol.version=2 fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+          git --no-pager log --oneline -1
+
+      - name: voxis-core + tauri-plugin-voxis + voxis-fake-stt test + clippy, guest-js build/test, in voxis-ci image
+        run: |
+          set -euo pipefail
+          cache="$HOME/.cache/voxis-ci"
+          mkdir -p "$cache/cargo" "$cache/target" "$cache/home"
+          docker run --rm \
+            -v "$PWD":/w -w /w \
+            -v "$cache/cargo":/tmp/cargo-home \
+            -v "$cache/target":/tmp/ci-target \
+            -v "$cache/home":/tmp/cihome \
+            -e CARGO_HOME=/tmp/cargo-home \
+            -e CARGO_TARGET_DIR=/tmp/ci-target \
+            -e HOME=/tmp/cihome \
+            --user "$(id -u):$(id -g)" \
+            voxis-ci:latest \
+            bash -euo pipefail -c '
+              echo "=== [required] cargo test -p voxis-core -p tauri-plugin-voxis -p voxis-fake-stt (NOT --workspace, see job comment) ===" &&
+              cargo test -p voxis-core -p tauri-plugin-voxis -p voxis-fake-stt &&
+              echo "=== [required] clippy -D warnings (voxis-core + tauri-plugin-voxis only) ===" &&
+              cargo clippy -p voxis-core -p tauri-plugin-voxis --all-targets -- -D warnings &&
+              echo "=== [required] guest-js build + test ===" &&
+              cd crates/tauri-plugin-voxis/guest-js && bun install --frozen-lockfile && bun run build && bun run test
+            '
+
+      # Advisory only: the voxis-ci image does not currently install
+      # cargo-audit (Dockerfile.ci has no `cargo install cargo-audit`
+      # step) -- this step is a no-op today, not a silently-skipped real
+      # check. Remove `continue-on-error` (and the `command -v` guard
+      # below) once cargo-audit is added to the image, so a real finding
+      # then actually blocks this job.
+      - name: cargo audit (advisory -- see step comment)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cache="$HOME/.cache/voxis-ci"
+          docker run --rm \
+            -v "$PWD":/w -w /w \
+            -v "$cache/cargo":/tmp/cargo-home \
+            -v "$cache/target":/tmp/ci-target \
+            -v "$cache/home":/tmp/cihome \
+            -e CARGO_HOME=/tmp/cargo-home \
+            -e CARGO_TARGET_DIR=/tmp/ci-target \
+            -e HOME=/tmp/cihome \
+            --user "$(id -u):$(id -g)" \
+            voxis-ci:latest \
+            bash -euo pipefail -c '
+              if command -v cargo-audit >/dev/null 2>&1; then
+                cargo audit
+              else
+                echo "::warning::cargo-audit not installed in voxis-ci:latest -- skipping (see step comment)"
+              fi
+            '

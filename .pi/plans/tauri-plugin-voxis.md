@@ -416,7 +416,12 @@ Voxis) → профиль без промптов, не ошибка. Тесты
 3. Хранилище плагина: sqlite для не-секретов (тот же `factory` с другим путём) + `SecretStore`.
 4. Round-trip сценарий в host-min.
 
-### Task 6b: host-min `profile-import` smoke + device-from-profile `[ADO follow-up of T6 + HW-GATE finding]`
+### Task 6b: ✅ APPROVED `18f5ee4` (1 round) + Task 6c ✅ `b28f864` (guard test) — host-min `profile-import` smoke + device-from-profile `[ADO follow-up of T6 + HW-GATE finding]`
+`[ADO-6b/6c production bugs]` gate 7 (реальный импорт профиля, fake-stt получил 0 запросов) вскрыл класс багов Voxis desktop:
+`ConfigSqliteStorage::save/load` пишутся руками по полям, и 6 полей `AppConfig` МОЛЧА терялись при рестарте:
+`api_url_override` (self-hosted STT endpoint → откат на Groq), `min_recording_ms`, `vad.{backend,onset_frames,hangover_frames,prefill_frames}`
+(читались, не писались). Починены; страж `every_app_config_field_round_trips_through_sqlite` (полностью недефолтный AppConfig
+вкл. вложенные структуры без `..Default`, save→load ==, деструктуризация без `..` → новое поле не компилируется). → CHANGELOG в T12.
 **Files:** `crates/tauri-plugin-voxis/examples/host-min/**`, `crates/voxis-core/src/profile/mod.rs` (+`audio_device` в
 `ProfileConfig`), `crates/tauri-plugin-voxis/src/{lib.rs,desktop.rs,profile_source.rs}` (init_desktop берёт устройство из
 pipeline_config), `crates/tauri-plugin-voxis/guest-js/src/types/contract.ts`, `contract/fixtures/profile-v1.json`
@@ -512,7 +517,7 @@ Sources/AudioCapture.swift}`, `…/src/mobile.rs`, `…/examples/host-min/src-ta
 3. Калибровка порога при расхождении. Одной строкой в лог: `SpeechTranscriber.supportedLocales`
    на iOS (на macOS 26.6.2 `ru_RU` отсутствует — подтвердить).
 
-### Task 9a: iOS Live Activity — Swift-реализация + `docs/PLUGIN_IOS_HOST.md`
+### Task 9a: ✅ APPROVED `86d8769` (1 round REJECT-FIX: widget-файлы без `@available(iOS 17)` при `NakedLiveActivity.deploymentTarget 16.1` → typecheck теперь при 16.1 И 17.0; step 0 в доке) — iOS Live Activity — Swift-реализация + `docs/PLUGIN_IOS_HOST.md`
 **Files:** `crates/tauri-plugin-voxis/ios/Sources/LiveActivity.swift`,
 `crates/tauri-plugin-voxis/ios/LiveActivityWidget/{VoxisActivityAttributes.swift,VoxisActivityView.swift}`
 (файлы для **существующего** WidgetBundle хоста), `docs/PLUGIN_IOS_HOST.md`
@@ -596,6 +601,29 @@ App Group + Darwin notification (App Group у naked уже есть: `project.ym
 ### Phase 3 — интеграция в naked
 
 ### Task 10: naked desktop: подключить плагин, кнопка + hotkey + вставка в терминал
+**Статус:** часть 1 ✅ `naked@951b6cea` (APPROVE), часть 2 ✅ `naked@3f748d18` (1 REJECT-FIX: чип без `setPointerCapture` →
+stuck recording при отпускании вне чипа — класс исходного инцидента; naked решает это в 5 местах). Ветка `voxis-plugin` в
+~/work/naked, НЕ запушена: **CI-блокер** — voxis приватный на Forgejo, docker-джобы naked не достанут git-dep без auth
+(решение владельца: PAT-secret / subtree / public). Сделано: git-dep по rev + вендорный tgz guest-js; `NakedVoxisSecretStore`
+(4-я роль `EncryptedFileSecretStore`, namespace `voxis:`); `useVoxisRuntime` — единая проводка (кнопка, consent, `voxis://result` →
+`pasteText`→`sanitizePaste` активного pane, fallback clipboard+notice); чип hold-to-talk в KeyPanel; security e2e (реальный
+`apply_profile_bytes` с `sk-test…` → raw-ключа нет ни в одном файле плагина); CSP-гейт на vendored dist; Playwright 2/2.
+**Часть 3 ✅ `naked@bde07927`** (1 REJECT-FIX: `error` показывал pill): `<voxis-overlay driver=host>` как индикатор записи (скрыт вне
+recording|transcribing — idle-pill сталкивался с chrome в любом углу: bottom-right → тулбар телефона, top-right → вкладки комнат, 30 спеков);
+plugin 0.1.1 `initialPosition` (voxis `325e220`); гонка StrictMode в `useVoxisRuntime` (зомби-слушатель → двойная вставка в dev) закрыта;
+`tauriMock` честный (unlisten/fan-out) → вскрыт баг naked `SftpPanel` refresh сбрасывает скролл (`theListKeepsItsPlace` был вакуумным) — owner.
+Уроки: пересборка tgz = bump версии (bun/vite кэши); vite v7 `localhost`=::1 vs Playwright 127.0.0.1 (нужен `--host 127.0.0.1`).
+**Часть 4 ✅ `naked@8853aa93`** (2 раунда: R1 отклонён по ложной посылке «dialog не расширяет fs-scope» — опровергнуто
+tauri-plugin-dialog 2.7.2 `allow_file()`; R2 нашёл реальный blocker: `set_hotkey` `permissionDenied` (macOS Accessibility для rdev)
+глотался → теперь notice + inline-статус в Settings). Hotkey-кандидаты только из KEY_TABLE плагина (f13+ нет), `f1` занят naked;
+сохранённый hotkey применяется при старте (с части 1 был мёртвый код); импорт desktop/.vxp (passphrase → `apply_profile`, у плагина
+нет `import_profile_from_file`). **T10 ЗАКРЫТ** (5 коммитов на ветке `voxis-plugin`, не запушено — CI-auth решение владельца).
+`[T10 → T12]` follow-ups плагина: команда `import_profile_from_file(path, passphrase)`? (сейчас хост читает байты сам — приемлемо, blob AEAD);
+`set_hotkey` при отсутствии Accessibility — вернуть структурированную подсказку в message.
+(старое) **Остаток → часть 4:** Settings-секция (hotkey/импорт desktop+.vxp/статус профиля); монтирование `<voxis-overlay>` — заблокировано
+тем, что элемент сам подписывается на state/result и сам рулит сессией → **plugin follow-up `[T10-overlay]`**: `mountOverlay({ mode:
+"host-driven" })` без собственной подписки/старта + `applyState()/applyResult()`; затем re-vendor tgz + bump rev в naked.
+Найден pre-existing баг naked: `useNativeMenuEvents` fire-and-forget unlisten → два живых `menu:context` слушателя (вне scope).
 **Files (repo naked-cli):** `src-tauri/Cargo.toml`, `src-tauri/src/lib.rs`, `src-tauri/capabilities/*.json`,
 `src/components/AppMainToolbar.tsx`, `src/components/KeyPanel.tsx`, `src/lib/voxis.ts`,
 `src/components/settings/*` (hotkey, consent), `package.json`, `crates/naked-core/src/voxis_secrets.rs`
@@ -619,6 +647,18 @@ mock-плагин → кнопка → текст в pane.
 5. Тесты.
 
 ### Task 11: naked iOS: сборка с плагином, разрешения, прогон на живом iPad
+**Стадия 1 (Simulator) ✅** `naked@0ffb4723` + `dc3f301d`: app target 17.0 (extensions 16.1), NSMicrophoneUsageDescription, PrivacyInfo AudioData,
+`voxis-core` в mobile-таблице (первый iOS-компайл поймал пропуск T10), `UIFileSharingEnabled`+`LSSupportsOpeningDocumentsInPlace` (импорт .vxp через
+Files). Найдено и починено: mic-кнопка на iPhone сидела ПОД ☰ (резерв под drawer-toggle был per-child на `.recording-status-strip`, теперь на
+`.app-main-toolbar`; spec `micToggleClearsTheDrawerToggle.phone`). Прогоны (idb, честная evidence в /tmp/ado.C4YWdv/t11a,t11b): consent «…sent to Groq»
+→ AVAudioEngine с Mac-микрофона → 70 с тишины → stop без HTTP; `.vxp` из локального Voxis → UIDocumentPicker → passphrase → «API key configured»;
+mic → **реальный Groq** → транскрипт в буфере симулятора + notice «Dictated text copied — no active pane». Live Activity тикает ~1/с (T9b-evidence).
+Полиш: pill top-right на iPhone наезжает на верхний ряд; «Import from Voxis desktop» и селектор hotkey бессмысленны на iOS (скрыть на mobile);
+paste в masked passphrase-поле через pbcopy+long-press ненадёжен; `.vxp` UTI/Share-sheet — follow-up. SSH-pane из Simulator — NOT COLLECTED.
+**Стадия 2 (iPad) ✅ ядро** — см. `research/plugin-plan/T11_ipad_run_2026-09-16.md`: речь → Groq → текст в НОВОМ tmux-pane (13.4 с, finalized),
+тишина → 81.8 с `silenceTimeoutNoSpeech`, pane нетронут; профиль через `apply_profile`. Найдено: TCC-kill из-за незакоммиченных
+xcodegen-метаданных (`naked@2e0ca845`), WDA-тапы инертны (CDP-drive на inspectable-сборке), stop игнорируется пока `start()` ждёт системный
+mic-prompt (naked polish), stale profileStatus. NOT COLLECTED: drag/persist оверлея, внешняя клавиатура, QR, mute, Live Activity (T9b).
 **Files (naked-cli):** `src-tauri/gen/apple/project.yml` (`info.properties`: `NSMicrophoneUsageDescription`
 с именем STT-провайдера; **без** `UIBackgroundModes: audio` до Task 9b), `src-tauri/gen/apple/PrivacyInfo.xcprivacy`
 (Audio Data / Other User Content → third-party AI) `[R1-Safety S6]`, `src-tauri/Cargo.toml` (ios target dep),
@@ -776,6 +816,12 @@ DMG-сборку не запустит `[R1-Migration verified]`); naked фик�
   `WhenUnlockedThisDeviceOnly` → errSecInteractionNotAllowed при финализации на lock screen (T9a: кэшировать ключ на
   время сессии или AfterFirstUnlock); mockito port-contention флак в profile_source тестах (T6b); reason-string при
   гонке таймера/уведомления «whichever first».
+- `[ADO-6b/6c/9a minors]` 6c: удалить/расширить слабый `test_save_and_load_cycle_all_fields` (`..Default`, ~25/36 полей — именно
+  такой стиль пропустил 6 полей); комментарий у `fully_non_default_app_config`, что вложенные структуры защищены отсутствием
+  `..Default::default()` в литералах, а не деструктуризацией. 6b: `ImportSummary.source` union не валидируется в runtime
+  (bare `invoke<ImportSummary>`). 9a: naked **app** target 16.1 → 17.0 обязателен при подключении плагина (`Package.swift`
+  `.iOS(.v17)`) — учесть в T11; Option B (регистрация `VoxisActivityWidget` за `if #available(iOS 17.0, *)` в WidgetBundle,
+  проверено typecheck при 16.1) рекомендована; Keychain на lock screen при Stop-intent — открыт.
 - `[ADO-4 minors]` перенести `HotkeyTracker` + таблицу букв/цифр из плагина в `voxis_core::hotkey`, чтобы desktop
   Voxis получил комбо и был один трекер; edge-loop сериализован за latency транскрипции (await только ack
   `signal(Stop)`, не outcome); level-thread sleep 250 мс → stop() ждёт до 250 мс (нарезать); первая

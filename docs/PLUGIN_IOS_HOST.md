@@ -492,3 +492,65 @@ decide first**:
   in-flight session only, or (b) surface this specific Keychain failure as its own
   distinct, actionable error. Recorded here so it isn't rediscovered from scratch —
   carried over verbatim from this section's pre-Task-9a draft, still open.
+
+## `[T11]` Host checklist additions — real iPad run findings (naked)
+
+Facts from an actual physical-iPad run of a real host (`naked`, branch
+`voxis-plugin`) embedding this plugin — full evidence in
+`research/plugin-plan/T11_ipad_run_2026-09-16.md`. These are host-integration
+gotchas the plugin itself cannot fix; add them to any new host's own checklist:
+
+- **`xcodegen generate` must be run — and the regenerated output committed —
+  after every `project.yml` edit, on the actual on-device deploy path, not
+  just in a local/Simulator build script.** The iPad run's first dictation
+  tap killed the app with a TCC crash (no `NSMicrophoneUsageDescription` at
+  the moment of first mic access) because the device-deploy script
+  (`scripts/ios-device-deploy.sh`) built from the **last-committed** generated
+  `Info.plist`, which predated an uncommitted `project.yml` edit that had
+  already added the key. Running `xcodegen generate` locally and forgetting
+  to `git add`/commit the regenerated `gen/apple/**` output reproduces this
+  exactly — a host's device-deploy script trusting a stale committed
+  `Info.plist` is indistinguishable from never having added the key at all.
+  Rule: after any `project.yml` change intended to reach a device build,
+  regenerate AND commit before deploying, not just before testing locally.
+- **`.vxp` file import needs `UIFileSharingEnabled` (+
+  `LSSupportsOpeningDocumentsInPlace`) in the host's `Info.plist`/
+  `project.yml`** for `UIDocumentPickerViewController`-based import to be able
+  to reach a `.vxp` file placed via the Files app/iTunes-file-sharing/AirDrop
+  at all — without it, the picker has nothing to show for a file living
+  outside the host's own sandboxed Documents directory. (naked's own iOS
+  Simulator stage, Task 11 stage 1, added this; the iPad run confirmed the
+  `apply_profile` passphrase-import call itself works once bytes are in hand —
+  see the next point for what did NOT work automatable on this specific
+  device run.)
+- **A deploy script that skips `xcodegen generate` isn't just "missed
+  metadata" — it is a silent TCC kill, not a graceful permission denial.**
+  Restating the `Info.plist` keys table's own point above with on-device
+  confirmation: this is not a theoretical risk, it is the exact failure mode
+  hit on first physical use, with no in-app warning beforehand and no
+  `PermissionDenied` ever reaching the plugin (the process was already gone).
+  A host's own release/deploy tooling needs its own guard (e.g. diff
+  `gen/apple/**` against a freshly-run `xcodegen generate` and fail the build
+  if they differ) if it wants to catch this before a real device run does.
+- **WDA (WebDriverAgent) taps were inert on this specific physical iPad**
+  (element clicks and W3C pointer actions, against both the WebView and a
+  native document picker), while the accessibility tree and screenshots kept
+  working — an unresolved automation-environment issue (`research/
+  plugin-plan/T11_ipad_run_2026-09-16.md` finding 2 leaves it undiagnosed:
+  automation-mode/testmanagerd state, not something this plugin's own code
+  touches). **CDP (`Runtime.evaluate` against an inspectable build,
+  `NAKED_IOS_DEVTOOLS=1`) reliably drove the WebView end to end instead** —
+  any host planning unattended on-device UI automation (not just manual human
+  gate runs) should plan for a CDP-based driving path as the reliable one on
+  real hardware, with WDA treated as a fallback that may simply not work on a
+  given device/OS combination, not the primary path. Native (non-WebView)
+  sheets (e.g. the system document picker) remain undriveable by either path
+  on this device — a `devicectl` relaunch was the only way to dismiss one
+  once WDA taps stopped working.
+- **A toggle-mode stop tap that lands while `start()` is still awaiting the
+  system microphone-permission prompt is silently swallowed** (see this
+  plugin's own README "Real hard-won lessons" section for the mechanism) —
+  confirmed on real hardware, not just in theory: the session ran all the way
+  to its silence timeout instead of stopping. A host's own UI needs to track
+  "start is pending" and stop/cancel once it resolves; the plugin does not
+  expose a way to cancel an in-flight, not-yet-resolved `start()` call today.

@@ -122,6 +122,20 @@ the default overlay size is used. Copy a builtin theme folder as a starting
 point, edit the code, then use Reload + Preview or reload/reselect it in
 Settings. See the full guide at **[docs/THEMES.md](docs/THEMES.md)**.
 
+## Embeddable plugin (`tauri-plugin-voxis`)
+
+Voxis's dictation engine is also available as an embeddable Tauri 2 plugin
+(desktop + iOS) for third-party apps that want in-app dictation rather than
+switching to the standalone Voxis app. See
+**[crates/tauri-plugin-voxis/README.md](crates/tauri-plugin-voxis/README.md)**
+(Rust: installation, commands/events, permissions) and
+**[crates/tauri-plugin-voxis/guest-js/README.md](crates/tauri-plugin-voxis/guest-js/README.md)**
+(TypeScript client + `<voxis-overlay>` component), plus
+**[docs/PLUGIN.md](docs/PLUGIN.md)** for the architecture/guarantees and
+**[docs/PLUGIN_IOS_HOST.md](docs/PLUGIN_IOS_HOST.md)** for the iOS host
+checklist. This is a separate artifact from the Voxis desktop app above —
+see `CHANGELOG.md` for its own version history.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

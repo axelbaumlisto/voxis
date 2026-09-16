@@ -43,10 +43,31 @@ GitHub is **binary releases only**. Do not push private Voxis source to GitHub.
    git log --oneline HEAD..forgejo/main     # must be empty, else rebase onto forgejo/main
    ```
 1. Bump version in **four** places: `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`,
-   `package.json`, and the `voice` entry in `src-tauri/Cargo.lock` (edit the one line;
-   no `cargo update`). Add a `CHANGELOG.md` section. Check the tag is free:
-   `git ls-remote --tags forgejo | grep vX.Y.Z` — a published tag can NOT be re-published
-   (guard in release.yml); if a release shipped incomplete, bump again instead.
+   `package.json`, and the `voice` entry in the **root** `Cargo.lock` (edit the one line;
+   no `cargo update`) — `[ADO-1a lessons (2)]`: since Task 1a moved the Cargo workspace
+   root out of `src-tauri/` into the repo root, `Cargo.lock` lives at **`/Cargo.lock`**,
+   not `src-tauri/Cargo.lock` (that file no longer exists). Verify with
+   `cargo metadata --no-deps -q >/dev/null` after editing (fails loudly on a malformed
+   lockfile edit) and `grep -rn "<old-version>" src-tauri/Cargo.toml package.json
+   src-tauri/tauri.conf.json` (must be empty). Add a `CHANGELOG.md` section. Check the
+   tag is free: `git ls-remote --tags forgejo | grep vX.Y.Z` — a published tag can NOT be
+   re-published (guard in release.yml); if a release shipped incomplete, bump again
+   instead.
+
+   **`tauri-plugin-voxis`/guest-js versions are separate** (`crates/tauri-plugin-voxis/
+   Cargo.toml`'s own `version`, `crates/tauri-plugin-voxis/guest-js/package.json`'s own
+   `version`) — bumping the `voice` app version above does **not** bump either of
+   these, and vice versa; they follow their own schedule.
+
+   **A `plugin-v*` tag does NOT trigger `release.yml`** — `release.yml`'s `on.push.tags`
+   filter is `v*`, so `plugin-v0.1.0` (or any other `plugin-*`-prefixed tag used to pin
+   a host's git dependency on this plugin) never starts the DMG/artifact-publish
+   pipeline above. This is intentional (the plugin crate is not part of the Voxis
+   desktop app release), not a bug to "fix" by broadening the trigger filter — a host
+   pinning `tauri-plugin-voxis = { git = "...", tag = "plugin-v0.1.0" }` just needs the
+   tag to exist and point at the right commit; pushing it is a plain `git tag` + `git
+   push forgejo plugin-v0.1.0`, no workflow dispatch involved.
+
 2. Commit. Run locally before tagging (fast, catches 95%):
    `cd src-tauri && cargo test --lib && cargo clippy --all-targets -- -D warnings`
    and `bun run test:run` (2 pre-existing golden-hash failures in
