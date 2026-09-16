@@ -64,6 +64,17 @@ pub enum CaptureError {
     AlreadyRunning,
     #[error("capture not running")]
     NotRunning,
+    /// Microphone permission denied by the OS -- iOS's `AVAudioApplication`/
+    /// `AVAudioSession` record-permission check (`mobile.rs::map_invoke_error`
+    /// maps the Swift `PERMISSION_DENIED` reject code here); desktop has no
+    /// equivalent runtime prompt today, so only the iOS backend constructs
+    /// this variant. Kept distinct from `Backend` so `PluginError::from`
+    /// (`error.rs`) can surface it under the SAME `permissionDenied` `kind`
+    /// tag desktop's own `PluginError::PermissionDenied` (hotkey OS
+    /// permission, `hotkey_desktop.rs`) already uses, instead of the
+    /// frontend needing two different error shapes for "OS said no".
+    #[error("capture permission denied: {0}")]
+    PermissionDenied(String),
     #[error("capture backend error: {0}")]
     Backend(String),
 }
@@ -430,6 +441,53 @@ impl AudioCapture for MockCapture {
 
     fn set_device_id(&self, device_id: &str) {
         self.state.lock().unwrap().device_id = Some(device_id.to_string());
+    }
+}
+
+/// A one-shot latch for deterministic (sleep-free) TOCTOU race tests
+/// across this crate: a test double calls [`BlockingLatch::block`] from
+/// inside a synchronous trait method on a real OS thread, which signals
+/// "I'm parked here now" (non-blocking) and then blocks until the test
+/// releases it. Shared here so the `commands`/`pipeline` test doubles
+/// (blocking `capture.start`/`capture.stop`/`SecretStore::get`) don't each
+/// re-implement the same `ready`/`release` handshake (review finding F4).
+/// The "ready" side is a non-blocking `tokio::sync::oneshot::Sender::send`
+/// (safe from any context); the "release" side is a plain
+/// `std::sync::mpsc::Receiver::recv()` (a real blocking wait, deliberately
+/// not `oneshot::blocking_recv`, which panics on a runtime worker thread)
+/// -- so a double using it needs the multi-thread test runtime.
+#[cfg(test)]
+pub(crate) struct BlockingLatch {
+    ready_tx: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    release_rx: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+}
+
+#[cfg(test)]
+impl BlockingLatch {
+    /// Returns the latch (to embed in a test double) plus the test's
+    /// `ready_rx` (await it to learn the double is parked) and `release_tx`
+    /// (send `()` to let it proceed).
+    pub(crate) fn new() -> (std::sync::Arc<Self>, tokio::sync::oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        (
+            std::sync::Arc::new(Self {
+                ready_tx: std::sync::Mutex::new(Some(ready_tx)),
+                release_rx: std::sync::Mutex::new(Some(release_rx)),
+            }),
+            ready_rx,
+            release_tx,
+        )
+    }
+
+    /// Call from inside the synchronous trait method being blocked.
+    pub(crate) fn block(&self) {
+        if let Some(tx) = self.ready_tx.lock().unwrap().take() {
+            let _ = tx.send(());
+        }
+        if let Some(rx) = self.release_rx.lock().unwrap().take() {
+            let _ = rx.recv();
+        }
     }
 }
 

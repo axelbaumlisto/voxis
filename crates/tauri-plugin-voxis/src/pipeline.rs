@@ -24,7 +24,7 @@ use voxis_core::config::AppConfig;
 use voxis_core::guard::{GuardState, StopReason};
 use voxis_core::transcription::TranscriptionClient;
 
-use crate::capture::{AudioCapture, RecFile};
+use crate::capture::{AudioCapture, CaptureError, RecFile};
 use crate::error::PluginError;
 use crate::events::EventSink;
 use crate::guard_adapter;
@@ -64,49 +64,97 @@ pub struct PipelineDeps {
     pub dictionary: Vec<(String, String)>,
 }
 
-/// Spawns the Recording-phase task for a just-`begin()`'d session and
-/// returns the handles `SessionGuard::attach_handles` stores for it.
-/// `file` (the just-created `RecFile`) moves into the task \u2014 it is
-/// dropped (deleting the WAV) exactly once, inside `finalize`, on every
-/// exit path.
-pub fn spawn(id: SessionId, mode: Mode, file: RecFile, deps: PipelineDeps, sessions: Arc<SessionGuard>) -> SessionHandles {
+/// Claims the single-flight slot for a new session (`SessionGuard::begin`,
+/// with the control/outcome handles attached atomically, review finding
+/// F1) and spawns its pipeline task, returning the new session id and a
+/// clone of its outcome receiver.
+///
+/// The task parks on `capture_ready` before doing anything else:
+/// `commands::do_start` runs the (possibly blocking) capture backend
+/// start off-thread (`[ADO-8]`) AFTER calling this, and reports the
+/// result here. On `Ok(())` the session actually begins Recording; on
+/// `Err`/a dropped sender it finalises as the capture error (slot freed,
+/// file deleted, no HTTP, no `voxis://result`) -- the same rollback the
+/// old inline path did, routed through the one finalize/cleanup path, so
+/// a `stop`/`cancel` that landed in the start window still gets a real
+/// outcome instead of an `UnknownSession`.
+///
+/// `file` (the just-created `RecFile`) moves into the task and is dropped
+/// (deleting the WAV) exactly once, inside `finish`, on every exit path
+/// (including the capture-failure path; on the `AlreadyRecording` path
+/// `spawn` returns `Err` before spawning and `file` is dropped as it goes
+/// out of scope).
+pub fn spawn(
+    mode: Mode,
+    file: RecFile,
+    deps: PipelineDeps,
+    sessions: Arc<SessionGuard>,
+    capture_ready: tokio::sync::oneshot::Receiver<Result<(), CaptureError>>,
+) -> Result<(SessionId, watch::Receiver<Option<Outcome>>), PluginError> {
     let (control_tx, control_rx) = watch::channel(ControlSignal::None);
     let (outcome_tx, outcome_rx) = watch::channel(None);
     let transcribe_abort = Arc::new(StdMutex::new(None));
     let cancelled = Arc::new(AtomicBool::new(false));
     let lease = if mode == Mode::Hold { Some(Arc::new(StdMutex::new(LeaseTracker::new(TokioInstant::now())))) } else { None };
 
-    deps.events.emit(STATE_EVENT, serde_json::to_value(State::Recording).unwrap());
+    // Claim the slot WITH the handles already attached (review finding
+    // F1): the moment the session is observable, a concurrent
+    // stop/cancel/cancel_all_hold reaches its real control channel and
+    // cancel flag. Failing here (`AlreadyRecording`) drops `file`
+    // (deleting the WAV) as it goes out of scope.
+    let handles = SessionHandles {
+        control_tx,
+        outcome_rx: outcome_rx.clone(),
+        transcribe_abort: transcribe_abort.clone(),
+        lease: lease.clone(),
+        cancelled: cancelled.clone(),
+    };
+    let id = sessions.begin(mode, handles)?;
 
     // `SessionSlotGuard` (review finding F4): a panic anywhere in
     // `record_phase`/`finalize` still unwinds through this guard's
     // `Drop`, freeing the single-flight slot -- without it a panicking
     // pipeline task would wedge `SessionGuard` at `AlreadyRecording`
-    // forever, since `finalize`'s own explicit `sessions.end(&id)` would
+    // forever, since `finish`'s own explicit `sessions.end(&id)` would
     // never run. Calling `end` a second time on the normal path is a
     // harmless no-op (`UnknownSession`, ignored).
     let slot_guard = SessionSlotGuard { sessions: sessions.clone(), id: id.clone() };
-    let task_lease = lease.clone();
-    let task_transcribe_abort = transcribe_abort.clone();
-    let task_cancelled = cancelled.clone();
+    let task_id = id.clone();
     tokio::spawn(async move {
         let _slot_guard = slot_guard;
-        record_phase(
-            id,
-            mode,
-            file,
-            deps,
-            control_rx,
-            outcome_tx,
-            task_lease,
-            task_transcribe_abort,
-            task_cancelled,
-            sessions,
-        )
-        .await;
+        match capture_ready.await {
+            Ok(Ok(())) => {
+                deps.events.emit(STATE_EVENT, serde_json::to_value(State::Recording).unwrap());
+                record_phase(task_id, mode, file, deps, control_rx, outcome_tx, lease, transcribe_abort, cancelled, sessions).await;
+            }
+            Ok(Err(capture_err)) => finalize_capture_failure(task_id, capture_err, file, deps, outcome_tx, sessions).await,
+            Err(_) => {
+                let err = CaptureError::Backend("capture readiness signal dropped before start completed".to_string());
+                finalize_capture_failure(task_id, err, file, deps, outcome_tx, sessions).await;
+            }
+        }
     });
 
-    SessionHandles { control_tx, outcome_rx, transcribe_abort, lease, cancelled }
+    Ok((id, outcome_rx))
+}
+
+/// Capture backend `start` failed (or its readiness signal was lost):
+/// finalise the just-reserved session as that error. No state events and
+/// no `voxis://result` -- capture never started, so there is nothing to
+/// report to the frontend beyond the error `start()` itself returns
+/// (matches the pre-refactor inline rollback) -- but routed through
+/// `finish` so the slot-free / file-delete ordering and any `do_stop`
+/// waiter that landed in the start window are handled by the one cleanup
+/// path.
+async fn finalize_capture_failure(
+    id: SessionId,
+    err: CaptureError,
+    file: RecFile,
+    deps: PipelineDeps,
+    outcome_tx: watch::Sender<Option<Outcome>>,
+    sessions: Arc<SessionGuard>,
+) {
+    finish(Err(err.into()), file, &id, &sessions, deps.events.as_ref(), &outcome_tx);
 }
 
 /// See `spawn`'s doc comment / review finding F4.
@@ -192,7 +240,19 @@ async fn record_phase(
 
 /// Maps a stop trigger to the `GuardOutcome` reported to the caller and
 /// whether the captured audio should actually be sent for transcription.
-fn decide(trigger: Trigger, duration_ms: u64, min_recording_ms: u32) -> (GuardOutcome, bool) {
+///
+/// `cancelled` is the SINGLE decision point for "was this session
+/// cancelled?" (review finding F3): a `cancel()` that set the flag AFTER
+/// the Recording-phase loop already broke out on some other trigger
+/// (silence/max-duration/liveness) -- but before finalize got here --
+/// must still win over that trigger, otherwise a full transcription would
+/// run and `voxis://result` would carry real text for a session the
+/// caller was told was cancelled. Folding it in here (instead of a second
+/// override at the call site) keeps `decide`'s answer authoritative.
+fn decide(trigger: Trigger, duration_ms: u64, min_recording_ms: u32, cancelled: bool) -> (GuardOutcome, bool) {
+    if cancelled {
+        return (GuardOutcome::Cancelled, false);
+    }
     let long_enough = duration_ms >= min_recording_ms as u64;
     match trigger {
         Trigger::Guard(StopReason::SilenceTimeout) => (GuardOutcome::SilenceTimeout, long_enough),
@@ -243,16 +303,8 @@ async fn finalize(
         }
     };
 
-    let (decided_outcome, decided_should_transcribe) = decide(trigger, stats.duration_ms, deps.app_config.min_recording_ms);
-    // Review finding F2 (TOCTOU): a `cancel()` that arrived after the
-    // Recording-phase loop already broke out with some other trigger
-    // (silence/max-duration/liveness), but before this check, must still
-    // win -- otherwise `do_cancel` can return `Ok` while a full
-    // transcription happens anyway and `voxis://result` carries real
-    // text for a session the caller believes was cancelled.
-    let already_cancelled = cancelled.load(Ordering::SeqCst);
     let (guard_outcome, should_transcribe) =
-        if already_cancelled { (GuardOutcome::Cancelled, false) } else { (decided_outcome, decided_should_transcribe) };
+        decide(trigger, stats.duration_ms, deps.app_config.min_recording_ms, cancelled.load(Ordering::SeqCst));
 
     let result: Outcome = if capture_failed {
         Err(PluginError::Capture { message: "capture backend failed to stop cleanly".to_string() })
@@ -280,30 +332,39 @@ async fn finalize(
     }
     deps.events.emit(STATE_EVENT, serde_json::to_value(State::Idle).unwrap());
 
-    // Cleanup MUST complete before both the outcome is published AND
-    // `voxis://result` is emitted: a waiter (`do_stop`/`do_cancel`'s
-    // `await_outcome`, or a test on a different OS thread under the
-    // multi-thread runtime) can be woken and resume running concurrently
-    // with the rest of this function the instant `outcome_tx.send`
-    // returns -- sending first would let it observe "the session
-    // finished" before the slot is actually freed or the rec file
-    // actually deleted (round-2 review, scenario A/B tests hit this in
-    // practice on the multi-thread test runtime). `[ADO-3b]`: the same
-    // reasoning applies to `voxis://result` -- it used to fire before
-    // this cleanup, so a frontend that reacted to the event by
-    // immediately calling `start()` again could race the not-yet-freed
-    // session slot into a spurious `AlreadyRecording`. Within cleanup
-    // itself, the file is dropped (deleted) BEFORE the slot is freed
-    // (round-3 review, M1) so "slot free" is exactly synonymous with
-    // "file gone" for any observer -- `do_cancel` has a path that returns
-    // `Ok` without waiting at all when `outcome_receiver` is already
-    // `None` (the session ended between `request_cancel` and that call),
-    // and that caller should never be able to see a freed slot with an
-    // orphaned rec file still on disk.
+    finish(result, file, &id, &sessions, deps.events.as_ref(), &outcome_tx);
+}
+
+/// The load-bearing finalize cleanup ordering, in one place (review
+/// finding F5) so a future edit can't silently reorder it and reintroduce
+/// the races the sequence exists to prevent. The order is: drop `file`
+/// (deletes the WAV), then `end(id)` (frees the slot), then emit
+/// `voxis://result`, then publish the outcome -- every step must precede
+/// the next. A waiter (`do_stop`/`do_cancel`'s `await_outcome`, or a test
+/// on another OS thread under the multi-thread runtime) can be woken and
+/// resume concurrently the instant `outcome_tx.send` returns, so
+/// publishing first would let it observe
+/// "the session finished" before the slot is freed or the rec file
+/// deleted (round-2 review, scenario A/B). `[ADO-3b]`: the same applies to
+/// `voxis://result` -- firing it before cleanup let a frontend that
+/// reacted by immediately calling `start()` again race the not-yet-freed
+/// slot into a spurious `AlreadyRecording`. And the file is dropped
+/// BEFORE the slot is freed (round-3 review, M1) so "slot free" is exactly
+/// synonymous with "file gone" for any observer, including `do_cancel`'s
+/// path that returns `Ok` without waiting when `outcome_receiver` is
+/// already `None`.
+fn finish(
+    result: Outcome,
+    file: RecFile,
+    id: &SessionId,
+    sessions: &SessionGuard,
+    events: &dyn EventSink,
+    outcome_tx: &watch::Sender<Option<Outcome>>,
+) {
     drop(file); // deletes the WAV -- every exit path, success or failure.
-    let _ = sessions.end(&id);
+    let _ = sessions.end(id);
     if let Ok(dictation_result) = &result {
-        deps.events.emit(RESULT_EVENT, serde_json::to_value(dictation_result).unwrap());
+        events.emit(RESULT_EVENT, serde_json::to_value(dictation_result).unwrap());
     }
     let _ = outcome_tx.send(Some(result));
 }
@@ -325,29 +386,20 @@ async fn run_transcription(
         Err(e) => return TranscribeOutcome::Failed(PluginError::Capture { message: format!("reading rec file: {e}") }),
     };
 
-    // Review finding F2, scenario B: `cancel()` can arrive while we're
-    // still here (reading the file / fetching the secret / building the
-    // client) -- before `abort_cell` even has a handle in it for
-    // `request_cancel`'s `Transcribing` branch to grab. This is an early,
-    // cheap check right after the file read; the check right before
-    // actually building the client / spawning the HTTP task is the one
-    // just below, after `secrets.get()` returns.
-    if cancelled.load(Ordering::SeqCst) {
-        return TranscribeOutcome::Aborted;
-    }
-
     let api_key = match deps.secrets.get(API_KEY_SECRET_NAME) {
         Ok(Some(secret)) => secret,
         Ok(None) => return TranscribeOutcome::Failed(PluginError::Transcription { message: "no API key configured in SecretStore".to_string() }),
         Err(e) => return TranscribeOutcome::Failed(PluginError::Transcription { message: format!("reading API key: {e}") }),
     };
 
-    // `SecretStore::get` is a synchronous trait method that can itself
-    // take real time (host keychain prompt, disk IO) -- `cancel()` can
-    // land while it's in flight, before `abort_cell` has anything in it
-    // for `request_cancel`'s `Transcribing` branch to grab (round-2
-    // review, scenario B). Re-check right after it returns, before
-    // building the client / spawning the HTTP task at all.
+    // Real race, kept (review finding F2, scenario B): `abort_cell` has no
+    // handle until the HTTP task below is spawned, so a `cancel()` landing
+    // while `SecretStore::get` was in flight (a sync trait method that can
+    // block on a keychain prompt / disk IO) has nothing to abort. Because
+    // `cancelled` is monotonic (`request_cancel` only ever sets it), this
+    // one check also subsumes a cancel that arrived earlier, during the
+    // file read -- so the older redundant post-`fs::read` check was
+    // dropped. Re-check here, before building the client / spawning HTTP.
     if cancelled.load(Ordering::SeqCst) {
         return TranscribeOutcome::Aborted;
     }
@@ -372,12 +424,11 @@ async fn run_transcription(
     let joined = handle.await;
     *abort_cell.lock().unwrap() = None;
 
-    // Symmetric check right after the network call completes: a
-    // `cancel()` that landed while the request was in flight (too late
-    // to actually abort the socket, e.g. the response had already fully
-    // arrived) must still drop the real result instead of reporting it
-    // as a successful transcription for a session the caller was told
-    // was cancelled.
+    // Real race, kept: a `cancel()` that landed while the request was in
+    // flight but too late to actually abort the socket (the response had
+    // already fully arrived, so the `abort()` above no-ops) must still
+    // drop the real result instead of reporting it as a successful
+    // transcription for a session the caller was told was cancelled.
     if cancelled.load(Ordering::SeqCst) {
         return TranscribeOutcome::Aborted;
     }
@@ -470,6 +521,52 @@ mod tests {
         (RecFile::create(path.clone()).unwrap(), path)
     }
 
+    /// Claims the slot and spawns the pipeline task, reporting capture as
+    /// already ready (these tests drive the pipeline directly with the
+    /// MockCapture already `start()`ed, so there is no real
+    /// `spawn_blocking(capture.start)` to gate on). Dedupes the
+    /// `begin`/capture-ready/`spawn` prologue every pipeline test shared
+    /// (review finding F4).
+    fn spawn_session(
+        sessions: &Arc<SessionGuard>,
+        deps: PipelineDeps,
+        file: RecFile,
+        mode: Mode,
+    ) -> (SessionId, watch::Receiver<Option<Outcome>>) {
+        let (capture_ready_tx, capture_ready_rx) = tokio::sync::oneshot::channel();
+        capture_ready_tx.send(Ok(())).unwrap();
+        spawn(mode, file, deps, sessions.clone(), capture_ready_rx).unwrap()
+    }
+
+    /// A dedicated (non-pooled) mockito listener -- mockito's plain
+    /// `new_async()` draws from a process-wide pool of reused servers;
+    /// under this crate's parallel test harness a server checked back into
+    /// the pool by one finishing test can be handed to another before its
+    /// listener is fully re-armed, producing a spurious "connection
+    /// refused" against a port mockito had just reported as its own (see
+    /// `profile_source.rs`'s identical fix for the QR tests that first
+    /// surfaced this). `port: 0` gives each test a listener it exclusively
+    /// owns end to end. Kept in one helper so the rule can't drift.
+    async fn mock_server() -> mockito::Server {
+        mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await
+    }
+
+    /// Minimal `SessionHandles` for the couple of tests that assert only
+    /// that the single-flight slot is free again (`begin` succeeds) after
+    /// a prior session ended -- `begin` now takes the handles up front
+    /// (review finding F1), so a bare re-`begin` needs something to hand it.
+    fn dummy_handles() -> SessionHandles {
+        let (control_tx, _control_rx) = watch::channel(ControlSignal::None);
+        let (_outcome_tx, outcome_rx) = watch::channel(None);
+        SessionHandles {
+            control_tx,
+            outcome_rx,
+            transcribe_abort: Arc::new(StdMutex::new(None)),
+            lease: None,
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
     // Real time, not `start_paused` (`[R2-Exec]` empirically verified,
     // see `/tmp/repro_crate` throwaway repro during this task): tokio's
     // paused-clock auto-advance races against reqwest's own internal
@@ -492,7 +589,7 @@ mod tests {
         // that first surfaced this). `new_with_opts_async` with `port: 0`
         // gives each test a listener it exclusively owns end to end.
         let mut server =
-            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
+            mock_server().await;
         let _mock = server
             .mock("POST", "/transcriptions")
             .with_status(200)
@@ -511,14 +608,12 @@ mod tests {
         deps.dictionary = vec![("solid".to_string(), "SOLID".to_string())];
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&dir.path().join("session.wav"), 999_999).unwrap();
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
         capture.tick(); // some signal, so liveness/level plumbing runs at least once
 
-        let rx = sessions.signal(&id, ControlSignal::Stop).unwrap();
+        let rx = sessions.request_stop(&id).unwrap();
         let outcome = drain_outcome(rx).await;
 
         let result = outcome.unwrap();
@@ -551,7 +646,7 @@ mod tests {
         }
 
         let mut server =
-            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
+            mock_server().await;
         let _mock = server
             .mock("POST", "/transcriptions")
             .with_status(200)
@@ -580,12 +675,10 @@ mod tests {
         };
         let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink, app_config, dictionary: Vec::new() };
 
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&dir.path().join("session.wav"), 999_999).unwrap();
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
-        let rx = sessions.signal(&id, ControlSignal::Stop).unwrap();
+        let rx = sessions.request_stop(&id).unwrap();
         let outcome = drain_outcome(rx).await;
         assert_eq!(outcome.unwrap().text, "hello");
 
@@ -599,7 +692,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn no_speech_discard_never_calls_transcription() {
         let mut server =
-            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
+            mock_server().await;
         let mock = server.mock("POST", "/transcriptions").expect(0).create_async().await;
 
         let dir = tempfile::tempdir().unwrap();
@@ -611,11 +704,9 @@ mod tests {
         deps.app_config.silence_timeout_ms = 300;
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&path, 999_999).unwrap();
         capture.set_script(vec![LevelSample::new(0.0, 0.0); 60]);
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
         // Drive the guard by advancing time + ticking in lockstep every
         // 250ms poll. The silence window's capacity is fixed at
@@ -643,7 +734,7 @@ mod tests {
     #[tokio::test] // real time — see happy_path's comment on `start_paused` + real HTTP.
     async fn http_5xx_produces_transcription_error_and_deletes_file() {
         let mut server =
-            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
+            mock_server().await;
         let _mock = server.mock("POST", "/transcriptions").with_status(500).with_body("boom").create_async().await;
 
         let dir = tempfile::tempdir().unwrap();
@@ -655,12 +746,10 @@ mod tests {
         deps.app_config.min_recording_ms = 0;
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&path, 999_999).unwrap();
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
-        let rx = sessions.signal(&id, ControlSignal::Stop).unwrap();
+        let rx = sessions.request_stop(&id).unwrap();
         let outcome = drain_outcome(rx).await;
 
         assert!(matches!(outcome, Err(PluginError::Transcription { .. })));
@@ -679,11 +768,9 @@ mod tests {
         let deps = test_deps(capture.clone(), sink.clone());
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&path, 999_999).unwrap();
         capture.set_die_silently(true); // "died silently": is_running() stays true, no more ticks
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
         let rx = sessions.outcome_receiver(&id).unwrap();
         let start = TokioInstant::now();
@@ -703,11 +790,9 @@ mod tests {
         let deps = test_deps(capture.clone(), sink.clone());
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&path, 2).unwrap(); // cap_samples = 2: self-cap fires almost immediately
         capture.set_script(vec![LevelSample::new(0.5, 0.5); 10]);
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
         let rx = sessions.outcome_receiver(&id).unwrap();
         for _ in 0..5 {
@@ -732,14 +817,12 @@ mod tests {
         let deps = test_deps(capture.clone(), sink.clone());
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Hold).unwrap();
         capture.start(&path, 999_999).unwrap();
         // A long quiet-but-alive script: keeps the liveness check happy
         // (level_rx keeps ticking) so `StreamDied` (1s) can't preempt the
         // 3s lease-loss deadline this test is actually isolating.
         capture.set_script(vec![LevelSample::new(0.01, 0.01); 20]);
-        let handles = spawn(id.clone(), Mode::Hold, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Hold);
 
         let rx = sessions.outcome_receiver(&id).unwrap();
         for _ in 0..12 {
@@ -766,11 +849,9 @@ mod tests {
         let deps = test_deps(capture.clone(), sink.clone());
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Hold).unwrap();
         capture.start(&path, 999_999).unwrap();
         capture.set_script(vec![LevelSample::new(0.01, 0.01); 20]);
-        let handles = spawn(id.clone(), Mode::Hold, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Hold);
 
         // Keep the stream alive up to 2.9s (11 ticks * 250ms + 150ms) with
         // no heartbeat at all, then stop — must beat the 3.0s lease-loss
@@ -782,7 +863,7 @@ mod tests {
         }
         tokio::time::advance(Duration::from_millis(150)).await;
         tokio::task::yield_now().await;
-        let rx = sessions.signal(&id, ControlSignal::Stop).unwrap();
+        let rx = sessions.request_stop(&id).unwrap();
         let outcome = drain_outcome(rx).await;
 
         assert_eq!(outcome.unwrap().guard_outcome, GuardOutcome::Finalized, "a stop() at 2.9s must win the race against lease-loss at 3.0s");
@@ -802,14 +883,12 @@ mod tests {
             let deps = test_deps(capture.clone(), sink.clone());
 
             let sessions = Arc::new(SessionGuard::new());
-            let id = sessions.begin(Mode::Hold).unwrap();
             capture.start(&path, 999_999).unwrap();
-            let handles = spawn(id.clone(), Mode::Hold, file, deps, sessions.clone());
-            sessions.attach_handles(&id, handles);
+            let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Hold);
 
             tokio::time::advance(Duration::from_millis(100)).await;
             tokio::task::yield_now().await;
-            let rx = sessions.signal(&id, ControlSignal::Stop).unwrap();
+            let rx = sessions.request_stop(&id).unwrap();
             let outcome = drain_outcome(rx).await;
             assert_eq!(outcome.unwrap().guard_outcome, GuardOutcome::Finalized, "a quick hold-release must never be reported as LeaseLost");
         }
@@ -818,7 +897,7 @@ mod tests {
     #[tokio::test] // real time — see happy_path's comment on `start_paused` + real HTTP.
     async fn cancel_during_transcribing_aborts_http_and_deletes_file() {
         let mut server =
-            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
+            mock_server().await;
         let _mock = server
             .mock("POST", "/transcriptions")
             .with_status(200)
@@ -838,13 +917,11 @@ mod tests {
         deps.app_config.min_recording_ms = 0;
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&path, 999_999).unwrap();
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
         // Kick the pipeline into Transcribing.
-        let _ = sessions.signal(&id, ControlSignal::Stop).unwrap();
+        let _ = sessions.request_stop(&id).unwrap();
         // Give the finalize task a chance to reach the point where it
         // has spawned the (now permanently hanging) HTTP call and stored
         // its abort handle — real (small) sleeps, not `yield_now`: this
@@ -881,12 +958,10 @@ mod tests {
         deps.app_config.silence_timeout_ms = 300;
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&path, 999_999).unwrap();
         capture.set_muted(true);
         capture.set_script(vec![LevelSample::new(0.9, 0.9); 60]); // loud, but muted must still read as silence
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
         let rx = sessions.outcome_receiver(&id).unwrap();
         for _ in 0..50 {
@@ -941,11 +1016,9 @@ mod tests {
         let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink, app_config, dictionary: Vec::new() };
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
-        let rx = sessions.signal(&id, ControlSignal::Stop).unwrap();
+        let rx = sessions.request_stop(&id).unwrap();
         let _ = drain_outcome(rx).await;
 
         let stop_thread_id = capture.thread_id.lock().unwrap().unwrap();
@@ -964,13 +1037,11 @@ mod tests {
         let deps = test_deps(capture.clone(), sink.clone());
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&path, 999_999).unwrap();
         capture.set_ignore_stop(true);
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
-        let rx = sessions.signal(&id, ControlSignal::Stop).unwrap();
+        let rx = sessions.request_stop(&id).unwrap();
         let outcome = drain_outcome(rx).await;
         assert!(outcome.is_err(), "the pipeline still reports the capture failure to the caller");
 
@@ -1028,12 +1099,10 @@ mod tests {
         let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink, app_config, dictionary: Vec::new() };
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&path, 999_999).unwrap();
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
-        let mut outcome_rx = sessions.signal(&id, ControlSignal::Stop).unwrap();
+        let mut outcome_rx = sessions.request_stop(&id).unwrap();
         // As of `[ADO-8]` (see `PanicOnStopCapture`'s own doc comment
         // above), `capture.stop()`'s panic is caught inside
         // `spawn_blocking` and surfaced to `finalize` as an ordinary
@@ -1053,7 +1122,7 @@ mod tests {
         }
 
         assert!(!sessions.has_active(), "a capture.stop() panic (caught as a JoinError) must still free the single-flight slot");
-        let second = sessions.begin(Mode::Toggle);
+        let second = sessions.begin(Mode::Toggle, dummy_handles());
         assert!(second.is_ok(), "a subsequent start() must succeed after the panic");
     }
 
@@ -1088,12 +1157,10 @@ mod tests {
         let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink, app_config, dictionary: Vec::new() };
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&path, 999_999).unwrap();
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
-        let mut outcome_rx = sessions.signal(&id, ControlSignal::Stop).unwrap();
+        let mut outcome_rx = sessions.request_stop(&id).unwrap();
         // This time the panic genuinely unwinds `finalize`/the pipeline
         // task -- `finalize` never reaches its own `outcome_tx.send`, so
         // the sender is simply dropped without publishing.
@@ -1107,7 +1174,7 @@ mod tests {
         }
 
         assert!(!sessions.has_active(), "a panic inside finalize's own body (outside spawn_blocking) must still free the slot via SessionSlotGuard::drop");
-        assert!(sessions.begin(Mode::Toggle).is_ok(), "a subsequent start() must succeed after the panic");
+        assert!(sessions.begin(Mode::Toggle, dummy_handles()).is_ok(), "a subsequent start() must succeed after the panic");
     }
 
     // ---- Round-2 review, F2 scenario A/B: deterministic TOCTOU races ----
@@ -1125,11 +1192,11 @@ mod tests {
     // which panics if called from inside a runtime worker thread) -- no
     // sleeps anywhere, fully latch-driven.
 
-    /// Blocks `stop()` on a real channel -- see the module comment above.
+    /// Blocks `stop()` on a shared [`crate::capture::BlockingLatch`] -- see
+    /// the module comment above.
     struct BlockingStopCapture {
         inner: Arc<MockCapture>,
-        ready_tx: StdMutex<Option<tokio::sync::oneshot::Sender<()>>>,
-        release_rx: StdMutex<Option<std::sync::mpsc::Receiver<()>>>,
+        latch: Arc<crate::capture::BlockingLatch>,
     }
 
     impl AudioCapture for BlockingStopCapture {
@@ -1137,12 +1204,7 @@ mod tests {
             self.inner.start(path, cap_samples)
         }
         fn stop(&self) -> Result<crate::capture::CaptureStats, crate::capture::CaptureError> {
-            if let Some(tx) = self.ready_tx.lock().unwrap().take() {
-                let _ = tx.send(());
-            }
-            if let Some(rx) = self.release_rx.lock().unwrap().take() {
-                let _ = rx.recv();
-            }
+            self.latch.block();
             self.inner.stop()
         }
         fn level_rx(&self) -> tokio::sync::watch::Receiver<Option<LevelSample>> {
@@ -1163,19 +1225,14 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancel_races_the_guards_own_finalize_scenario_a() {
         let mut server =
-            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
+            mock_server().await;
         let mock_endpoint = server.mock("POST", "/transcriptions").expect(0).create_async().await;
 
         let dir = tempfile::tempdir().unwrap();
         let (file, path) = rec_file(&dir);
         let mock_capture = Arc::new(MockCapture::new());
-        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
-        let capture: Arc<dyn AudioCapture> = Arc::new(BlockingStopCapture {
-            inner: mock_capture.clone(),
-            ready_tx: StdMutex::new(Some(ready_tx)),
-            release_rx: StdMutex::new(Some(release_rx)),
-        });
+        let (latch, ready_rx, release_tx) = crate::capture::BlockingLatch::new();
+        let capture: Arc<dyn AudioCapture> = Arc::new(BlockingStopCapture { inner: mock_capture.clone(), latch });
         let sink = Arc::new(RecordingSink::new());
         let secrets: Arc<dyn SecretStore> = Arc::new(InMemorySecretStore::new());
         secrets.set(API_KEY_SECRET_NAME, &Secret::new("test-key")).unwrap();
@@ -1188,7 +1245,6 @@ mod tests {
         let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink.clone(), app_config, dictionary: Vec::new() };
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&path, 1).unwrap(); // cap_samples = 1: self-cap fires on the very first sample
         mock_capture.set_script(vec![LevelSample::new(0.5, 0.5)]);
         // Ticking BEFORE `spawn()` still reaches the session's `level_rx`:
@@ -1199,8 +1255,7 @@ mod tests {
         // documented "first tick completes immediately" does the rest
         // deterministically once the task is polled.
         mock_capture.tick();
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
         ready_rx.await.unwrap();
         assert_eq!(
@@ -1232,22 +1287,16 @@ mod tests {
         assert_eq!(sink.last(RESULT_EVENT).unwrap()["text"], serde_json::json!(""));
     }
 
-    /// Blocks `SecretStore::get()` on a real channel -- see the module
-    /// comment above.
+    /// Blocks `SecretStore::get()` on a shared
+    /// [`crate::capture::BlockingLatch`] -- see the module comment above.
     struct BlockingSecretStore {
         inner: InMemorySecretStore,
-        ready_tx: StdMutex<Option<tokio::sync::oneshot::Sender<()>>>,
-        release_rx: StdMutex<Option<std::sync::mpsc::Receiver<()>>>,
+        latch: Arc<crate::capture::BlockingLatch>,
     }
 
     impl crate::secrets::SecretStore for BlockingSecretStore {
         fn get(&self, name: &str) -> crate::secrets::SecretResult<Option<Secret>> {
-            if let Some(tx) = self.ready_tx.lock().unwrap().take() {
-                let _ = tx.send(());
-            }
-            if let Some(rx) = self.release_rx.lock().unwrap().take() {
-                let _ = rx.recv();
-            }
+            self.latch.block();
             self.inner.get(name)
         }
         fn set(&self, name: &str, value: &Secret) -> crate::secrets::SecretResult<()> {
@@ -1268,7 +1317,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancel_while_secret_lookup_is_in_flight_scenario_b() {
         let mut server =
-            mockito::Server::new_with_opts_async(mockito::ServerOpts { port: 0, ..Default::default() }).await;
+            mock_server().await;
         let mock_endpoint = server.mock("POST", "/transcriptions").expect(0).create_async().await;
 
         let dir = tempfile::tempdir().unwrap();
@@ -1278,13 +1327,8 @@ mod tests {
 
         let inner_secrets = InMemorySecretStore::new();
         inner_secrets.set(API_KEY_SECRET_NAME, &Secret::new("test-key")).unwrap();
-        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
-        let secrets: Arc<dyn SecretStore> = Arc::new(BlockingSecretStore {
-            inner: inner_secrets,
-            ready_tx: StdMutex::new(Some(ready_tx)),
-            release_rx: StdMutex::new(Some(release_rx)),
-        });
+        let (latch, ready_rx, release_tx) = crate::capture::BlockingLatch::new();
+        let secrets: Arc<dyn SecretStore> = Arc::new(BlockingSecretStore { inner: inner_secrets, latch });
 
         let app_config = AppConfig {
             api_url_override: Some(format!("{}/transcriptions", server.url())),
@@ -1295,12 +1339,10 @@ mod tests {
         let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink.clone(), app_config, dictionary: Vec::new() };
 
         let sessions = Arc::new(SessionGuard::new());
-        let id = sessions.begin(Mode::Toggle).unwrap();
         capture.start(&path, 999_999).unwrap();
-        let handles = spawn(id.clone(), Mode::Toggle, file, deps, sessions.clone());
-        sessions.attach_handles(&id, handles);
+        let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
 
-        let _ = sessions.signal(&id, ControlSignal::Stop).unwrap();
+        let _ = sessions.request_stop(&id).unwrap();
 
         ready_rx.await.unwrap();
         assert_eq!(sessions.stage_of(&id), Some(crate::session::Stage::Transcribing));
