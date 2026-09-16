@@ -127,11 +127,16 @@ async fn wait_for_outcome_receiver(
         if !state.sessions.is_active(id) {
             return Err(PluginError::UnknownSession { session_id: id.to_string() });
         }
-        // A short sleep, not a bare `yield_now`: on a single-worker runtime a
-        // cooperative yield spins the whole `spawn_blocking(capture.start)`
-        // window (blind review R1). 1 ms is far below any human-visible
-        // latency and keeps the worker free for `attach_handles`.
-        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        // Deliberately `yield_now`, not a timed sleep: a coarser poll lets a
+        // pending Stop applied at `attach_handles` run the whole finalize
+        // (mock capture: microseconds) between two polls, after which
+        // `is_active` is false and the stop caller gets `UnknownSession` even
+        // though its stop was honoured (`do_stop_arriving_while_capture_start_
+        // is_blocked_*` fail deterministically with a 1 ms sleep). The tight
+        // cooperative spin is bounded by the `spawn_blocking(capture.start)`
+        // window. Proper fix (follow-up): hand the outcome receiver to a
+        // pending stop directly in `attach_handles` instead of polling.
+        tokio::task::yield_now().await;
     }
 }
 
