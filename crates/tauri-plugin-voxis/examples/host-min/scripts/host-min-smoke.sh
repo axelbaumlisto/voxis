@@ -107,6 +107,13 @@ run_scenario() {
   local name="$1" wav="$2" expect_grep="$3" expect_requests="$4" expect_guard_outcome="$5" extra_env="${6:-}"
 
   : > "$fake_stt_log"
+  # Truncate host-min's log HERE, synchronously -- not only via the `>`
+  # redirection of the background job below. That redirection happens in
+  # the forked child, racing the poll loop's first `grep RESULT_EVENT`,
+  # which on a fast box read the PREVIOUS scenario's RESULT_EVENT, broke
+  # out immediately and killed host-min before it wrote a byte
+  # (CI task 6912: speech-streamdied "no RESULT_EVENT" with an empty log).
+  : > "$host_min_log"
   start_fake_stt  # NOT `port=$(start_fake_stt)` -- see the F1 comment above.
   echo "=== [$name] fake-stt on port $fake_stt_port ==="
 
@@ -187,6 +194,7 @@ run_profile_import_scenario() {
   local seed_dir
   seed_dir="$(mktemp -d)"
 
+  : > "$host_min_log"
   env \
   VOXIS_SMOKE_SEED_DESKTOP_DIR="$seed_dir" \
   VOXIS_SMOKE_SEED_STT_URL="http://127.0.0.1:$fake_stt_port/v1/audio/transcriptions" \
