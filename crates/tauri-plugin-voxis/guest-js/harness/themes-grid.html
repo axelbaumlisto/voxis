@@ -1,0 +1,83 @@
+<!doctype html>
+<!--
+  crates/tauri-plugin-voxis/guest-js/harness/themes-grid.html
+  A6 — visual proof-of-work for "full Voxis theme support in
+  <voxis-overlay>". Mounts all 18 builtin themes simultaneously, each
+  forced `"expanded"` (recording, fed a fake sine-wave level) so its real
+  manifest size renders instead of being squashed into the old fixed
+  64x64 pill — plus two `"compact"` handles (idle/error) alongside, for
+  a single screenshot showing both lifecycle states at once. Served by
+  `bun run harness` (this package) via `vite.harness.config.ts`, same as
+  `index.html` — open `/themes-grid.html`.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Same CSP naked actually ships (src-tauri/tauri.conf.json's app.security.csp) -— style-src needs 'unsafe-inline' because the overlay injects a <style> tag into its shadow root and sets inline style.left/top/width/height for drag/positioning/sizing; script-src stays 'self' only (no inline scripts, no eval, static imports only, per __tests__/csp-bundle.test.ts). -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost" />
+    <title>voxis-overlay — all themes (A6)</title>
+    <style>
+      body {
+        margin: 0;
+        background: #1b1b1b;
+        color: #eee;
+        font: 12px/1.4 system-ui, sans-serif;
+      }
+      #grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 8px;
+        padding: 16px;
+      }
+      .slot {
+        position: relative;
+        height: 180px;
+        background: #262626;
+        border-radius: 8px;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        overflow: hidden;
+      }
+      .slot .label {
+        position: absolute;
+        top: 4px;
+        left: 6px;
+        right: 6px;
+        font-size: 11px;
+        color: #aaa;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .slot .anchor {
+        position: relative;
+        width: 100%;
+        height: 100%;
+      }
+      #compact-row {
+        display: flex;
+        gap: 24px;
+        padding: 0 16px 24px;
+        align-items: center;
+      }
+      #compact-row .slot {
+        width: 140px;
+        height: 90px;
+        flex: none;
+      }
+      h1 {
+        font-size: 14px;
+        padding: 16px 16px 0;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>All 18 builtin themes — expanded (fake sine level)</h1>
+    <div id="grid"></div>
+    <h1>Compact handles (idle / error)</h1>
+    <div id="compact-row"></div>
+    <script type="module" src="./themes-grid.ts"></script>
+  </body>
+</html>

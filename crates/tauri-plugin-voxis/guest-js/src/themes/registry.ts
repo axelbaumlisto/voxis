@@ -23,7 +23,7 @@
  * and `console.warn`s, per plan Task 5 acceptance ("unknown id ->
  * default + warn").
  */
-import type { ThemeModule } from "../types/theme-api";
+import type { ThemeModule, ThemeSize } from "../types/theme-api";
 
 // Each of these is this package's own build output
 // (`themes/generated/<id>/theme.js`, produced by `bun run build`/`test`'s
@@ -52,6 +52,34 @@ import * as quietReed from "./generated/quiet_reed/theme.js";
 import * as radiolarian from "./generated/radiolarian/theme.js";
 import * as vorticellaBloom from "./generated/vorticella_bloom/theme.js";
 import * as winampClassic from "./generated/winamp_classic/theme.js";
+
+// Manifest JSON, statically imported the same way (and from the same
+// `build-themes.ts` output directory) as each `theme.js` above — a
+// `resolveJsonModule` import is just as CSP-safe as the static ESM
+// imports above (still no Blob:/data: URL, and no dynamic runtime
+// import call at all, see `__tests__/csp-bundle.test.ts`), and gives
+// `resolveThemeSize` below a
+// manifest-accurate `overlay_width`/`overlay_height` per theme (A6 —
+// full theme support: a 120x120 WebGL theme like lavalamp must not be
+// squashed into a 64x64 pill).
+import allAquariumManifest from "./generated/all_aquarium/theme.json";
+import defaultManifest from "./generated/default/theme.json";
+import didiniumDriftManifest from "./generated/didinium_drift/theme.json";
+import driftingContourManifest from "./generated/drifting_contour/theme.json";
+import duoAquariumManifest from "./generated/duo_aquarium/theme.json";
+import euglenaDriftManifest from "./generated/euglena_drift/theme.json";
+import handyPillManifest from "./generated/handy_pill/theme.json";
+import lavalampManifest from "./generated/lavalamp/theme.json";
+import livingReedManifest from "./generated/living_reed/theme.json";
+import metaballsManifest from "./generated/metaballs/theme.json";
+import metaballs25dManifest from "./generated/metaballs25d/theme.json";
+import metaballs3dManifest from "./generated/metaballs3d/theme.json";
+import neonManifest from "./generated/neon/theme.json";
+import parameciumSoloManifest from "./generated/paramecium_solo/theme.json";
+import quietReedManifest from "./generated/quiet_reed/theme.json";
+import radiolarianManifest from "./generated/radiolarian/theme.json";
+import vorticellaBloomManifest from "./generated/vorticella_bloom/theme.json";
+import winampClassicManifest from "./generated/winamp_classic/theme.json";
 
 /** The theme id every embedding host gets when its requested/profile theme id is unknown. */
 export const DEFAULT_THEME_ID = "default";
@@ -94,4 +122,72 @@ export function resolveTheme(id: string | undefined): ThemeModule {
     throw new Error(`[voxis-overlay] ThemeRegistry has no "${DEFAULT_THEME_ID}" entry — build-themes.ts output missing?`);
   }
   return fallback;
+}
+
+/**
+ * The size an overlay hosting a theme with no `overlay_width`/
+ * `overlay_height` in its manifest gets (`default`/`handy_pill`/`neon`/
+ * `winamp_classic` today — see `manifest.rs`'s `Option<u32>`, absent
+ * meaning "no opinion"). Same value `<voxis-overlay>`'s pill has always
+ * used pre-A6, so those four themes render unchanged; only themes that
+ * *do* declare a manifest size (e.g. lavalamp's 120×120 WebGL scene) now
+ * get their own overlay size instead of being squashed into this one.
+ */
+export const FALLBACK_THEME_SIZE: ThemeSize = { width: 64, height: 64 };
+
+/**
+ * The manifest fields `sizeFromManifest` reads — the rest of
+ * `ThemeManifest` (name/description/params/...) is irrelevant to sizing.
+ * `entry` is required (every manifest has one) purely so this interface
+ * isn't a TS "weak type" (all-optional-properties) that would otherwise
+ * make every manifest object literal below fail TS2559's "has no
+ * properties in common" check.
+ */
+interface ManifestSizeFields {
+  entry: string;
+  overlay_width?: number;
+  overlay_height?: number;
+}
+
+function sizeFromManifest(manifest: ManifestSizeFields): ThemeSize {
+  if (typeof manifest.overlay_width === "number" && typeof manifest.overlay_height === "number") {
+    return { width: manifest.overlay_width, height: manifest.overlay_height };
+  }
+  return FALLBACK_THEME_SIZE;
+}
+
+/** Static id -> manifest overlay size map, mirroring `ThemeRegistry`'s id -> module map. The *only* place manifest sizes are read. */
+const ThemeSizes: Record<string, ThemeSize> = {
+  all_aquarium: sizeFromManifest(allAquariumManifest),
+  default: sizeFromManifest(defaultManifest),
+  didinium_drift: sizeFromManifest(didiniumDriftManifest),
+  drifting_contour: sizeFromManifest(driftingContourManifest),
+  duo_aquarium: sizeFromManifest(duoAquariumManifest),
+  euglena_drift: sizeFromManifest(euglenaDriftManifest),
+  handy_pill: sizeFromManifest(handyPillManifest),
+  lavalamp: sizeFromManifest(lavalampManifest),
+  living_reed: sizeFromManifest(livingReedManifest),
+  metaballs: sizeFromManifest(metaballsManifest),
+  metaballs25d: sizeFromManifest(metaballs25dManifest),
+  metaballs3d: sizeFromManifest(metaballs3dManifest),
+  neon: sizeFromManifest(neonManifest),
+  paramecium_solo: sizeFromManifest(parameciumSoloManifest),
+  quiet_reed: sizeFromManifest(quietReedManifest),
+  radiolarian: sizeFromManifest(radiolarianManifest),
+  vorticella_bloom: sizeFromManifest(vorticellaBloomManifest),
+  winamp_classic: sizeFromManifest(winampClassicManifest),
+};
+
+/**
+ * The overlay size a theme's manifest declares (A6 plan step 1) —
+ * `FALLBACK_THEME_SIZE` (64×64, this element's original fixed pill size)
+ * for an unknown id or a manifest with no `overlay_width`/
+ * `overlay_height`. Mirrors `resolveTheme`'s id normalization
+ * (`undefined`/empty -> `DEFAULT_THEME_ID`) so a caller resolving both a
+ * module and a size for the same requested id always gets a consistent
+ * pair.
+ */
+export function resolveThemeSize(id: string | undefined): ThemeSize {
+  const key = id && id.length > 0 ? id : DEFAULT_THEME_ID;
+  return ThemeSizes[key] ?? FALLBACK_THEME_SIZE;
 }

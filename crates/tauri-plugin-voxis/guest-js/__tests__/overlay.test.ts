@@ -16,8 +16,8 @@
  * value, not as the CSP guarantee itself.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cornerPosition, mountOverlay, VoxisOverlayElement, type OverlayCorner } from "../src/overlay";
-import { clampToViewport, savePosition } from "../src/drag";
+import { anchorGrow, cornerPosition, COMPACT_SIZE, mountOverlay, shapeRadius, VoxisOverlayElement, type OverlayCorner } from "../src/overlay";
+import { clampToViewport, loadPosition, savePosition } from "../src/drag";
 import type { DictationResult, LevelEvent, PluginState } from "../src/types/contract";
 import type { VoxisClient } from "../src/client";
 
@@ -266,7 +266,7 @@ describe("<voxis-overlay>", () => {
       fakeVV.dispatchEvent(new Event("resize"));
 
       const top = parseFloat(pill.style.top);
-      expect(top + 64).toBeLessThanOrEqual(300);
+      expect(top + COMPACT_SIZE.height).toBeLessThanOrEqual(300);
     });
 
     it("re-clamps on visualViewport's own scroll event too", () => {
@@ -281,7 +281,7 @@ describe("<voxis-overlay>", () => {
       fakeVV.dispatchEvent(new Event("scroll"));
 
       const top = parseFloat(pill.style.top);
-      expect(top + 64).toBeLessThanOrEqual(300);
+      expect(top + COMPACT_SIZE.height).toBeLessThanOrEqual(300);
     });
 
     it("falls back to window resize/orientationchange when visualViewport is unsupported", () => {
@@ -297,7 +297,7 @@ describe("<voxis-overlay>", () => {
         window.dispatchEvent(new Event("resize"));
 
         const top = parseFloat(pill.style.top);
-        expect(top + 64).toBeLessThanOrEqual(250);
+        expect(top + COMPACT_SIZE.height).toBeLessThanOrEqual(250);
       } finally {
         Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
       }
@@ -384,8 +384,8 @@ describe("<voxis-overlay> driver: \"host\" [T10-overlay]", () => {
     el.remove();
   });
 
-  it("the theme's own cancel action is a no-op instead of touching a nonexistent client", () => {
-    const el = mountOverlay(container, { driver: "host" });
+  it("the theme's own cancel action is a no-op instead of touching a nonexistent client (idleTheme keeps the bridge mounted to reach it)", () => {
+    const el = mountOverlay(container, { driver: "host", idleTheme: true });
     const bridge = (el as unknown as { themeBridge: { api: { actions: { cancel: () => void } } } }).themeBridge;
     expect(() => bridge.api.actions.cancel()).not.toThrow();
     el.remove();
@@ -452,7 +452,8 @@ describe("<voxis-overlay> under naked's CSP meta tag", () => {
   it("mounts without the CSP meta tag itself throwing (jsdom does not enforce CSP — see file doc comment)", () => {
     const meta = document.createElement("meta");
     meta.httpEquiv = "Content-Security-Policy";
-    meta.content = "default-src 'self'; script-src 'self'";
+    // Same CSP naked actually ships (src-tauri/tauri.conf.json's app.security.csp).
+    meta.content = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost";
     document.head.appendChild(meta);
 
     const { client } = createMockClient();
@@ -488,7 +489,9 @@ describe("cornerPosition [initialPosition]", () => {
 
 describe("<voxis-overlay> initialPosition option", () => {
   let container: HTMLDivElement;
-  const PILL_SIZE = { width: 64, height: 64 };
+  // The overlay's default (idle) size is the compact handle, not the
+  // pre-A6 fixed 64x64 pill — see `COMPACT_SIZE`/module doc comment.
+  const PILL_SIZE = COMPACT_SIZE;
   const originalInnerWidth = window.innerWidth;
   const originalInnerHeight = window.innerHeight;
 
@@ -566,6 +569,281 @@ describe("<voxis-overlay> initialPosition option", () => {
       initialPosition: "top-left",
     });
     expect(pillPos(el)).toEqual({ x: 12, y: 34 });
+  });
+});
+
+describe("anchorGrow [A6 compact<->expanded growth direction]", () => {
+  const viewport = { width: 400, height: 800 };
+
+  it("grows to the right/down when resting near the top-left (anchors the top-left edge)", () => {
+    const grown = anchorGrow({ x: 10, y: 10 }, COMPACT_SIZE, { width: 120, height: 120 }, viewport);
+    expect(grown).toEqual({ x: 10, y: 10 });
+  });
+
+  it("grows to the left when resting near the right edge (anchors the right edge)", () => {
+    const pos = { x: 400 - COMPACT_SIZE.width - 10, y: 10 };
+    const grown = anchorGrow(pos, COMPACT_SIZE, { width: 120, height: 120 }, viewport);
+    // Right edge stays fixed: pos.x + COMPACT_SIZE.width - 120.
+    expect(grown.x).toBe(pos.x + COMPACT_SIZE.width - 120);
+    expect(grown.y).toBe(10);
+  });
+
+  it("grows upward when resting near the bottom edge (anchors the bottom edge)", () => {
+    const pos = { x: 10, y: 800 - COMPACT_SIZE.height - 10 };
+    const grown = anchorGrow(pos, COMPACT_SIZE, { width: 120, height: 120 }, viewport);
+    expect(grown.x).toBe(10);
+    expect(grown.y).toBe(pos.y + COMPACT_SIZE.height - 120);
+  });
+
+  it("grows left AND upward when resting in the bottom-right corner", () => {
+    const pos = { x: 400 - COMPACT_SIZE.width - 10, y: 800 - COMPACT_SIZE.height - 10 };
+    const grown = anchorGrow(pos, COMPACT_SIZE, { width: 120, height: 120 }, viewport);
+    expect(grown.x).toBe(pos.x + COMPACT_SIZE.width - 120);
+    expect(grown.y).toBe(pos.y + COMPACT_SIZE.height - 120);
+  });
+});
+
+describe("shapeRadius [A6 shape rule]", () => {
+  it("a square no larger than 96px a side is a circle", () => {
+    expect(shapeRadius(COMPACT_SIZE)).toBe("50%");
+    expect(shapeRadius({ width: 96, height: 96 })).toBe("50%");
+  });
+
+  it("a square larger than 96px a side is a rounded rect", () => {
+    expect(shapeRadius({ width: 120, height: 120 })).toBe("16px");
+  });
+
+  it("any non-square size is a rounded rect, regardless of how small", () => {
+    expect(shapeRadius({ width: 64, height: 40 })).toBe("16px");
+    expect(shapeRadius({ width: 340, height: 170 })).toBe("16px");
+  });
+});
+
+describe("<voxis-overlay> compact<->expanded lifecycle [A6]", () => {
+  let container: HTMLDivElement;
+
+  function countingThemeModule() {
+    const calls = { mount: 0, unmount: 0 };
+    const module = {
+      mount: vi.fn(() => {
+        calls.mount += 1;
+        return { unmount: vi.fn(() => { calls.unmount += 1; }) };
+      }),
+    };
+    return { module, calls };
+  }
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  it.each(["client", "host"] as const)("driver=%s: starts compact (56x56, circle) and expands to the theme's manifest size on recording/transcribing, then shrinks back to compact on idle", (driver) => {
+    const { module, calls } = countingThemeModule();
+    const { client, emitState } = createMockClient();
+    const el =
+      driver === "client"
+        ? mountOverlay(container, { client, theme: "lavalamp", themeModule: module })
+        : mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+
+    expect(el.lifecycle).toBe("compact");
+    expect(el.size).toEqual(COMPACT_SIZE);
+    expect(pill.style.width).toBe(`${COMPACT_SIZE.width}px`);
+    expect(pill.classList.contains("state-compact")).toBe(true);
+    expect(calls.mount).toBe(0);
+
+    if (driver === "client") emitState("recording");
+    else el.applyState("recording");
+
+    expect(el.lifecycle).toBe("expanded");
+    expect(el.size).toEqual({ width: 120, height: 120 });
+    expect(pill.style.width).toBe("120px");
+    expect(pill.classList.contains("state-expanded")).toBe(true);
+    expect(calls.mount).toBe(1);
+    expect(calls.unmount).toBe(0);
+
+    if (driver === "client") emitState("idle");
+    else el.applyState("idle");
+
+    expect(el.lifecycle).toBe("compact");
+    expect(el.size).toEqual(COMPACT_SIZE);
+    expect(pill.style.width).toBe(`${COMPACT_SIZE.width}px`);
+    expect(calls.mount).toBe(1);
+    expect(calls.unmount).toBe(1);
+  });
+
+  it.each(["client", "host"] as const)("driver=%s: error state is also compact (unmounted), same as idle", (driver) => {
+    const { module, calls } = countingThemeModule();
+    const { client, emitState } = createMockClient();
+    const el =
+      driver === "client"
+        ? mountOverlay(container, { client, theme: "lavalamp", themeModule: module })
+        : mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
+
+    if (driver === "client") emitState("recording");
+    else el.applyState("recording");
+    expect(calls.mount).toBe(1);
+
+    if (driver === "client") emitState("error");
+    else el.applyState("error");
+    expect(el.lifecycle).toBe("compact");
+    expect(calls.unmount).toBe(1);
+  });
+
+  it.each(["client", "host"] as const)(
+    "driver=%s: idleTheme: true mounts eagerly and never unmounts across idle/recording/idle transitions",
+    (driver) => {
+      const { module, calls } = countingThemeModule();
+      const { client, emitState } = createMockClient();
+      const el =
+        driver === "client"
+          ? mountOverlay(container, { client, theme: "lavalamp", themeModule: module, idleTheme: true })
+          : mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, idleTheme: true });
+
+      expect(el.lifecycle).toBe("expanded");
+      expect(calls.mount).toBe(1);
+
+      if (driver === "client") emitState("recording");
+      else el.applyState("recording");
+      expect(el.lifecycle).toBe("expanded");
+
+      if (driver === "client") emitState("idle");
+      else el.applyState("idle");
+      expect(el.lifecycle).toBe("expanded");
+
+      expect(calls.mount).toBe(1);
+      expect(calls.unmount).toBe(0);
+    },
+  );
+
+  it.each(["client", "host"] as const)(
+    "driver=%s: dispatches voxis-overlay-resize with the new width/height/state on every compact<->expanded transition",
+    (driver) => {
+      const { module } = countingThemeModule();
+      const { client, emitState } = createMockClient();
+      const el =
+        driver === "client"
+          ? mountOverlay(container, { client, theme: "lavalamp", themeModule: module })
+          : mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
+      const events: Array<{ width: number; height: number; state: string }> = [];
+      el.addEventListener("voxis-overlay-resize", (e) => {
+        events.push((e as CustomEvent<{ width: number; height: number; state: string }>).detail);
+      });
+
+      if (driver === "client") emitState("recording");
+      else el.applyState("recording");
+      expect(events).toEqual([{ width: 120, height: 120, state: "expanded" }]);
+
+      if (driver === "client") emitState("idle");
+      else el.applyState("idle");
+      expect(events).toEqual([
+        { width: 120, height: 120, state: "expanded" },
+        { width: COMPACT_SIZE.width, height: COMPACT_SIZE.height, state: "compact" },
+      ]);
+    },
+  );
+
+  it.each(["client", "host"] as const)(
+    "driver=%s: a drag while expanded clamps using the expanded size, and after shrinking back a drag clamps using the compact size again",
+    (driver) => {
+      const { module } = countingThemeModule();
+      const { client, emitState } = createMockClient();
+      const el =
+        driver === "client"
+          ? mountOverlay(container, { client, theme: "lavalamp", themeModule: module, storageKey: `a6-drag-size-switch-${driver}` })
+          : mountOverlay(container, {
+              driver: "host",
+              theme: "lavalamp",
+              themeModule: module,
+              storageKey: `a6-drag-size-switch-${driver}`,
+            });
+      const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+
+      function drag(fromX: number, fromY: number, toX: number, toY: number) {
+        pill.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, clientX: fromX, clientY: fromY, bubbles: true }));
+        pill.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: toX, clientY: toY, bubbles: true }));
+        pill.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1, clientX: toX, clientY: toY, bubbles: true }));
+      }
+
+      if (driver === "client") emitState("recording");
+      else el.applyState("recording"); // now expanded, 120x120
+      pill.style.left = "0px";
+      pill.style.top = "0px";
+      // Drag far to the right — clamp must use the expanded (120px) width,
+      // not the compact (56px) one, or the pill would overshoot past
+      // (viewport.width - 120).
+      drag(50, 50, 100000, 50);
+      const expandedLeft = parseFloat(pill.style.left);
+      expect(expandedLeft).toBe(window.innerWidth - 120);
+
+      if (driver === "client") emitState("idle");
+      else el.applyState("idle"); // now compact again, 56x56, restored to its pre-grow position
+      pill.style.left = "0px";
+      pill.style.top = "0px";
+      drag(50, 50, 100000, 50);
+      const compactLeft = parseFloat(pill.style.left);
+      expect(compactLeft).toBe(window.innerWidth - COMPACT_SIZE.width);
+      expect(compactLeft).not.toBe(expandedLeft);
+    },
+  );
+
+  it("drag while compact persists the dragged position under storageKey (baseline, unaffected by Finding 1's fix)", () => {
+    const { module } = countingThemeModule();
+    const storageKey = "f1-compact-drag";
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, storageKey });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+    pill.style.left = "0px";
+    pill.style.top = "0px";
+
+    pill.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, clientX: 10, clientY: 10, bubbles: true }));
+    pill.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: 200, clientY: 210, bubbles: true }));
+    pill.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1, clientX: 200, clientY: 210, bubbles: true }));
+
+    const draggedPos = { x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) };
+    expect(loadPosition(storageKey)).toEqual(draggedPos);
+  });
+
+  it("[F1] a drag while expanded does not persist the expanded-sized position; shrinking back re-saves the original compact spot, so a new mount with the same storageKey lands there, not the expanded-dragged position", () => {
+    const { module } = countingThemeModule();
+    const storageKey = "f1-expanded-drag";
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, storageKey });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+
+    // Establish + persist a real compact resting spot via a compact-state drag first.
+    pill.style.left = "0px";
+    pill.style.top = "0px";
+    pill.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, clientX: 10, clientY: 10, bubbles: true }));
+    pill.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: 60, clientY: 70, bubbles: true }));
+    pill.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1, clientX: 60, clientY: 70, bubbles: true }));
+    const compactPos = { x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) };
+    expect(loadPosition(storageKey)).toEqual(compactPos);
+
+    // Expand (recording), then drag while expanded — must NOT persist the expanded-sized position.
+    el.applyState("recording");
+    pill.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, clientX: 10, clientY: 10, bubbles: true }));
+    pill.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: 300, clientY: 400, bubbles: true }));
+    pill.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1, clientX: 300, clientY: 400, bubbles: true }));
+    const expandedDraggedPos = { x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) };
+    expect(expandedDraggedPos).not.toEqual(compactPos);
+
+    // Shrink back — storage must reflect the ORIGINAL compact position, not the expanded-dragged one.
+    el.applyState("idle");
+    expect(loadPosition(storageKey)).toEqual(compactPos);
+
+    el.remove();
+
+    // A new element mounting with the same storageKey must land at the original compact position.
+    const el2 = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, storageKey });
+    const pill2 = el2.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+    expect({ x: parseFloat(pill2.style.left), y: parseFloat(pill2.style.top) }).toEqual(compactPos);
+    el2.remove();
   });
 });
 

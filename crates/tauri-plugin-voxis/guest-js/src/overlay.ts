@@ -18,7 +18,10 @@
  * - A persistent recording indicator (visible dot + `aria-live` text) is
  *   shown whenever the plugin's own state is `"recording"`, independent
  *   of which mode triggered it — required for Toggle mode by App Store
- *   2.5.14, harmless (and arguably reassuring) in Hold mode too.
+ *   2.5.14, harmless (and arguably reassuring) in Hold mode too. This is
+ *   unrelated to the compact/expanded size below — it's a top-right dot
+ *   layered over whichever visual (idle handle or mounted theme) is
+ *   currently showing.
  *
  * Driver model (`driver` option — separate from `mode`, which is the
  * hold/toggle *gesture* and unrelated to who owns the session):
@@ -42,10 +45,42 @@
  *   uses in `"client"` mode (single code path, see `applyState` etc.
  *   below). Window `blur` is a no-op in this mode (nothing here is
  *   started, so nothing here needs stopping).
+ *
+ * Compact/expanded lifecycle (A6 — full theme support):
+ * A theme's manifest can declare an `overlay_width`/`overlay_height`
+ * much larger than a plain pill (lavalamp/metaballs* are 120×120 WebGL
+ * scenes; all_aquarium is 340×170) — squashing one of those into a fixed
+ * 64×64 circle (this element's original, pre-A6 behaviour) makes it
+ * unrecognisable. Two states, driven by `applyState`'s `PluginState`
+ * exactly like the indicator dot is:
+ * - `"compact"` (`idle`/`error`, unless `idleTheme` is set): a fixed
+ *   56×56 circle "handle" — a ring (border) + a center dot, no mounted
+ *   theme (no WebGL/canvas render loop while idle — battery). This is
+ *   the element's resting size/shape, and what every pre-A6
+ *   `initialPosition`/drag/clamp/snap computation now uses in place of
+ *   the old constant `PILL_SIZE`.
+ * - `"expanded"` (`recording`/`transcribing`, or always when
+ *   `idleTheme: true`): the pill grows to the resolved theme's manifest
+ *   size (`themes/registry.ts`'s `resolveThemeSize`, `FALLBACK_THEME_SIZE`
+ *   64×64 for a manifest with no declared size — same as the pre-A6
+ *   constant, so those themes are visually unchanged) and the theme
+ *   itself is mounted (`mountThemeInstance`) and driven by
+ *   `applyLevel`/`applyState` via `themeBridge`.
+ * Growing/shrinking pivots around whichever edge the pill is already
+ * closest to (`anchorGrow`) so it can't grow off-screen, and shrinking
+ * always returns to the exact pre-growth position (`compactPosition`),
+ * never wherever a drag mid-expansion happened to leave it — see
+ * `growToExpanded`/`shrinkToCompact`. Shape follows `shapeRadius`: a
+ * circle for a square ≤96px a side (both the 56×56 compact handle and
+ * any theme with a small square manifest size), a rounded rect (16px)
+ * otherwise. `MountOverlayOptions.idleTheme` opts a desktop-style host
+ * (its own permanently-visible "socket") out of the compact/mount-
+ * lifecycle entirely — the theme stays mounted and the pill stays
+ * expanded even at idle.
  */
 import { createClient, type VoxisClient, type UnlistenFn } from "./client";
 import { createThemeBridge, pluginStateToThemeMode } from "./theme-bridge";
-import { resolveTheme } from "./themes/registry";
+import { resolveTheme, resolveThemeSize } from "./themes/registry";
 import {
   clampToViewport,
   createDragController,
@@ -62,16 +97,20 @@ import {
 } from "./drag";
 import { startHoldLease, type Lease } from "./lease";
 import type { DictationResult, LevelEvent, Mode, PluginState, SessionId } from "./types/contract";
-import type { ThemeInstance } from "./types/theme-api";
+import type { ThemeInstance, ThemeModule } from "./types/theme-api";
 
 export const TAG_NAME = "voxis-overlay";
 
-const PILL_SIZE = { width: 64, height: 64 };
+/** The pill's fixed idle/error size — see the module doc comment's "Compact/expanded lifecycle" section. */
+export const COMPACT_SIZE: Size = { width: 56, height: 56 };
 
 /** Named starting corners for `MountOverlayOptions.initialPosition` — see that option's doc comment. */
 export type OverlayCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
 const CORNER_MARGIN = 16;
+
+/** `"compact"` (idle handle, theme unmounted) or `"expanded"` (theme mounted at its manifest size) — see the module doc comment. */
+export type OverlayLifecycleState = "compact" | "expanded";
 
 /**
  * Resolves a named corner to a top-left `{x, y}` in `viewport`, inset by
@@ -89,6 +128,37 @@ export function cornerPosition(corner: OverlayCorner, size: Size, viewport: View
   const x = corner === "top-left" || corner === "bottom-left" ? CORNER_MARGIN : viewport.width - size.width - CORNER_MARGIN;
   const y = corner === "top-left" || corner === "top-right" ? CORNER_MARGIN : viewport.height - size.height - CORNER_MARGIN;
   return { x, y };
+}
+
+/**
+ * Grows (or shrinks) a box from `fromSize` at `pos` to `toSize`, pivoting
+ * around whichever edge — independently on each axis — `pos`'s center is
+ * already closer to, so the box extends *away* from the nearer edge
+ * instead of risking going off-screen (e.g. a pill resting near the
+ * right edge grows leftward, keeping its right edge roughly fixed).
+ * Pure/unclamped — the caller (`growToExpanded`/`shrinkToCompact`) still
+ * runs the result through the existing `clampToViewport`, so an anchor
+ * edge itself right at the viewport boundary still ends up on-screen.
+ */
+export function anchorGrow(pos: Point, fromSize: Size, toSize: Size, viewport: Viewport): Point {
+  const centerX = pos.x + fromSize.width / 2;
+  const centerY = pos.y + fromSize.height / 2;
+  const nearerRight = viewport.width - centerX < centerX;
+  const nearerBottom = viewport.height - centerY < centerY;
+  const x = nearerRight ? pos.x + fromSize.width - toSize.width : pos.x;
+  const y = nearerBottom ? pos.y + fromSize.height - toSize.height : pos.y;
+  return { x, y };
+}
+
+/**
+ * A circle for a square box no larger than 96px a side (the 56×56
+ * compact handle, and any theme whose manifest size happens to be a
+ * small square) — a rounded rect (16px radius) for everything else,
+ * i.e. any non-square size or a square larger than 96px (e.g.
+ * lavalamp/metaballs*'s 120×120).
+ */
+export function shapeRadius(size: Size): string {
+  return size.width === size.height && size.width <= 96 ? "50%" : "16px";
 }
 
 export interface MountOverlayOptions {
@@ -125,6 +195,22 @@ export interface MountOverlayOptions {
    * section for the full contract.
    */
   driver?: "client" | "host";
+  /**
+   * Default `false`. When `true`, the pill stays `"expanded"` (theme
+   * mounted, at its manifest size) even while idle — for a desktop-style
+   * host with its own permanently-visible "socket" for the overlay,
+   * where shrinking to the compact handle would be the wrong visual.
+   * See the module doc comment's "Compact/expanded lifecycle" section.
+   */
+  idleTheme?: boolean;
+  /**
+   * Injectable theme module (tests/harness), same spirit as `client`
+   * above — bypasses `themes/registry.ts`'s `resolveTheme` entirely
+   * (no real theme, e.g. WebGL, ever mounts) while `theme` still governs
+   * `resolveThemeSize`'s manifest-size lookup, so a test can exercise
+   * real manifest-driven sizing/growth without mounting a real theme.
+   */
+  themeModule?: ThemeModule;
 }
 
 interface OverlayConfig {
@@ -135,6 +221,8 @@ interface OverlayConfig {
   mode: Mode;
   driver: "client" | "host";
   client: VoxisClient | undefined;
+  idleTheme: boolean;
+  themeModule: ThemeModule | undefined;
 }
 
 let defined = false;
@@ -152,10 +240,28 @@ export class VoxisOverlayElement extends HTMLElement {
   private config: OverlayConfig | null = null;
   private pillEl!: HTMLButtonElement;
   private themeContainerEl!: HTMLDivElement;
+  private handleDotEl!: HTMLSpanElement;
   private dotEl!: HTMLSpanElement;
   private liveEl!: HTMLSpanElement;
   private themeInstance: ThemeInstance | null = null;
   private themeBridge: ReturnType<typeof createThemeBridge> | null = null;
+  private themeMounted = false;
+  private resolvedThemeModule: ThemeModule | null = null;
+  private lifecycleState: OverlayLifecycleState = "compact";
+  private expandedSize: Size = { width: 64, height: 64 };
+  /** The pill's position right before the most recent `growToExpanded()` — restored verbatim by `shrinkToCompact()`, so a drag that happens while expanded never changes where the pill settles once it shrinks back. */
+  private compactPosition: Point | null = null;
+  /**
+   * Set by `wireDrag`'s `onDragEnd` when a drag completes while
+   * `lifecycleState === "expanded"` — `shrinkToCompact()` consumes this
+   * to re-persist the restored *compact* position under `storageKey`,
+   * overwriting whatever expanded-sized position `drag.ts`'s own
+   * `endGesture` already wrote to storage (it persists unconditionally,
+   * before `onDragEnd` ever runs). Without this, the compact resting
+   * spot documented above would silently become the expanded-dragged
+   * position across a reload (REJECT-FIX a6-r1 Finding 1).
+   */
+  private expandedDragOccurred = false;
   private dragController: DragController | null = null;
   private unlistenState: UnlistenFn | null = null;
   private unlistenLevel: UnlistenFn | null = null;
@@ -177,15 +283,15 @@ export class VoxisOverlayElement extends HTMLElement {
       throw new Error("<voxis-overlay> must be configured via mountOverlay(), not created bare");
     }
 
+    this.expandedSize = resolveThemeSize(config.theme);
+    this.lifecycleState = config.idleTheme ? "expanded" : "compact";
+
     const shadow = this.attachShadow({ mode: "open" });
     const style = document.createElement("style");
     style.textContent = `
       :host { all: initial; }
       .pill {
         position: fixed;
-        width: ${PILL_SIZE.width}px;
-        height: ${PILL_SIZE.height}px;
-        border-radius: 50%;
         border: none;
         background: #111;
         touch-action: none;
@@ -196,7 +302,23 @@ export class VoxisOverlayElement extends HTMLElement {
         padding: 0;
         z-index: 2147483647;
       }
+      .pill.state-compact {
+        border: 2px solid rgba(255, 255, 255, 0.35);
+      }
+      .pill.state-compact.mode-error {
+        border-color: rgba(229, 57, 53, 0.7);
+      }
       .theme-container { width: 100%; height: 100%; pointer-events: none; }
+      .pill.state-compact .theme-container { display: none; }
+      .handle-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #888;
+        pointer-events: none;
+      }
+      .pill.state-expanded .handle-dot { display: none; }
+      .pill.state-compact.mode-error .handle-dot { background: #e53935; }
       .dot {
         position: absolute;
         top: 4px;
@@ -226,6 +348,10 @@ export class VoxisOverlayElement extends HTMLElement {
     this.themeContainerEl = document.createElement("div");
     this.themeContainerEl.className = "theme-container";
 
+    this.handleDotEl = document.createElement("span");
+    this.handleDotEl.className = "handle-dot";
+    this.handleDotEl.setAttribute("aria-hidden", "true");
+
     this.dotEl = document.createElement("span");
     this.dotEl.className = "dot";
     this.dotEl.setAttribute("aria-hidden", "true");
@@ -235,12 +361,24 @@ export class VoxisOverlayElement extends HTMLElement {
     this.liveEl.setAttribute("aria-live", "polite");
 
     this.pillEl.appendChild(this.themeContainerEl);
+    this.pillEl.appendChild(this.handleDotEl);
     this.pillEl.appendChild(this.dotEl);
     shadow.appendChild(style);
     shadow.appendChild(this.pillEl);
     shadow.appendChild(this.liveEl);
 
-    this.mountTheme(config.theme);
+    // Resolving (not mounting) the theme up front, regardless of the
+    // initial lifecycle state, preserves the pre-A6 behaviour of an
+    // unknown theme id warning immediately at mount — actually mounting
+    // it (WebGL context, render loop) is deferred to `growToExpanded`/
+    // `idleTheme`'s eager mount below.
+    this.resolveThemeModule();
+    this.applyLifecycleClasses();
+    this.applyPillSize(this.currentSize());
+    if (this.lifecycleState === "expanded") {
+      this.mountThemeInstance();
+    }
+
     this.wirePointerHandling(config);
     this.wireDrag(config);
     this.wireClientEvents(config);
@@ -249,7 +387,7 @@ export class VoxisOverlayElement extends HTMLElement {
     // connected (needs `document.body`); harmless default (bottom-right,
     // clamped) until the first `reposition()`.
     const initial = loadPosition(config.storageKey) ?? this.resolveInitialPosition(config.initialPosition);
-    const clamped = clampToViewport(initial, PILL_SIZE, this.safeArea(), readEffectiveViewport());
+    const clamped = clampToViewport(initial, this.currentSize(), this.safeArea(), readEffectiveViewport());
     this.pillEl.style.left = `${clamped.x}px`;
     this.pillEl.style.top = `${clamped.y}px`;
 
@@ -267,8 +405,7 @@ export class VoxisOverlayElement extends HTMLElement {
     this.unlistenResult = null;
     this.lease?.stop();
     this.lease = null;
-    this.themeInstance?.unmount();
-    this.themeInstance = null;
+    this.unmountThemeInstance();
     window.removeEventListener("blur", this.handleWindowBlur);
     this.visualViewportTarget?.removeEventListener("resize", this.handleViewportChange);
     this.visualViewportTarget?.removeEventListener("scroll", this.handleViewportChange);
@@ -291,9 +428,24 @@ export class VoxisOverlayElement extends HTMLElement {
     return { x: Number.isFinite(left) ? left : 0, y: Number.isFinite(top) ? top : 0 };
   }
 
+  /** The pill's current on-screen size — `COMPACT_SIZE` or the resolved theme's manifest size, whichever `lifecycleState` is active. Every drag/clamp/snap/corner computation reads this instead of a fixed constant. */
+  private currentSize(): Size {
+    return this.lifecycleState === "expanded" ? this.expandedSize : COMPACT_SIZE;
+  }
+
+  /** Public read-only mirror of `currentSize()` — for a host that wants to size its own container/layout around the pill (`MountOverlayOptions`/module doc comment's "host-driven mode" note); also carried in the `"voxis-overlay-resize"` event's `detail`. */
+  get size(): Size {
+    return this.currentSize();
+  }
+
+  /** `"compact"` or `"expanded"` — see the module doc comment. */
+  get lifecycle(): OverlayLifecycleState {
+    return this.lifecycleState;
+  }
+
   private handleViewportChange = (): void => {
     if (!this.pillEl || !this.config) return;
-    const snapped = snapToNearestEdge(this.currentPillPos(), PILL_SIZE, this.safeArea(), readEffectiveViewport());
+    const snapped = snapToNearestEdge(this.currentPillPos(), this.currentSize(), this.safeArea(), readEffectiveViewport());
     this.pillEl.style.left = `${snapped.x}px`;
     this.pillEl.style.top = `${snapped.y}px`;
     if (this.config.draggable) {
@@ -303,8 +455,8 @@ export class VoxisOverlayElement extends HTMLElement {
 
   /** Resolves `MountOverlayOptions.initialPosition` — see that option's doc comment for the persisted-position-wins contract. */
   private resolveInitialPosition(initialPosition: Point | OverlayCorner | undefined): Point {
-    if (initialPosition === undefined) return cornerPosition("bottom-right", PILL_SIZE, readEffectiveViewport());
-    if (typeof initialPosition === "string") return cornerPosition(initialPosition, PILL_SIZE, readEffectiveViewport());
+    if (initialPosition === undefined) return cornerPosition("bottom-right", this.currentSize(), readEffectiveViewport());
+    if (typeof initialPosition === "string") return cornerPosition(initialPosition, this.currentSize(), readEffectiveViewport());
     return initialPosition;
   }
 
@@ -316,25 +468,150 @@ export class VoxisOverlayElement extends HTMLElement {
     }
   }
 
-  private mountTheme(themeId: string | undefined): void {
-    const themeModule = resolveTheme(themeId);
-    this.themeBridge = createThemeBridge(PILL_SIZE, undefined, {
+  /**
+   * Resolves (but does not mount) this instance's theme module —
+   * `config.themeModule` if injected (tests/harness, bypasses the
+   * registry entirely), otherwise `themes/registry.ts`'s `resolveTheme`
+   * (warns + falls back to default for an unknown id). Cached: calling
+   * this more than once must not re-warn.
+   */
+  private resolveThemeModule(): ThemeModule {
+    if (this.config?.themeModule) return this.config.themeModule;
+    if (!this.resolvedThemeModule) {
+      this.resolvedThemeModule = resolveTheme(this.config?.theme);
+    }
+    return this.resolvedThemeModule;
+  }
+
+  /** Mounts the resolved theme into `themeContainerEl`, sized to `expandedSize`, and wires its `cancel` action — a no-op if already mounted (`idleTheme` mounts eagerly at connect; `growToExpanded` mounts on the way in). */
+  private mountThemeInstance(): void {
+    if (this.themeMounted) return;
+    const themeModule = this.resolveThemeModule();
+    this.themeBridge = createThemeBridge(this.expandedSize, undefined, {
       cancel: () => {
         if (this.activeSessionId) void this.stopActive();
       },
     });
     this.themeInstance = themeModule.mount(this.themeContainerEl, this.themeBridge.api);
+    this.themeMounted = true;
+  }
+
+  /** Unmounts the theme instance (stopping its render loop) — a no-op if not currently mounted (`idleTheme` never calls this). */
+  private unmountThemeInstance(): void {
+    if (!this.themeMounted) return;
+    this.themeInstance?.unmount();
+    this.themeInstance = null;
+    this.themeBridge = null;
+    this.themeMounted = false;
+  }
+
+  private applyPillSize(size: Size): void {
+    this.pillEl.style.width = `${size.width}px`;
+    this.pillEl.style.height = `${size.height}px`;
+    this.pillEl.style.borderRadius = shapeRadius(size);
+  }
+
+  private applyLifecycleClasses(): void {
+    this.pillEl.classList.toggle("state-compact", this.lifecycleState === "compact");
+    this.pillEl.classList.toggle("state-expanded", this.lifecycleState === "expanded");
+    this.pillEl.classList.toggle("mode-error", this.currentState === "error");
+  }
+
+  /** Dispatches `"voxis-overlay-resize"` (module doc comment's "host-driven mode" note) — after every size/lifecycle change, both programmatic (grow/shrink) and this being the very first layout. */
+  private dispatchResize(): void {
+    const size = this.currentSize();
+    this.dispatchEvent(
+      new CustomEvent("voxis-overlay-resize", {
+        detail: { width: size.width, height: size.height, state: this.lifecycleState },
+      }),
+    );
+  }
+
+  /**
+   * `"compact"` -> `"expanded"`: mounts the theme (if not already, e.g.
+   * `idleTheme`), grows from `COMPACT_SIZE` to `expandedSize` pivoting
+   * around whichever edge the pill is closest to (`anchorGrow`), then
+   * clamps the result to the viewport/safe area the same way every other
+   * position this element computes is. Remembers the pre-growth position
+   * as `compactPosition` for `shrinkToCompact` to restore verbatim.
+   */
+  private growToExpanded(): void {
+    this.compactPosition = this.currentPillPos();
+    this.mountThemeInstance();
+    const viewport = readEffectiveViewport();
+    const grown = anchorGrow(this.compactPosition, COMPACT_SIZE, this.expandedSize, viewport);
+    const clamped = clampToViewport(grown, this.expandedSize, this.safeArea(), viewport);
+    this.lifecycleState = "expanded";
+    this.applyLifecycleClasses();
+    this.applyPillSize(this.expandedSize);
+    this.pillEl.style.left = `${clamped.x}px`;
+    this.pillEl.style.top = `${clamped.y}px`;
+    this.dispatchResize();
+  }
+
+  /**
+   * `"expanded"` -> `"compact"`: unmounts the theme (unless `idleTheme`,
+   * which never reaches this method — see `updateLifecycle`) and
+   * restores the exact position captured by the preceding `growToExpanded`
+   * (never wherever a drag mid-expansion left the pill — module doc
+   * comment's "Compact/expanded lifecycle" section). If a drag completed
+   * while expanded (`expandedDragOccurred`), re-persists this restored
+   * compact position under `storageKey` — correcting the expanded-sized
+   * position `drag.ts`'s own `endGesture` already wrote to storage on
+   * that drag, so the next mount with the same `storageKey` still loads
+   * the compact resting spot, not the expanded one (Finding 1, REJECT-FIX
+   * a6-r1).
+   */
+  private shrinkToCompact(): void {
+    this.unmountThemeInstance();
+    const restore = this.compactPosition ?? this.currentPillPos();
+    const clamped = clampToViewport(restore, COMPACT_SIZE, this.safeArea(), readEffectiveViewport());
+    this.lifecycleState = "compact";
+    this.compactPosition = null;
+    this.applyLifecycleClasses();
+    this.applyPillSize(COMPACT_SIZE);
+    this.pillEl.style.left = `${clamped.x}px`;
+    this.pillEl.style.top = `${clamped.y}px`;
+    if (this.expandedDragOccurred && this.config) {
+      savePosition(this.config.storageKey, clamped);
+    }
+    this.expandedDragOccurred = false;
+    this.dispatchResize();
+  }
+
+  /** Recomputes the target lifecycle state from `currentState`/`idleTheme` and transitions if it changed. Called by `applyState`. */
+  private updateLifecycle(): void {
+    if (!this.config) return;
+    const target: OverlayLifecycleState =
+      this.config.idleTheme || this.currentState === "recording" || this.currentState === "transcribing"
+        ? "expanded"
+        : "compact";
+    if (target === this.lifecycleState) return;
+    if (target === "expanded") {
+      this.growToExpanded();
+    } else {
+      this.shrinkToCompact();
+    }
   }
 
   private wireDrag(config: OverlayConfig): void {
     if (!config.draggable) return;
     this.dragController = createDragController(this.pillEl, {
       storageKey: config.storageKey,
-      getSize: () => PILL_SIZE,
+      getSize: () => this.currentSize(),
       getSafeArea: () => this.safeArea(),
       getViewport: () => readEffectiveViewport(),
       onDragEnd: (pos, dragged) => {
-        if (dragged) savePosition(config.storageKey, pos);
+        if (!dragged) return;
+        if (this.lifecycleState === "expanded") {
+          // Do not persist an expanded-sized dragged position under the
+          // same storageKey as the compact resting spot — shrinkToCompact()
+          // re-saves the restored compact position instead (Finding 1,
+          // REJECT-FIX a6-r1; see expandedDragOccurred's doc comment).
+          this.expandedDragOccurred = true;
+          return;
+        }
+        savePosition(config.storageKey, pos);
       },
     });
   }
@@ -444,11 +721,14 @@ export class VoxisOverlayElement extends HTMLElement {
    * Pushes a `voxis://state` payload into the overlay's indicator/theme.
    * In `driver: "client"` mode this is called internally by
    * `wireClientEvents`; in `driver: "host"` mode the host calls it
-   * directly from its own `onState` subscription.
+   * directly from its own `onState` subscription. Also drives the
+   * compact/expanded lifecycle (`updateLifecycle`) — see the module doc
+   * comment's "Compact/expanded lifecycle" section.
    */
   applyState(state: PluginState): void {
     this.currentState = state;
     this.updateIndicator();
+    this.updateLifecycle();
     this.themeBridge?.setFromLevel(pluginStateToThemeMode(state), 0, false);
     // `[fixed per REJECT-FIX L3]` The plugin can end a session on its
     // own (silence/max-duration/stream-died guard outcomes) with no
@@ -494,15 +774,17 @@ export class VoxisOverlayElement extends HTMLElement {
     const recording = this.currentState === "recording";
     this.dotEl.classList.toggle("visible", recording);
     this.liveEl.textContent = recording ? "Recording" : "";
+    this.applyLifecycleClasses();
   }
 
   /**
    * Session-controlling — `driver: "host"` never reaches this (pointer
    * handling and window blur are no-ops for sessions in that mode, see
    * `wirePointerHandlingHostDriven`/`handleWindowBlur`), but the theme's
-   * own `cancel` action (`mountTheme`) routes through `stopActive` too,
-   * so both methods guard defensively rather than relying solely on
-   * their only current caller never calling them in that mode.
+   * own `cancel` action (`mountThemeInstance`) routes through
+   * `stopActive` too, so both methods guard defensively rather than
+   * relying solely on their only current caller never calling them in
+   * that mode.
    */
   private async startActive(mode: Mode): Promise<void> {
     if (!this.config || this.config.driver === "host" || !this.config.client || this.activeSessionId) return;
@@ -571,6 +853,8 @@ export function mountOverlay(container: HTMLElement = document.body, options: Mo
     // unused, since `wireClientEvents`/`startActive`/`stopActive` all
     // check `driver` before touching it.
     client: driver === "host" ? options.client : options.client ?? createClient(),
+    idleTheme: options.idleTheme ?? false,
+    themeModule: options.themeModule,
   });
   container.appendChild(el);
   return el;

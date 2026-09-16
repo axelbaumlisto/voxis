@@ -8,8 +8,10 @@ the Rust command/event contract in `../contract/fixtures/*.json` and
 manual update here (the fixture-snapshot tests on both sides are the
 safety net, not a generator).
 
-Currently versioned **`0.1.1`**, independently of the Rust crate's own
-`0.1.0` — bump each on its own schedule.
+Currently versioned **`0.2.0`**, independently of the Rust crate's own
+`0.1.0` — bump each on its own schedule. (`0.2.0`, additive: the pill now
+resolves each theme's manifest `overlay_width`/`overlay_height` instead
+of a fixed 64×64 — see "Compact/expanded lifecycle" below.)
 
 ## Install
 
@@ -138,6 +140,39 @@ webview unmodified).
 - `mode?: "hold" | "toggle"` (default `"hold"`).
 - `client?: VoxisClient` — injectable, ignored (and not required) under
   `driver: "host"`.
+- `idleTheme?: boolean` (default `false`) — see "Compact/expanded
+  lifecycle" below.
+
+### Compact/expanded lifecycle (theme-sized overlay)
+
+A theme's manifest can declare an `overlay_width`/`overlay_height` far
+bigger than a plain pill (lavalamp/metaballs* are 120×120 WebGL scenes;
+`all_aquarium` is 340×170) — squashing one of those into a fixed 64×64
+circle made it unrecognisable (a lava lamp rendered at pill scale is just
+a dotted smear). The element now has two sizes/states, driven by
+`applyState`'s `PluginState` (both drivers, `"client"` and `"host"`):
+
+- **`"compact"`** (`idle`/`error`, the default resting state): a fixed
+  56×56 circle "handle" (a ring + a center dot) — **no theme is mounted**,
+  so there's no WebGL/canvas render loop while idle (battery).
+- **`"expanded"`** (`recording`/`transcribing`): the pill grows to the
+  theme's resolved manifest size (`resolveThemeSize`; `FALLBACK_THEME_SIZE`
+  64×64 for a manifest with no declared size — unchanged for those themes)
+  and the theme is mounted and driven by `applyState`/`applyLevel` exactly
+  as before. Growing/shrinking pivots around whichever edge the pill is
+  already closest to, so it can't grow off-screen, and shrinking always
+  returns to the exact pre-growth position — a drag mid-expansion doesn't
+  change where the pill settles once it shrinks back. Shape: a circle for
+  a square ≤96px a side, a 16px-radius rounded rect otherwise.
+
+`idleTheme: true` opts a host out of this entirely (e.g. a desktop host
+with its own permanently-visible "socket" for the overlay) — the theme
+stays mounted and the pill stays `"expanded"` even at idle.
+
+A host can read the current size via `el.size`/`el.lifecycle`, or listen
+for `"voxis-overlay-resize"` (`detail: { width, height, state }`,
+`state` being `"compact" | "expanded"`) to resize its own layout around
+the pill instead of polling.
 
 ## In-app hotkey (`HotkeyMachine`/`bindHotkey`)
 

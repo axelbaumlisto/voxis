@@ -433,3 +433,59 @@ import { mountOverlay } from "@voxis/tauri-plugin-voxis";
 // Avoid naked's bottom-right status control on first mount.
 const el = mountOverlay(document.body, { initialPosition: "top-right" });
 ```
+
+### Compact/expanded lifecycle (theme-sized overlay, guest-js `0.2.0`)
+
+Pre-`0.2.0`, `<voxis-overlay>` always rendered at a fixed 64×64 pill,
+regardless of the mounted theme's own manifest `overlay_width`/
+`overlay_height`. That's fine for the four themes with no declared
+overlay size (`default`/`handy_pill`/`neon`/`winamp_classic`), but it
+squashed every theme that *does* declare one — lavalamp/metaballs*'s
+120×120 WebGL scenes rendered as an unrecognisable dotted smear at pill
+scale, `all_aquarium`'s 340×170 aquarium even more so.
+
+`0.2.0` gives the element two sizes/states instead of one fixed size,
+driven by the same `applyState(PluginState)` call both drivers
+(`"client"` and `"host"`) already made:
+
+- **`"compact"`** (`idle`/`error`, the default resting state): a fixed
+  56×56 circle "handle" — a ring (border) plus a center dot, no theme
+  mounted at all, so there is no WebGL/canvas render loop while idle.
+  This is the size every drag/clamp/snap/`initialPosition` computation
+  now uses at rest, in place of the old fixed 64×64 constant.
+- **`"expanded"`** (`recording`/`transcribing`): the pill grows to the
+  theme's manifest size (`resolveThemeSize` in `themes/registry.ts`;
+  falls back to 64×64, the old constant, for a manifest with no declared
+  size — those four themes are visually unchanged) and the theme is
+  mounted into it, receiving `api.size` equal to that manifest size and
+  `applyState`/`applyLevel` exactly as before. Shrinking back to
+  `"compact"` unmounts the theme again.
+
+Growing/shrinking pivots around whichever edge (independently
+horizontal/vertical) the pill is already closest to, so it always grows
+*away* from the nearest screen edge instead of risking going off-screen
+(e.g. a pill resting near the right edge grows leftward). Shrinking back
+always restores the *exact* pre-growth position, regardless of whether a
+drag happened while expanded — the compact resting spot never moves
+underneath a recording session. Shape follows one rule: a circle for a
+square no larger than 96px a side (the 56×56 handle, or any theme with a
+small square manifest size), a 16px-radius rounded rect otherwise.
+
+`MountOverlayOptions.idleTheme?: boolean` (default `false`) opts a host
+out of the compact state entirely — for a desktop-style host with its own
+permanently-visible "socket" for the overlay, where shrinking to the
+handle on idle would be the wrong visual. With `idleTheme: true` the
+theme stays mounted and the pill stays `"expanded"` even at idle.
+
+A host can read the pill's current size (`ThemeSize`) via the element's
+`size` getter, or its lifecycle state (`"compact" | "expanded"`) via
+`lifecycle` — or listen for the `"voxis-overlay-resize"` `CustomEvent`
+(`detail: { width, height, state }`) instead of polling either, to keep
+its own layout in sync with the pill's size as it grows/shrinks:
+
+```js
+el.addEventListener("voxis-overlay-resize", (e) => {
+  const { width, height, state } = e.detail; // state: "compact" | "expanded"
+  // ...resize/reposition whatever the host wraps the pill in...
+});
+```

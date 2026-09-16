@@ -5,14 +5,18 @@
   (this package) via `vite.harness.config.ts` — mounts <voxis-overlay>
   with a mock invoke/listen (no Tauri runtime) and fake levels so the
   pill/theme can be eyeballed. Same CSP the overlay must actually run
-  under in naked (jsdom can't enforce this — the real guard is
-  __tests__/csp-bundle.test.ts, which greps the built dist/ for blob:/
-  data:text/javascript).
+  under in naked (src-tauri/tauri.conf.json's app.security.csp —
+  style-src needs 'unsafe-inline' because the overlay injects a
+  <style> tag into its shadow root and sets inline style.left/top/
+  width/height for drag/positioning/sizing; jsdom can't enforce any of
+  this in vitest — the real guard there is __tests__/csp-bundle.test.ts,
+  which greps the built dist/ for blob:/data:text/javascript/dynamic
+  import()).
 -->
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost" />
     <title>voxis-overlay harness</title>
     <style>
       body {
