@@ -18,10 +18,65 @@
 //! `start(&self, app: AppHandle, hotkey: &str)` signature, so its own
 //! callers (`setup/state.rs`, `config/change_handler.rs`) compile
 //! unchanged.
+//!
+//! ## What this listens to, and the risk that comes with it
+//!
+//! `rdev::listen` installs an OS-level keyboard hook. The process then
+//! receives the machine's WHOLE keystroke stream — not only the keys aimed at
+//! Voxis. That is inherent to a GLOBAL hotkey (the point is to start
+//! dictation while another window has focus), and it is why the filter lives
+//! in OUR code rather than in the kernel. Three consequences, stated as facts
+//! rather than as reassurance:
+//!
+//! - **Only key press/release is ever looked at.** rdev also delivers mouse
+//!   moves, button presses and wheel events; the callback's `_ => {}` arm
+//!   drops every one of them without inspecting it.
+//! - **Only the configured key produces a notification.** The callback
+//!   compares the key against the configured target BEFORE anything observes
+//!   the event, and nothing is buffered, recorded or forwarded — a press or a
+//!   release is all a sink can ever receive. That order is not a convention
+//!   this comment asks you to keep: it is pinned by a source-text gate
+//!   (`tests/hotkey_listener_source_gate.rs`) that reads this file and goes
+//!   red if a log or a sink call moves ahead of the comparison. The tempting
+//!   "let me log what arrives while I debug this" edit is exactly how
+//!   dictation would become a keylogger.
+//! - **Corporate EDR/MDM and some antivirus products classify this behaviour
+//!   as a keylogger**, which is what an unfiltered keyboard hook looks like
+//!   from the outside. Worth knowing before deploying into a managed fleet.
+//!
+//! ## Platform facts (each is a real limitation, not a bug to file)
+//!
+//! - **macOS**: needs the Input Monitoring (or Accessibility) permission, and
+//!   the system prompt reads as "wants to observe your keystrokes". Without
+//!   that grant `rdev::listen` fails and the hotkey silently never fires; the
+//!   failure IS logged (never swallowed), but nothing else surfaces it.
+//! - **Linux**: works through X11 (XRecord). Under **Wayland** the events
+//!   never arrive, so the hotkey will not fire whatever is configured. That is
+//!   the platform lacking the API, not a defect here — say so in the UI/docs
+//!   rather than leaving the user to conclude the app is broken.
+//! - **iOS/iPadOS**: `rdev` is not compiled at all (optional dependency behind
+//!   the `rdev` feature; `cargo build -p voxis-core --target
+//!   aarch64-apple-ios` never touches it) AND the OS grants no app a global
+//!   hotkey in the first place — not even with a Bluetooth keyboard attached.
+//!   On a tablet the in-app button and hold-to-talk remain the only ways in.
+//!
+//! ## Stopping is not instant, and this doc says so instead of pretending
+//!
+//! `rdev::listen` blocks forever and offers no way to interrupt it on any of
+//! the three desktop platforms, so [`HotkeyListener::stop`] flips the flag the
+//! callback reads and the thread exits **on the first event after that** —
+//! the next key typed anywhere. Until that event arrives the OS hook is still
+//! installed and rdev still hands it the event; the callback returns before
+//! looking at it, so a stopped listener notifies nothing (tested in
+//! `hotkey::tests`). But "I turned it off, so it stopped watching" would be
+//! false: one further keystroke is still delivered to a process that no longer
+//! wants it. Callers that must not leave even that window open have one lever
+//! — never arm the listener in the first place (see
+//! [`HotkeyListener::start`]).
 
 use rdev::{listen, Event, EventType, Key};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 /// Notified on hotkey press/release by [`HotkeyListener`]. Replaces the
@@ -360,20 +415,93 @@ fn key_to_u32(key: Key) -> u32 {
         .unwrap_or(0)
 }
 
+/// Whether `hotkey` names something to listen FOR at all.
+///
+/// An empty (or whitespace-only) hotkey means "nothing configured", and
+/// arming the OS-level hook for it would mean watching every keystroke on the
+/// machine to match a key nobody asked for — precisely the window this module
+/// exists to keep shut. A NON-empty but unknown name is a different case and
+/// keeps its historical behaviour (see [`HotkeyListener::start_with_thread_init`]):
+/// it falls back to `ctrl_r` with a warning.
+pub fn hotkey_is_configured(hotkey: &str) -> bool {
+    !hotkey.trim().is_empty()
+}
+
+/// The callback `rdev::listen` drives for every OS event.
+///
+/// Extracted from the listener thread's body on purpose: `rdev::listen` blocks
+/// forever and cannot be fed synthetic events, so a filter that stayed inside
+/// the thread closure could only ever be READ, never TESTED. Everything that
+/// decides "is this event our hotkey?" is here; the thread below only wires it
+/// up, and the tests drive this directly with synthetic [`Event`]s.
+///
+/// The order inside IS the safety property: stop-flag check, then the
+/// target-key comparison, and only then any logging or sink notification. See
+/// the module doc — a log ahead of that comparison turns dictation into a
+/// keylogger, and `tests/hotkey_listener_source_gate.rs` pins the order by
+/// reading this file's own text.
+fn hotkey_callback(
+    sink: Arc<dyn HotkeySink>,
+    target_key: Arc<AtomicU32>,
+    should_stop: Arc<AtomicBool>,
+) -> impl FnMut(Event) + Send + 'static {
+    let mut is_pressed = false;
+    let mut last_pressed_key: Option<Key> = None;
+
+    move |event: Event| {
+        if should_stop.load(Ordering::SeqCst) {
+            return;
+        }
+
+        let current_target = target_key.load(Ordering::SeqCst);
+
+        match event.event_type {
+            EventType::KeyPress(key) => {
+                let key_id = key_to_u32(key);
+                if key_id == current_target && key_id != 0 && !is_pressed {
+                    is_pressed = true;
+                    last_pressed_key = Some(key);
+                    tracing::debug!("Hotkey pressed: {:?}", key);
+                    sink.on_pressed();
+                }
+            }
+            EventType::KeyRelease(key) if is_pressed && last_pressed_key == Some(key) => {
+                is_pressed = false;
+                last_pressed_key = None;
+                tracing::debug!("Hotkey released: {:?}", key);
+                sink.on_released();
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Hotkey listener state.
 pub struct HotkeyListener {
-    /// Whether the listener thread should stop.
-    should_stop: Arc<AtomicBool>,
+    /// The stop flag of the CURRENT listener thread, replaced on every
+    /// [`Self::start`].
+    ///
+    /// Deliberately NOT one flag shared by every thread this instance ever
+    /// spawns: `rdev::listen` cannot be interrupted, so a thread abandoned by
+    /// [`Self::stop`] stays alive until its next event. With a single shared
+    /// flag, re-arming would clear that flag and silently wake the abandoned
+    /// thread back up — two OS hooks and two notifications per press. A
+    /// per-thread flag leaves the abandoned thread inert for good.
+    stop_flag: Mutex<Arc<AtomicBool>>,
     /// Current target key (atomic for dynamic updates).
     target_key: Arc<AtomicU32>,
+    /// Whether a listener thread is armed right now; makes [`Self::start`]
+    /// idempotent (see the method doc for why one hook at a time matters).
+    armed: AtomicBool,
 }
 
 impl HotkeyListener {
     /// Create a new hotkey listener.
     pub fn new() -> Self {
         Self {
-            should_stop: Arc::new(AtomicBool::new(false)),
+            stop_flag: Mutex::new(Arc::new(AtomicBool::new(false))),
             target_key: Arc::new(AtomicU32::new(0)),
+            armed: AtomicBool::new(false),
         }
     }
 
@@ -384,7 +512,7 @@ impl HotkeyListener {
     /// the caller needs a hook to run at the very top of the background
     /// thread (`voice_lib` uses it to install its crash-diagnostics
     /// altstack, a voice_lib-only concern this crate has no module for).
-    pub fn start(&self, sink: Arc<dyn HotkeySink>, hotkey: &str) {
+    pub fn start(&self, sink: Arc<dyn HotkeySink>, hotkey: &str) -> bool {
         self.start_with_thread_init(sink, hotkey, || {})
     }
 
@@ -394,12 +522,46 @@ impl HotkeyListener {
     /// builder uses everywhere else to install its fatal-signal altstack.
     /// Defaults to a no-op via `start` for callers (this crate's own
     /// tests, any future non-voice_lib consumer) that don't need it.
+    ///
+    /// Returns whether THIS call armed a listener. `false` means the OS-level
+    /// hook was NOT installed, for one of two reasons:
+    ///
+    /// - **no hotkey is configured** ([`hotkey_is_configured`]): arming a
+    ///   global keyboard hook for a key nobody asked for is exactly the
+    ///   capture window this module tries to keep shut, so it refuses;
+    /// - **a listener is already armed** ([`Self::is_armed`]): a second
+    ///   `rdev::listen` would mean a second OS hook and every press reported
+    ///   twice. Start is therefore idempotent — to CHANGE the key of a running
+    ///   listener use [`Self::set_hotkey`], and to re-arm after
+    ///   [`Self::stop`] wait for the stopped thread to exit (it does so on its
+    ///   next event; see the module doc) or build a fresh listener.
+    ///
+    /// A NON-empty but unknown key name keeps its historical behaviour: it
+    /// warns and falls back to `ctrl_r`, so `false` is never returned for a
+    /// merely misspelled hotkey.
     pub fn start_with_thread_init(
         &self,
         sink: Arc<dyn HotkeySink>,
         hotkey: &str,
         on_thread_start: impl Fn() + Send + 'static,
-    ) {
+    ) -> bool {
+        if !hotkey_is_configured(hotkey) {
+            tracing::warn!(
+                "Hotkey is not configured; NOT starting the global key listener \
+                 (an armed listener receives every keystroke on this machine)"
+            );
+            return false;
+        }
+
+        if self.armed.swap(true, Ordering::SeqCst) {
+            tracing::warn!(
+                hotkey = %hotkey,
+                "Hotkey listener is already running; ignoring this start \
+                 (use set_hotkey to change the key)"
+            );
+            return false;
+        }
+
         let target = match parse_hotkey(hotkey) {
             Some(k) => k,
             None => {
@@ -418,40 +580,15 @@ impl HotkeyListener {
             target_u32
         );
 
-        let should_stop = Arc::clone(&self.should_stop);
+        // A flag of THIS thread only — see the field doc for the two-hooks
+        // hazard a shared one would create.
+        let should_stop = Arc::new(AtomicBool::new(false));
+        *self.stop_flag.lock().unwrap() = Arc::clone(&should_stop);
         let target_key = Arc::clone(&self.target_key);
 
         thread::spawn(move || {
             on_thread_start();
-            let mut is_pressed = false;
-            let mut last_pressed_key: Option<Key> = None;
-
-            let callback = move |event: Event| {
-                if should_stop.load(Ordering::SeqCst) {
-                    return;
-                }
-
-                let current_target = target_key.load(Ordering::SeqCst);
-
-                match event.event_type {
-                    EventType::KeyPress(key) => {
-                        let key_id = key_to_u32(key);
-                        if key_id == current_target && key_id != 0 && !is_pressed {
-                            is_pressed = true;
-                            last_pressed_key = Some(key);
-                            tracing::debug!("Hotkey pressed: {:?}", key);
-                            sink.on_pressed();
-                        }
-                    }
-                    EventType::KeyRelease(key) if is_pressed && last_pressed_key == Some(key) => {
-                        is_pressed = false;
-                        last_pressed_key = None;
-                        tracing::debug!("Hotkey released: {:?}", key);
-                        sink.on_released();
-                    }
-                    _ => {}
-                }
-            };
+            let callback = hotkey_callback(sink, target_key, should_stop);
 
             tracing::info!("Hotkey listener thread: starting rdev::listen");
 
@@ -465,11 +602,28 @@ impl HotkeyListener {
             }
             tracing::warn!("Hotkey listener thread: rdev::listen exited");
         });
+
+        true
+    }
+
+    /// Whether a listener is armed right now.
+    ///
+    /// `true` between a successful [`Self::start`] and the matching
+    /// [`Self::stop`] — NOT "the OS hook is gone", which only happens when the
+    /// stopped thread takes its next event (see the module doc).
+    pub fn is_armed(&self) -> bool {
+        self.armed.load(Ordering::SeqCst)
     }
 
     /// Stop the hotkey listener.
+    ///
+    /// Flips the CURRENT thread's flag; that thread exits on its next event
+    /// (`rdev::listen` cannot be interrupted — see the module doc), and until
+    /// then it returns without inspecting anything. Idempotent, and safe to
+    /// call when nothing was ever started.
     pub fn stop(&self) {
-        self.should_stop.store(true, Ordering::SeqCst);
+        self.stop_flag.lock().unwrap().store(true, Ordering::SeqCst);
+        self.armed.store(false, Ordering::SeqCst);
     }
 
     /// Change the hotkey without restarting the listener thread.
