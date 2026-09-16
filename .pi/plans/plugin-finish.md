@@ -9,7 +9,16 @@ A1. Дефолт placement bottom-right / offsetY 96 (на iPad bottom-left на
 A2. `routeVoxisResult`: активный pane закрыт («Session closed») → fallback clipboard + notice (сейчас текст молча теряется).
 A3. Деплой на iPad (`ios-device-deploy.sh`, DEVTOOLS=1): CDP-tap → запись → стоп → текст в pane; **владелец**: drag пальцем
     (~0.5 с hold → перенос → снап), перезапуск naked → позиция сохранилась. Evidence в research/plugin-plan/T11_ipad_run.
-A4. Review пилюли раунд 2 (fresh) → commit.
+A4. Review пилюли раунд 2 (fresh) → commit. ✅ A1/A2 `naked@8ebd9e98`; A3 drag пальцем — владелец: «да, вижу, хорошо».
+A5. (владелец) **Клавиатура**: когда экранная клавиатура перекрывает пилюлю, она должна подниматься РОВНО на высоту, нужную чтобы быть видимой
+    (прилипнуть к верхнему краю клавиатуры/нижнему краю видимой области панелей), а не прыгать вверх на пол-экрана. Разобраться, что сейчас
+    двигает её (visualViewport vs layout viewport vs `--keyboard-inset` naked) — замерить на iPad через CDP при открытой клавиатуре.
+A6. (владелец) **Полная поддержка тем Voxis** в пилюле: размер из манифеста темы (`overlay_width/height`, напр. lavalamp 120×120,
+    all_aquarium 340×170), тема рендерится как в Voxis desktop (WebGL и т.д.), а не сплющена в 64px («пунктир»). Дизайн: idle = компактная
+    ручка (кольцо в цвете темы, 44–64px, без GPU-анимации → батарея); recording/transcribing = раскрытие до размера темы, рост от угла
+    placement внутрь экрана; тема монтируется при старте и размонтируется при idle. Guest-js (`<voxis-overlay>`: size from ThemeRegistry
+    manifest, `compact`/`expanded` состояния для host-driven) + naked (контейнер под размер, anchor учитывает размер). Проверить все 18
+    builtin-тем в harness (скриншоты idle/recording) и на iPad.
 
 ## B. Плагин — хвосты качества (voxis)
 B1. Flaky `profile_source::import_from_qr_happy_path` (mockito): изоляция сервера/порта или `#[serial]`; 10 прогонов зелёные.
