@@ -8,10 +8,12 @@ the Rust command/event contract in `../contract/fixtures/*.json` and
 manual update here (the fixture-snapshot tests on both sides are the
 safety net, not a generator).
 
-Currently versioned **`0.2.0`**, independently of the Rust crate's own
-`0.1.0` — bump each on its own schedule. (`0.2.0`, additive: the pill now
-resolves each theme's manifest `overlay_width`/`overlay_height` instead
-of a fixed 64×64 — see "Compact/expanded lifecycle" below.)
+Currently versioned **`0.4.0`**, independently of the Rust crate's own
+version — bump each on its own schedule. (`0.4.0`, additive: new
+`setProvider(opts)` command for typing a Groq key / self-hosted URL in
+directly, no Voxis desktop needed. `0.2.0` earlier: the pill now resolves
+each theme's manifest `overlay_width`/`overlay_height` instead of a fixed
+64×64 — see "Compact/expanded lifecycle" below.)
 
 ## Install
 
@@ -64,6 +66,9 @@ interface VoxisClient {
   applyProfile(bytes: number[], keySource: KeySourceDto): Promise<ImportSummary>;
   importProfileFromDesktop(): Promise<ImportSummary>;
   importProfileFromQr(payload: string, code: string): Promise<ImportSummary>;
+  // Manual entry (no desktop/QR): apiKey null=keep, ""=clear, else set;
+  // apiUrlOverride null=Groq default, else an http(s) URL; model null=unchanged.
+  setProvider(opts: { apiKey: string | null; apiUrlOverride: string | null; model: string | null }): Promise<ImportSummary>;
   setHotkey(spec: HotkeySpec): Promise<void>;
   setConsent(consented: boolean): Promise<void>;
   holdLease(id: SessionId): Promise<void>;

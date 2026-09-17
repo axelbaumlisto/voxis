@@ -18,8 +18,8 @@ microphone and real Groq; a live-iPad end-to-end run exists (see
 `research/plugin-plan/T11_ipad_run_2026-09-16.md`) driving this plugin from
 a real host (`naked`) — that integration work is not itself part of this
 crate/repo. `guest-js` is versioned separately (`@voxis/tauri-plugin-voxis`,
-currently `0.1.1`) and is **not** on the same version number as this Rust
-crate (currently `0.1.0`) — bump each independently when either changes.
+currently `0.4.0`) and is **not** on the same version number as this Rust
+crate (currently `0.2.0`) — bump each independently when either changes.
 
 ## Installation
 
@@ -138,6 +138,7 @@ Every command is `Result<T, PluginError>`; see "Errors" below for the
 | `apply_profile` | `(bytes, keySource) -> ImportSummary` | Opens a sealed `VoxisProfile` (`VXP1` format) and applies it — dictionary/LLM/theme/hotkey to the plugin's own storage, secrets to the `SecretStore`, nothing to the host's own app storage. |
 | `import_profile_from_desktop` | `() -> ImportSummary` | **Desktop only**, same machine: reads an installed Voxis desktop's config/dictionary/providers/prompts DBs **read-only** and builds a profile from them directly (no encryption round-trip needed — it's a local read, not a transit). `notFound` if no Voxis desktop config dir exists. |
 | `import_profile_from_qr` | `(payload, code) -> ImportSummary` | LAN path: GETs the sealed profile from desktop Voxis's "Share profile" server (`profile-qr.json` wire contract, see below), opens it with `KeySource::Qr { k_qr, code }`. |
+| `set_provider` | `(apiKey?, apiUrlOverride?, model?) -> ImportSummary` | Manual entry, **no Voxis desktop / sealed profile needed** (the iPad case): type a Groq key / self-hosted URL straight in. `apiKey` null = keep the stored key, `""` = clear it, else set it (stored via the `SecretStore`, never plaintext); `apiUrlOverride` null = Groq default, else a validated http(s) URL; `model` null = unchanged. Resets consent for the new provider host if it changed; rejects `alreadyRecording` while a session is active. Returns an `ImportSummary` with `source: "manual"`. |
 | `set_hotkey` | `(spec: HotkeySpec)` | Desktop only (`hotkey == None` on iOS/no-`desktop`-feature builds → `Ok(())`, silent no-op — there is no OS-level backend to bind to). See "HotkeySpec" below for the accepted syntax and the one real rejection path (`permissionDenied`). |
 | `set_consent` | `(granted: bool)` | Per-(host, provider) gate; `start()` refuses until this is `true` at least once for the plugin's currently-configured provider (`[R1-Safety S6]`). |
 | `hold_lease` | `(sessionId)` | Heartbeat for Hold-mode sessions — guest-js's `lease.ts` calls this once per second while a hold gesture is active; 3 missed beats → the session is cancelled server-side (`LeaseLost`) even if the webview died silently. Not needed for Toggle-mode sessions. |

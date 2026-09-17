@@ -199,8 +199,9 @@ pub enum KeySourceDto {
 #[serde(rename_all = "camelCase")]
 pub struct ImportSummary {
     /// Where this profile came from: `"desktop"` (`import_profile_from_desktop`),
-    /// `"qr"` (`import_profile_from_qr`), or `"passphrase"`/`"qr"` (`apply_profile`,
-    /// named after the `KeySourceDto` variant used).
+    /// `"qr"` (`import_profile_from_qr`), `"passphrase"`/`"qr"` (`apply_profile`,
+    /// named after the `KeySourceDto` variant used), or `"manual"`
+    /// (`set_provider` — a key/URL typed in directly, no sealed profile).
     pub source: String,
     pub dictionary_entries: usize,
     pub llm_providers: usize,

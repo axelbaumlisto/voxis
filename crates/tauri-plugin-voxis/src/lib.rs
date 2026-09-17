@@ -21,7 +21,7 @@
 //! - `pipeline`: the real capture -> guard -> transcription -> dictionary
 //!   -> llm -> `DictationResult` pipeline (Task 3b).
 //! - `error`: the one `PluginError` every command returns.
-//! - `commands`: the eleven Tauri commands, thin wrappers around
+//! - `commands`: the twelve Tauri commands, thin wrappers around
 //!   testable `do_*` functions operating on `&PluginState` (no Tauri
 //!   runtime needed to unit-test the actual logic).
 //!
@@ -136,9 +136,9 @@ pub struct PluginState {
     /// from, so `init`/`init_with` just take it as a constructor
     /// argument.
     pub host_id: String,
-    /// The STT provider host consent/gating currently applies to.
-    /// Hardcoded to the desktop Voxis default (Groq) until Task 2/6 wire
-    /// this from the active `VoxisProfile` instead.
+    /// Fallback STT provider host (Groq) used only when no profile can be
+    /// loaded; consent/gating reads the LIVE host from the active profile
+    /// via `profile_source::current_provider_host`.
     pub provider_host: String,
     /// Task 6: `<host-config>/voxis-plugin/` — the plugin's OWN profile
     /// storage root (`config.db`/`dictionary.txt`/`providers.db`/
@@ -412,7 +412,7 @@ fn desktop_hotkey_factory<R: Runtime>(app: tauri::AppHandle<R>, events: Arc<dyn 
 type HotkeyFactory<R> = fn(tauri::AppHandle<R>, Arc<dyn EventSink>) -> Arc<dyn HotkeyController>;
 
 /// The invoke-handler/`on_page_load`/`on_event` chain shared by every
-/// `TauriPlugin` this crate builds (`build`, `init_ios`) — the eleven
+/// `TauriPlugin` this crate builds (`build`, `init_ios`) — the twelve
 /// JS-facing commands never change per-platform, and both the Hold-mode
 /// webview-reload guard and the process-exit guard below apply just as
 /// much to an iOS host's single webview as to desktop's. Only `.setup(..)`
@@ -430,6 +430,7 @@ fn plugin_builder<R: Runtime>() -> Builder<R> {
             commands::apply_profile,
             commands::import_profile_from_desktop,
             commands::import_profile_from_qr,
+            commands::set_provider,
             commands::set_hotkey,
             commands::set_consent,
             commands::hold_lease,

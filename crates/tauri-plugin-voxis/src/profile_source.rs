@@ -207,6 +207,18 @@ pub fn import_from_desktop(state: &PluginState) -> Result<ImportSummary, PluginE
 /// (`api_key_ref` only \u2014 `ProfileConfig` never carries the raw secret;
 /// the `ProfileSecrets` half of `from_storage`'s return is intentionally
 /// discarded here, never serialized back to the caller).
+/// The STT provider host consent applies to RIGHT NOW: derived from the
+/// active profile's `api_url_override` (Groq when unset or when no profile
+/// exists yet). `PluginState::provider_host` used to be a hardcoded
+/// "api.groq.com", so a self-hosted profile was gated (and consented) under
+/// Groq's name — `set_provider` made that visible.
+pub(crate) fn current_provider_host(state: &PluginState) -> String {
+    match current_profile(state) {
+        Ok(profile) => provider_host_of(profile.config.api_url_override.as_deref()),
+        Err(_) => state.provider_host.clone(),
+    }
+}
+
 pub fn current_profile(state: &PluginState) -> Result<VoxisProfile, PluginError> {
     let plugin_storage = PluginProfileStorage::open(&state.profile_dir)?;
     let (mut profile, _secrets) = VoxisProfile::from_storage(
@@ -256,6 +268,154 @@ pub fn apply_profile_bytes(
     let core_key_source = core_key_source(key_source)?;
     let (profile, secrets) = voxis_core::profile::open(bytes, &core_key_source)?;
     apply_imported_profile(state, source, profile, secrets)
+}
+
+/// `set_provider`: manual provider entry for the iPad case with no Voxis
+/// desktop to import from (`apply_profile`/QR/desktop all need a *sealed*
+/// profile from somewhere) — a host can offer "paste your Groq key /
+/// self-hosted URL" and land it through the exact same persistence path
+/// every import uses (`apply_imported_profile`), source `"manual"`.
+///
+/// - `api_url_override`: `None` = Groq default (`ProfileConfig::
+///   api_url_override = None`); `Some` is trimmed and must be an http(s)
+///   URL with a host (`validate_http_url` — `config::validate_config`
+///   does NOT check this field, so the check lives here).
+/// - `model`: applied only when `Some`.
+/// - `api_key`: `None` keeps whatever key is already stored; `Some`
+///   trimmed to empty clears it; any other `Some` stores it through the
+///   same `SecretStore` path `apply_imported_profile` uses — never
+///   plaintext on disk, and carried as a `Secret` (`ZeroizeOnDrop`) from
+///   here to the store, never copied into the profile/summary.
+///
+/// Rejected while a session is active (`AlreadyRecording`): this rewrites
+/// the plugin's own `config.db` and the `PipelineConfig` snapshot the
+/// in-flight `start()` already read, and can revoke consent for a changed
+/// provider host — none of which is safe to swap out from under a
+/// recording/transcribing session. (`apply_profile` has no such guard;
+/// `set_provider` adds one because it is expected to be called
+/// interactively from a settings screen, exactly when a stray active
+/// session is most likely.)
+///
+/// Consent is per `(host_id, provider_host)` (`consent.rs`): when the
+/// provider host derived from `api_url_override` changes, consent for the
+/// new host is reset to `false` so the user must re-consent before the
+/// next dictation to that provider. (`PluginState::provider_host` — what
+/// `start`'s consent gate actually reads — is still the hardcoded Groq
+/// default until a later task sources it from the active profile; this
+/// reset operates at the consent-store level the gate ultimately
+/// consults.)
+pub fn set_provider(
+    state: &PluginState,
+    api_key: Option<String>,
+    api_url_override: Option<String>,
+    model: Option<String>,
+) -> Result<ImportSummary, PluginError> {
+    if state.sessions.has_active() {
+        return Err(PluginError::AlreadyRecording);
+    }
+
+    let mut profile = current_profile(state)?;
+
+    // `None` = Groq default; `Some` must be a trimmed http(s) URL.
+    let new_url = match api_url_override {
+        Some(raw) => {
+            let trimmed = raw.trim().to_string();
+            validate_http_url(&trimmed)?;
+            Some(trimmed)
+        }
+        None => None,
+    };
+    let old_host = provider_host_of(profile.config.api_url_override.as_deref());
+    let new_host = provider_host_of(new_url.as_deref());
+    profile.config.api_url_override = new_url;
+
+    if let Some(model) = model {
+        profile.config.model = model;
+    }
+
+    // API key: keep (None) / clear (Some, empty after trim) / set (Some).
+    // `api_key_ref` is set to reflect the *resulting* stored state so
+    // `ImportSummary::has_api_key` is accurate. The key travels as a
+    // `Secret` into `ProfileSecrets` (for the set case) or is deleted
+    // directly (clear case) — it never lands in `profile.config`.
+    let mut secrets = ProfileSecrets::default();
+    let mut clear_existing = false;
+    let api_key_present = match api_key {
+        None => has_secret(state, voxis_core::profile::API_KEY_SECRET_NAME)?,
+        Some(raw) => {
+            if raw.trim().is_empty() {
+                clear_existing = true;
+                false
+            } else {
+                secrets.api_key = Some(Secret::new(raw.trim().to_owned()));
+                true
+            }
+        }
+    };
+    profile.config.api_key_ref =
+        api_key_present.then(|| voxis_core::profile::API_KEY_SECRET_NAME.to_string());
+
+    // Persist exactly like every import path (config write + secret sink +
+    // pipeline-config refresh + `ImportSummary`), source `"manual"`.
+    let summary = apply_imported_profile(state, "manual", profile, secrets)?;
+
+    // `apply_to` only ever *writes* secrets, never deletes — so an
+    // explicit clear is a separate `SecretStore::delete` after the profile
+    // was persisted.
+    if clear_existing {
+        state
+            .secrets
+            .delete(voxis_core::profile::API_KEY_SECRET_NAME)
+            .map_err(|e| PluginError::Store { message: format!("clearing api key: {e}") })?;
+    }
+
+    // Consent is per provider host: force re-consent when the host changed.
+    if old_host != new_host {
+        state
+            .consent
+            .set_consent(&state.host_id, &new_host, false)
+            .map_err(|e| PluginError::Store { message: format!("resetting consent: {e}") })?;
+    }
+
+    Ok(summary)
+}
+
+/// Groq's transcription host — the value `PluginState::provider_host`
+/// defaults to, and what `provider_host_of` reports for a `None`
+/// (default-provider) `api_url_override`.
+const GROQ_PROVIDER_HOST: &str = "api.groq.com";
+
+/// Validates a caller-supplied `apiUrlOverride` is a syntactically valid
+/// http(s) URL with a host — `config::validate_config` does not check this
+/// field, so `set_provider` enforces it here before persisting.
+fn validate_http_url(url: &str) -> Result<(), PluginError> {
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|e| PluginError::Profile { message: format!("apiUrlOverride is not a valid URL: {e}") })?;
+    match parsed.scheme() {
+        "http" | "https" if parsed.host_str().is_some() => Ok(()),
+        "http" | "https" => {
+            Err(PluginError::Profile { message: format!("apiUrlOverride {url:?} has no host") })
+        }
+        other => Err(PluginError::Profile {
+            message: format!("apiUrlOverride must be an http(s) URL, got scheme {other:?}"),
+        }),
+    }
+}
+
+/// The provider host consent is keyed on (`consent.rs`, per `(host_id,
+/// provider_host)`): the URL's host for a custom `api_url_override`, or
+/// the Groq default host when none is set. Parsing never fails for the
+/// `Some` case in `set_provider`'s own use — it only calls this after
+/// `validate_http_url` has already accepted the URL — but the
+/// `unwrap_or_else` keeps this total for any other caller.
+pub(crate) fn provider_host_of(api_url_override: Option<&str>) -> String {
+    match api_url_override {
+        None => GROQ_PROVIDER_HOST.to_string(),
+        Some(url) => reqwest::Url::parse(url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .unwrap_or_else(|| url.to_string()),
+    }
 }
 
 /// Converts the wire-format `KeySourceDto` to `voxis_core::profile::
@@ -794,6 +954,183 @@ mod tests {
         );
 
         assert!(matches!(result, Err(PluginError::Profile { .. })));
+    }
+
+    // -- set_provider (manual key entry, no desktop/QR) --------------
+
+    #[test]
+    fn set_provider_persists_url_and_model_and_reads_key_back_through_the_secret_store_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(&tmp);
+
+        let summary = set_provider(
+            &state,
+            Some("gsk_manual_secret_key".to_string()),
+            Some("https://self.hosted.example/v1/audio/transcriptions".to_string()),
+            Some("whisper-manual".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(summary.source, "manual");
+        assert!(summary.has_api_key);
+
+        // Persisted to the plugin's own profile storage.
+        let profile = current_profile(&state).unwrap();
+        assert_eq!(
+            profile.config.api_url_override.as_deref(),
+            Some("https://self.hosted.example/v1/audio/transcriptions")
+        );
+        assert_eq!(profile.config.model, "whisper-manual");
+        assert_eq!(profile.config.api_key_ref.as_deref(), Some(pipeline_api_key_name()));
+
+        // The key is readable back only through the SecretStore...
+        let stored = state.secrets.get(pipeline_api_key_name()).unwrap().unwrap();
+        assert_eq!(stored.expose(), "gsk_manual_secret_key");
+
+        // ...and never lands in the plugin's own sqlite (`[R1-Safety S2]`).
+        let config_db = state.profile_dir.join("config.db");
+        assert!(config_db.exists(), "set_provider must have written the plugin's own config.db");
+        let bytes = std::fs::read(&config_db).unwrap();
+        assert!(
+            !contains_subslice(&bytes, b"gsk_manual_secret_key"),
+            "config.db must never contain the raw API key"
+        );
+    }
+
+    #[test]
+    fn set_provider_trims_the_key_and_url() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(&tmp);
+
+        set_provider(
+            &state,
+            Some("  gsk_padded  ".to_string()),
+            Some("  https://trim.example/v1  ".to_string()),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(state.secrets.get(pipeline_api_key_name()).unwrap().unwrap().expose(), "gsk_padded");
+        assert_eq!(
+            current_profile(&state).unwrap().config.api_url_override.as_deref(),
+            Some("https://trim.example/v1")
+        );
+    }
+
+    #[test]
+    fn set_provider_null_url_is_the_groq_default_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(&tmp);
+        set_provider(&state, None, Some("https://self.hosted.example/v1".to_string()), None).unwrap();
+        assert!(current_profile(&state).unwrap().config.api_url_override.is_some());
+
+        set_provider(&state, None, None, None).unwrap();
+
+        assert_eq!(
+            current_profile(&state).unwrap().config.api_url_override,
+            None,
+            "a null apiUrlOverride resets to the Groq default (None)"
+        );
+    }
+
+    #[test]
+    fn set_provider_null_key_keeps_the_existing_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(&tmp);
+        set_provider(&state, Some("gsk_first".to_string()), None, None).unwrap();
+
+        // A later call that only changes the model must not disturb the key.
+        let summary = set_provider(&state, None, None, Some("whisper-2".to_string())).unwrap();
+
+        assert!(summary.has_api_key);
+        assert_eq!(state.secrets.get(pipeline_api_key_name()).unwrap().unwrap().expose(), "gsk_first");
+        assert_eq!(current_profile(&state).unwrap().config.model, "whisper-2");
+    }
+
+    #[test]
+    fn set_provider_empty_key_clears_the_existing_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(&tmp);
+        set_provider(&state, Some("gsk_to_be_cleared".to_string()), None, None).unwrap();
+        assert!(state.secrets.get(pipeline_api_key_name()).unwrap().is_some());
+
+        // Whitespace-only counts as empty after trimming.
+        let summary = set_provider(&state, Some("   ".to_string()), None, None).unwrap();
+
+        assert!(!summary.has_api_key, "clearing the key leaves has_api_key false");
+        assert!(state.secrets.get(pipeline_api_key_name()).unwrap().is_none(), "the stored key must be gone");
+        assert_eq!(current_profile(&state).unwrap().config.api_key_ref, None);
+    }
+
+    #[test]
+    fn set_provider_rejects_a_non_http_url() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(&tmp);
+
+        for bad in ["ftp://example.com/v1", "not a url", "file:///etc/passwd", "http://"] {
+            let result = set_provider(&state, None, Some(bad.to_string()), None);
+            assert!(matches!(result, Err(PluginError::Profile { .. })), "{bad:?} must be rejected");
+        }
+
+        // A rejected URL must not have persisted anything.
+        assert_eq!(current_profile(&state).unwrap().config.api_url_override, None);
+    }
+
+    #[test]
+    fn set_provider_resets_consent_only_when_the_provider_host_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(&tmp);
+
+        // Consent granted for both the Groq default host and a self-hosted host.
+        state.consent.set_consent(&state.host_id, "api.groq.com", true).unwrap();
+        state.consent.set_consent(&state.host_id, "self.hosted.example", true).unwrap();
+
+        // Same host (still Groq default -- only the model changes): consent kept.
+        set_provider(&state, None, None, Some("whisper-3".to_string())).unwrap();
+        assert!(state.consent.is_consented(&state.host_id, "api.groq.com").unwrap());
+
+        // Host changes groq -> self.hosted.example: consent for the NEW host reset.
+        set_provider(&state, None, Some("https://self.hosted.example/v1".to_string()), None).unwrap();
+        assert!(
+            !state.consent.is_consented(&state.host_id, "self.hosted.example").unwrap(),
+            "changing the provider host must reset consent for the new host"
+        );
+    }
+
+    /// The consent gate follows the ACTIVE profile's host: after switching
+    /// to a self-hosted URL, a Groq consent no longer opens the mic, and
+    /// `do_start` names the new host in `ConsentRequired`.
+    #[tokio::test]
+    async fn start_gates_consent_on_the_active_profiles_host_not_the_hardcoded_groq_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(&tmp);
+        state.consent.set_consent(&state.host_id, "api.groq.com", true).unwrap();
+        set_provider(&state, Some("k".to_string()), Some("https://self.hosted.example/v1/audio/transcriptions".to_string()), None).unwrap();
+
+        let err = crate::commands::do_start(&state, crate::models::Mode::Toggle).await.unwrap_err();
+        assert!(
+            matches!(&err, PluginError::ConsentRequired { provider_host } if provider_host == "self.hosted.example"),
+            "expected ConsentRequired for the self-hosted host, got {err:?}"
+        );
+
+        crate::commands::do_set_consent(&state, true).unwrap();
+        assert!(state.consent.is_consented(&state.host_id, "self.hosted.example").unwrap(), "set_consent must key on the live host too");
+        let id = crate::commands::do_start(&state, crate::models::Mode::Toggle).await.unwrap();
+        crate::commands::do_cancel(&state, &id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_provider_is_refused_while_a_session_is_active() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(&tmp);
+        state.consent.set_consent(&state.host_id, &state.provider_host, true).unwrap();
+        let id = crate::commands::do_start(&state, crate::models::Mode::Hold).await.unwrap();
+        assert!(state.sessions.has_active());
+
+        let result = set_provider(&state, Some("gsk_new".to_string()), None, None);
+
+        assert!(matches!(result, Err(PluginError::AlreadyRecording)));
+        crate::commands::do_cancel(&state, &id).await.unwrap();
     }
 
     // -- import_from_qr -----------------------------------------------

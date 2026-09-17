@@ -70,6 +70,39 @@ describe("createClient() profile commands [REJECT-FIX F1]", () => {
 
     expect(calls).toEqual([{ cmd: "plugin:voxis|import_profile_from_desktop", args: undefined }]);
   });
+
+  it("setProvider(opts) invokes set_provider with the flat camelCase apiKey/apiUrlOverride/model args", async () => {
+    const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
+    const invoke: InvokeFn = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return undefined as never;
+    });
+    const client = createClient({ invoke });
+
+    await client.setProvider({ apiKey: "gsk_manual", apiUrlOverride: "https://self.hosted/v1", model: "whisper-1" });
+
+    expect(calls).toEqual([
+      {
+        cmd: "plugin:voxis|set_provider",
+        args: { apiKey: "gsk_manual", apiUrlOverride: "https://self.hosted/v1", model: "whisper-1" },
+      },
+    ]);
+  });
+
+  it("setProvider(opts) forwards nulls as-is (keep key / Groq default URL / unchanged model)", async () => {
+    const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
+    const invoke: InvokeFn = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return undefined as never;
+    });
+    const client = createClient({ invoke });
+
+    await client.setProvider({ apiKey: null, apiUrlOverride: null, model: null });
+
+    expect(calls).toEqual([
+      { cmd: "plugin:voxis|set_provider", args: { apiKey: null, apiUrlOverride: null, model: null } },
+    ]);
+  });
 });
 
 /** Advances the microtask queue enough ticks for `dictate()`'s own

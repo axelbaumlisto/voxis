@@ -1,4 +1,4 @@
-//! The eleven Tauri commands the plugin registers (`build.rs`'s
+//! The twelve Tauri commands the plugin registers (`build.rs`'s
 //! `COMMANDS`, `lib.rs`'s `generate_handler!`). Each is a thin
 //! `#[tauri::command]` wrapper around a `do_*` function that takes
 //! `&PluginState` directly \u2014 the `do_*` functions are what
@@ -28,8 +28,9 @@ use crate::profile_source;
 use crate::PluginState;
 
 pub(crate) async fn do_start(state: &PluginState, mode: Mode) -> Result<SessionId, PluginError> {
-    if !state.consent.is_consented(&state.host_id, &state.provider_host)? {
-        return Err(PluginError::ConsentRequired { provider_host: state.provider_host.clone() });
+    let provider_host = profile_source::current_provider_host(state);
+    if !state.consent.is_consented(&state.host_id, &provider_host)? {
+        return Err(PluginError::ConsentRequired { provider_host });
     }
 
     let path = state.rec_dir.new_session_path();
@@ -145,7 +146,8 @@ pub(crate) fn do_state(state: &PluginState) -> crate::models::State {
 }
 
 pub(crate) fn do_set_consent(state: &PluginState, consented: bool) -> Result<(), PluginError> {
-    state.consent.set_consent(&state.host_id, &state.provider_host, consented)?;
+    let provider_host = profile_source::current_provider_host(state);
+    state.consent.set_consent(&state.host_id, &provider_host, consented)?;
     Ok(())
 }
 
@@ -203,6 +205,23 @@ pub fn import_profile_from_desktop(
     state: TauriState<'_, PluginState>,
 ) -> Result<ImportSummary, PluginError> {
     profile_source::import_from_desktop(&state)
+}
+
+/// Manual provider entry (paste a Groq key / self-hosted URL) for a host
+/// with no Voxis desktop to import a sealed profile from — see
+/// `profile_source::set_provider` for the full semantics (key kept/
+/// cleared/set through the `SecretStore`, http(s)-URL validation,
+/// per-host consent reset, `AlreadyRecording` while a session is live).
+/// The three params map to the camelCase wire keys `apiKey`/
+/// `apiUrlOverride`/`model`, each nullable.
+#[tauri::command]
+pub fn set_provider(
+    state: TauriState<'_, PluginState>,
+    api_key: Option<String>,
+    api_url_override: Option<String>,
+    model: Option<String>,
+) -> Result<ImportSummary, PluginError> {
+    profile_source::set_provider(&state, api_key, api_url_override, model)
 }
 
 #[tauri::command]

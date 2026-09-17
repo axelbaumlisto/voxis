@@ -70,8 +70,42 @@ understanding when debugging an integration):
 - **Consent gates every session, not just the first.** `start()` refuses
   (`consentRequired`) until `set_consent(true)` has been recorded for the
   plugin's current (host id, provider host) pair — changing the provider
-  (e.g. via a new profile import) re-arms the gate for the new provider
-  host.
+  (e.g. via a new profile import, or `set_provider` below) re-arms the
+  gate for the new provider host.
+
+## Manual provider entry (`set_provider`)
+
+Every *other* way to get a provider key into the plugin needs a
+`VoxisProfile` produced somewhere else first — a sealed `.vxp`
+(`apply_profile`), the LAN QR share (`import_profile_from_qr`), or a Voxis
+desktop install on the same machine (`import_profile_from_desktop`). On an
+iPad with no Voxis desktop anywhere, none of those apply. `set_provider`
+closes that gap: a host can offer a plain "paste your Groq key /
+self-hosted URL" screen and land the result through the exact same
+persistence path every import uses.
+
+`set_provider(apiKey?, apiUrlOverride?, model?) -> ImportSummary` (all
+arguments nullable, camelCase on the wire):
+
+- **`apiKey`**: `null` keeps whatever key is already stored, `""` (empty
+  after trimming) clears it, any other value stores it. The key travels
+  as a `Secret` straight into the `SecretStore` — the same "secrets never
+  touch sqlite in plaintext" guarantee as every import path — never onto
+  `ProfileConfig` or into the returned `ImportSummary`.
+- **`apiUrlOverride`**: `null` = the Groq default (`api_url_override =
+  None`); any other value must be an http(s) URL with a host (validated
+  here, since `config::validate_config` does not check this field) or the
+  call rejects with a `profile` error.
+- **`model`**: applied only when non-null.
+
+It returns the same `ImportSummary` shape as the import commands, with
+`source: "manual"`, and refreshes the pipeline config so the next
+`start()` sees the new settings. Two safety rules: it **rejects
+`alreadyRecording`** while a session is active (it rewrites the plugin's
+own `config.db` and the in-flight pipeline snapshot — not safe to swap
+under a live session), and it **resets consent for the new provider
+host** when the host derived from `apiUrlOverride` changed, so the user
+must re-consent before dictating to a newly-pointed provider.
 
 ## Tests / gates
 

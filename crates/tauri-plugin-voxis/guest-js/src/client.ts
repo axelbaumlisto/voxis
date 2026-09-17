@@ -57,6 +57,22 @@ export interface VoxisClient {
   applyProfile(bytes: number[], keySource: KeySourceDto): Promise<ImportSummary>;
   importProfileFromDesktop(): Promise<ImportSummary>;
   importProfileFromQr(payload: string, code: string): Promise<ImportSummary>;
+  /**
+   * Manual provider entry for a host with no Voxis desktop to import a
+   * sealed profile from: type in a Groq key / self-hosted URL directly.
+   * Every argument is nullable (`null`, sent as-is over the wire):
+   * - `apiKey`: `null` keeps the currently stored key, `""` clears it,
+   *   any other string stores it (through the same secret store every
+   *   import uses — never persisted in plaintext).
+   * - `apiUrlOverride`: `null` = the Groq default; otherwise an http(s)
+   *   URL (rejected by the backend if it isn't one).
+   * - `model`: `null` leaves the current model unchanged.
+   *
+   * Rejects with `AlreadyRecording` if a session is active. Returns the
+   * same `ImportSummary` shape as the import commands, with
+   * `source: "manual"`.
+   */
+  setProvider(opts: { apiKey: string | null; apiUrlOverride: string | null; model: string | null }): Promise<ImportSummary>;
   setHotkey(spec: HotkeySpec): Promise<void>;
   setConsent(consented: boolean): Promise<void>;
   holdLease(id: SessionId): Promise<void>;
@@ -128,6 +144,8 @@ export function createClient(deps: VoxisClientDeps = {}): VoxisClient {
     importProfileFromDesktop: () => invoke<ImportSummary>(pluginCommand("import_profile_from_desktop")),
     importProfileFromQr: (payload, code) =>
       invoke<ImportSummary>(pluginCommand("import_profile_from_qr"), { payload, code }),
+    setProvider: ({ apiKey, apiUrlOverride, model }) =>
+      invoke<ImportSummary>(pluginCommand("set_provider"), { apiKey, apiUrlOverride, model }),
     setHotkey: (spec: HotkeySpec) => invoke<void>(pluginCommand("set_hotkey"), { spec }),
     setConsent: (consented) => invoke<void>(pluginCommand("set_consent"), { consented }),
     holdLease: (id) => invoke<void>(pluginCommand("hold_lease"), { id }),

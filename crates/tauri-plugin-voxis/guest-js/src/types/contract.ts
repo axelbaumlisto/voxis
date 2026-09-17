@@ -34,6 +34,7 @@ export const COMMAND_NAMES = [
   "apply_profile",
   "import_profile_from_desktop",
   "import_profile_from_qr",
+  "set_provider",
   "set_hotkey",
   "set_consent",
   "hold_lease",
@@ -111,8 +112,9 @@ export type KeySourceDto = { type: "qr"; k: string; code: string } | { type: "pa
 
 /** `models::ImportSummary`. */
 export interface ImportSummary {
-  /** Where this profile came from — named after the transport/`KeySourceDto` variant used. */
-  source: "desktop" | "qr" | "passphrase";
+  /** Where this profile came from — named after the transport/`KeySourceDto`
+   * variant used, or `"manual"` for a key/URL typed in via `setProvider`. */
+  source: "desktop" | "qr" | "passphrase" | "manual";
   dictionaryEntries: number;
   llmProviders: number;
   llmPrompts: number;

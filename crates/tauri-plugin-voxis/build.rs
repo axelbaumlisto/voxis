@@ -2,7 +2,7 @@
 // (one `allow-<cmd>`/`deny-<cmd>` pair per command, plus `reference.md` and
 // the JSON schema) from `COMMANDS` below, and merges every `*.toml` under
 // `permissions/` (including the hand-written `permissions/default.toml`,
-// which allows all eleven commands — see that file's own comment) into the
+// which allows all twelve commands — see that file's own comment) into the
 // ACL manifest embedded in the plugin binary.
 //
 // Task 8: `ios/` now has real Swift sources (`Sources/VoxisPlugin.swift` +
@@ -28,6 +28,7 @@ const COMMANDS: &[&str] = &[
     "apply_profile",
     "import_profile_from_desktop",
     "import_profile_from_qr",
+    "set_provider",
     "set_hotkey",
     "set_consent",
     "hold_lease",

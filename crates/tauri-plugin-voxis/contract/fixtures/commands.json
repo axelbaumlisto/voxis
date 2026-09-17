@@ -7,6 +7,7 @@
   "apply_profile",
   "import_profile_from_desktop",
   "import_profile_from_qr",
+  "set_provider",
   "set_hotkey",
   "set_consent",
   "hold_lease"
