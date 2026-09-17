@@ -268,3 +268,27 @@ fn start_is_idempotent_and_never_installs_a_second_hook() {
          reported twice by two threads)"
     );
 }
+
+/// Regression: `rdev`'s macOS keycode table has no arm for keycode 62
+/// (Right Control), so the OS's `ControlRight` reaches us as `Unknown(62)`.
+/// A `ctrl_r` hotkey must still fire on it — press AND release — and the
+/// repair must not turn any OTHER unknown code into a hotkey.
+#[test]
+#[cfg(target_os = "macos")]
+fn right_control_arrives_as_unknown_62_and_still_matches_ctrl_r() {
+    assert_eq!(normalize_rdev_key(Key::Unknown(62)), Key::ControlRight);
+    assert_eq!(normalize_rdev_key(Key::Unknown(61)), Key::Unknown(61));
+    assert_eq!(normalize_rdev_key(Key::ControlLeft), Key::ControlLeft);
+
+    let listener = HotkeyListener::new();
+    listen_for(&listener, parse_hotkey("ctrl_r").unwrap());
+    let (sink, mut callback) = sink_and_callback(&listener);
+
+    callback(key_event(EventType::KeyPress(Key::Unknown(62))));
+    assert_eq!(sink.pressed(), 1, "raw right-Ctrl (Unknown(62)) must press");
+    callback(key_event(EventType::KeyRelease(Key::Unknown(62))));
+    assert_eq!(sink.released(), 1, "and its raw release must release");
+
+    callback(key_event(EventType::KeyPress(Key::Unknown(61))));
+    assert_eq!(sink.pressed(), 1, "another unknown code is not the hotkey");
+}

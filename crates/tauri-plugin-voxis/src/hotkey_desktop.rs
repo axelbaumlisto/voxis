@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use rdev::Key;
 
-use voxis_core::hotkey::{parse_hotkey, HotkeyCombo, HotkeyModifier};
+use voxis_core::hotkey::{normalize_rdev_key, parse_hotkey, HotkeyCombo, HotkeyModifier};
 
 use crate::error::PluginError;
 use crate::events::EventSink;
@@ -315,9 +315,15 @@ impl RdevHotkey {
                 let dispatch = {
                     let mut guard = tracker.lock().unwrap();
                     guard.as_mut().and_then(|t| {
+                        // `rdev` hands macOS right-Ctrl over as `Unknown(62)`;
+                        // one shared repair before any matching (voxis-core).
                         let edge = match event.event_type {
-                            rdev::EventType::KeyPress(key) => t.on_key_press(key),
-                            rdev::EventType::KeyRelease(key) => t.on_key_release(key),
+                            rdev::EventType::KeyPress(key) => {
+                                t.on_key_press(normalize_rdev_key(key))
+                            }
+                            rdev::EventType::KeyRelease(key) => {
+                                t.on_key_release(normalize_rdev_key(key))
+                            }
                             _ => None,
                         };
                         edge.map(|e| (e, t.mode()))
@@ -405,6 +411,21 @@ mod tests {
         for key in ["alt_r", "ctrl_r", "Ctrl+Shift+V"] {
             assert!(parse_hotkey_spec(key).is_ok(), "{key} should parse");
         }
+    }
+
+    /// macOS `rdev` delivers right-Ctrl as `Unknown(62)` (its keycode table
+    /// lacks the arm); the listener thread repairs it with voxis-core's
+    /// `normalize_rdev_key` before the tracker sees it. Pin that the repaired
+    /// key drives a full press/release edge pair for a `ctrl_r` spec.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn tracker_matches_ctrl_r_from_raw_unknown_62_after_normalize() {
+        let spec = parse_hotkey_spec("ctrl_r").unwrap();
+        let mut t = HotkeyTracker::new(spec, Mode::Hold);
+        assert_eq!(t.on_key_press(normalize_rdev_key(Key::Unknown(62))), Some(Edge::Pressed));
+        assert_eq!(t.on_key_release(normalize_rdev_key(Key::Unknown(62))), Some(Edge::Released));
+        // Unrepaired, the very same physical key is invisible — the bug this pins.
+        assert_eq!(t.on_key_press(Key::Unknown(62)), None);
     }
 
     #[test]

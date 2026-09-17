@@ -406,6 +406,27 @@ pub fn parse_hotkey(name: &str) -> Option<Key> {
         .map(|entry| entry.key)
 }
 
+/// Repair the keys `rdev` delivers under a name it does not know.
+///
+/// `rdev`'s macOS keycode table (`src/macos/keycodes.rs`, `key_from_code`)
+/// maps `CONTROL_LEFT`, `META_RIGHT`, `SHIFT_RIGHT`… but has NO arm for
+/// keycode 62 (Right Control), so a physical right-Ctrl press arrives as
+/// `Key::Unknown(62)` and can never match a `ctrl_r` hotkey. Found live:
+/// the owner's Voxis stayed silent on right Ctrl while left Ctrl worked,
+/// and a WebKit key probe proved the OS itself sent a clean `ControlRight`.
+///
+/// Every rdev-fed listener (the desktop app's `hotkey_callback` and the
+/// plugin's `RdevHotkey`) must pass each key through here BEFORE matching.
+/// The mapping is macOS-only because the code 62 is a macOS virtual keycode;
+/// on other platforms `Unknown(62)` means whatever it means there.
+pub fn normalize_rdev_key(key: Key) -> Key {
+    match key {
+        #[cfg(target_os = "macos")]
+        Key::Unknown(62) => Key::ControlRight,
+        other => other,
+    }
+}
+
 /// Convert Key to u32 for atomic storage.
 fn key_to_u32(key: Key) -> u32 {
     KEY_TABLE
@@ -457,6 +478,7 @@ fn hotkey_callback(
 
         match event.event_type {
             EventType::KeyPress(key) => {
+                let key = normalize_rdev_key(key);
                 let key_id = key_to_u32(key);
                 if key_id == current_target && key_id != 0 && !is_pressed {
                     is_pressed = true;
@@ -465,11 +487,14 @@ fn hotkey_callback(
                     sink.on_pressed();
                 }
             }
-            EventType::KeyRelease(key) if is_pressed && last_pressed_key == Some(key) => {
-                is_pressed = false;
-                last_pressed_key = None;
-                tracing::debug!("Hotkey released: {:?}", key);
-                sink.on_released();
+            EventType::KeyRelease(raw) => {
+                let key = normalize_rdev_key(raw);
+                if is_pressed && last_pressed_key == Some(key) {
+                    is_pressed = false;
+                    last_pressed_key = None;
+                    tracing::debug!("Hotkey released: {:?}", key);
+                    sink.on_released();
+                }
             }
             _ => {}
         }
