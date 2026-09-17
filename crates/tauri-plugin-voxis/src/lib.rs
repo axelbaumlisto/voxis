@@ -540,6 +540,14 @@ fn build<R: Runtime>(
 /// `mobile.rs`'s own `IntentPayloadWire`; what actually varies per-call,
 /// and is worth a host-side regression test, is this function's own
 /// active/no-active branch).
+/// `[T11b]` What a Start intent becomes: exactly one `voxis://intent`
+/// `{"action": "start"}` to the host windows. Pure over the sink so the
+/// test below can pin the wire shape without an iOS runtime.
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))] // only called from the iOS mobile path on-device; exercised via unit tests on host
+pub(crate) fn forward_start_intent(events: &dyn EventSink) {
+    events.emit(models::INTENT_EVENT, serde_json::json!({ "action": "start" }));
+}
+
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))] // only called from the iOS mobile path on-device; exercised via unit tests on host
 pub(crate) async fn handle_live_activity_stop_intent(state: &PluginState) {
     match state.sessions.active_id() {
@@ -609,6 +617,28 @@ mod live_activity_intent_tests {
 
         assert!(!state.sessions.has_active(), "Stop intent must finalize (like releasing Hold), not leave the session stuck");
     }
+
+    /// `[T11b]` A Start intent never touches the session machinery here:
+    /// it is exactly one `voxis://intent {action:"start"}` for the host.
+    #[test]
+    fn start_intent_is_forwarded_to_the_host_as_one_intent_event_and_starts_nothing() {
+        let sink = RecordingSink::default();
+        forward_start_intent(&sink);
+        let events = sink.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, models::INTENT_EVENT);
+        assert_eq!(events[0].1, serde_json::json!({ "action": "start" }));
+        assert_eq!(sink.count(models::STATE_EVENT), 0, "no session was started plugin-side");
+    }
+
+    #[test]
+    fn intent_actions_parse_exactly_start_and_stop() {
+        assert_eq!(models::IntentAction::parse("start"), Some(models::IntentAction::Start));
+        assert_eq!(models::IntentAction::parse("stop"), Some(models::IntentAction::Stop));
+        assert_eq!(models::IntentAction::parse("toggle"), None);
+        assert_eq!(models::IntentAction::parse(""), None);
+    }
+
 }
 
 /// Task 9a: `EventSink` decorator that mirrors `voxis://state`/
@@ -739,19 +769,26 @@ pub fn init_ios_with<R: Runtime>(secrets_override: Option<Arc<dyn SecretStore>>)
             // `PluginHotkeySink`/`run_hotkey_edge_loop` already rely on
             // for the desktop hotkey path).
             let live_activity = Arc::new(mobile::LiveActivityController::new(mobile_handle.clone()));
+            let tauri_events = Arc::new(TauriEventSink::new(app.app_handle().clone()));
             let intent_app_handle = app.app_handle().clone();
-            live_activity.register_intent_channel(move || {
-                let app_handle = intent_app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    let state = app_handle.state::<PluginState>();
-                    handle_live_activity_stop_intent(&state).await;
-                });
+            let intent_events: Arc<dyn EventSink> = tauri_events.clone();
+            live_activity.register_intent_channel(move |action| match action {
+                // Stop = the Live Activity button: finalize Rust-side, like a
+                // hotkey release (Task 9a acceptance #3).
+                models::IntentAction::Stop => {
+                    let app_handle = intent_app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app_handle.state::<PluginState>();
+                        handle_live_activity_stop_intent(&state).await;
+                    });
+                }
+                // Start = Siri / Shortcuts / Action Button (`[T11b]`): the
+                // HOST decides -- consent, no-API-key, single-flight all live
+                // there -- so this is only ever forwarded, never `do_start`.
+                models::IntentAction::Start => forward_start_intent(intent_events.as_ref()),
             });
 
-            let events: Arc<dyn EventSink> = Arc::new(LiveActivityEventSink::new(
-                Arc::new(TauriEventSink::new(app.app_handle().clone())),
-                live_activity,
-            ));
+            let events: Arc<dyn EventSink> = Arc::new(LiveActivityEventSink::new(tauri_events, live_activity));
             let state = PluginState::new(config_dir, cache_dir, secrets, capture, events, None);
 
             // `[R1-Safety S5]`, same as desktop's `build`: any file left

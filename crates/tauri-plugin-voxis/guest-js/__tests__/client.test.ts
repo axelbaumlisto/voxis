@@ -247,3 +247,29 @@ describe("createClient().dictate", () => {
     await expect(promise).resolves.toEqual(result);
   });
 });
+
+describe("createClient().onIntent [T11b]", () => {
+  it("delivers a voxis://intent start payload to the host and starts nothing itself", async () => {
+    const ipc = createFakeIpc();
+    const client = createClient({ invoke: ipc.invoke, listen: ipc.listen });
+    const seen: unknown[] = [];
+    await client.onIntent((intent) => seen.push(intent));
+
+    ipc.emit("voxis://intent", { action: "start" });
+
+    expect(seen).toEqual([{ action: "start" }]);
+    expect(ipc.callOrder.filter((c) => c.startsWith("invoke:"))).toEqual([]);
+  });
+
+  it("drops an unknown intent action instead of guessing", async () => {
+    const ipc = createFakeIpc();
+    const client = createClient({ invoke: ipc.invoke, listen: ipc.listen });
+    const seen: unknown[] = [];
+    await client.onIntent((intent) => seen.push(intent));
+
+    ipc.emit("voxis://intent", { action: "toggle" });
+    ipc.emit("voxis://intent", "start");
+
+    expect(seen).toEqual([]);
+  });
+});

@@ -75,6 +75,9 @@ class VoxisPlugin: Plugin {
         // `VoxisLiveActivityBridge.shared`'s own doc for why
         // `StopDictationIntent.perform()` needs a static handle onto it.
         VoxisLiveActivityBridge.shared = liveActivity
+        // [T11b] Host-app AppIntents (Siri / Shortcuts / Action Button) reach
+        // Rust through the same bridge, relayed by NotificationCenter.
+        liveActivity.observeHostIntents()
         // S2 (BLIND_SDK_swift.md finding #2): `WavWriter.selfCheck()` used
         // to run here as a DEBUG-only `assert()` -- compiled out in
         // release, not a CI gate, and only exercised once an app actually

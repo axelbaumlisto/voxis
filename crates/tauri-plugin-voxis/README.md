@@ -18,8 +18,8 @@ microphone and real Groq; a live-iPad end-to-end run exists (see
 `research/plugin-plan/T11_ipad_run_2026-09-16.md`) driving this plugin from
 a real host (`naked`) — that integration work is not itself part of this
 crate/repo. `guest-js` is versioned separately (`@voxis/tauri-plugin-voxis`,
-currently `0.4.0`) and is **not** on the same version number as this Rust
-crate (currently `0.2.1`) — bump each independently when either changes.
+currently `0.5.0`) and is **not** on the same version number as this Rust
+crate (currently `0.3.0`) — bump each independently when either changes.
 
 ## Installation
 
@@ -150,6 +150,7 @@ Every command is `Result<T, PluginError>`; see "Errors" below for the
 | `voxis://state` | `"idle" \| "recording" \| "transcribing" \| "error"` | Every state transition. |
 | `voxis://level` | `{ rms, peak, muted }` | ≤ 20 Hz while recording — drives the overlay's waveform/mute indicator. |
 | `voxis://result` | `DictationResult` (same shape as `stop()`'s return) | Fired **after** the session slot is released and its rec file deleted, so a caller reacting to this event by immediately calling `start()` again cannot race a not-yet-freed slot into a spurious `alreadyRecording`. This ordering opens a narrow window where a *different* session's `start()` can succeed before this event fires — always correlate by the payload's `sessionId`, never by assuming "the next result event" belongs to a particular session. |
+| `voxis://intent` | `{ action: "start" }` | iOS only, out of band (`[T11b]`): the host app's own Siri / Shortcuts / Action Button `StartDictationIntent` fired. **Nothing has started** — the host routes it through its own pill-press path (consent, `noApiKey`, single-flight). `client.onIntent(cb)`; see `docs/PLUGIN_IOS_HOST.md` §`[T11b]`. |
 
 ## Errors
 

@@ -228,6 +228,40 @@ pub const RESULT_EVENT: &str = "voxis://result";
 /// the three lifecycle events every session emits); this one is
 /// deliberately out of band and best-effort.
 pub const ERROR_EVENT: &str = "voxis://error";
+/// `voxis://intent` event name -- an OS-originated request the host must
+/// decide on, not a session lifecycle fact. Today: `{"action": "start"}`
+/// when the host app's own `StartDictationIntent` (Siri / Shortcuts /
+/// Action Button) fires (`docs/PLUGIN_IOS_HOST.md`). The plugin forwards
+/// it to the webview instead of calling `do_start` itself on purpose: the
+/// host owns consent, the no-API-key path and its own single-flight rule
+/// (`[T11b]`), so an intent goes through exactly the same code a pill
+/// press does. `stop` intents are NOT forwarded -- the Live Activity Stop
+/// button is finalized Rust-side (`handle_live_activity_stop_intent`).
+/// Out of band like `ERROR_EVENT`: not in the `events.json` snapshot.
+pub const INTENT_EVENT: &str = "voxis://intent";
+
+/// What an OS-level intent asked for, decoded from Swift's
+/// `{"action": ...}` wire payload. Two sources feed the one channel:
+/// the Live Activity Stop button (`StopDictationIntent`, `LiveActivity.
+/// swift`) and the host app's own `StartDictationIntent` relayed via
+/// `NotificationCenter` (`docs/PLUGIN_IOS_HOST.md`, `[T11b]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntentAction {
+    Start,
+    Stop,
+}
+
+impl IntentAction {
+    /// `None` for an action this version does not know -- the caller logs
+    /// and drops it (never guesses).
+    pub fn parse(action: &str) -> Option<Self> {
+        match action {
+            "start" => Some(Self::Start),
+            "stop" => Some(Self::Stop),
+            _ => None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

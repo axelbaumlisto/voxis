@@ -371,6 +371,9 @@ struct IntentPayloadWire {
     action: String,
 }
 
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LiveActivityStartArgs {
@@ -399,19 +402,19 @@ impl<R: Runtime> LiveActivityController<R> {
     }
 
     /// Registers Rust's own intent-forwarding channel with Swift, once.
-    /// `on_stop` runs synchronously on whatever thread decodes the
+    /// `on_intent` runs synchronously on whatever thread decodes the
     /// channel payload (same as `IosCapture`'s `on_level` closure) --
     /// callers that need to `.await` anything (this crate's own
     /// `commands::do_stop`) spawn their own task instead of blocking
     /// this callback.
-    pub fn register_intent_channel(&self, on_stop: impl Fn() + Send + Sync + 'static) {
+    pub fn register_intent_channel(&self, on_intent: impl Fn(crate::models::IntentAction) + Send + Sync + 'static) {
         let channel = Channel::new(move |body: InvokeResponseBody| {
             match body.deserialize::<IntentPayloadWire>() {
-                Ok(payload) if payload.action == "stop" => on_stop(),
-                Ok(payload) => {
-                    tracing::warn!(action = %payload.action, "unrecognised Live Activity intent action")
-                }
-                Err(e) => tracing::warn!(error = %e, "failed to decode a Live Activity intent payload"),
+                Ok(payload) => match crate::models::IntentAction::parse(&payload.action) {
+                    Some(action) => on_intent(action),
+                    None => tracing::warn!(action = %payload.action, "unrecognised intent action -- dropped"),
+                },
+                Err(e) => tracing::warn!(error = %e, "failed to decode an intent payload"),
             }
             Ok(())
         });

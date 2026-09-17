@@ -133,6 +133,10 @@ final class VoxisLiveActivityBridge {
     /// only ever started after `setup` has completed) only logs.
     private var onIntent: Channel?
 
+    /// Intents that arrived before `onIntent` existed, flushed in order by
+    /// `registerIntentChannel` (`[T11b]`; a cold Siri launch is the case).
+    private var pendingIntents: [String] = []
+
     /// `Any?`, not `Activity<VoxisActivityAttributes>?` -- see the note
     /// above `VoxisActivityAttributes`'s own declaration for why a
     /// stored property cannot use the versioned generic type directly
@@ -145,7 +149,36 @@ final class VoxisLiveActivityBridge {
     // MARK: - Rust -> Swift (driven by `voxis://state`/`voxis://level`)
 
     func registerIntentChannel(_ channel: Channel) {
-        queue.async { self.onIntent = channel }
+        queue.async {
+            self.onIntent = channel
+            // [T11b] A Start intent that arrived before Rust registered the
+            // channel (Siri opening a cold app: `perform()` can run before
+            // the plugin's `setup` finished) is delivered now, in order,
+            // rather than dropped -- the host still decides what to do.
+            let pending = self.pendingIntents
+            self.pendingIntents.removeAll()
+            for action in pending { channel.send(.dictionary(["action": action])) }
+        }
+    }
+
+    /// Intents relayed by the HOST app's own `AppIntent`s through
+    /// `NotificationCenter` (`docs/PLUGIN_IOS_HOST.md`, `[T11b]`): the host
+    /// posts `VoxisIntentNotification.name` with `userInfo["action"]`
+    /// (`"start"` today) from its `StartDictationIntent.perform()`; this
+    /// bridge forwards it through the same Rust channel the Live Activity
+    /// Stop button uses. NotificationCenter, not a Swift import: the host's
+    /// intent type must live in the app target (App Shortcuts are
+    /// discovered per app), and this keeps it free of any dependency on
+    /// this package's module name. Observed for the process lifetime --
+    /// the bridge is one-per-process (`shared`), same as the observer.
+    func observeHostIntents(center: NotificationCenter = .default) {
+        center.addObserver(forName: VoxisIntentNotification.name, object: nil, queue: nil) { [weak self] note in
+            guard let action = note.userInfo?[VoxisIntentNotification.actionKey] as? String else {
+                NSLog("[voxis] host intent notification without a string userInfo[\"action\"] -- dropped")
+                return
+            }
+            self?.intentRequested(action)
+        }
     }
 
     func start(startedAt: Date) {
@@ -216,12 +249,31 @@ final class VoxisLiveActivityBridge {
     /// only, same convention as every `mobile::LiveActivityController`
     /// call in the other direction.
     func stopRequestedByIntent() {
+        intentRequested("stop")
+    }
+
+    /// Queued (never dropped) until `registerIntentChannel` has run;
+    /// decoded and routed on the Rust side (`models::IntentAction`).
+    func intentRequested(_ action: String) {
         queue.async {
             guard let channel = self.onIntent else {
-                NSLog("[voxis] StopDictationIntent fired before registerIntentChannel ran -- dropped")
+                self.pendingIntents.append(action)
+                NSLog("[voxis] intent \(action) arrived before registerIntentChannel ran -- queued")
                 return
             }
-            channel.send(.dictionary(["action": "stop"]))
+            channel.send(.dictionary(["action": action]))
         }
     }
+}
+
+/// The NotificationCenter contract between a host app's `AppIntent`s and
+/// this plugin (`[T11b]`). String constants on purpose -- a host posts
+/// them from its own target without importing this module:
+///
+///     NotificationCenter.default.post(
+///         name: Notification.Name("top.voxis.intent"),
+///         object: nil, userInfo: ["action": "start"])
+public enum VoxisIntentNotification {
+    public static let name = Notification.Name("top.voxis.intent")
+    public static let actionKey = "action"
 }
