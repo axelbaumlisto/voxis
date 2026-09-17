@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.1.7 (Voxis desktop)
+
+### Fix
+- **Right Ctrl (`ctrl_r`) never worked as a hotkey on macOS** — and it is the
+  app's default. `rdev`'s macOS keycode table (`key_from_code`) has no arm for
+  virtual keycode 62 (Right Control), so a physical right-Ctrl press reached
+  the listener as `Key::Unknown(62)` and could never match; left Ctrl and
+  right Cmd were unaffected. Found live on the owner's Mac (Voxis silent on
+  right Ctrl while a WebKit key probe showed the OS sending a clean
+  `ControlRight`, keyCode 62 / location 2). Fixed with one shared repair seam,
+  `voxis_core::hotkey::normalize_rdev_key` (macOS-only `Unknown(62) →
+  ControlRight`), applied before matching in both rdev-fed listeners: the
+  desktop app's `hotkey_callback` and `tauri-plugin-voxis`'s `RdevHotkey`.
+  Tests pin that `Unknown(62)` drives a full press+release for `ctrl_r` and
+  that other unknown codes stay invisible; the source gate (`no log or sink
+  call outside a target-key guard`) still holds. Verified on hardware: real
+  right-Ctrl hold → recording → transcript.
+
 ## v0.1.6 (Voxis desktop)
 
 ### Fix
