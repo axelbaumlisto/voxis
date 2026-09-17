@@ -166,6 +166,21 @@ impl PluginState {
             dictionary: config.dictionary.clone(),
         }
     }
+
+    /// The STT provider host consent applies to right now (active
+    /// profile's `api_url_override` host, Groq when unset) -- the same
+    /// value `start()` gates on and `set_consent` records under. Hosts that
+    /// grant consent programmatically (a smoke harness, a kiosk) must use
+    /// this instead of a hardcoded "api.groq.com".
+    pub fn current_provider_host(&self) -> String {
+        profile_source::current_provider_host(self)
+    }
+
+    /// Grants or revokes consent for the CURRENT provider host (see
+    /// `current_provider_host`); what the `set_consent` command does.
+    pub fn grant_consent(&self, consented: bool) -> Result<(), error::PluginError> {
+        commands::do_set_consent(self, consented)
+    }
 }
 
 impl PluginState {

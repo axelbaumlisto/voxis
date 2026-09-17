@@ -370,7 +370,10 @@ pub fn run() {
             // runs `setConsent(true)` for it) -- grant consent the same
             // way `main.js`'s own startup call would, straight through
             // the plugin's already-`pub` `ConsentStore` field.
-            state.consent.set_consent(&state.host_id, &state.provider_host, true).expect("granting smoke-mode consent");
+            // Through the plugin's own seam, not the raw store with a
+            // hardcoded host: consent is keyed on the ACTIVE provider host
+            // (127.0.0.1 for the fake-stt smoke), not always api.groq.com.
+            state.grant_consent(true).expect("granting smoke-mode consent");
             install_smoke_listeners(app);
             if std::env::var("VOXIS_SMOKE_LOG_LEVELS").is_ok() {
                 install_level_summary_listener(app);
