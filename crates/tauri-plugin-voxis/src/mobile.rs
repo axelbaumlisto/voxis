@@ -371,9 +371,6 @@ struct IntentPayloadWire {
     action: String,
 }
 
-    }
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LiveActivityStartArgs {
