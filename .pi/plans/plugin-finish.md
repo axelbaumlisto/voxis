@@ -75,3 +75,12 @@ S2 (M) Swift: чистые функции (sub-chunk RMS, self-cap, mute-heurist
 S3 (M) `VoxisAudioCapture` SRP: permission resolver + level/cap math вынести.
 S4 (L) wire-структуры Swift↔Rust: принять + задокументировать (без генератора).
 Порядок: R1→R2→R3→R4→R5 одним воркером (Rust); S1→S2→S3 (Swift); T2→T3 (guest-js) → naked T3-хост+T4; затем T1, T5. Каждый шаг — fresh reviewer.
+
+## Итог 2026-09-17 (ночь)
+- Voxis **v0.1.6 опубликован** (Forgejo+GitHub, 8 артефактов, DMG notarized/stapled, установлен на dev Mac; фикс 6 настроек проверен round-trip). Релизные лейны починены: target/ в корне (Dockerfile.gui-linux, macos-vm.sh), iOS-gate skip без SDK, disk preflight 60G.
+- CI voxis: host-min-e2e впервые зелёный (xauth в образе, CARGO_TARGET_DIR, гонка лога); AddEntryForm teardown-флейк.
+- **plugin-v0.1.0** тег + релиз с guest-js 0.3.1 tgz; naked запинен на тег (PR #2 `3e869f21`), собран под iOS 16.1 и прогнан на iPad (start→expanded→silence→compact).
+- Phase SDK закрыт: R1–R5 (−207 LOC, APPROVE), T1 (overlay split), T2/T3 (live seams), T4/T5 (naked hooks split, APPROVE), S1–S3 (permissionDenied, VoxisAudioMath + 24 XCTest, MicPermission). S4 принят как риск.
+- Хвосты: seal() zeroize, rms/peak документированы.
+- Решение владельца: naked-как-платформа с плагинами (VNC/браузер) — ОТЛОЖЕНО («оставляем пока так»); продажа плагина — отложено; iOS cross-app — объяснено, не делаем.
+- Открыто: PR #2 merge (после CI), T9b Live Activity на устройстве, T11b Siri, QR-импорт на устройстве, экран ручного ввода ключа в naked, `.vxp` UTI, Windows/Android матрица.
