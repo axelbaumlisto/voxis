@@ -78,7 +78,15 @@ pub enum State {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LevelEvent {
+    /// Window peak of the 10 ms sub-chunk RMS values seen since the previous
+    /// level tick (desktop `WindowPeakAccumulator`, iOS `LevelMath`) -- a
+    /// "loudness of the loudest 10 ms" figure in [0, 1], NOT a mean RMS over
+    /// the whole window. Identical on both platforms by design.
     pub rms: f32,
+    /// Currently the same number as `rms` on both platforms (kept as a
+    /// separate field so a true sample peak can be added without a wire
+    /// change; blind review R2/SDK-swift noted the duplication). Consumers
+    /// must not treat `rms` as an average.
     pub peak: f32,
     pub muted: bool,
 }

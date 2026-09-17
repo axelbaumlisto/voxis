@@ -32,6 +32,7 @@ mod tests;
 pub use crypto::{decode_base64url, encode_base64url, KeySource};
 pub use secret::Secret;
 
+use zeroize::Zeroize;
 use serde::{Deserialize, Serialize};
 
 use crate::llm::prompts::LlmPrompt;
@@ -542,18 +543,31 @@ impl VoxisProfile {
 /// derived from `key_source`. See `crypto` module docs for the wire
 /// format.
 pub fn seal(profile: &VoxisProfile, secrets: &ProfileSecrets, key_source: &KeySource) -> Result<Vec<u8>> {
-    let payload = SealedPayload {
+    let mut payload = SealedPayload {
         profile: profile.clone(),
         api_key: secrets.api_key.as_ref().map(|s| s.expose().to_string()),
         llm_api_key: secrets.llm_api_key.as_ref().map(|s| s.expose().to_string()),
     };
-    let plaintext = serde_json::to_vec(&payload)?;
-    crypto::encrypt(&plaintext, key_source)
+    let mut plaintext = serde_json::to_vec(&payload)?;
+    let sealed = crypto::encrypt(&plaintext, key_source);
+    // The serialized payload and the two String copies of the API keys are
+    // the only plaintext copies outside `Secret`'s ZeroizeOnDrop -- wipe them
+    // before they go back to the allocator (zeroize follow-up, T12).
+    plaintext.zeroize();
+    if let Some(k) = payload.api_key.as_mut() {
+        k.zeroize();
+    }
+    if let Some(k) = payload.llm_api_key.as_mut() {
+        k.zeroize();
+    }
+    sealed
 }
 
 /// Inverse of [`seal`]. Returns `Err` \u2014 never panics \u2014 for a wrong key,
 /// tampered bytes, truncated input, or an unsupported `version`.
 pub fn open(data: &[u8], key_source: &KeySource) -> Result<(VoxisProfile, ProfileSecrets)> {
+    // `decrypt` hands back `Zeroizing<Vec<u8>>`, so the plaintext buffer is
+    // wiped on drop; the parsed key Strings move straight into `Secret`s.
     let plaintext = crypto::decrypt(data, key_source)?;
     let payload: SealedPayload = serde_json::from_slice(&plaintext)?;
     payload.profile.check_version()?;

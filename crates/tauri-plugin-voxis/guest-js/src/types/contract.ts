@@ -61,7 +61,11 @@ export type PluginState = "idle" | "recording" | "transcribing" | "error";
 
 /** `models::LevelEvent`, `voxis://level` payload. */
 export interface LevelEvent {
+  /** Window peak of 10 ms sub-chunk RMS values since the previous tick, in
+   * [0, 1] — "loudness of the loudest 10 ms", not a mean over the window. */
   rms: number;
+  /** Currently equals `rms` on every platform (reserved for a true sample
+   * peak; kept so adding it is not a wire change). */
   peak: number;
   muted: boolean;
 }
