@@ -203,6 +203,52 @@ round 2) found and fixed the opposite bug — the one real rejection
 `set_hotkey` failure meant "no backend on this build" (it does not: no
 backend returns `Ok(())`, never an error at all).
 
+## The global hotkey listener: what it captures, and where it does not work
+
+Read this before shipping a host that turns the hotkey on. `set_hotkey` binds
+a **global** key, and a global key means an OS-level keyboard hook: for as long
+as one is installed, the process receives the machine's WHOLE keystroke stream —
+not only the keys aimed at this app. That is the price of starting dictation
+while another window has focus, and no amount of care in the plugin removes it;
+what the plugin does control is what happens to those events once they arrive.
+
+**What is actually looked at.** Only `KeyPress`/`KeyRelease`. Mouse moves,
+button presses and wheel events arrive on the same hook and are dropped without
+being inspected. Of the key events, only the one that matches the configured
+spec produces anything: the callback compares the key against the target before
+any log line or any action call can run, nothing is buffered, and nothing is
+written to disk or forwarded off-process. A press and a release are all the
+host's `HotkeyActions` can ever receive. This is not a convention documented
+here and left to reviewer memory: `crates/voxis-core/tests/
+hotkey_listener_source_gate.rs` and `crates/tauri-plugin-voxis/tests/
+hotkey_listener_source_gate.rs` read the listener sources and go red if a log or
+an action call moves ahead of the target-key check — the "let me log what
+arrives while debugging" edit is exactly how dictation would become a
+keylogger.
+
+**Platform facts — each is a limitation, not a bug to file:**
+
+| Platform | What happens |
+|---|---|
+| **macOS** | Needs the **Input Monitoring** (or Accessibility) permission. The system prompt reads as "wants to observe your keystrokes". Without the grant `rdev::listen` fails and the hotkey silently never fires; the plugin surfaces that as `permissionDenied` from `set_hotkey`, and a late failure is re-reported on the next `set_hotkey` call (see "Errors"). A host should offer a deep-link to System Settings — a bare message leaves the user stuck. |
+| **Linux (X11)** | Works, via XRecord. |
+| **Linux (Wayland)** | **The hotkey will not fire, whatever is configured.** rdev reads X11 events; a Wayland session delivers none to it. This is a missing platform API, not a defect here — tell the user, or they will conclude the app is broken. |
+| **iOS / iPadOS** | `rdev` is not compiled at all (`voxis-core`'s `rdev` feature is desktop-only; `cargo build -p voxis-core --target aarch64-apple-ios` never touches it), and the OS gives **no** app a global hotkey — **not even with a Bluetooth keyboard attached**, and not with a hardware keyboard on a tablet either: the restriction is on global input capture, not on which keyboard is present. On mobile the in-app button and hold-to-talk are the only ways in. |
+| **Android** | No plugin backend at all (out of scope, see "Known limitations"). |
+| **Managed fleets** | Corporate EDR/MDM and some antivirus products classify an unfiltered keyboard hook as a **keylogger** — which is what this looks like from outside. Decide whether that trade is acceptable *before* deploying into a managed fleet, rather than discovering it in a quarantine ticket. |
+
+**There is currently no way to disarm the plugin's listener.** `set_hotkey`
+only ever *installs* a target: the first successful call spawns the background
+`rdev::listen` thread, every later call swaps the target under one lock, and no
+command clears it back to "nothing" — the hook therefore lives for the rest of
+the process, and a host that lets the user turn dictation off cannot currently
+stop the capture from this side. Treat that as the residual risk of shipping
+the hotkey, not as a hidden detail: the desktop Voxis app's own listener does
+have a `stop()` (and uses it when the configured hotkey is cleared), and the
+plugin's backend is expected to grow the same affordance. Until then, a host
+that must not leave a keyboard hook installed should not call `set_hotkey` at
+all, and make the hotkey optional in its UI.
+
 ## Profile: three import paths + `apply_profile`
 
 A `VoxisProfile` (version 1) carries: provider/model/language/guard timeouts
