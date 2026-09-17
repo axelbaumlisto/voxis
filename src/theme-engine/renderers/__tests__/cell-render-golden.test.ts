@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { CELL_DEFAULTS, createCellRenderer } from "../cell";
 import type { CellOptions, CellParams } from "../cell";
 import type { ThemeState } from "../../contract";
@@ -199,7 +201,7 @@ function renderFrame(options: CellOptions, state: ThemeState, frameCount = 1): G
       cb();
     }
     renderer.destroy();
-    return summarize(ops);
+    return { summary: summarize(ops), ops: [...ops] };
   } finally {
     nowSpy.mockRestore();
     restoreCanvas();
@@ -208,18 +210,7 @@ function renderFrame(options: CellOptions, state: ThemeState, frameCount = 1): G
   }
 }
 
-describe("cell renderer draw-call golden", () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-    localStorage.clear();
-  });
-
-  it.each([
+const GOLDEN_CASES = [
     {
       name: "CELL_DEFAULTS idle 160x160",
       options: { width: SIZE, height: SIZE, params: { ...CELL_DEFAULTS } },
@@ -270,7 +261,76 @@ describe("cell renderer draw-call golden", () => {
         counts: { beginPath: 225, moveTo: 223, lineTo: 4054, stroke: 222, closePath: 2, fill: 3, save: 1, clip: 1, arc: 2, restore: 1 },
       },
     },
-  ] as const)("keeps draw operations stable: $name", ({ options, state, expected }) => {
-    expect(renderFrame(options, state)).toEqual(expected);
+  ] as const;
+
+describe("cell renderer draw-call golden", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it.each(GOLDEN_CASES)("keeps draw operations stable: $name", ({ name, options, state, expected }) => {
+    const { summary, ops } = renderFrame(options, state);
+    // Op TYPES and COUNTS are exact everywhere. The COORDINATES are not: the
+    // renderer's trig runs through the platform libm, and macOS-arm64 vs the
+    // Linux CI image disagree in the last place often enough to flip a
+    // 3-decimal rounding and therefore the sha256 (two cases failed on every
+    // Mac since 52cf460, passed on CI, and vice versa after each "refresh").
+    // So the hash is checked only when it matches; otherwise every op is
+    // compared numerically against the stored golden with a 2e-3 tolerance.
+    expect({ opCount: summary.opCount, counts: summary.counts }).toEqual({ opCount: expected.opCount, counts: expected.counts });
+    if (summary.hash === expected.hash) return;
+    const goldenPath = goldenOpsPath(name);
+    if (!existsSync(goldenPath)) {
+      throw new Error(`hash ${summary.hash} != ${expected.hash} and no ops golden at ${goldenPath}; run with VOXIS_WRITE_GOLDEN=1 on the reference machine`);
+    }
+    const golden = readFileSync(goldenPath, "utf8").split("\n").filter((l) => l.length > 0);
+    expect(ops.length).toBe(golden.length);
+    for (let i = 0; i < ops.length; i++) {
+      expectOpClose(ops[i], golden[i], i);
+    }
   });
 });
+
+const OPS_GOLDEN_DIR = join(process.cwd(), "src/theme-engine/renderers/__tests__/__golden__");
+
+function goldenOpsPath(name: string): string {
+  return join(OPS_GOLDEN_DIR, `${name.replace(/[^a-z0-9]+/gi, "_")}.ops.txt`);
+}
+
+/** Same op name/arity; every number within 2e-3 (one 3-decimal rounding step
+ * on either side of a libm difference). */
+function expectOpClose(actual: string, golden: string, index: number): void {
+  const num = /-?\d+(?:\.\d+)?/g;
+  const shape = (op: string) => op.replace(num, "#");
+  if (shape(actual) !== shape(golden)) {
+    throw new Error(`op ${index} shape differs:\n  actual ${actual}\n  golden ${golden}`);
+  }
+  const a = actual.match(num) ?? [];
+  const g = golden.match(num) ?? [];
+  for (let k = 0; k < a.length; k++) {
+    const d = Math.abs(Number(a[k]) - Number(g[k]));
+    if (d > 2e-3) {
+      throw new Error(`op ${index} number ${k} differs by ${d}:\n  actual ${actual}\n  golden ${golden}`);
+    }
+  }
+}
+
+// One-time generation of the numeric goldens (kept in the repo):
+//   VOXIS_WRITE_GOLDEN=1 bunx vitest run src/theme-engine/renderers/__tests__/cell-render-golden.test.ts
+if (process.env.VOXIS_WRITE_GOLDEN === "1") {
+  describe("write ops goldens", () => {
+    it("writes", () => {
+      mkdirSync(OPS_GOLDEN_DIR, { recursive: true });
+      for (const c of GOLDEN_CASES) {
+        const { ops } = renderFrame(c.options, c.state);
+        writeFileSync(goldenOpsPath(c.name), ops.join("\n") + "\n");
+      }
+    });
+  });
+}
