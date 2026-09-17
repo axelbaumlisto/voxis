@@ -97,6 +97,10 @@ describe("AddEntryForm", () => {
     await waitFor(() => {
       expect(mockOnAdd).toHaveBeenCalledWith("солид", "SOLID");
     });
+    // Let handleSubmit's `finally { setAdding(false) }` land before the test
+    // ends — otherwise the state update fires after teardown ("window is not
+    // defined", CI fast task 7100) and vitest exits 1 with all tests green.
+    await waitFor(() => expect(sourceInput).toHaveValue(""));
   });
 
   it("trims whitespace from values", async () => {
@@ -113,6 +117,7 @@ describe("AddEntryForm", () => {
     await waitFor(() => {
       expect(mockOnAdd).toHaveBeenCalledWith("солид", "SOLID");
     });
+    await waitFor(() => expect(sourceInput).toHaveValue(""));
   });
 
   it("clears form after successful submit", async () => {
