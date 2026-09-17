@@ -586,9 +586,6 @@ fn test_rapid_start_stop_cycles() {
         let start_result = recorder.start("default");
 
         if start_result.is_ok() {
-            // Tiny delay to let recording actually start
-            std::thread::sleep(std::time::Duration::from_millis(20));
-
             let stop_result = recorder.stop();
             assert!(
                 stop_result.is_ok(),
@@ -596,10 +593,32 @@ fn test_rapid_start_stop_cycles() {
                 i
             );
 
+            // The timing assumption this test used to encode was a fixed
+            // 20ms sleep between start() and stop(), on the theory that it
+            // gave the background recording thread "time to actually
+            // start". That delay did not guard what it claimed to: on
+            // macOS, `is_recording` is flipped to `true` synchronously in
+            // start() itself, before the recording thread even begins
+            // building the audio stream (see spawn_recording_thread), so
+            // it was always already `true` by the time the sleep ran.
+            // What the fixed delay incidentally did was give the
+            // background thread a head start before stop()'s
+            // stop_macos_pause() sends the Pause command — without it (or
+            // under machine load, when the thread is slower to schedule),
+            // stop() can return `Ok` before the recording thread has
+            // processed Pause and flipped `is_recording` back to `false`.
+            // Wait on that actual observable post-condition instead, with
+            // a generous cap, rather than assuming any fixed wall-clock
+            // budget is enough for the background thread to catch up.
+            let idle_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while recorder.is_recording() && std::time::Instant::now() < idle_deadline {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+
             // Verify clean state
             assert!(
                 !recorder.is_recording(),
-                "Cycle {}: should not be recording after stop()",
+                "Cycle {}: should not be recording after stop() (waited up to 5s for idle)",
                 i
             );
             assert_eq!(

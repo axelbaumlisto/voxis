@@ -1124,6 +1124,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let state = test_state(&tmp);
         state.consent.set_consent(&state.host_id, &state.provider_host, true).unwrap();
+        state.secrets.set(crate::pipeline::API_KEY_SECRET_NAME, &Secret::new("k")).unwrap();
         let id = crate::commands::do_start(&state, crate::models::Mode::Hold).await.unwrap();
         assert!(state.sessions.has_active());
 

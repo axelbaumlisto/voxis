@@ -32,6 +32,14 @@ pub(crate) async fn do_start(state: &PluginState, mode: Mode) -> Result<SessionI
     if !state.consent.is_consented(&state.host_id, &provider_host)? {
         return Err(PluginError::ConsentRequired { provider_host });
     }
+    // Fail fast, before the mic opens: a session without a key can only end
+    // in a `Transcription { "no API key configured" }` after the user has
+    // already spoken. Checked here (sync, cheap) rather than in the pipeline.
+    match state.secrets.get(pipeline::API_KEY_SECRET_NAME) {
+        Ok(Some(_)) => {}
+        Ok(None) => return Err(PluginError::NoApiKey { message: "no transcription API key -- set a provider (Groq key or self-hosted URL) first".to_string() }),
+        Err(e) => return Err(PluginError::NoApiKey { message: format!("reading the API key: {e}") }),
+    }
 
     let path = state.rec_dir.new_session_path();
     let file = match RecFile::create(path.clone()) {
@@ -274,6 +282,22 @@ mod tests {
     fn test_state(tmp: &tempfile::TempDir) -> PluginState {
         let (state, _mock) = test_state_with_mock(tmp);
         state
+    }
+
+    /// A host with no key yet (fresh iPad, no Voxis desktop): `start()` is
+    /// refused up front with `noApiKey`, the mic never opens, no slot is
+    /// taken -- instead of a recording that ends in a Transcription error.
+    #[tokio::test]
+    async fn start_without_an_api_key_is_refused_before_the_mic_opens() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (state, mock) = test_state_with_mock(&tmp);
+        state.consent.set_consent("test-host", "api.groq.com", true).unwrap();
+        state.secrets.delete(pipeline::API_KEY_SECRET_NAME).unwrap();
+
+        let err = do_start(&state, Mode::Toggle).await.unwrap_err();
+        assert!(matches!(err, PluginError::NoApiKey { .. }), "got {err:?}");
+        assert!(!state.sessions.has_active(), "no slot may be claimed");
+        assert!(!mock.is_running(), "the mic must not open");
     }
 
     fn test_state_with_mock(tmp: &tempfile::TempDir) -> (PluginState, Arc<MockCapture>) {

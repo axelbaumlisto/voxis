@@ -169,6 +169,7 @@ Every command error is `{ kind: "...", message: string, ...extra fields }`
 | `invalidHotkey` | `message` | `set_hotkey` given a spec that doesn't parse (see "HotkeySpec"). |
 | `permissionDenied` | `message` | `set_hotkey`: the OS-level key listener (`rdev`) failed to start — on macOS this is almost always a missing Accessibility/Input Monitoring grant. **The one realistic rejection a real desktop host will see from `set_hotkey`** — surface it to the user (deep-link to System Settings), don't swallow it silently (a real regression found in naked's own integration, see `research/plugin-plan/review_10p4_r2.md`). |
 | `notFound` | `message` | `import_profile_from_desktop`: no installed Voxis desktop config dir found on this machine. |
+| `noApiKey` | `message` | `start`: no transcription API key in the `SecretStore` yet — refused BEFORE the mic opens; the host should open its provider setup (`set_provider`) or profile import. |
 | `profile` | `message` | Any failure building/reading/decrypting a `VoxisProfile` — crypto/validation/storage error, malformed QR payload, or a non-2xx from the desktop's profile-share HTTP server. |
 
 On iOS specifically, `startCapture` can also reject with a `PERMISSION_DENIED`

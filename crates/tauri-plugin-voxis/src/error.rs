@@ -71,6 +71,13 @@ pub enum PluginError {
     /// `voxis_core::storage::paths::voxis_desktop_config_dir()`).
     #[error("Voxis desktop installation not found: {message}")]
     NotFound { message: String },
+    /// `start()` with no transcription API key in the `SecretStore` -- the
+    /// host has no profile yet (fresh iPad without Voxis desktop). Refused
+    /// BEFORE the mic opens, so the user is not made to speak into a
+    /// recording that can only end in a transcription error; the host maps
+    /// this to "open Settings → Dictation → Provider".
+    #[error("no transcription API key configured: {message}")]
+    NoApiKey { message: String },
     /// Task 6/7: any failure building/reading/decrypting a `VoxisProfile`
     /// — `voxis_core::profile::ProfileError` (crypto/validation/storage),
     /// a malformed QR payload, or an HTTP-level rejection
@@ -146,6 +153,8 @@ mod tests {
         let value =
             serde_json::to_value(PluginError::NotFound { message: "no config.db".to_string() }).unwrap();
         assert_eq!(value, serde_json::json!({"kind": "notFound", "message": "no config.db"}));
+        let value = serde_json::to_value(PluginError::NoApiKey { message: "set a provider first".to_string() }).unwrap();
+        assert_eq!(value, serde_json::json!({"kind": "noApiKey", "message": "set a provider first"}));
     }
 
     #[test]
