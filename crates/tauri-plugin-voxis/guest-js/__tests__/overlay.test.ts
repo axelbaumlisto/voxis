@@ -287,6 +287,26 @@ describe("<voxis-overlay>", () => {
       expect(top + COMPACT_SIZE.height).toBeLessThanOrEqual(300);
     });
 
+    it('driver:"host": a visualViewport resize does NOT move the pill — the host owns placement (iPad "two rings", 2026-09-19)', () => {
+      const fakeVV = new FakeVisualViewport(1366, 1024);
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: fakeVV });
+
+      const el = mountOverlay(container, { driver: "host", draggable: false, storageKey: "host-no-self-snap" });
+      el.setPosition({ x: 282, y: 930 });
+      const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+      expect(pill.style.top).toBe("930px");
+
+      // A transient shrink (a key row / accessory view measuring in), then back.
+      fakeVV.height = 934;
+      fakeVV.dispatchEvent(new Event("resize"));
+      fakeVV.height = 1024;
+      fakeVV.dispatchEvent(new Event("resize"));
+
+      // Unmoved: the host will re-anchor its ring AND the pill together via setPosition.
+      expect(pill.style.left).toBe("282px");
+      expect(pill.style.top).toBe("930px");
+    });
+
     it("re-clamps on visualViewport's own scroll event too", () => {
       const fakeVV = new FakeVisualViewport(400, 300);
       Object.defineProperty(window, "visualViewport", { configurable: true, value: fakeVV });

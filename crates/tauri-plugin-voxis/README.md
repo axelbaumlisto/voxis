@@ -18,7 +18,7 @@ microphone and real Groq; a live-iPad end-to-end run exists (see
 `research/plugin-plan/T11_ipad_run_2026-09-16.md`) driving this plugin from
 a real host (`naked`) — that integration work is not itself part of this
 crate/repo. `guest-js` is versioned separately (`@voxis/tauri-plugin-voxis`,
-currently `0.5.0`) and is **not** on the same version number as this Rust
+currently `0.5.1`) and is **not** on the same version number as this Rust
 crate (currently `0.3.1`) — bump each independently when either changes.
 
 ## Installation

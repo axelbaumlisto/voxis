@@ -480,6 +480,14 @@ export class VoxisOverlayElement extends HTMLElement {
 
   private handleViewportChange = (): void => {
     if (!this.pillEl || !this.config) return;
+    // `driver: "host"`: the HOST owns placement — it re-anchors on its own
+    // signals (keyboard/key-panel geometry, safe area, viewport) and drives
+    // this element through `setPosition`. Snapping here as well made two
+    // authorities move one pill: on the iPad (2026-09-19, naked 63dfa464)
+    // a transient visualViewport resize left the pill at y=878 while the
+    // host's ring stayed at y=930 — "two rings", 52px apart, until the
+    // next placement change. One owner: in host mode this is a no-op.
+    if (this.config.driver === "host") return;
     const snapped = snapToNearestEdge(this.currentPillPos(), this.currentSize(), this.safeArea(), readEffectiveViewport());
     this.pillEl.style.left = `${snapped.x}px`;
     this.pillEl.style.top = `${snapped.y}px`;
