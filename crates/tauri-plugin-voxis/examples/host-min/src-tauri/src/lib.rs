@@ -5,7 +5,7 @@
 //
 // Capture backend selection via `VOXIS_CAPTURE` (the switch lives here
 // in host-min, not the plugin -- plan Task 4 step 2):
-// - unset or `mock` (default): `tauri_plugin_voxis::init()` -- a plain,
+// - unset or `mock` (default): `tauri_plugin_voxis::init_mock()` -- a plain,
 //   unscripted `MockCapture`. No real microphone/hotkey involved.
 // - `mock:<path-to-wav>`: a `MockCapture` scripted from the WAV fixture
 //   (`wav_to_level_script`, per-250ms RMS/peak windows -- the same
@@ -334,7 +334,7 @@ pub fn run() {
             panic!("VOXIS_CAPTURE=ios is only available when host-min itself is built for target_os = \"ios\" (Task 8.5)");
         }
     } else {
-        builder.plugin(tauri_plugin_voxis::init())
+        builder.plugin(tauri_plugin_voxis::init_mock())
     };
 
     builder = builder.setup(move |app| {

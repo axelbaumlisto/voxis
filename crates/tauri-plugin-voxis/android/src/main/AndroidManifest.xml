@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- C1 (2026-09-19): the microphone. Merged into the host app's manifest
+         by the Android Gradle plugin; the runtime grant is requested by
+         VoxisPlugin.startCapture (Tauri's permission alias "microphone"). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+</manifest>

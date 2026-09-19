@@ -65,9 +65,11 @@ use tauri::{
 };
 use tokio::sync::watch;
 
+#[cfg(target_os = "ios")]
 use voxis_core::profile::Secret;
 
 use crate::capture::{AudioCapture, CaptureError, CaptureStats, LevelSample};
+#[cfg(target_os = "ios")]
 use crate::secrets::{SecretResult, SecretStore};
 
 // Binds this crate's Swift plugin's `@_cdecl("init_plugin_voxis")` entry
@@ -81,14 +83,24 @@ use crate::secrets::{SecretResult, SecretStore};
 #[cfg(target_os = "ios")]
 tauri::ios_plugin_binding!(init_plugin_voxis);
 
-/// Registers `VoxisPlugin` with Tauri's iOS bridge during this plugin's
-/// own `setup` hook (`lib.rs::init_ios`) and returns the handle
-/// `IosCapture`/`IosKeychainSecretStore` wrap.
+/// Registers the platform half of this plugin with Tauri's mobile bridge
+/// during the plugin's own `setup` hook (`lib.rs::init_ios_with` /
+/// `init_android_with`) and returns the handle `MobileCapture` (and, on
+/// iOS, `IosKeychainSecretStore`/`LiveActivityController`) wrap. iOS:
+/// the Swift `@_cdecl` entry point; Android (C1, 2026-09-19): the Kotlin
+/// class `top.voxis.plugin.VoxisPlugin` (`android/src/main/java/...`).
 pub fn init<R: Runtime, C: serde::de::DeserializeOwned>(
     _app: &AppHandle<R>,
     api: PluginApi<R, C>,
 ) -> Result<PluginHandle<R>, Box<dyn std::error::Error>> {
-    Ok(api.register_ios_plugin(init_plugin_voxis)?)
+    #[cfg(target_os = "ios")]
+    {
+        Ok(api.register_ios_plugin(init_plugin_voxis)?)
+    }
+    #[cfg(target_os = "android")]
+    {
+        Ok(api.register_android_plugin("top.voxis.plugin", "VoxisPlugin")?)
+    }
 }
 
 fn map_invoke_error(e: PluginInvokeError) -> CaptureError {
@@ -174,6 +186,7 @@ mod tests {
     }
 }
 
+#[cfg(target_os = "ios")]
 fn box_secret_err(e: PluginInvokeError) -> Box<dyn std::error::Error + Send + Sync> {
     Box::new(std::io::Error::other(e.to_string()))
 }
@@ -224,12 +237,17 @@ impl From<LevelSampleWire> for LevelSample {
 #[derive(Serialize)]
 struct EmptyArgs {}
 
-/// `AudioCapture` backed by the Swift `VoxisAudioCapture`
-/// (`ios/Sources/AudioCapture.swift`) via `startCapture`/`stopCapture`/
-/// `resetCapture`. One instance per plugin, matching the trait's own
-/// single-session assumption (`capture.rs`'s doc, same as
-/// `CpalCapture`/`MockCapture`).
-pub struct IosCapture<R: Runtime> {
+/// `AudioCapture` backed by the platform capture class -- Swift
+/// `VoxisAudioCapture` (`ios/Sources/tauri-plugin-voxis/AudioCapture.swift`)
+/// on iOS, Kotlin `VoxisAudioCapture` (`android/src/main/java/top/voxis/
+/// plugin/AudioCapture.kt`) on Android -- via the same three commands
+/// `startCapture`/`stopCapture`/`resetCapture` and the same wire structs.
+/// One instance per plugin, matching the trait's own single-session
+/// assumption (`capture.rs`'s doc, same as `CpalCapture`/`MockCapture`).
+/// Historical name of [`MobileCapture`] (Task 8, iOS-only then).
+pub type IosCapture<R> = MobileCapture<R>;
+
+pub struct MobileCapture<R: Runtime> {
     handle: PluginHandle<R>,
     level_rx: watch::Receiver<Option<LevelSample>>,
     /// Created exactly once, in `new` -- **not** per `start()` call.
@@ -249,7 +267,7 @@ pub struct IosCapture<R: Runtime> {
     on_level: Channel<serde_json::Value>,
 }
 
-impl<R: Runtime> IosCapture<R> {
+impl<R: Runtime> MobileCapture<R> {
     pub fn new(handle: PluginHandle<R>) -> Self {
         let (level_tx, level_rx) = watch::channel(None);
         // Rust-side `Channel`, passed to Swift as a `start` argument --
@@ -269,7 +287,7 @@ impl<R: Runtime> IosCapture<R> {
     }
 }
 
-impl<R: Runtime> AudioCapture for IosCapture<R> {
+impl<R: Runtime> AudioCapture for MobileCapture<R> {
     /// `cap_samples` arrives expressed in samples at 16 kHz
     /// (`capture.rs`'s own doc on this trait method) -- Swift's
     /// `AVAudioConverter` already downsamples the tap's native-rate
@@ -318,196 +336,208 @@ impl<R: Runtime> AudioCapture for IosCapture<R> {
     }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SecretNameArgs<'a> {
-    name: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SecretSetArgs<'a> {
-    name: &'a str,
-    value: &'a str,
-}
-
-#[derive(Deserialize)]
-struct SecretGetResult {
-    value: Option<String>,
-}
-
-// -- Task 9a: Live Activity / Dynamic Island bridge ---------------------
+// -- iOS-only: Keychain secret store + Live Activity bridge -------------
 //
-// Two directions cross this bridge, both via the same three plain
-// `run_mobile_plugin` calls `IosCapture`/`IosKeychainSecretStore` already
-// use (no new IPC mechanism):
-//
-// - Rust -> Swift: `LiveActivityController::start`/`update`/`end`, driven
-//   by `lib.rs`'s `LiveActivityEventSink` decorator observing
-//   `voxis://state`/`voxis://level` transitions (`[R1-iOS tactical]`).
-//   Best-effort by design (Task 9a acceptance #2: "never throws into the
-//   pipeline") -- every one of these three logs and returns on failure,
-//   never propagates a `CaptureError`/`PluginError` anywhere.
-// - Swift -> Rust: the Lock Screen/Dynamic Island Stop button
-//   (`StopDictationIntent`, `ios/LiveActivityWidget/StopDictationIntent.swift`)
-//   runs `perform()` **in this app process** (Apple's own documented
-//   behaviour for `LiveActivityIntent`, plan `[R1-iOS C1]`) and reaches
-//   `VoxisLiveActivityBridge.shared` (`ios/Sources/LiveActivity.swift`),
-//   which forwards `{"action": "stop"}` through a Rust-created `Channel`
-//   -- same "created once, handed to Swift, never from JS" convention
-//   `IosCapture::new`'s own `on_level` channel already established
-//   (`[R1-iOS C5]`-adjacent), registered exactly once via
-//   `register_intent_channel` (`lib.rs::init_ios_with`, right after
-//   `mobile::init` builds the plugin handle).
+// Android (C1) has neither: a host injects its own `SecretStore`
+// (`init_android_with(secrets)` requires one) and ActivityKit is iOS.
+#[cfg(target_os = "ios")]
+mod ios_only {
+    use super::*;
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RegisterIntentChannelArgs {
-    on_intent: Channel<serde_json::Value>,
-}
-
-#[derive(Deserialize)]
-struct IntentPayloadWire {
-    action: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LiveActivityStartArgs {
-    started_at_ms: u64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LiveActivityUpdateArgs {
-    phase: String,
-    elapsed_seconds: Option<u64>,
-    peak: f32,
-}
-
-/// Rust-side handle onto the Swift `VoxisLiveActivityBridge`
-/// (`ios/Sources/LiveActivity.swift`), reached through the same
-/// `PluginHandle` `IosCapture`/`IosKeychainSecretStore` already use --
-/// one instance, constructed once in `lib.rs::init_ios_with`.
-pub struct LiveActivityController<R: Runtime> {
-    handle: PluginHandle<R>,
-}
-
-impl<R: Runtime> LiveActivityController<R> {
-    pub fn new(handle: PluginHandle<R>) -> Self {
-        Self { handle }
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SecretNameArgs<'a> {
+        name: &'a str,
     }
 
-    /// Registers Rust's own intent-forwarding channel with Swift, once.
-    /// `on_stop` runs synchronously on whatever thread decodes the
-    /// channel payload (same as `IosCapture`'s `on_level` closure) --
-    /// callers that need to `.await` anything (this crate's own
-    /// `commands::do_stop`) spawn their own task instead of blocking
-    /// this callback.
-    pub fn register_intent_channel(&self, on_stop: impl Fn() + Send + Sync + 'static) {
-        let channel = Channel::new(move |body: InvokeResponseBody| {
-            match body.deserialize::<IntentPayloadWire>() {
-                Ok(payload) if payload.action == "stop" => on_stop(),
-                Ok(payload) => {
-                    tracing::warn!(action = %payload.action, "unrecognised Live Activity intent action")
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SecretSetArgs<'a> {
+        name: &'a str,
+        value: &'a str,
+    }
+
+    #[derive(Deserialize)]
+    struct SecretGetResult {
+        value: Option<String>,
+    }
+
+    // -- Task 9a: Live Activity / Dynamic Island bridge ---------------------
+    //
+    // Two directions cross this bridge, both via the same three plain
+    // `run_mobile_plugin` calls `IosCapture`/`IosKeychainSecretStore` already
+    // use (no new IPC mechanism):
+    //
+    // - Rust -> Swift: `LiveActivityController::start`/`update`/`end`, driven
+    //   by `lib.rs`'s `LiveActivityEventSink` decorator observing
+    //   `voxis://state`/`voxis://level` transitions (`[R1-iOS tactical]`).
+    //   Best-effort by design (Task 9a acceptance #2: "never throws into the
+    //   pipeline") -- every one of these three logs and returns on failure,
+    //   never propagates a `CaptureError`/`PluginError` anywhere.
+    // - Swift -> Rust: the Lock Screen/Dynamic Island Stop button
+    //   (`StopDictationIntent`, `ios/LiveActivityWidget/StopDictationIntent.swift`)
+    //   runs `perform()` **in this app process** (Apple's own documented
+    //   behaviour for `LiveActivityIntent`, plan `[R1-iOS C1]`) and reaches
+    //   `VoxisLiveActivityBridge.shared` (`ios/Sources/LiveActivity.swift`),
+    //   which forwards `{"action": "stop"}` through a Rust-created `Channel`
+    //   -- same "created once, handed to Swift, never from JS" convention
+    //   `IosCapture::new`'s own `on_level` channel already established
+    //   (`[R1-iOS C5]`-adjacent), registered exactly once via
+    //   `register_intent_channel` (`lib.rs::init_ios_with`, right after
+    //   `mobile::init` builds the plugin handle).
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RegisterIntentChannelArgs {
+        on_intent: Channel<serde_json::Value>,
+    }
+
+    #[derive(Deserialize)]
+    struct IntentPayloadWire {
+        action: String,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LiveActivityStartArgs {
+        started_at_ms: u64,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LiveActivityUpdateArgs {
+        phase: String,
+        elapsed_seconds: Option<u64>,
+        peak: f32,
+    }
+
+    /// Rust-side handle onto the Swift `VoxisLiveActivityBridge`
+    /// (`ios/Sources/LiveActivity.swift`), reached through the same
+    /// `PluginHandle` `IosCapture`/`IosKeychainSecretStore` already use --
+    /// one instance, constructed once in `lib.rs::init_ios_with`.
+    pub struct LiveActivityController<R: Runtime> {
+        handle: PluginHandle<R>,
+    }
+
+    impl<R: Runtime> LiveActivityController<R> {
+        pub fn new(handle: PluginHandle<R>) -> Self {
+            Self { handle }
+        }
+
+        /// Registers Rust's own intent-forwarding channel with Swift, once.
+        /// `on_stop` runs synchronously on whatever thread decodes the
+        /// channel payload (same as `IosCapture`'s `on_level` closure) --
+        /// callers that need to `.await` anything (this crate's own
+        /// `commands::do_stop`) spawn their own task instead of blocking
+        /// this callback.
+        pub fn register_intent_channel(&self, on_stop: impl Fn() + Send + Sync + 'static) {
+            let channel = Channel::new(move |body: InvokeResponseBody| {
+                match body.deserialize::<IntentPayloadWire>() {
+                    Ok(payload) if payload.action == "stop" => on_stop(),
+                    Ok(payload) => {
+                        tracing::warn!(action = %payload.action, "unrecognised Live Activity intent action")
+                    }
+                    Err(e) => tracing::warn!(error = %e, "failed to decode a Live Activity intent payload"),
                 }
-                Err(e) => tracing::warn!(error = %e, "failed to decode a Live Activity intent payload"),
+                Ok(())
+            });
+            if let Err(e) = self
+                .handle
+                .run_mobile_plugin::<serde_json::Value>("registerIntentChannel", RegisterIntentChannelArgs { on_intent: channel })
+            {
+                // Task 9a acceptance #2: dictation itself must still work even
+                // if this registration call fails -- there is simply no Stop
+                // button forwarding for this process's lifetime.
+                tracing::warn!(
+                    error = %e,
+                    "registering the Live Activity intent channel failed -- the Stop button (if shown) will not work this session"
+                );
             }
+        }
+
+        /// Starts a Live Activity for a session that just entered
+        /// `Recording`. `started_at_ms` is Unix epoch milliseconds (Swift
+        /// reconstructs a `Date` from it) -- best-effort: Swift's own
+        /// `liveActivityStart` resolves regardless of whether `ActivityKit`
+        /// actually created the activity (`LiveActivity.swift`'s own doc
+        /// covers the disabled/unavailable cases); a transport-level failure
+        /// here is only logged.
+        pub fn start(&self, started_at_ms: u64) {
+            if let Err(e) = self
+                .handle
+                .run_mobile_plugin::<serde_json::Value>("liveActivityStart", LiveActivityStartArgs { started_at_ms })
+            {
+                tracing::warn!(error = %e, "starting the Live Activity failed -- continuing without it");
+            }
+        }
+
+        /// Updates the running Live Activity's phase/elapsed/peak. `phase` is
+        /// one of `VoxisActivityAttributes.Phase`'s raw values
+        /// (`"recording"`/`"transcribing"`/`"idle"`) -- a plain `&str`, not a
+        /// shared Rust enum, since this crate's own `models::State` has no
+        /// `idle` variant worth threading through for a call site that never
+        /// actually sends it (`end()` handles that transition instead).
+        pub fn update(&self, phase: &str, elapsed_seconds: Option<u64>, peak: f32) {
+            if let Err(e) = self.handle.run_mobile_plugin::<serde_json::Value>(
+                "liveActivityUpdate",
+                LiveActivityUpdateArgs { phase: phase.to_string(), elapsed_seconds, peak },
+            ) {
+                tracing::warn!(error = %e, "updating the Live Activity failed -- continuing without it");
+            }
+        }
+
+        /// Ends the running Live Activity (`dismissalPolicy: .immediate` on
+        /// the Swift side -- Task 9a acceptance #2: "at stop/cancel the
+        /// activity ends within ~1s", not left on the Lock Screen for the OS
+        /// default of up to 4h).
+        pub fn end(&self) {
+            if let Err(e) = self.handle.run_mobile_plugin::<serde_json::Value>("liveActivityEnd", EmptyArgs {}) {
+                tracing::warn!(error = %e, "ending the Live Activity failed -- it may remain visible up to the OS default (4h)");
+            }
+        }
+    }
+
+    /// `SecretStore` backed by the Swift `VoxisKeychainSecretStore`
+    /// (`ios/Sources/KeychainSecretStore.swift`) via `secretGet`/`secretSet`/
+    /// `secretDelete` -- Task 8 acceptance #5. Same blocking
+    /// `run_mobile_plugin` contract as `IosCapture` above.
+    pub struct IosKeychainSecretStore<R: Runtime> {
+        handle: PluginHandle<R>,
+    }
+
+    impl<R: Runtime> IosKeychainSecretStore<R> {
+        pub fn new(handle: PluginHandle<R>) -> Self {
+            Self { handle }
+        }
+    }
+
+    impl<R: Runtime> SecretStore for IosKeychainSecretStore<R> {
+        fn get(&self, name: &str) -> SecretResult<Option<Secret>> {
+            let result: SecretGetResult = self
+                .handle
+                .run_mobile_plugin("secretGet", SecretNameArgs { name })
+                .map_err(box_secret_err)?;
+            Ok(result.value.map(Secret::new))
+        }
+
+        fn set(&self, name: &str, value: &Secret) -> SecretResult<()> {
+            // `expose()` only at this serialization boundary (handing the
+            // value to the IPC payload that crosses to Swift) -- same
+            // convention `secrets.rs`'s `FileSecretStore::set` documents.
+            self.handle
+                .run_mobile_plugin::<serde_json::Value>("secretSet", SecretSetArgs { name, value: value.expose() })
+                .map_err(box_secret_err)?;
             Ok(())
-        });
-        if let Err(e) = self
-            .handle
-            .run_mobile_plugin::<serde_json::Value>("registerIntentChannel", RegisterIntentChannelArgs { on_intent: channel })
-        {
-            // Task 9a acceptance #2: dictation itself must still work even
-            // if this registration call fails -- there is simply no Stop
-            // button forwarding for this process's lifetime.
-            tracing::warn!(
-                error = %e,
-                "registering the Live Activity intent channel failed -- the Stop button (if shown) will not work this session"
-            );
         }
-    }
 
-    /// Starts a Live Activity for a session that just entered
-    /// `Recording`. `started_at_ms` is Unix epoch milliseconds (Swift
-    /// reconstructs a `Date` from it) -- best-effort: Swift's own
-    /// `liveActivityStart` resolves regardless of whether `ActivityKit`
-    /// actually created the activity (`LiveActivity.swift`'s own doc
-    /// covers the disabled/unavailable cases); a transport-level failure
-    /// here is only logged.
-    pub fn start(&self, started_at_ms: u64) {
-        if let Err(e) = self
-            .handle
-            .run_mobile_plugin::<serde_json::Value>("liveActivityStart", LiveActivityStartArgs { started_at_ms })
-        {
-            tracing::warn!(error = %e, "starting the Live Activity failed -- continuing without it");
-        }
-    }
-
-    /// Updates the running Live Activity's phase/elapsed/peak. `phase` is
-    /// one of `VoxisActivityAttributes.Phase`'s raw values
-    /// (`"recording"`/`"transcribing"`/`"idle"`) -- a plain `&str`, not a
-    /// shared Rust enum, since this crate's own `models::State` has no
-    /// `idle` variant worth threading through for a call site that never
-    /// actually sends it (`end()` handles that transition instead).
-    pub fn update(&self, phase: &str, elapsed_seconds: Option<u64>, peak: f32) {
-        if let Err(e) = self.handle.run_mobile_plugin::<serde_json::Value>(
-            "liveActivityUpdate",
-            LiveActivityUpdateArgs { phase: phase.to_string(), elapsed_seconds, peak },
-        ) {
-            tracing::warn!(error = %e, "updating the Live Activity failed -- continuing without it");
-        }
-    }
-
-    /// Ends the running Live Activity (`dismissalPolicy: .immediate` on
-    /// the Swift side -- Task 9a acceptance #2: "at stop/cancel the
-    /// activity ends within ~1s", not left on the Lock Screen for the OS
-    /// default of up to 4h).
-    pub fn end(&self) {
-        if let Err(e) = self.handle.run_mobile_plugin::<serde_json::Value>("liveActivityEnd", EmptyArgs {}) {
-            tracing::warn!(error = %e, "ending the Live Activity failed -- it may remain visible up to the OS default (4h)");
+        fn delete(&self, name: &str) -> SecretResult<()> {
+            self.handle
+                .run_mobile_plugin::<serde_json::Value>("secretDelete", SecretNameArgs { name })
+                .map_err(box_secret_err)?;
+            Ok(())
         }
     }
 }
 
-/// `SecretStore` backed by the Swift `VoxisKeychainSecretStore`
-/// (`ios/Sources/KeychainSecretStore.swift`) via `secretGet`/`secretSet`/
-/// `secretDelete` -- Task 8 acceptance #5. Same blocking
-/// `run_mobile_plugin` contract as `IosCapture` above.
-pub struct IosKeychainSecretStore<R: Runtime> {
-    handle: PluginHandle<R>,
-}
-
-impl<R: Runtime> IosKeychainSecretStore<R> {
-    pub fn new(handle: PluginHandle<R>) -> Self {
-        Self { handle }
-    }
-}
-
-impl<R: Runtime> SecretStore for IosKeychainSecretStore<R> {
-    fn get(&self, name: &str) -> SecretResult<Option<Secret>> {
-        let result: SecretGetResult = self
-            .handle
-            .run_mobile_plugin("secretGet", SecretNameArgs { name })
-            .map_err(box_secret_err)?;
-        Ok(result.value.map(Secret::new))
-    }
-
-    fn set(&self, name: &str, value: &Secret) -> SecretResult<()> {
-        // `expose()` only at this serialization boundary (handing the
-        // value to the IPC payload that crosses to Swift) -- same
-        // convention `secrets.rs`'s `FileSecretStore::set` documents.
-        self.handle
-            .run_mobile_plugin::<serde_json::Value>("secretSet", SecretSetArgs { name, value: value.expose() })
-            .map_err(box_secret_err)?;
-        Ok(())
-    }
-
-    fn delete(&self, name: &str) -> SecretResult<()> {
-        self.handle
-            .run_mobile_plugin::<serde_json::Value>("secretDelete", SecretNameArgs { name })
-            .map_err(box_secret_err)?;
-        Ok(())
-    }
-}
+#[cfg(target_os = "ios")]
+pub use ios_only::{IosKeychainSecretStore, LiveActivityController};

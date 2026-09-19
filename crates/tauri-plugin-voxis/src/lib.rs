@@ -50,7 +50,7 @@ pub mod lease;
 // same reason `desktop` is feature-gated: this module's own
 // `tauri::ios_plugin_binding!`/`register_ios_plugin` calls only exist on
 // `#[cfg(target_os = "ios")]` inside `tauri` itself.
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 pub mod mobile;
 pub mod models;
 pub mod pipeline;
@@ -72,7 +72,7 @@ use tauri::{
     Manager, Runtime,
 };
 
-use capture::{AudioCapture, MockCapture, RecDir};
+use capture::{AudioCapture, MockCapture, RecDir, UnsupportedCapture};
 use consent::ConsentStore;
 use events::{EventSink, TauriEventSink};
 use secrets::{FileSecretStore, SecretStore};
@@ -219,23 +219,78 @@ impl PluginState {
     }
 }
 
-/// Registers the plugin with the default desktop `SecretStore`
-/// (`FileSecretStore`, a 0600 JSON file under the host's app-config dir —
-/// see `secrets.rs` for why this is a fallback, not the final answer) and
-/// `MockCapture` (Task 3 ships no real backend; Task 4/8 add
-/// `CpalCapture`/the iOS Swift bridge and are expected to provide their
-/// own `init_with_capture`-style constructor instead of this default).
+/// The right plugin for THIS build target, no secret store injected:
+/// desktop (feature `desktop`) → `CpalCapture` + `RdevHotkey`; iOS →
+/// `MobileCapture` (Swift) + Keychain; Android → `MobileCapture` (Kotlin) +
+/// `FileSecretStore`; anything else → `UnsupportedCapture`, whose `start`
+/// refuses with `unsupportedPlatform` before a session exists. Never a test
+/// double (C0, 2026-09-19: `init`/`init_with` used to hand out
+/// `MockCapture`, and naked's Android build registered the plugin through
+/// exactly that — a live pill over a dead microphone; 0.4.1's README already
+/// described this dispatch while the code still returned the double — the
+/// edit had silently not applied; fixed for real in 0.5.0). Harnesses that
+/// WANT the double say so: `init_mock`/`init_mock_with`.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
-    build(None, Box::new(default_capture), None)
+    #[cfg(feature = "desktop")]
+    {
+        init_desktop()
+    }
+    #[cfg(all(not(feature = "desktop"), target_os = "ios"))]
+    {
+        init_ios()
+    }
+    #[cfg(all(not(feature = "desktop"), target_os = "android"))]
+    {
+        init_android_with(None)
+    }
+    #[cfg(all(not(feature = "desktop"), not(any(target_os = "ios", target_os = "android"))))]
+    {
+        init_unsupported_with(None)
+    }
 }
 
-/// Registers the plugin with a host-supplied `SecretStore` (e.g. naked's
-/// `naked_core::SecretStore`) instead of the desktop JSON fallback.
+/// Same platform dispatch as [`init`], with the host's own `SecretStore`
+/// (e.g. naked's `naked_core::SecretStore` adapter) — the recommended
+/// one-liner for a multi-platform host.
 pub fn init_with<R: Runtime>(secrets: Arc<dyn SecretStore>) -> TauriPlugin<R> {
-    build(Some(secrets), Box::new(default_capture), None)
+    #[cfg(feature = "desktop")]
+    {
+        init_desktop_with(secrets)
+    }
+    #[cfg(all(not(feature = "desktop"), target_os = "ios"))]
+    {
+        init_ios_with(Some(secrets))
+    }
+    #[cfg(all(not(feature = "desktop"), target_os = "android"))]
+    {
+        init_android_with(Some(secrets))
+    }
+    #[cfg(all(not(feature = "desktop"), not(any(target_os = "ios", target_os = "android"))))]
+    {
+        init_unsupported_with(Some(secrets))
+    }
 }
 
-fn default_capture() -> Arc<dyn AudioCapture> {
+/// The plugin for a platform this crate has no capture backend on. Every
+/// other command works — profile import, provider setup, consent — so a
+/// host can keep ONE settings UI; only `start` refuses, with
+/// `PluginError::UnsupportedPlatform`, and refuses first.
+pub fn init_unsupported_with<R: Runtime>(secrets: Option<Arc<dyn SecretStore>>) -> TauriPlugin<R> {
+    build(secrets, Box::new(|| Arc::new(UnsupportedCapture::for_this_platform()) as Arc<dyn AudioCapture>), None)
+}
+
+/// The `MockCapture` test double — for harnesses/tracer bullets ONLY (the
+/// `host-min` example, fake-stt smokes). Explicit in the name so it can
+/// never be mistaken for a platform default again.
+pub fn init_mock<R: Runtime>() -> TauriPlugin<R> {
+    build(None, Box::new(mock_capture), None)
+}
+
+pub fn init_mock_with<R: Runtime>(secrets: Arc<dyn SecretStore>) -> TauriPlugin<R> {
+    build(Some(secrets), Box::new(mock_capture), None)
+}
+
+fn mock_capture() -> Arc<dyn AudioCapture> {
     Arc::new(MockCapture::new())
 }
 
@@ -754,7 +809,7 @@ pub fn init_ios_with<R: Runtime>(secrets_override: Option<Arc<dyn SecretStore>>)
             let cache_dir = app.path().app_cache_dir()?;
 
             let mobile_handle = mobile::init(app, api)?;
-            let capture: Arc<dyn AudioCapture> = Arc::new(mobile::IosCapture::new(mobile_handle.clone()));
+            let capture: Arc<dyn AudioCapture> = Arc::new(mobile::MobileCapture::new(mobile_handle.clone()));
             let secrets = secrets_override.clone().unwrap_or_else(|| {
                 Arc::new(mobile::IosKeychainSecretStore::new(mobile_handle.clone())) as Arc<dyn SecretStore>
             });
@@ -789,6 +844,37 @@ pub fn init_ios_with<R: Runtime>(secrets_override: Option<Arc<dyn SecretStore>>)
                 tracing::warn!(error = %e, "RecDir::sweep failed during plugin setup — an orphaned recording file may remain on disk");
             }
 
+            app.manage(state);
+            Ok(())
+        })
+        .build()
+}
+
+/// Android (C1, 2026-09-19): the Kotlin `VoxisPlugin` (`android/`) behind
+/// the SAME `mobile::MobileCapture` the iOS half uses -- one Rust bridge,
+/// two platform classes. `secrets_override: None` falls back to the
+/// 0600-JSON `FileSecretStore` in the app's private config dir (there is no
+/// Keychain-style platform store in this crate for Android); a host that
+/// has its own (naked's `EncryptedFileSecretStore`) passes it. No hotkey
+/// backend (no OS-level global keys), no Live Activity (ActivityKit).
+#[cfg(target_os = "android")]
+pub fn init_android_with<R: Runtime>(secrets_override: Option<Arc<dyn SecretStore>>) -> TauriPlugin<R> {
+    plugin_builder()
+        .setup(move |app, api| {
+            let config_dir = app.path().app_config_dir()?;
+            let cache_dir = app.path().app_cache_dir()?;
+
+            let mobile_handle = mobile::init(app, api)?;
+            let capture: Arc<dyn AudioCapture> = Arc::new(mobile::MobileCapture::new(mobile_handle));
+            let secrets = match secrets_override.clone() {
+                Some(s) => s,
+                None => Arc::new(FileSecretStore::new(config_dir.join(PLUGIN_DIR_NAME).join("secrets.json"))) as Arc<dyn SecretStore>,
+            };
+            let events: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.app_handle().clone()));
+            let state = PluginState::new(config_dir, cache_dir, secrets, capture, events, None);
+            if let Err(e) = state.rec_dir.sweep() {
+                tracing::warn!(error = %e, "RecDir::sweep failed during plugin setup — an orphaned recording file may remain on disk");
+            }
             app.manage(state);
             Ok(())
         })
