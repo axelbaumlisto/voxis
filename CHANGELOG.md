@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (Voxis desktop)
+## v0.1.8 (Voxis desktop)
 
 ### Add
 - **"Secure Input is on — held by Terminal (pid 812)" banner** (macOS). While
