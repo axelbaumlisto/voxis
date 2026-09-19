@@ -132,12 +132,16 @@ final class VoxisAudioCapture {
 
     // MARK: - debug capture fixture (C3 seam, iOS mirror of the Kotlin one)
     //
-    // In a DEBUG build only, `<Documents>/voxis-capture-fixture.wav` (16 kHz
-    // mono PCM16, 44-byte header) replaces the microphone: its samples are
-    // streamed into the SAME level/cap path the tap feeds, paced to real
+    // In a DEBUG or SIMULATOR build only, `<Documents>/voxis-capture-fixture.wav`
+    // (16 kHz mono PCM16, 44-byte header) replaces the microphone: its samples
+    // are streamed into the SAME level/cap path the tap feeds, paced to real
     // time, and `stop()` hands back the file's ORIGINAL bytes verbatim so
-    // `voxis-fake-stt`'s sha map matches. Release builds never look for the
-    // file — `#if DEBUG` removes the code, not just the branch.
+    // `voxis-fake-stt`'s sha map matches. Release device builds never look
+    // for the file — the `#if` removes the code, not just the branch.
+    // `targetEnvironment(simulator)` is there because a host's Xcode
+    // configuration named `debug` (tauri's lowercase default) does NOT give a
+    // SwiftPM dependency `DEBUG` (2026-09-19: the simulator E2E hit the real
+    // mic prompt) — and a simulator build is never a shipped artifact.
     private var fixtureBytes: Data?
     private var fixtureSamples: [Float] = []
     private var fixtureCursor = 0
@@ -189,7 +193,7 @@ final class VoxisAudioCapture {
                 return
             }
 
-            #if DEBUG
+            #if DEBUG || targetEnvironment(simulator)
             if let fixture = Self.loadFixture() {
                 self.startFixture(fixture, path: path, capSamples: capSamples, onLevel: onLevel, completion: completion)
                 return
@@ -208,7 +212,7 @@ final class VoxisAudioCapture {
         }
     }
 
-    #if DEBUG
+    #if DEBUG || targetEnvironment(simulator)
     /// `(originalBytes, decodedSamples)` when the fixture file is present and
     /// well-formed; `nil` otherwise (absent file = the ordinary microphone).
     /// A present-but-malformed file is logged and IGNORED rather than
@@ -480,7 +484,7 @@ final class VoxisAudioCapture {
         // exact failure class). Checking `engine.isRunning` directly here
         // catches that even if the notification never arrives.
         var engineExpected = true
-        #if DEBUG
+        #if DEBUG || targetEnvironment(simulator)
         engineExpected = fixtureTimer == nil  // the fixture feeder has no engine to check
         #endif
         if engineExpected && !engine.isRunning {
@@ -724,7 +728,7 @@ final class VoxisAudioCapture {
                 UInt64((DispatchTime.now().uptimeNanoseconds &- $0.uptimeNanoseconds) / 1_000_000)
             } ?? 0
             var wav = WavWriter.encode(samples: collected, sampleRate: UInt32(Self.sampleRate))
-            #if DEBUG
+            #if DEBUG || targetEnvironment(simulator)
             if let original = self.fixtureBytes {
                 // Verbatim, so sha256(file) == the fake-stt map key (MockCapture semantics).
                 wav = original
@@ -771,7 +775,7 @@ final class VoxisAudioCapture {
     }
 
     private func teardownEngine() {
-        #if DEBUG
+        #if DEBUG || targetEnvironment(simulator)
         fixtureTimer?.cancel()
         fixtureTimer = nil
         #endif
@@ -798,7 +802,7 @@ final class VoxisAudioCapture {
             self.samples.removeAll()
             self.interruptionReason = nil
             self.currentPath = nil
-            #if DEBUG
+            #if DEBUG || targetEnvironment(simulator)
             self.fixtureBytes = nil
             self.fixtureSamples = []
             #endif

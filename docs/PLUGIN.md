@@ -170,8 +170,10 @@ must re-consent before dictating to a newly-pointed provider.
   through the SAME level/cap path the microphone feeds, and hands its bytes
   back verbatim on `stop` — desktop's scripted `MockCapture` semantics, so
   `voxis-fake-stt`'s sha map matches. Release builds never look at the file
-  (Kotlin: `ApplicationInfo.FLAG_DEBUGGABLE`; Swift: `#if DEBUG` removes the
-  code). The Swift decoder `FixtureWav` is in the Tauri-free
+  (Kotlin: `ApplicationInfo.FLAG_DEBUGGABLE`; Swift: `#if DEBUG ||
+  targetEnvironment(simulator)` removes the code — a host's lowercase `debug`
+  Xcode configuration gives SwiftPM dependencies no `DEBUG`, and a simulator
+  build is never shipped). The Swift decoder `FixtureWav` is in the Tauri-free
   `VoxisAudioMath` target and XCTested on the Mac (`scripts/check-ios-build.sh`). Two host-integration facts learned on the stand: (1) a
   plugin registered from inside the host's `setup` (`AppHandle::plugin`)
   can DEADLOCK an Android app at launch — `register_android_plugin` waits
