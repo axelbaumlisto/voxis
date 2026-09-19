@@ -419,6 +419,14 @@ pub fn parse_hotkey(name: &str) -> Option<Key> {
 /// plugin's `RdevHotkey`) must pass each key through here BEFORE matching.
 /// The mapping is macOS-only because the code 62 is a macOS virtual keycode;
 /// on other platforms `Unknown(62)` means whatever it means there.
+///
+/// Upstream: `Narsil/rdev` PR #196 ("fix: derive macOS modifier state from
+/// keycode", open since 2026-07) adds `CONTROL_RIGHT => Key::ControlRight`
+/// to `key_from_code` among other right-modifier fixes. When a release of
+/// `rdev` carries it, the `Unknown(62)` arm here becomes a no-op and the
+/// test `right_control_arrives_as_unknown_62_and_still_matches_ctrl_r` keeps
+/// proving the seam either way.
+/// Not duplicating that PR (E2 of `.pi/plans/ideal.md`, 2026-09-19).
 pub fn normalize_rdev_key(key: Key) -> Key {
     match key {
         #[cfg(target_os = "macos")]
