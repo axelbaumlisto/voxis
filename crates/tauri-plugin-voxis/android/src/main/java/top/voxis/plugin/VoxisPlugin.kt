@@ -43,7 +43,22 @@ class StartCaptureArgs {
 class VoxisPlugin(private val activity: Activity) : Plugin(activity) {
     companion object { const val MIC = "microphone" }
 
-    private val capture = VoxisAudioCapture()
+    private val capture = VoxisAudioCapture(fixture = captureFixture(activity))
+
+    /**
+     * C3: `<external-files-dir>/voxis-capture-fixture.wav` in a DEBUGGABLE
+     * host build replaces the microphone (see `VoxisAudioCapture`'s
+     * constructor doc). `adb push fixtures/audio/speech.wav
+     * /sdcard/Android/data/<pkg>/files/voxis-capture-fixture.wav` arms it;
+     * deleting the file disarms it. Release builds never look.
+     */
+    private fun captureFixture(activity: Activity): java.io.File? {
+        val debuggable = (activity.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (!debuggable) return null
+        val dir = activity.getExternalFilesDir(null) ?: return null
+        val f = java.io.File(dir, "voxis-capture-fixture.wav")
+        return if (f.isFile) f else null
+    }
 
     @Command
     fun startCapture(invoke: Invoke) {

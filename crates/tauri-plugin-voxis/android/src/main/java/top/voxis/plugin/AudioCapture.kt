@@ -41,7 +41,19 @@ data class CaptureStats(val durationMs: Long, val samples: Int, val peakRms: Flo
  * complete through callbacks -- exactly the iOS `queue.async` discipline,
  * so `mobile.rs`'s blocking `run_mobile_plugin` sees the same timing.
  */
-class VoxisAudioCapture {
+class VoxisAudioCapture(
+    /**
+     * C3 test seam, DEBUG builds only (`VoxisPlugin` passes it only when the
+     * host APK is debuggable AND the file exists): a 16 kHz mono PCM16 WAV
+     * whose samples are streamed in real time INSTEAD of `AudioRecord`, and
+     * whose bytes are handed back verbatim on `stop` -- so the emulator lane
+     * (no microphone) exercises levels, self-cap, the mute heuristic and the
+     * whole Rust pipeline against `voxis-fake-stt`'s sha-keyed map, exactly
+     * like desktop's scripted `MockCapture` fixture. Never set in a release
+     * build; the path is the app's own external-files dir, writable by `adb`.
+     */
+    private val fixture: File? = null,
+) {
     companion object {
         const val SAMPLE_RATE = 16_000
         private const val TICK_MS = 250L
@@ -71,6 +83,19 @@ class VoxisAudioCapture {
     fun start(path: String, capSamples: Int, onLevel: Channel, completion: (Result<Unit>) -> Unit) {
         handler.post {
             if (running) { completion(Result.failure(VoxisCaptureError.alreadyRunning)); return@post }
+            fixture?.let { f ->
+                val decoded = try { decodeFixture(f) } catch (e: Exception) {
+                    completion(Result.failure(VoxisCaptureError.backend("capture fixture $f: $e"))); return@post
+                }
+                fixtureSamples = decoded
+                fixtureCursor = 0
+                record = null
+                beginSession(path, capSamples, onLevel)
+                completion(Result.success(Unit))
+                handler.post(readLoop)
+                handler.postDelayed(levelTick, TICK_MS)
+                return@post
+            }
             val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             if (minBuf <= 0) { completion(Result.failure(VoxisCaptureError.backend("AudioRecord.getMinBufferSize=$minBuf: 16 kHz mono PCM16 unsupported"))); return@post }
             val rec = try {
@@ -94,23 +119,58 @@ class VoxisAudioCapture {
                 rec.release(); completion(Result.failure(VoxisCaptureError.backend("AudioRecord did not enter RECORDING (another app holds the mic?)"))); return@post
             }
             record = rec
-            running = true
-            samples = FloatArray(maxOf(capSamples, SAMPLE_RATE))
-            count = 0
-            this.capSamples = capSamples
-            capHit = false
-            sawAudio = false
-            consecutiveNearSilentWindows = 0
-            overallPeakRms = 0f
-            startedAt = SystemClock.elapsedRealtime()
-            currentPath = path
-            levelChannel = onLevel
-            interruptionReason = null
-            windowPeak.takePeak()
+            beginSession(path, capSamples, onLevel)
             completion(Result.success(Unit))
             handler.post(readLoop)
             handler.postDelayed(levelTick, TICK_MS)
         }
+    }
+
+    private fun beginSession(path: String, capSamples: Int, onLevel: Channel) {
+        running = true
+        samples = FloatArray(maxOf(capSamples, SAMPLE_RATE))
+        count = 0
+        this.capSamples = capSamples
+        capHit = false
+        sawAudio = false
+        consecutiveNearSilentWindows = 0
+        overallPeakRms = 0f
+        startedAt = SystemClock.elapsedRealtime()
+        currentPath = path
+        levelChannel = onLevel
+        interruptionReason = null
+        windowPeak.takePeak()
+    }
+
+    // -- fixture source (debug builds only; see the constructor doc) --------
+    private var fixtureSamples: ShortArray? = null
+    private var fixtureCursor = 0
+
+    /** 44-byte-header 16 kHz mono PCM16 only -- the format `WavWriter` writes and `fixtures/audio/*.wav` are in. */
+    private fun decodeFixture(f: File): ShortArray {
+        val bytes = f.readBytes()
+        require(bytes.size >= 44 && String(bytes, 0, 4, Charsets.US_ASCII) == "RIFF") { "not a RIFF WAV" }
+        val bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        require(bb.getShort(22).toInt() == 1 && bb.getInt(24) == SAMPLE_RATE && bb.getShort(34).toInt() == 16) { "need 16 kHz mono PCM16" }
+        require(String(bytes, 36, 4, Charsets.US_ASCII) == "data") { "expected the data chunk at offset 36" }
+        val n = (bytes.size - 44) / 2
+        val out = ShortArray(n)
+        for (i in 0 until n) out[i] = bb.getShort(44 + i * 2)
+        return out
+    }
+
+    /** Next 20 ms of fixture audio, paced to real time; zeros once the file is exhausted (a silence the guard can time out on). */
+    private fun readFixture(dst: ShortArray): Int {
+        val src = fixtureSamples ?: return 0
+        val elapsedFrames = ((SystemClock.elapsedRealtime() - startedAt) * SAMPLE_RATE / 1000).toInt()
+        if (fixtureCursor >= elapsedFrames) { SystemClock.sleep(5); return 0 }
+        val n = minOf(dst.size, elapsedFrames - fixtureCursor)
+        for (i in 0 until n) {
+            val idx = fixtureCursor + i
+            dst[i] = if (idx < src.size) src[idx] else 0
+        }
+        fixtureCursor += n
+        return n
     }
 
     private val pcm = ShortArray(READ_FRAMES)
@@ -118,9 +178,10 @@ class VoxisAudioCapture {
 
     private val readLoop = object : Runnable {
         override fun run() {
-            val rec = record ?: return
             if (!running || capHit) return
-            val n = rec.read(pcm, 0, READ_FRAMES)
+            val rec = record
+            if (rec == null && fixtureSamples == null) return
+            val n = if (rec != null) rec.read(pcm, 0, READ_FRAMES) else readFixture(pcm)
             if (n < 0) {
                 // ERROR_DEAD_OBJECT etc: the stream died under us -- the iOS
                 // `failWithInterruption` path; `stop()` reports INTERRUPTED.
@@ -176,8 +237,15 @@ class VoxisAudioCapture {
             val collected = samples.copyOfRange(0, count)
             if (path == null) { completion(Result.failure(VoxisCaptureError.backend("no session path recorded for this capture"))); return@post }
             try {
-                val wav = WavWriter.encode(collected, SAMPLE_RATE)
-                FileOutputStream(File(path)).use { it.write(wav) }
+                val f = fixture
+                if (f != null && fixtureSamples != null) {
+                    // Verbatim, like desktop's MockCapture copying its fixture:
+                    // the bytes voxis-fake-stt's sha map knows.
+                    f.copyTo(File(path), overwrite = true)
+                } else {
+                    val wav = WavWriter.encode(collected, SAMPLE_RATE)
+                    FileOutputStream(File(path)).use { it.write(wav) }
+                }
             } catch (e: Exception) {
                 completion(Result.failure(VoxisCaptureError.backend("writing WAV to $path: $e"))); return@post
             }
@@ -205,5 +273,7 @@ class VoxisAudioCapture {
             rec.release()
         }
         record = null
+        fixtureSamples = null
+        fixtureCursor = 0
     }
 }
