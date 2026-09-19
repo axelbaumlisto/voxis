@@ -428,24 +428,34 @@ export class VoxisOverlayElement extends HTMLElement {
   }
 
   /**
-   * Live-move the pill to a new top-left `{x, y}` without tearing the
-   * element (or its mounted theme/WebGL context) down — the host-facing
-   * seam a `driver: "host"` caller uses on every placement drag-commit,
-   * in place of remounting. Clamps to the viewport/safe area using the
-   * *current* on-screen size (`currentSize()`, i.e. compact vs expanded),
-   * exactly like every other position this element computes. While
-   * compact, this also becomes the pill's resting spot, so it's recorded
-   * as `compactPosition`; while expanded, `compactPosition` is left alone
-   * so a later `shrinkToCompact` still returns to the pre-grow spot.
+   * Live-move the pill's COMPACT RESTING SPOT to `{x, y}` without tearing
+   * the element (or its mounted theme/WebGL context) down — the host-facing
+   * seam a `driver: "host"` caller uses on every placement commit (a drag,
+   * a viewport change, a lifecycle re-anchor), in place of remounting.
+   *
+   * `p` always means the same thing, whatever the lifecycle: "the compact
+   * pill rests here" (clamped with `COMPACT_SIZE`, recorded as
+   * `compactPosition`). While compact the pill is placed there; while
+   * expanded the pill is placed where `growToExpanded` would have put it
+   * from that spot (`growToExpandedPosition`), so a host that re-anchors
+   * mid-recording (the iOS keyboard opening/closing while dictating) keeps
+   * ONE owner of the position and the later `shrinkToCompact` lands on the
+   * host's ring, not on a stale pre-grow spot. E3 (`ideal.md`), 2026-09-19:
+   * the previous "expanded: clamp with the expanded size, leave
+   * `compactPosition` alone" semantics gave the expanded pill the compact
+   * anchor as its top-left AND restored to the old spot on stop — the fourth
+   * way to get «два кольца».
    */
   setPosition(p: Point): void {
     if (!this.pillEl || !this.config) return;
-    const clamped = clampToViewport(p, this.currentSize(), this.safeArea(), readEffectiveViewport());
-    this.pillEl.style.left = `${clamped.x}px`;
-    this.pillEl.style.top = `${clamped.y}px`;
-    if (this.lifecycleState === "compact") {
-      this.compactPosition = clamped;
-    }
+    const compact = clampToViewport(p, COMPACT_SIZE, this.safeArea(), readEffectiveViewport());
+    this.compactPosition = compact;
+    const placed =
+      this.lifecycleState === "expanded"
+        ? growToExpandedPosition(compact, this.expandedSize, this.safeArea(), readEffectiveViewport())
+        : compact;
+    this.pillEl.style.left = `${placed.x}px`;
+    this.pillEl.style.top = `${placed.y}px`;
   }
 
   /**

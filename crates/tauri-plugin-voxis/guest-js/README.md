@@ -133,7 +133,14 @@ webview unmodified).
   running element instead of remounting it:
 
   ```ts
-  el.setPosition({ x, y }); // clamped with the current size; no remount
+  el.setPosition({ x, y }); // "the COMPACT pill rests here" — in every
+                            // lifecycle state (0.7.0). Compact: placed there
+                            // (clamped with COMPACT_SIZE). Expanded: placed
+                            // where a grow from that spot lands, and the
+                            // next shrink returns TO that spot — so a host
+                            // that re-anchors mid-recording (keyboard
+                            // opening/closing while dictating) stays the one
+                            // owner of the position. No remount.
   el.setTheme("lavalamp");  // re-resolves module + manifest size; while
                             // expanded, swaps only the theme container
                             // (fresh WebGL context) and emits

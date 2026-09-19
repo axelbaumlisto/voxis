@@ -18,7 +18,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cornerPosition, COMPACT_SIZE, mountOverlay, VoxisOverlayElement, type OverlayCorner } from "../src/overlay";
 import { OverlaySessionController } from "../src/overlay-session";
-import { clampToViewport, loadPosition, savePosition } from "../src/drag";
+import { clampToViewport, loadPosition, readEffectiveViewport, savePosition } from "../src/drag";
+import { growToExpandedPosition } from "../src/overlay-geometry";
 import type { DictationResult, LevelEvent, PluginState } from "../src/types/contract";
 import type { VoxisClient } from "../src/client";
 
@@ -849,21 +850,35 @@ describe("<voxis-overlay> live seams setPosition/setTheme [T3]", () => {
     expect(calls.mount).toBe(0);
   });
 
-  it("setPosition clamps to the CURRENT size (expanded uses the theme size) and leaves the pre-grow compact spot intact for shrink", () => {
+  it("setPosition while expanded means 'the compact spot is now here': the pill is placed as a grow FROM that spot, and shrink lands ON it (E3: host re-anchors mid-recording)", () => {
     const { module } = countingThemeModule();
     const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
     const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
 
     el.setPosition({ x: 20, y: 20 });
-    const compactSpot = { x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) };
+    el.applyState("recording"); // expanded, 120x120, grown from {20,20}
 
-    el.applyState("recording"); // expanded, 120x120
-    // Overshoot far right — the clamp must use the expanded (120px) width.
+    // The host moved its ring (keyboard closed → anchor back down) while recording.
+    const newSpot = { x: 300, y: window.innerHeight - COMPACT_SIZE.height - 10 };
+    el.setPosition(newSpot);
+    const expectedGrown = growToExpandedPosition(newSpot, { width: 120, height: 120 }, { top: 0, right: 0, bottom: 0, left: 0 }, readEffectiveViewport());
+    expect({ x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) }).toEqual(expectedGrown);
+    expect(parseFloat(pill.style.top) + 120).toBeLessThanOrEqual(window.innerHeight); // grew UP from a bottom spot, not off-screen
+
+    el.applyState("idle"); // shrink: lands on the host's NEW spot, not the pre-grow {20,20}
+    expect({ x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) }).toEqual(newSpot);
+  });
+
+  it("setPosition always clamps the compact spot with COMPACT_SIZE — an overshoot while expanded still rests the pill inside the viewport after shrink", () => {
+    const { module } = countingThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+
+    el.applyState("recording");
     el.setPosition({ x: 100000, y: 20 });
-    expect(parseFloat(pill.style.left)).toBe(window.innerWidth - 120);
-
-    el.applyState("idle"); // shrink: returns to the pre-grow compact spot, not the expanded setPosition
-    expect({ x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) }).toEqual(compactSpot);
+    el.applyState("idle");
+    expect(parseFloat(pill.style.left)).toBe(window.innerWidth - COMPACT_SIZE.width);
+    expect(parseFloat(pill.style.top)).toBe(20);
   });
 
   it("setTheme while compact only records the new theme/size (no mount, no resize event); the next expansion adopts it", () => {
