@@ -231,6 +231,7 @@ class VoxisAudioCapture(
             running = false
             interruptionReason = null
             val path = currentPath
+            val usedFixture = fixtureSamples != null // read BEFORE teardown clears it
             teardown()
             if (reason != null) { completion(Result.failure(VoxisCaptureError.interrupted(reason))); return@post }
             val durationMs = SystemClock.elapsedRealtime() - startedAt
@@ -238,7 +239,7 @@ class VoxisAudioCapture(
             if (path == null) { completion(Result.failure(VoxisCaptureError.backend("no session path recorded for this capture"))); return@post }
             try {
                 val f = fixture
-                if (f != null && fixtureSamples != null) {
+                if (f != null && usedFixture) {
                     // Verbatim, like desktop's MockCapture copying its fixture:
                     // the bytes voxis-fake-stt's sha map knows.
                     f.copyTo(File(path), overwrite = true)
