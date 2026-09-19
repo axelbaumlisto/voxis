@@ -153,8 +153,33 @@ jobs:
               echo "=== [required] clippy -D warnings (voxis-core + tauri-plugin-voxis only) ===" &&
               cargo clippy -p voxis-core -p tauri-plugin-voxis --all-targets -- -D warnings &&
               echo "=== [required] guest-js build + test ===" &&
-              cd crates/tauri-plugin-voxis/guest-js && bun install --frozen-lockfile && bun run build && bun run test
+              (cd crates/tauri-plugin-voxis/guest-js && bun install --frozen-lockfile && bun run build && bun run test) &&
             '
+
+      # B2 (2026-09-19): the mobile half of the plugin (`src/mobile.rs`,
+      # cfg(ios|android) after C1) is compiled by NO desktop test/clippy run;
+      # plugin-v0.3.0 shipped with a syntax error there and only a host's iOS
+      # build caught it. iOS needs an Apple toolchain (release.yml's macOS-VM
+      # lane runs scripts/check-ios-build.sh); Android needs only the NDK's
+      # clang for `ring`'s build script -- and the runner host already has the
+      # SDK/NDK the naked-cli Android lane uses, so this runs on the host, not
+      # in voxis-ci (an NDK layer there would be ~1 GB for one `cc` call).
+      - name: "[required] B2: Android cross-check (cargo check aarch64-linux-android, host NDK)"
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
+          ndk="$(ls -d "$sdk"/ndk/* 2>/dev/null | sort -V | tail -1)"
+          [ -n "$ndk" ] || { echo "no NDK under $sdk/ndk -- the Android cross-check cannot run on this host" >&2; exit 1; }
+          bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          clang="$(ls "$bin"/aarch64-linux-android*-clang | sort -V | tail -1)"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup target add aarch64-linux-android >/dev/null
+          export CC_aarch64_linux_android="$clang" AR_aarch64_linux_android="$bin/llvm-ar" \
+                 CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$clang" \
+                 CARGO_TARGET_DIR="$HOME/.cache/voxis-ci/target-android" \
+                 GIT_CONFIG_COUNT=0
+          echo "NDK: $ndk"
+          cargo check -p voxis-core -p tauri-plugin-voxis --target aarch64-linux-android
 
       # Advisory only: the voxis-ci image does not currently install
       # cargo-audit (Dockerfile.ci has no `cargo install cargo-audit`

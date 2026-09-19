@@ -68,11 +68,13 @@ GitHub is **binary releases only**. Do not push private Voxis source to GitHub.
    tag to exist and point at the right commit; pushing it is a plain `git tag` + `git
    push forgejo plugin-v0.1.0`, no workflow dispatch involved.
 
-   **Before tagging any `plugin-v*`**: `cargo check -p tauri-plugin-voxis --target
-   aarch64-apple-ios` (~2 min warm). `src/mobile.rs` is `cfg(target_os = "ios")` — the
-   desktop test/clippy run below never compiles it, and a syntax slip there only surfaces
-   when a host builds for iOS (2026-09-17: `plugin-v0.3.0` shipped with a stray `}` in
-   `mobile.rs`; tags are immutable, so it cost a `plugin-v0.3.1`).
+   **Tag a `plugin-v*` ONLY through `scripts/tag-plugin.sh <X.Y.Z> "<msg>"`** (B2): it runs
+   desktop test+clippy, guest-js build+test, `scripts/check-ios-build.sh` (macOS) and the
+   Android `cargo check --target aarch64-linux-android` (NDK clang for `ring`), then tags.
+   `src/mobile.rs` is `cfg(ios|android)` — the desktop test/clippy run never compiles it, and
+   a syntax slip there only surfaces when a host builds for a phone (2026-09-17:
+   `plugin-v0.3.0` shipped with a stray `}` in `mobile.rs`; tags are immutable, so it cost a
+   `plugin-v0.3.1`). `ci.yml` runs the Android check on every push too (runner host NDK).
 
 2. Commit. Run locally before tagging (fast, catches 95%):
    `cd src-tauri && cargo test --lib && cargo clippy --all-targets -- -D warnings`
