@@ -162,12 +162,17 @@ must re-consent before dictating to a newly-pointed provider.
   before any `plugin-v*` tag, and naked's stand scenario
   `tests/android-e2e/scenarios/V1-dictation-fake-stt.sh` (fixture mic →
   Kotlin → Rust → `voxis-fake-stt` → transcript in a real tmux pane).
-  **Debug-only capture fixture**: a debuggable host APK with
-  `<external-files>/voxis-capture-fixture.wav` (16 kHz mono PCM16, 44-byte
-  header) streams that file in real time instead of the microphone and
-  hands its bytes back verbatim on `stop` — desktop's scripted `MockCapture`
-  semantics, so `voxis-fake-stt`'s sha map matches; release builds never
-  look at the file. Two host-integration facts learned on the stand: (1) a
+  **Debug-only capture fixture** (both mobile backends, `plugin-v0.6.1`): a
+  debuggable host build with `voxis-capture-fixture.wav` (16 kHz mono PCM16,
+  44-byte header) in the app's files dir — Android `<external-files>/`, iOS
+  `<Documents>/` (`xcrun simctl get_app_container <udid> <bundle> data`
+  → `Documents/`) — streams that file in real time instead of the microphone
+  through the SAME level/cap path the microphone feeds, and hands its bytes
+  back verbatim on `stop` — desktop's scripted `MockCapture` semantics, so
+  `voxis-fake-stt`'s sha map matches. Release builds never look at the file
+  (Kotlin: `ApplicationInfo.FLAG_DEBUGGABLE`; Swift: `#if DEBUG` removes the
+  code). The Swift decoder `FixtureWav` is in the Tauri-free
+  `VoxisAudioMath` target and XCTested on the Mac (`scripts/check-ios-build.sh`). Two host-integration facts learned on the stand: (1) a
   plugin registered from inside the host's `setup` (`AppHandle::plugin`)
   can DEADLOCK an Android app at launch — `register_android_plugin` waits
   for the main thread to construct the Kotlin class while the main thread

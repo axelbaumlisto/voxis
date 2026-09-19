@@ -130,6 +130,20 @@ final class VoxisAudioCapture {
     /// that was never actually muted).
     private var sawAudio = false
 
+    // MARK: - debug capture fixture (C3 seam, iOS mirror of the Kotlin one)
+    //
+    // In a DEBUG build only, `<Documents>/voxis-capture-fixture.wav` (16 kHz
+    // mono PCM16, 44-byte header) replaces the microphone: its samples are
+    // streamed into the SAME level/cap path the tap feeds, paced to real
+    // time, and `stop()` hands back the file's ORIGINAL bytes verbatim so
+    // `voxis-fake-stt`'s sha map matches. Release builds never look for the
+    // file — `#if DEBUG` removes the code, not just the branch.
+    private var fixtureBytes: Data?
+    private var fixtureSamples: [Float] = []
+    private var fixtureCursor = 0
+    private var fixtureTimer: DispatchSourceTimer?
+    static let fixtureFileName = "voxis-capture-fixture.wav"
+
     init() {
         // Mute observer lives for the object's whole lifetime (not just
         // while a session is running) -- Task 8 step 5: iOS 17+'s system
@@ -175,6 +189,13 @@ final class VoxisAudioCapture {
                 return
             }
 
+            #if DEBUG
+            if let fixture = Self.loadFixture() {
+                self.startFixture(fixture, path: path, capSamples: capSamples, onLevel: onLevel, completion: completion)
+                return
+            }
+            #endif
+
             MicPermission.resolve { granted in
                 self.queue.async {
                     guard granted else {
@@ -186,6 +207,67 @@ final class VoxisAudioCapture {
             }
         }
     }
+
+    #if DEBUG
+    /// `(originalBytes, decodedSamples)` when the fixture file is present and
+    /// well-formed; `nil` otherwise (absent file = the ordinary microphone).
+    /// A present-but-malformed file is logged and IGNORED rather than
+    /// half-used — see `FixtureWav`'s doc for why.
+    private static func loadFixture() -> (Data, [Float])? {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return nil }
+        let url = docs.appendingPathComponent(fixtureFileName)
+        guard let bytes = try? Data(contentsOf: url) else { return nil }
+        guard let samples = FixtureWav.decodePCM16Mono16k(bytes) else {
+            NSLog("voxis capture fixture at %@ is not 16 kHz mono PCM16 with a 44-byte header; using the microphone", url.path)
+            return nil
+        }
+        return (bytes, samples)
+    }
+
+    /// Fixture start: no AVAudioSession, no permission prompt, no engine —
+    /// a 250 ms timer feeds `ingestConverted` 4000 samples per tick (real
+    /// time at 16 kHz) until the file runs out, then keeps ticking silence
+    /// so the guard sees a natural trailing pause. Levels/cap/mute all go
+    /// through the same code the tap uses; only the SOURCE is swapped.
+    private func startFixture(_ fixture: (Data, [Float]), path: String, capSamples: Int, onLevel: Channel, completion: @escaping (Result<Void, VoxisCaptureError>) -> Void) {
+        stateLock.lock()
+        samples.removeAll(keepingCapacity: true)
+        self.capSamples = capSamples > 0 ? capSamples : .max
+        capHit = false
+        overallPeakRms = 0
+        interruptionReason = nil
+        consecutiveNearSilentWindows = 0
+        sawAudio = false
+        muted = false
+        running = true
+        startInstant = DispatchTime.now()
+        currentPath = path
+        fixtureBytes = fixture.0
+        fixtureSamples = fixture.1
+        fixtureCursor = 0
+        stateLock.unlock()
+
+        let perTick = Int(Self.sampleRate) / 4
+        let feeder = DispatchSource.makeTimerSource(queue: queue)
+        feeder.schedule(deadline: .now(), repeating: .milliseconds(250))
+        feeder.setEventHandler { [weak self] in
+            guard let self else { return }
+            let end = min(self.fixtureCursor + perTick, self.fixtureSamples.count)
+            let chunk: [Float] = self.fixtureCursor < end
+                ? Array(self.fixtureSamples[self.fixtureCursor..<end])
+                : [Float](repeating: 0, count: perTick)
+            self.fixtureCursor = end
+            self.ingestConverted(chunk)
+        }
+        fixtureTimer = feeder
+        feeder.resume()
+
+        levelChannel = onLevel
+        startLevelTimer()
+        NSLog("voxis capture: DEBUG fixture in use (%d samples) instead of the microphone", fixture.1.count)
+        completion(.success(()))
+    }
+    #endif
 
     private func startEngine(path: String, capSamples: Int, onLevel: Channel, completion: @escaping (Result<Void, VoxisCaptureError>) -> Void) {
         let session = AVAudioSession.sharedInstance()
@@ -323,7 +405,13 @@ final class VoxisAudioCapture {
         guard frameCount > 0 else { return }
         let pointer = channelData[0]
         let chunk = Array(UnsafeBufferPointer(start: pointer, count: frameCount))
+        ingestConverted(chunk)
+    }
 
+    /// The one path every 16 kHz mono chunk takes — from the converted tap
+    /// buffer in production, from the fixture feeder in a DEBUG test run.
+    /// Runs on `queue`.
+    private func ingestConverted(_ chunk: [Float]) {
         // Peak RMS over 10 ms sub-chunks within this 250 ms window (Task 8
         // acceptance #1: "max over 10 ms sub-chunks, mirroring desktop's
         // WindowPeakAccumulator") -- desktop's own cpal callback happens
@@ -391,7 +479,11 @@ final class VoxisAudioCapture {
         // fabricated success over truncated audio (desktop review M2's
         // exact failure class). Checking `engine.isRunning` directly here
         // catches that even if the notification never arrives.
-        if !engine.isRunning {
+        var engineExpected = true
+        #if DEBUG
+        engineExpected = fixtureTimer == nil  // the fixture feeder has no engine to check
+        #endif
+        if engineExpected && !engine.isRunning {
             failWithInterruption(reason: "engine stopped")
             return
         }
@@ -631,7 +723,14 @@ final class VoxisAudioCapture {
             let durationMs: UInt64 = start.map {
                 UInt64((DispatchTime.now().uptimeNanoseconds &- $0.uptimeNanoseconds) / 1_000_000)
             } ?? 0
-            let wav = WavWriter.encode(samples: collected, sampleRate: UInt32(Self.sampleRate))
+            var wav = WavWriter.encode(samples: collected, sampleRate: UInt32(Self.sampleRate))
+            #if DEBUG
+            if let original = self.fixtureBytes {
+                // Verbatim, so sha256(file) == the fake-stt map key (MockCapture semantics).
+                wav = original
+                self.fixtureBytes = nil
+            }
+            #endif
 
             guard let path else {
                 completion(.failure(.backend("no session path recorded for this capture")))
@@ -672,6 +771,10 @@ final class VoxisAudioCapture {
     }
 
     private func teardownEngine() {
+        #if DEBUG
+        fixtureTimer?.cancel()
+        fixtureTimer = nil
+        #endif
         levelTimer?.cancel()
         levelTimer = nil
         levelChannel = nil
@@ -695,6 +798,10 @@ final class VoxisAudioCapture {
             self.samples.removeAll()
             self.interruptionReason = nil
             self.currentPath = nil
+            #if DEBUG
+            self.fixtureBytes = nil
+            self.fixtureSamples = []
+            #endif
             self.stateLock.unlock()
         }
     }
