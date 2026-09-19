@@ -46,30 +46,6 @@ export type CommandName = (typeof COMMAND_NAMES)[number];
 export const STATE_EVENT = "voxis://state" as const;
 export const LEVEL_EVENT = "voxis://level" as const;
 export const RESULT_EVENT = "voxis://result" as const;
-/**
- * `models::INTENT_EVENT` — out of band (not in `events.json`): an
- * OS-originated request the HOST must decide on. Today only
- * `{action: "start"}`, emitted when the host app's own
- * `StartDictationIntent` (Siri / Shortcuts / Action Button, `[T11b]`)
- * fired. The plugin never starts a session for it itself: consent, the
- * no-API-key path and single-flight are the host's — route it through
- * exactly the same code a pill press takes.
- */
-export const INTENT_EVENT = "voxis://intent" as const;
-
-/** `models::IntentAction` as it arrives on `voxis://intent`. */
-export type IntentAction = "start";
-
-export interface IntentEvent {
-  action: IntentAction;
-}
-
-/** Parses a `voxis://intent` payload; unknown actions are rejected loudly. */
-export function parseIntentEvent(value: unknown): IntentEvent {
-  if (!isRecord(value)) fail("intent", "expected an object");
-  if (value.action !== "start") fail("intent.action", `unknown action ${JSON.stringify(value.action)}`);
-  return { action: "start" };
-}
 
 // ---------------------------------------------------------------------
 // models.rs mirrors

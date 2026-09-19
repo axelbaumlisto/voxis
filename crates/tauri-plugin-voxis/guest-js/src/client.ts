@@ -19,7 +19,6 @@ import type {
   DictationResult,
   HotkeySpec,
   ImportSummary,
-  IntentEvent,
   KeySourceDto,
   LevelEvent,
   Mode,
@@ -27,7 +26,7 @@ import type {
   SessionId,
   VoxisProfileDto,
 } from "./types/contract";
-import { INTENT_EVENT, LEVEL_EVENT, RESULT_EVENT, STATE_EVENT, parseIntentEvent } from "./types/contract";
+import { LEVEL_EVENT, RESULT_EVENT, STATE_EVENT } from "./types/contract";
 
 /** An IPC `invoke`-shaped function — matches `@tauri-apps/api/core`'s `invoke`. */
 export type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
@@ -110,14 +109,6 @@ export interface VoxisClient {
   onState(cb: (state: PluginState) => void): Promise<UnlistenFn>;
   onLevel(cb: (level: LevelEvent) => void): Promise<UnlistenFn>;
   onResult(cb: (result: DictationResult) => void): Promise<UnlistenFn>;
-  /**
-   * `voxis://intent` (`[T11b]`): the host app's own Siri / Shortcuts /
-   * Action Button intent asked for dictation. Nothing has started — the
-   * host decides (typically: treat it exactly like its own pill press,
-   * including consent / no-API-key handling; ignore while recording).
-   * A payload with an unknown action is dropped, never guessed.
-   */
-  onIntent(cb: (intent: IntentEvent) => void): Promise<UnlistenFn>;
 }
 
 /**
@@ -241,19 +232,6 @@ export function createClient(deps: VoxisClientDeps = {}): VoxisClient {
     onState: (cb) => listen<PluginState>(STATE_EVENT, (event) => cb(event.payload)),
     onLevel: (cb) => listen<LevelEvent>(LEVEL_EVENT, (event) => cb(event.payload)),
     onResult: (cb) => listen<DictationResult>(RESULT_EVENT, (event) => cb(event.payload)),
-    onIntent: (cb) =>
-      listen<unknown>(INTENT_EVENT, (event) => {
-        let intent: IntentEvent;
-        try {
-          intent = parseIntentEvent(event.payload);
-        } catch {
-          // A newer plugin's action this guest-js does not know: dropping
-          // it is the whole contract (`parseIntentEvent`'s doc) — acting on
-          // a guess would start dictation nobody asked for.
-          return;
-        }
-        cb(intent);
-      }),
   };
 
   return client;
