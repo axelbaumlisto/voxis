@@ -87,8 +87,8 @@ pub use providers::{
 
 // Permissions
 pub use permissions::{
-    check_permissions, open_permission_settings, request_accessibility_permission,
-    request_microphone_permission, PermissionInfo,
+    check_permissions, check_secure_input, open_permission_settings,
+    request_accessibility_permission, request_microphone_permission, PermissionInfo,
 };
 
 // Failed transcriptions

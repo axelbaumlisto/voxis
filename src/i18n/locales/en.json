@@ -256,7 +256,11 @@
   },
   "permissions": {
     "openSettings": "[Open Settings]",
-    "restart": "[Restart]"
+    "restart": "[Restart]",
+    "secureInputTitle": "Secure Input is on",
+    "secureInputHolder": "held by {{name}} (pid {{pid}})",
+    "secureInputHolderUnknown": "held by an unknown process",
+    "secureInputDesc": "while it is on, no app receives global keyboard events — the Voxis hotkey is dead until that app releases it (usually: leave the password field, or quit it)."
   },
   "nav": {
     "history": "History",

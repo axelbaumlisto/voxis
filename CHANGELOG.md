@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased (Voxis desktop)
+
+### Add
+- **"Secure Input is on — held by Terminal (pid 812)" banner** (macOS). While
+  any app holds Secure Event Input (a password field, `sudo` in Terminal, a
+  password manager's lock screen) NO process receives global keyboard events,
+  so the Voxis hotkey goes dead with no error anywhere — the "полный ноль"
+  hunt of 2026-09-18 spent an hour ruling this out by hand. Voxis now asks the
+  OS (`IsSecureEventInputEnabled`) with the permission checks and every 5 s
+  while visible, names the holder (`kCGSSessionSecureInputPID` via `ioreg` →
+  `ps`), and shows a banner with no button: nothing Voxis can do about it,
+  the text says who to look at. Off macOS the command always reports "off".
+  `check_secure_input` command; `permissions::secure_input` with a tested
+  pure parser; banner tests.
+
 ## v0.1.7 (Voxis desktop)
 
 ### Fix

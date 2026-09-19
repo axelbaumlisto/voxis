@@ -522,6 +522,17 @@ export async function checkPermissions(): Promise<PermissionInfo[]> {
   return invoke<PermissionInfo[]>("check_permissions");
 }
 
+/** D3: macOS Secure Event Input — while on, the global hotkey cannot reach Voxis. */
+export interface SecureInputStatus {
+  enabled: boolean;
+  holder_pid: number | null;
+  holder_name: string | null;
+}
+
+export async function checkSecureInput(): Promise<SecureInputStatus> {
+  return invoke<SecureInputStatus>("check_secure_input");
+}
+
 export async function openPermissionSettings(permission: string): Promise<void> {
   return invoke("open_permission_settings", { permission });
 }

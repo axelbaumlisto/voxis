@@ -165,6 +165,7 @@ pub fn command_handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 
         commands::onboarding::is_first_run,
         commands::onboarding::mark_first_run_complete,
         commands::permissions::check_permissions,
+        commands::permissions::check_secure_input,
         commands::permissions::open_permission_settings,
         commands::permissions::request_microphone_permission,
         commands::permissions::request_accessibility_permission,

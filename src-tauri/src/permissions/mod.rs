@@ -10,6 +10,7 @@
 //! - DIP: Depends on abstractions (PermissionChecker trait)
 
 pub mod checker;
+pub mod secure_input;
 
 #[cfg(target_os = "macos")]
 pub mod macos;

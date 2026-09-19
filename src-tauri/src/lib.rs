@@ -138,6 +138,7 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
         crate::commands::profile_share::export_profile_file,
         // permissions
         crate::commands::permissions::check_permissions,
+        crate::commands::permissions::check_secure_input,
         crate::commands::permissions::open_permission_settings,
         crate::commands::permissions::request_microphone_permission,
         crate::commands::permissions::request_accessibility_permission,

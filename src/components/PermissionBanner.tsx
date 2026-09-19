@@ -1,10 +1,12 @@
 import { useTranslation } from "react-i18next";
-import { PermissionInfo, restartApp } from "../lib/commands";
+import { PermissionInfo, SecureInputStatus, restartApp } from "../lib/commands";
 import "../styles/permission-banner.css";
 
 interface PermissionBannerProps {
   permissions: PermissionInfo[];
   onRequestPermission: (permission: string) => void;
+  /** D3: Secure Event Input state; `null`/off renders nothing extra. */
+  secureInput?: SecureInputStatus | null;
 }
 
 // Permissions that require app restart to take effect on macOS
@@ -18,11 +20,13 @@ const RESTART_REQUIRED_PERMISSIONS = ["Input Monitoring", "Accessibility"];
 function PermissionBanner({
   permissions,
   onRequestPermission,
+  secureInput = null,
 }: PermissionBannerProps) {
   const { t } = useTranslation();
   const missing = (permissions ?? []).filter((p) => p.status !== "granted");
+  const secureInputOn = secureInput?.enabled === true;
 
-  if (missing.length === 0) {
+  if (missing.length === 0 && !secureInputOn) {
     return null;
   }
 
@@ -32,6 +36,24 @@ function PermissionBanner({
 
   return (
     <div className="permission-banners">
+      {secureInputOn && (
+        // D3: not a permission — a transient session state some other app
+        // holds. No button: nothing Voxis can do about it, the text says who.
+        <div className="permission-banner" data-testid="secure-input-banner">
+          <span className="permission-banner-icon">[!]</span>
+          <span className="permission-banner-text">
+            <strong>{t("permissions.secureInputTitle")}</strong>
+            <span className="permission-banner-desc">
+              {" — "}
+              {secureInput?.holder_pid !== null && secureInput?.holder_pid !== undefined
+                ? t("permissions.secureInputHolder", { name: secureInput.holder_name ?? "?", pid: secureInput.holder_pid })
+                : t("permissions.secureInputHolderUnknown")}
+              {"; "}
+              {t("permissions.secureInputDesc")}
+            </span>
+          </span>
+        </div>
+      )}
       {missing.map((perm) => {
         const needsRestart = RESTART_REQUIRED_PERMISSIONS.includes(perm.name);
 

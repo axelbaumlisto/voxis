@@ -16,10 +16,12 @@ import { useHotkeyDisplay } from "../hooks/useHotkeyDisplay";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import {
   checkPermissions,
+  checkSecureInput,
   openPermissionSettings,
   requestMicrophonePermission,
   requestAccessibilityPermission,
   PermissionInfo,
+  SecureInputStatus,
 } from "../lib/commands";
 
 const navKeys = [
@@ -48,6 +50,10 @@ function Layout() {
 
   // Permission state
   const [permissions, setPermissions] = useState<PermissionInfo[]>([]);
+  // D3: Secure Event Input (macOS) — polled with the permissions AND every
+  // 5 s while the window is visible: it flips when the user enters/leaves a
+  // password field somewhere else, which is exactly when the hotkey "dies".
+  const [secureInput, setSecureInput] = useState<SecureInputStatus | null>(null);
 
   // Check permissions on mount and when window gains focus
   const refreshPermissions = useCallback(async () => {
@@ -57,6 +63,19 @@ function Layout() {
     } catch {
       // Ignore errors - permissions UI is optional
     }
+    try {
+      setSecureInput(await checkSecureInput());
+    } catch {
+      setSecureInput(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      checkSecureInput().then(setSecureInput, () => setSecureInput(null));
+    }, 5000);
+    return () => window.clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -113,6 +132,7 @@ function Layout() {
       {/* Permission Banner */}
       <PermissionBanner
         permissions={permissions}
+        secureInput={secureInput}
         onRequestPermission={handleRequestPermission}
       />
 

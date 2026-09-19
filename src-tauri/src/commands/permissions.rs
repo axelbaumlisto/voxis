@@ -169,3 +169,11 @@ pub fn bring_to_front() {
     #[cfg(target_os = "macos")]
     crate::permissions::macos::bring_app_to_front();
 }
+
+/// D3: is macOS Secure Event Input on (and who holds it)? While it is on the
+/// global hotkey cannot reach Voxis — this is the banner's fact source.
+#[tauri::command]
+#[specta::specta]
+pub fn check_secure_input() -> crate::permissions::secure_input::SecureInputStatus {
+    crate::permissions::secure_input::check_secure_input()
+}

@@ -256,7 +256,11 @@
   },
   "permissions": {
     "openSettings": "[Открыть настройки]",
-    "restart": "[Перезапустить]"
+    "restart": "[Перезапустить]",
+    "secureInputTitle": "Включён Secure Input",
+    "secureInputHolder": "держит {{name}} (pid {{pid}})",
+    "secureInputHolderUnknown": "держит неизвестный процесс",
+    "secureInputDesc": "пока он включён, ни одно приложение не получает глобальные клавиши — хоткей Voxis мёртв, пока то приложение его не отпустит (обычно: выйти из поля пароля или закрыть его)."
   },
   "nav": {
     "history": "История",

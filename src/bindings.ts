@@ -347,6 +347,13 @@ async checkPermissions() : Promise<PermissionInfo[]> {
     return await TAURI_INVOKE("check_permissions");
 },
 /**
+ * D3: is macOS Secure Event Input on (and who holds it)? While it is on the
+ * global hotkey cannot reach Voxis — this is the banner's fact source.
+ */
+async checkSecureInput() : Promise<SecureInputStatus> {
+    return await TAURI_INVOKE("check_secure_input");
+},
+/**
  * Open system settings for a specific permission.
  */
 async openPermissionSettings(permission: string) : Promise<void> {
@@ -1138,6 +1145,22 @@ export type PermissionInfo = { name: string; status: string; description: string
  * deserialize.
  */
 export type ReprocessResult = { processed: number; suggestions_found: number; recorded?: number; promoted?: number; skipped?: number }
+/**
+ * What the banner shows.
+ */
+export type SecureInputStatus = { 
+/**
+ * `true` while some process holds Secure Event Input.
+ */
+enabled: boolean; 
+/**
+ * The holder's pid, when the console-users record names one.
+ */
+holder_pid: number | null; 
+/**
+ * The holder's process name (`ps -o comm=`), when the pid resolved.
+ */
+holder_name: string | null }
 /**
  * One non-loopback IPv4 LAN interface, as offered to the UI for the
  * interface picker (plan: "default first non-loopback, user can pick").
