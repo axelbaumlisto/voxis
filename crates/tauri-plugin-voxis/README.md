@@ -19,7 +19,7 @@ microphone and real Groq; a live-iPad end-to-end run exists (see
 a real host (`naked`) — that integration work is not itself part of this
 crate/repo. `guest-js` is versioned separately (`@voxis/tauri-plugin-voxis`,
 currently `0.6.0`) and is **not** on the same version number as this Rust
-crate (currently `0.4.0`) — bump each independently when either changes.
+crate (currently `0.4.1`) — bump each independently when either changes.
 
 ## Installation
 
@@ -69,8 +69,10 @@ All variants return a `tauri::plugin::TauriPlugin<R>` for `.plugin(...)`:
 
 | Function | Capture backend | Hotkey backend | `SecretStore` | Use when |
 |---|---|---|---|---|
-| `init()` | `MockCapture` | none | `FileSecretStore` (0600 JSON, desktop default) | never in production — no real audio |
-| `init_with(secrets)` | `MockCapture` | none | host-supplied | tests/tracer bullets with a host secret store |
+| `init()` | **platform dispatch**: `desktop::CpalCapture` (feature `desktop`) / `mobile::IosCapture` (iOS) / `UnsupportedCapture` (anything else — `start` refuses with `unsupportedPlatform`) | per platform | `FileSecretStore` / Keychain / `None` | the safe default for a host that does not care about variants |
+| `init_with(secrets)` | same platform dispatch | per platform | host-supplied | **the recommended one-liner for a multi-platform host** (naked) |
+| `init_unsupported_with(secrets?)` | `UnsupportedCapture` — every command but `start` works; `start` → `unsupportedPlatform` before any session | none | host-supplied or `None` | a platform without a backend yet (Android today), explicitly |
+| `init_mock()` / `init_mock_with(secrets)` | `MockCapture` test double | none | `FileSecretStore` / host-supplied | harnesses, tracer bullets, fake-stt smokes — **never production** (was `init`/`init_with` before 0.4.0: naked/Android shipped the double by accident) |
 | `init_with_capture(capture)` | host-supplied `Arc<dyn AudioCapture>` | none | `FileSecretStore` | pre-scripted `MockCapture` (fixture-driven tests) |
 | `init_with_capture_and_secrets(secrets, capture)` | host-supplied | none | host-supplied | same, with a host secret store too |
 | `init_desktop()` *(feature `desktop`)* | `desktop::CpalCapture` | `hotkey_desktop::RdevHotkey` | `FileSecretStore` | **desktop production**, no host secret store |
@@ -170,6 +172,7 @@ Every command error is `{ kind: "...", message: string, ...extra fields }`
 | `permissionDenied` | `message` | `set_hotkey`: the OS-level key listener (`rdev`) failed to start — on macOS this is almost always a missing Accessibility/Input Monitoring grant. **The one realistic rejection a real desktop host will see from `set_hotkey`** — surface it to the user (deep-link to System Settings), don't swallow it silently (a real regression found in naked's own integration, see `research/plugin-plan/review_10p4_r2.md`). |
 | `notFound` | `message` | `import_profile_from_desktop`: no installed Voxis desktop config dir found on this machine. |
 | `noApiKey` | `message` | `start`: no transcription API key in the `SecretStore` yet — refused BEFORE the mic opens; the host should open its provider setup (`set_provider`) or profile import. |
+| `unsupportedPlatform` | `message` | `start`: this build has no capture backend for the platform (Android today) — refused before consent/key/session, so a host shows "dictation is not available here" (C0). |
 | `profile` | `message` | Any failure building/reading/decrypting a `VoxisProfile` — crypto/validation/storage error, malformed QR payload, or a non-2xx from the desktop's profile-share HTTP server. |
 
 On iOS specifically, `startCapture` can also reject with a `PERMISSION_DENIED`

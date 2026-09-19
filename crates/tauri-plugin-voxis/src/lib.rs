@@ -609,6 +609,34 @@ mod live_activity_intent_tests {
 
         assert!(!state.sessions.has_active(), "Stop intent must finalize (like releasing Hold), not leave the session stuck");
     }
+
+    /// C0: a build without a capture backend refuses `start` FIRST — before
+    /// consent, before the key check, before a session slot or rec file —
+    /// with the typed `unsupportedPlatform` kind a host can show. The old
+    /// behaviour (naked/Android via `init_with` → `MockCapture`) "started"
+    /// happily and failed after the user had spoken.
+    #[tokio::test]
+    async fn unsupported_capture_refuses_start_up_front_with_no_session_and_no_rec_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sink = Arc::new(RecordingSink::new());
+        let mut state = test_state(&tmp);
+        state.capture = Arc::new(capture::UnsupportedCapture::new("android"));
+        state.events = sink.clone();
+        // Even with consent NOT granted and NO key, the platform refusal wins.
+        state.consent.set_consent("test-host", "api.groq.com", false).unwrap();
+        state.secrets.delete(pipeline::API_KEY_SECRET_NAME).unwrap();
+
+        let err = commands::do_start(&state, models::Mode::Toggle).await.unwrap_err();
+        match err {
+            error::PluginError::UnsupportedPlatform { message } => assert!(message.contains("android"), "{message}"),
+            other => panic!("expected unsupportedPlatform, got {other:?}"),
+        }
+        assert!(!state.sessions.has_active());
+        let rec_files = std::fs::read_dir(tmp.path()).unwrap().filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "wav")).count();
+        assert_eq!(rec_files, 0, "no rec file may be created for a refused start");
+        assert_eq!(sink.events().len(), 0, "no voxis://state may be emitted for a refused start");
+    }
+
 }
 
 /// Task 9a: `EventSink` decorator that mirrors `voxis://state`/

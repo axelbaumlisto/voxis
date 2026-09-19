@@ -28,6 +28,12 @@ use crate::profile_source;
 use crate::PluginState;
 
 pub(crate) async fn do_start(state: &PluginState, mode: Mode) -> Result<SessionId, PluginError> {
+    // C0: a platform this build cannot record on refuses before anything
+    // else — no consent prompt, no key check, no slot, no rec file. The
+    // host shows "not available here"; nobody speaks into nothing.
+    if let Some(message) = state.capture.unsupported_reason() {
+        return Err(PluginError::UnsupportedPlatform { message });
+    }
     let provider_host = profile_source::current_provider_host(state);
     if !state.consent.is_consented(&state.host_id, &provider_host)? {
         return Err(PluginError::ConsentRequired { provider_host });

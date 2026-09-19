@@ -35,6 +35,15 @@ pub enum PluginError {
     /// internally-tagged-enum reason as `UnknownSession` above.
     #[error("capture backend error: {message}")]
     Capture { message: String },
+    /// This build has NO audio capture backend for the platform it runs on
+    /// (C0, 2026-09-19: naked on Android registered the plugin through
+    /// `init_with`, which handed out the `MockCapture` test double — a live
+    /// pill over a dead microphone). Refused in `do_start` before any
+    /// session/rec file exists, like `noApiKey`, so a host can say
+    /// "dictation is not available here" instead of failing after the user
+    /// spoke. Struct variant for the internally-tagged-enum reason above.
+    #[error("dictation is not available on this platform: {message}")]
+    UnsupportedPlatform { message: String },
     /// `SecretStore`/`ConsentStore` IO or (de)serialization error.
     #[error("secret/consent store error: {message}")]
     Store { message: String },
@@ -155,6 +164,8 @@ mod tests {
         assert_eq!(value, serde_json::json!({"kind": "notFound", "message": "no config.db"}));
         let value = serde_json::to_value(PluginError::NoApiKey { message: "set a provider first".to_string() }).unwrap();
         assert_eq!(value, serde_json::json!({"kind": "noApiKey", "message": "set a provider first"}));
+        let value = serde_json::to_value(PluginError::UnsupportedPlatform { message: "android".to_string() }).unwrap();
+        assert_eq!(value, serde_json::json!({"kind": "unsupportedPlatform", "message": "android"}));
     }
 
     #[test]

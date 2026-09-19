@@ -115,6 +115,13 @@ pub trait AudioCapture: Send + Sync {
     /// self-cap check ever runs (iOS's `AVAudioConverter` output, Task 8)
     /// needs no such scaling and can compare directly.
     fn start(&self, path: &Path, cap_samples: usize) -> Result<(), CaptureError>;
+    /// `Some(why)` when this backend can NEVER record on the platform it was
+    /// built for (`UnsupportedCapture`); `do_start` refuses up front with
+    /// `PluginError::UnsupportedPlatform` — no session slot, no rec file, no
+    /// mic prompt. Real backends and the test double return `None`.
+    fn unsupported_reason(&self) -> Option<String> {
+        None
+    }
     /// Stop and finalize the WAV file, returning capture statistics.
     fn stop(&self) -> Result<CaptureStats, CaptureError>;
     /// Current level channel — `None` until the first sample after `start`.
@@ -489,6 +496,55 @@ impl BlockingLatch {
             let _ = rx.recv();
         }
     }
+}
+
+/// The capture "backend" for a platform this crate has no real backend on
+/// (today: Android — desktop has `CpalCapture` behind the `desktop` feature,
+/// iOS has `mobile::IosCapture`). Every operation refuses; `do_start` asks
+/// `unsupported_reason()` first so the refusal is a typed
+/// `unsupportedPlatform` error BEFORE any session exists. This replaces the
+/// old habit of handing production hosts the `MockCapture` test double
+/// (naked/Android, found 2026-09-19): a double that silently "records"
+/// nothing is a lie a host cannot detect; this is a refusal it can show.
+pub struct UnsupportedCapture {
+    platform: &'static str,
+    rx: watch::Receiver<Option<LevelSample>>,
+    _tx: watch::Sender<Option<LevelSample>>,
+}
+
+impl UnsupportedCapture {
+    pub fn new(platform: &'static str) -> Self {
+        let (tx, rx) = watch::channel(None);
+        Self { platform, rx, _tx: tx }
+    }
+
+    pub fn for_this_platform() -> Self {
+        Self::new(std::env::consts::OS)
+    }
+
+    fn reason(&self) -> String {
+        format!("no audio capture backend for {} in this build", self.platform)
+    }
+}
+
+impl AudioCapture for UnsupportedCapture {
+    fn start(&self, _path: &Path, _cap_samples: usize) -> Result<(), CaptureError> {
+        Err(CaptureError::Backend(self.reason()))
+    }
+
+    fn unsupported_reason(&self) -> Option<String> {
+        Some(self.reason())
+    }
+
+    fn stop(&self) -> Result<CaptureStats, CaptureError> {
+        Err(CaptureError::NotRunning)
+    }
+
+    fn level_rx(&self) -> watch::Receiver<Option<LevelSample>> {
+        self.rx.clone()
+    }
+
+    fn reset(&self) {}
 }
 
 #[cfg(test)]
