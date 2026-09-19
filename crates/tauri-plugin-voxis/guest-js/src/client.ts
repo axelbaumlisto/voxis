@@ -73,6 +73,7 @@ export interface VoxisClient {
    * `source: "manual"`.
    */
   setProvider(opts: { apiKey: string | null; apiUrlOverride: string | null; model: string | null }): Promise<ImportSummary>;
+  /** `{key: ""}` disarms the desktop hotkey entirely (the host's "plugin off" switch); any other key arms it. */
   setHotkey(spec: HotkeySpec): Promise<void>;
   setConsent(consented: boolean): Promise<void>;
   holdLease(id: SessionId): Promise<void>;

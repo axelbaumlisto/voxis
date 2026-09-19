@@ -273,6 +273,19 @@ impl RdevHotkey {
     /// listener first" here means the old target stops matching the
     /// instant the swap lands, not that the OS thread exits).
     pub fn set_hotkey(&self, spec: &HotkeySpec) -> Result<(), PluginError> {
+        // An EMPTY key disarms (owner 2026-09-19: a host must be able to switch
+        // the plugin off — e.g. a Mac that already runs the full Voxis app,
+        // where a second global-hotkey consumer is at best a duplicate and
+        // at worst a conflict). With no tracker the listener thread — if one
+        // was ever spawned; `rdev::listen` cannot be stopped — matches
+        // nothing and touches nothing (the module doc's keylogger rule holds
+        // by construction: no target key, no observable path). Never spawns
+        // a listener for a disarm, so a host that starts disabled has no OS
+        // hook at all.
+        if !voxis_core::hotkey::hotkey_is_configured(&spec.key) {
+            *self.tracker.lock().unwrap() = None;
+            return Ok(());
+        }
         let target = parse_hotkey_spec(&spec.key)?;
         *self.tracker.lock().unwrap() = Some(HotkeyTracker::new(target, spec.mode));
 
@@ -552,6 +565,20 @@ mod tests {
             t.on_key_release(Key::F5);
         }
         assert_eq!(*actions.pressed.lock().unwrap(), vec![Mode::Hold, Mode::Toggle, Mode::Toggle], "two physical taps of a toggle hotkey must flip twice");
+    }
+
+    /// Owner 2026-09-19 (host-side "plugin off" switch): an empty key
+    /// disarms — no tracker, no listener spawned when none ran before, and
+    /// a re-arm afterwards works like a first arm.
+    #[test]
+    fn empty_key_disarms_without_spawning_a_listener_and_rearm_works() {
+        let events = Arc::new(crate::events::RecordingSink::new());
+        let hotkey = RdevHotkey::new(Arc::new(RecordingActions::new()), events);
+        hotkey.set_hotkey(&spec("", Mode::Hold)).unwrap();
+        assert!(hotkey.tracker.lock().unwrap().is_none(), "disarmed: no target to match");
+        assert!(!hotkey.started.load(Ordering::SeqCst), "a disarm must not start the OS listener");
+        hotkey.set_hotkey(&spec("   ", Mode::Hold)).unwrap();
+        assert!(!hotkey.started.load(Ordering::SeqCst));
     }
 
     #[test]
