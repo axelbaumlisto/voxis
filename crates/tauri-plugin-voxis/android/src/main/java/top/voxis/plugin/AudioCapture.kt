@@ -146,7 +146,7 @@ class VoxisAudioCapture(
     private var fixtureSamples: ShortArray? = null
     private var fixtureCursor = 0
 
-    /** 44-byte-header 16 kHz mono PCM16 only -- the format `WavWriter` writes and `fixtures/audio/*.wav` are in. */
+    /** 44-byte-header 16 kHz mono PCM16 only -- the format `WavWriter` writes and the fixtures under fixtures/audio are in. */
     private fun decodeFixture(f: File): ShortArray {
         val bytes = f.readBytes()
         require(bytes.size >= 44 && String(bytes, 0, 4, Charsets.US_ASCII) == "RIFF") { "not a RIFF WAV" }
