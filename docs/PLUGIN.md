@@ -142,15 +142,52 @@ must re-consent before dictating to a newly-pointed provider.
   release time in `release.yml`'s macOS-VM lane (see the CHANGELOG/CI
   notes below).
 
+- **Android** (C1–C3, 2026-09-19): `android/` is the third implementation
+  of the ONE mobile contract `src/mobile.rs` speaks (`startCapture` /
+  `stopCapture` / `resetCapture`, reject codes `ALREADY_RUNNING` /
+  `NOT_RUNNING` / `PERMISSION_DENIED` / `INTERRUPTED` / `BACKEND`, 250 ms
+  level ticks `{rms, peak, muted, capHit}`): `VoxisPlugin.kt` (`@TauriPlugin`,
+  `RECORD_AUDIO` requested inside the first `startCapture` through Tauri's
+  permission alias and answered on the same `Invoke`), `AudioCapture.kt`
+  (`AudioRecord` 16 kHz mono PCM16 `VOICE_RECOGNITION` on one
+  `HandlerThread`: read loop + tick, peak-of-10-ms-RMS levels, hard
+  self-cap, 2-window near-silent mute heuristic), `AudioMath.kt`
+  (`LevelMath`/`WindowPeakAccumulator`/`WavWriter`, byte-for-byte the
+  Swift and Rust rules) with `AudioMathTest.kt` pinning the SAME fixture
+  numbers as the Swift XCTests and `pure.rs` (JUnit, plain JVM — runs as
+  `./gradlew :tauri-plugin-voxis:testDebugUnitTest` inside any host's
+  generated Android project, 12 tests). Gates: `cargo check --target
+  aarch64-linux-android` on every push (`ci.yml`, runner-host NDK — `ring`'s
+  build script needs a target clang even for `check`), `scripts/tag-plugin.sh`
+  before any `plugin-v*` tag, and naked's stand scenario
+  `tests/android-e2e/scenarios/V1-dictation-fake-stt.sh` (fixture mic →
+  Kotlin → Rust → `voxis-fake-stt` → transcript in a real tmux pane).
+  **Debug-only capture fixture**: a debuggable host APK with
+  `<external-files>/voxis-capture-fixture.wav` (16 kHz mono PCM16, 44-byte
+  header) streams that file in real time instead of the microphone and
+  hands its bytes back verbatim on `stop` — desktop's scripted `MockCapture`
+  semantics, so `voxis-fake-stt`'s sha map matches; release builds never
+  look at the file. Two host-integration facts learned on the stand: (1) a
+  plugin registered from inside the host's `setup` (`AppHandle::plugin`)
+  can DEADLOCK an Android app at launch — `register_android_plugin` waits
+  for the main thread to construct the Kotlin class while the main thread
+  waits in `WebviewManager::prepare_webview` for a lock the setup thread
+  holds; register at builder time (naked: `DeferredVoxisSecretStore` binds
+  the store's path in `setup` instead). (2) Kotlin nests block comments — a
+  path glob like `dir/*.wav` inside a doc comment opens one.
+
 ## Known limitations / follow-ups
 
 Carried forward from the plan's own Follow-ups section
 (`.pi/plans/tauri-plugin-voxis.md`) — current as of this document, not
 exhaustive of every minor:
 
-- **Android**: no plugin implementation exists. The contract (commands/
-  events/`AudioCapture`/`SecretStore` traits) was designed with a future
-  Kotlin `AudioRecord` implementation in mind but nothing is built.
+- **Android** (C1, `plugin-v0.6.0`, 2026-09-19): implemented — see the
+  "Android" section under Tests / gates. Not implemented on Android: a
+  global-hotkey backend (no OS-level global keys), the Live Activity
+  analogue, background recording (the host's Activity must be in the
+  foreground; a Foreground Service with a mic type is a separate decision),
+  and any auto-type into other apps (no Accessibility Service).
 - **On-device transcription**: `TranscriptionEngine` trait + iOS 26
   `DictationTranscriber` (not `SpeechTranscriber` — `ru_RU` is absent from
   the latter's `supportedLocales` as of macOS 26.6.2, confirmed by a
