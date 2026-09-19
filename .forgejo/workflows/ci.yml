@@ -153,7 +153,7 @@ jobs:
               echo "=== [required] clippy -D warnings (voxis-core + tauri-plugin-voxis only) ===" &&
               cargo clippy -p voxis-core -p tauri-plugin-voxis --all-targets -- -D warnings &&
               echo "=== [required] guest-js build + test ===" &&
-              (cd crates/tauri-plugin-voxis/guest-js && bun install --frozen-lockfile && bun run build && bun run test) &&
+              (cd crates/tauri-plugin-voxis/guest-js && bun install --frozen-lockfile && bun run build && bun run test)
             '
 
       # B2 (2026-09-19): the mobile half of the plugin (`src/mobile.rs`,

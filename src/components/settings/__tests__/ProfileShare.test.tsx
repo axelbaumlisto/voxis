@@ -63,11 +63,11 @@ beforeEach(() => {
 describe("ProfileShare", () => {
   it("loads and renders the interface dropdown", async () => {
     render(<ProfileShare label="Share profile to device" />);
-    await waitFor(() => {
-      expect(listShareInterfacesMock).toHaveBeenCalledTimes(1);
-    });
-    expect(screen.getByText("en0 (192.168.1.42)")).toBeTruthy();
+    // The mock resolving and React committing the list are two ticks apart
+    // under load; CI runs 160/162 failed on a getByText fired between them.
+    expect(await screen.findByText("en0 (192.168.1.42)")).toBeTruthy();
     expect(screen.getByText("en1 (10.0.0.5)")).toBeTruthy();
+    expect(listShareInterfacesMock).toHaveBeenCalledTimes(1);
   });
 
   it("starting a session calls startProfileShare and renders the QR + code", async () => {
