@@ -111,6 +111,15 @@ mod tests {
         assert_eq!(parse_secure_input_pid(r#""kCGSSessionSecureInputPID"=abc"#), None);
     }
 
+    /// Manual probe: `cargo test secure_input_live_probe -- --ignored --nocapture`
+    /// while a Terminal `sudo` prompt is open should print `enabled: true`
+    /// with Terminal as the holder; with nothing holding it, `OFF`.
+    #[test]
+    #[ignore]
+    fn secure_input_live_probe() {
+        println!("{:?}", check_secure_input());
+    }
+
     #[test]
     fn off_is_the_all_none_status() {
         assert_eq!(SecureInputStatus::OFF, SecureInputStatus { enabled: false, holder_pid: None, holder_name: None });
