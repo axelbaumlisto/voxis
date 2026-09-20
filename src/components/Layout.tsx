@@ -71,11 +71,21 @@ function Layout() {
   }, []);
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      if (document.visibilityState === "hidden") return;
-      checkSecureInput().then(setSecureInput, () => setSecureInput(null));
-    }, 5000);
-    return () => window.clearInterval(id);
+    const poll = () => checkSecureInput().then(setSecureInput, () => setSecureInput(null));
+    // Poll unconditionally (the call is microseconds): a WKWebView in an
+    // occluded window reports `visibilityState === "hidden"`, and gating on
+    // it left the banner stale until the next poll AFTER the window came
+    // back — the state must already be right the moment the user looks.
+    const id = window.setInterval(poll, 5000);
+    // ...and re-read the instant the window becomes visible again.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   useEffect(() => {

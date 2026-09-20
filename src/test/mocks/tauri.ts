@@ -232,6 +232,8 @@ export function setupDefaultMocks() {
           { name: "Accessibility", status: "granted", description: "Required for global hotkey detection" },
           { name: "Microphone", status: "granted", description: "Required for audio recording" },
         ];
+      case "check_secure_input":
+        return { enabled: false, holder_pid: null, holder_name: null };
       case "open_permission_settings":
         return undefined;
       case "request_microphone_permission":

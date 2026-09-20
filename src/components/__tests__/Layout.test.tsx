@@ -337,3 +337,29 @@ describe("Layout", () => {
     });
   });
 });
+
+describe("Layout — D3 Secure Input banner wiring", () => {
+  it("shows the banner as soon as check_secure_input reports enabled (mount poll), names the holder, and drops it when it turns off (5 s poll, runs even while hidden)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let enabled = true;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_secure_input") return { enabled, holder_pid: 812, holder_name: "Terminal" };
+      if (cmd === "check_permissions") return [];
+      if (cmd === "get_config") return { ...mockConfig };
+      return undefined;
+    });
+    renderLayout();
+    await waitFor(() => expect(screen.getByTestId("secure-input-banner")).toBeInTheDocument());
+    expect(screen.getByTestId("secure-input-banner").textContent).toContain("Terminal");
+
+    // The window is occluded (WKWebView reports hidden) — the poll must still run.
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    enabled = false;
+    await act(async () => {
+      vi.advanceTimersByTime(5100);
+    });
+    await waitFor(() => expect(screen.queryByTestId("secure-input-banner")).not.toBeInTheDocument());
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    vi.useRealTimers();
+  });
+});
