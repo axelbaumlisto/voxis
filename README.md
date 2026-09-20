@@ -11,6 +11,10 @@ Zero-lag native hotkeys, Rust CPAL audio core, and a Whisper-compatible transcri
 - **Testing**: Vitest + Cargo test + Playwright E2E
 - **License**: MIT
 
+## Privacy: where the audio goes
+
+By default, recorded audio is sent to Groq's cloud API for transcription using a Whisper-compatible client — audio leaves your machine on every recording. If you need fully local processing, you can point Voxis at any OpenAI-compatible `/audio/transcriptions` endpoint (e.g. a self-hosted whisper.cpp or `speaches` container) by setting the provider option `api_url_override` (the `apiUrlOverride` field of the provider settings); once that is set, no audio reaches Groq or any other third-party server. See [SECURITY.md](SECURITY.md) for credential and data-storage guidance.
+
 ## Documentation
 
 Published docs: <https://docs.voxis.top/>
