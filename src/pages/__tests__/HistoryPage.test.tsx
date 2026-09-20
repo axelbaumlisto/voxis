@@ -94,11 +94,16 @@ describe("HistoryPage", () => {
     const copyButtons = screen.getAllByRole("button", { name: /copy/i });
     fireEvent.click(copyButtons[0]);
 
-    await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith(
-        "Hello, this is a test transcription."
-      );
-    });
+    // The call itself is synchronous inside the click handler; the wait only
+    // covers React's commit. 5 s, not the 1 s default: this test flaked in
+    // CI (voxis runs 160/162) and locally under load avg >100 purely from
+    // worker starvation — the assertion never failed on a fresh machine.
+    await waitFor(
+      () => {
+        expect(writeText).toHaveBeenCalledWith("Hello, this is a test transcription.");
+      },
+      { timeout: 5000 },
+    );
   });
 
   it("shows copied toast after copying", async () => {
