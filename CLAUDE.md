@@ -14,6 +14,10 @@ bun install
 
 # Run development server with Tauri
 bun run tauri dev
+# NOTE: a plain `cargo build --bin voice` + `./target/debug/voice` does NOT
+# use the vite dev server — without `tauri dev`'s `dev` cfg the binary embeds
+# `dist/` as built at compile time. Run `bun run build` first or you test a
+# stale frontend (2026-09-20: a July dist hid a working feature for an hour).
 
 # Run frontend tests
 bun run test:run

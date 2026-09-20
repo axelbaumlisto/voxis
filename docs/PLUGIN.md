@@ -183,6 +183,45 @@ must re-consent before dictating to a newly-pointed provider.
   the store's path in `setup` instead). (2) Kotlin nests block comments — a
   path glob like `dir/*.wav` inside a doc comment opens one.
 
+- **Host-side machine gates (naked, 2026-09-19/20)** — the plugin is only as
+  good as its integration, and these run the REAL vendored element / the
+  REAL device:
+  - `tests/ui/voxisPillOneOwnerOfPosition.touch.spec.ts` — pill on the
+    host's ring after load / viewport shrink+grow / expanded→compact / a
+    re-anchor while recording; exactly one element.
+  - `tests/ui/voxisEveryThemeMounts.spec.ts` — every theme in the Settings
+    selector mounts while recording, no page/console errors, pill back on
+    the ring.
+  - `tests/ui/voxisPluginSwitch.spec.ts` — the on/off switch: off = pill
+    gone + `set_hotkey` with an empty key (disarmed) + group collapsed;
+    survives a reload; on = pill back, hotkey re-armed.
+  - `scripts/ios-sim-e2e.sh` — iOS Simulator, no hands, no microphone:
+    capture fixture → Swift → Rust → `voxis-fake-stt` → transcript in an
+    sshd container's tmux pane; CDP through `ios_webkit_debug_proxy` on the
+    LIVE `webinspectord_sim` socket with the iOS 26 Target-multiplexed
+    protocol (`scripts/sim-cdp-client.py`).
+  - `scripts/ios-device-pill-drag.sh` — the physical iPad: WDA
+    `dragfromtoforduration` (taps on the WebView are inert; this is not)
+    drags the pill to the middle, into a corner and back, drift 0 each time,
+    placement persisted across a relaunch.
+  - `tests/android-e2e/scenarios/V1-dictation-fake-stt.sh` — the Android
+    emulator stand (see "Android" above).
+
+- **The five ways the pill and its ring came apart** (all found on real
+  devices in two days; each fixed at its root, each now a test):
+  1. a mount promise resolving after cleanup left an orphan element;
+  2. the vendor re-clamped itself on viewport changes while the host owned
+     placement (guest-js 0.5.1: no self-move in host mode);
+  3. the element was born at a pre-layout anchor and a no-op effect never
+     re-applied the settled one;
+  4. `setPosition` while expanded clamped the compact anchor as the expanded
+     top-left and restored to a stale spot on stop (guest-js 0.7.0);
+  5. at the bottom edge the host clamped without `env(safe-area-inset-bottom)`
+     (the CSS var it read was consumed but never defined) while the vendor
+     measured `env()` — 25 px apart, corner only.
+  The invariant that survives: ONE owner of the compact position (the host),
+  `drift = 0` between ring and pill whenever compact.
+
 ## Known limitations / follow-ups
 
 Carried forward from the plan's own Follow-ups section

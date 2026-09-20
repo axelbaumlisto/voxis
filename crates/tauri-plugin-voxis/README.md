@@ -30,14 +30,26 @@ dependency against this repo's private Forgejo remote (`zverozabr/voxis`,
 ```toml
 # host's src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-voxis = { git = "https://clipshot.cc/git/zverozabr/voxis.git", rev = "<commit>", features = ["desktop"] }
-voxis-core = { git = "https://clipshot.cc/git/zverozabr/voxis.git", rev = "<commit>" }
+tauri-plugin-voxis = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.6.1", features = ["desktop"] }
+voxis-core = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.6.1" }
 ```
 
-- Pin by commit `rev`, not a branch — this crate has no crates.io releases
-  and no semver guarantees between commits yet. Until the tag lands pin by
-  `rev`; the tag `plugin-v0.1.0` will mark the first hosted release
-  (naked).
+- **Pin by a `plugin-v*` tag** (current: `plugin-v0.6.1`; naked pins it in
+  `src-tauri/Cargo.toml`). Tags are cut ONLY by `scripts/tag-plugin.sh
+  <X.Y.Z> "<msg>"`, which runs the desktop tests + clippy, the guest-js
+  build/tests, the iOS cross-build + Swift tests and (where an NDK exists)
+  the Android `cargo check` first — and they are immutable: a bad tag costs
+  the next patch number, never a re-push (`plugin-v0.3.0` → `0.3.1`,
+  `0.5.0` → `0.5.1` both happened). The JS half (`guest-js`,
+  `@voxis/tauri-plugin-voxis`) has its OWN version (0.7.0 today) and reaches
+  a host as a vendored `bun pm pack` tarball — see "guest-js" below.
+- **How an update reaches a device.** There is no plugin "file" on a phone
+  or a Mac: the Rust crate is compiled INTO the host app and the guest-js is
+  bundled into its frontend. A new plugin version reaches users only inside
+  a new host build — bump the tag (and the vendored tarball if guest-js
+  changed) → build → deploy. The only thing that travels separately is the
+  user's PROFILE (API key/provider), via `.vxp` file or QR, and that is
+  data, not code.
 - **Forgejo repo is private** — a CI/CD host that clones a Cargo git
   dependency (rather than building on a developer machine with existing SSH
   keys/tokens) needs its own credentials (PAT secret, git submodule with
@@ -327,7 +339,11 @@ Typed API + a `<voxis-overlay>` web component. See `guest-js/README.md` for
 the full API surface (`createClient`, `mountOverlay`, `HotkeyMachine`,
 driver modes) and `docs/THEMES.md`'s "Appendix: `tauri-plugin-voxis`'s own
 `<voxis-overlay>`" for the theme-engine reuse. Currently versioned
-`0.1.1` — bump this **and re-vendor** (tarball or npm dependency) on every
+`0.7.0` (0.7.0: in `driver:"host"` mode `setPosition` means "the compact
+pill rests here" in EVERY lifecycle state — expanded is placed as a grow
+from that spot and the next shrink lands on it; 0.5.1: no self-move on
+viewport changes in host mode; 0.6.0: the Siri/Shortcuts intent relay
+removed). Bump this **and re-vendor** (tarball or npm dependency) on every
 guest-js change; a host vendoring a prebuilt `.tgz` (as naked currently
 does) must bump the tarball filename/version on every rebuild, or a stale
 bundle silently ships (build caches — bun/vite — do not invalidate on a
@@ -422,8 +438,9 @@ Carried over verbatim from the plan's own Follow-ups section
 - Live Activity/Dynamic Island (`docs/PLUGIN_IOS_HOST.md`'s `[T9a]`
   section) is implemented and unit-tested but **not yet verified on a real
   device end-to-end** — that is Task 9b in the plan, still open.
-- Android has no plugin implementation at all — out of scope for this
-  crate's current design (see the plan's Follow-ups).
-
-Until the tag lands pin by `rev`; the tag `plugin-v0.1.0` will mark the
-first hosted release (naked).
+- Android: implemented since `plugin-v0.6.0` (Kotlin `AudioRecord` backend
+  behind the same mobile bridge as iOS; `docs/PLUGIN.md` "Android"). Not on
+  Android: a global-hotkey backend, a Live Activity analogue, background
+  recording, auto-typing into other apps.
+- Live Activity/Dynamic Island: implemented; the lock-screen card and its
+  Stop button remain an owner-eyes check on a real iPad (no machine oracle).

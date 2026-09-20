@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased (Voxis desktop)
+
+### Fix
+- **Secure Input banner could stay stale in an occluded window.** WKWebView
+  reports `document.visibilityState === "hidden"` while the window is covered,
+  and the 5 s poll skipped that case — so the banner reflected the state from
+  before the window was covered until the next poll after it came back
+  (seen once on 0.1.8: Secure Input on, Voxis brought forward, no banner). The
+  poll now runs unconditionally (microseconds) and re-reads on
+  `visibilitychange`. Verified on-screen: dialog with a password field →
+  banner names `osascript (pid …)` in a window nobody activated; dialog closed
+  → banner gone within one poll.
+- `HistoryPage` clipboard test flaked from worker starvation under load;
+  its assertion now waits 5 s instead of 1.
+
 ## v0.1.8 (Voxis desktop)
 
 ### Add
