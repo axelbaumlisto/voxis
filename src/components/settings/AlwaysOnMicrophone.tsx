@@ -12,6 +12,7 @@
  * not yet honour the flag (the cpal stream is dropped on stop()), so
  * we display an informational note instead of the misleading warning.
  */
+import { useTranslation } from "react-i18next";
 import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
 import { isMac } from "./platformUtils";
 
@@ -34,46 +35,57 @@ export default function AlwaysOnMicrophone({
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <AlwaysOnMicCheckbox label={label} value={value} onChange={onChange} />
         {mac && value && (
-          <div
-            data-testid="always-on-microphone-warning"
-            role="note"
-            style={{
-              padding: "8px 12px",
-              border: "1px solid #b08300",
-              borderRadius: 4,
-              background: "rgba(255, 196, 0, 0.08)",
-              // em: parent-relative secondary hint; no px token (would change computed size)
-              fontSize: "0.85em",
-              lineHeight: 1.4,
-            }}
-          >
-            <strong>⚠ Privacy note.</strong> The capture device stays
-            active between hotkey presses for zero-latency first sample.
-            <strong> Audio is NEVER buffered or sent to the cloud unless
-            you actively trigger the hotkey.</strong> Battery use will be
-            slightly higher (the mic chip never enters low-power state).
-          </div>
+          <PrivacyNote />
         )}
         {!mac && (
-          <div
-            data-testid="always-on-microphone-unsupported"
-            role="note"
-            style={{
-              padding: "8px 12px",
-              border: "1px solid #888",
-              borderRadius: 4,
-              background: "rgba(128, 128, 128, 0.08)",
-              fontSize: "0.85em",
-              lineHeight: 1.4,
-            }}
-          >
-            This option is not yet honoured on this platform. The capture
-            stream is currently released after each recording, so enabling
-            it has no effect.
-          </div>
+          <UnsupportedNote />
         )}
       </div>
     </FieldWrapper>
+  );
+}
+
+function PrivacyNote() {
+  const { t } = useTranslation();
+  return (
+    <div
+      data-testid="always-on-microphone-warning"
+      role="note"
+      style={{
+        padding: "8px 12px",
+        border: "1px solid #b08300",
+        borderRadius: 4,
+        background: "rgba(255, 196, 0, 0.08)",
+        // em: parent-relative secondary hint; no px token (would change computed size)
+        fontSize: "0.85em",
+        lineHeight: 1.4,
+      }}
+    >
+      <strong>{t("settings.alwaysOnMicrophonePrivacyTitle")}</strong>{" "}
+      {t("settings.alwaysOnMicrophonePrivacyBody")}{" "}
+      <strong>{t("settings.alwaysOnMicrophonePrivacyEmphasis")}</strong>{" "}
+      {t("settings.alwaysOnMicrophonePrivacyBattery")}
+    </div>
+  );
+}
+
+function UnsupportedNote() {
+  const { t } = useTranslation();
+  return (
+    <div
+      data-testid="always-on-microphone-unsupported"
+      role="note"
+      style={{
+        padding: "8px 12px",
+        border: "1px solid #888",
+        borderRadius: 4,
+        background: "rgba(128, 128, 128, 0.08)",
+        fontSize: "0.85em",
+        lineHeight: 1.4,
+      }}
+    >
+      {t("settings.alwaysOnMicrophoneUnsupported")}
+    </div>
   );
 }
 

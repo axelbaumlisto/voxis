@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import AlwaysOnMicrophone from "../AlwaysOnMicrophone";
+import en from "../../../i18n/locales/en.json";
 
 function setPlatform(platform: string) {
   Object.defineProperty(navigator, "platform", {
@@ -152,5 +153,38 @@ describe("AlwaysOnMicrophone — Windows", () => {
       />,
     );
     expect(screen.queryByTestId("always-on-microphone-warning")).toBeNull();
+  });
+});
+
+describe("AlwaysOnMicrophone — i18n", () => {
+  beforeEach(() => setPlatform("MacIntel"));
+  afterEach(() => setPlatform(""));
+
+  it("privacy note text comes from i18n en keys", () => {
+    render(
+      <AlwaysOnMicrophone
+        label="Always-on microphone"
+        value={true}
+        onChange={() => {}}
+      />,
+    );
+    const note = screen.getByTestId("always-on-microphone-warning");
+    expect(note.textContent).toContain(en.settings.alwaysOnMicrophonePrivacyTitle);
+    expect(note.textContent).toContain(en.settings.alwaysOnMicrophonePrivacyBody);
+    expect(note.textContent).toContain(en.settings.alwaysOnMicrophonePrivacyEmphasis);
+    expect(note.textContent).toContain(en.settings.alwaysOnMicrophonePrivacyBattery);
+  });
+
+  it("unsupported note text comes from i18n en key", () => {
+    setPlatform("Linux x86_64");
+    render(
+      <AlwaysOnMicrophone
+        label="Always-on microphone"
+        value={false}
+        onChange={() => {}}
+      />,
+    );
+    const note = screen.getByTestId("always-on-microphone-unsupported");
+    expect(note.textContent).toContain(en.settings.alwaysOnMicrophoneUnsupported);
   });
 });
