@@ -110,6 +110,8 @@
     "autoSubmitKeyDesc": "Press Enter (or Cmd/Super/Shift + Enter) after the transcription is typed so chat clients send the message without you touching the keyboard.",
     "audioFeedback": "Audio feedback",
     "audioFeedbackDesc": "Short beeps on recording start, stop, and failure so you know the hotkey registered without looking at the overlay.",
+    "audioFeedbackVolume": "Volume",
+    "audioFeedbackEnable": "Enable beeps",
     "overlayBackend": "Overlay",
     "overlayBackendDesc": "Show the on-screen indicator (the animated pill) while recording",
     "overlayBackendRestart": "Requires restart to take effect.",

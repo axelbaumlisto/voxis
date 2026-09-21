@@ -10,6 +10,7 @@
  * onChange that emits the modified shape. The settings page passes
  * one such pair per nested-config key.
  */
+import { useTranslation } from "react-i18next";
 import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
 
 export interface AudioFeedbackProps {
@@ -38,7 +39,7 @@ export default function AudioFeedback({
             opacity: safe.enabled ? 1 : 0.5,
           }}
         >
-          <span style={{ minWidth: 80 }}>Volume</span>
+          <VolumeLabel />
           <input
             type="range"
             min={0}
@@ -59,6 +60,16 @@ export default function AudioFeedback({
       </div>
     </FieldWrapper>
   );
+}
+
+function VolumeLabel() {
+  const { t } = useTranslation();
+  return <span style={{ minWidth: 80 }}>{t("settings.audioFeedbackVolume")}</span>;
+}
+
+function EnableBeepsLabel() {
+  const { t } = useTranslation();
+  return <span>{t("settings.audioFeedbackEnable")}</span>;
 }
 
 /** Inner control: consumes the FieldWrapper id so the label resolves to it. */
@@ -85,7 +96,7 @@ function AudioFeedbackToggle({
         aria-label={label}
         onChange={(e) => onChange({ ...safe, enabled: e.target.checked })}
       />
-      <span>Enable beeps</span>
+      <EnableBeepsLabel />
     </label>
   );
 }

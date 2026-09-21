@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import AudioFeedback from "../AudioFeedback";
+import en from "../../../i18n/locales/en.json";
 
 describe("AudioFeedback", () => {
   it("renders toggle + volume slider", () => {
@@ -53,6 +54,28 @@ describe("AudioFeedback", () => {
       target: { value: "0.85" },
     });
     expect(onChange).toHaveBeenCalledWith({ enabled: true, volume: 0.85 });
+  });
+
+  it("volume label comes from i18n en key", () => {
+    render(
+      <AudioFeedback
+        label="Audio feedback"
+        value={{ enabled: true, volume: 0.5 }}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByText(en.settings.audioFeedbackVolume)).toBeTruthy();
+  });
+
+  it("enable-beeps caption comes from i18n en key", () => {
+    render(
+      <AudioFeedback
+        label="Audio feedback"
+        value={{ enabled: true, volume: 0.5 }}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByText(en.settings.audioFeedbackEnable)).toBeTruthy();
   });
 
   it("falls back to safe defaults when value is undefined", () => {
