@@ -11,17 +11,13 @@
  * onChange} contract used by the rest of the custom widgets.
  */
 import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
+import { isMac } from "./platformUtils";
 
 export interface AutoSubmitSelectorProps {
   label: string;
   description?: string;
   value: string;
   onChange: (value: string) => void;
-}
-
-function isMac(): boolean {
-  if (typeof navigator === "undefined" || !navigator.platform) return false;
-  return navigator.platform.toLowerCase().includes("mac");
 }
 
 const VALUES = ["off", "enter", "cmd_enter", "shift_enter"] as const;

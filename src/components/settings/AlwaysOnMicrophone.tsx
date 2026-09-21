@@ -6,8 +6,14 @@
  * warning copy directly under it: keeping a capture stream warm
  * between recordings has real privacy and battery implications, so the
  * user MUST see them at the point of decision (privacy-by-design).
+ *
+ * On macOS the backend stream is kept alive between recordings, so
+ * the privacy note is accurate. On Linux and Windows the backend does
+ * not yet honour the flag (the cpal stream is dropped on stop()), so
+ * we display an informational note instead of the misleading warning.
  */
 import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
+import { isMac } from "./platformUtils";
 
 export interface AlwaysOnMicrophoneProps {
   label: string;
@@ -22,11 +28,12 @@ export default function AlwaysOnMicrophone({
   value,
   onChange,
 }: AlwaysOnMicrophoneProps) {
+  const mac = isMac();
   return (
     <FieldWrapper label={label} description={description}>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <AlwaysOnMicCheckbox label={label} value={value} onChange={onChange} />
-        {value && (
+        {mac && value && (
           <div
             data-testid="always-on-microphone-warning"
             role="note"
@@ -45,6 +52,24 @@ export default function AlwaysOnMicrophone({
             <strong> Audio is NEVER buffered or sent to the cloud unless
             you actively trigger the hotkey.</strong> Battery use will be
             slightly higher (the mic chip never enters low-power state).
+          </div>
+        )}
+        {!mac && (
+          <div
+            data-testid="always-on-microphone-unsupported"
+            role="note"
+            style={{
+              padding: "8px 12px",
+              border: "1px solid #888",
+              borderRadius: 4,
+              background: "rgba(128, 128, 128, 0.08)",
+              fontSize: "0.85em",
+              lineHeight: 1.4,
+            }}
+          >
+            This option is not yet honoured on this platform. The capture
+            stream is currently released after each recording, so enabling
+            it has no effect.
           </div>
         )}
       </div>
