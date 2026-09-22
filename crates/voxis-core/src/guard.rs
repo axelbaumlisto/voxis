@@ -184,6 +184,12 @@ impl SilenceWindow {
         }
     }
 
+    /// Record one silence-detection poll result into the sliding window.
+    ///
+    /// `is_silent` is `true` when the sampled audio frame was below the
+    /// silence threshold, `false` when it contained audible signal. Once the
+    /// window is full the oldest entry is evicted before the new one is
+    /// appended, keeping the buffer at exactly `capacity` entries.
     pub fn push(&mut self, is_silent: bool) {
         if self.buf.len() == self.capacity {
             self.buf.pop_front();
