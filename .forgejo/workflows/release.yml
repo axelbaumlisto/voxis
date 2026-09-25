@@ -411,11 +411,24 @@ jobs:
 
       - name: restore repo to main
         if: always()
+        # This step used to be three commands each ending in `|| true`. On
+        # 2026-09-25 the persistent worktree's local main turned out to be a
+        # July history with no common ancestor to origin/main; `pull --ff-only`
+        # failed silently on every release since 2026-09-14, the worktree stayed
+        # on the old main, and the publish job's prune step then ran against a
+        # tree in which scripts/prune-release-assets.sh did not exist -- three
+        # releases, three WARN lines, three green runs, 491 MB not freed.
+        #
+        # The worktree is shared state that the next job reads, so leaving it
+        # wrong is not a degraded success. Force it to origin/main and say so
+        # if that changed anything unexpected.
         run: |
-          cd /home/spex/work/voxis 2>/dev/null || exit 0
-          git checkout main 2>/dev/null || true
-          git pull --ff-only origin main 2>/dev/null || true
-          echo "repo restored to main"
+          set -euo pipefail
+          cd /home/spex/work/voxis
+          git fetch --force origin "refs/heads/main:refs/remotes/origin/main"
+          before=$(git rev-parse --short HEAD)
+          git checkout -q -B main origin/main
+          echo "repo restored to main: $before -> $(git rev-parse --short HEAD) (= origin/main)"
 
   # docs regeneration is DECOUPLED from release — see .forgejo/workflows/docs.yml
   # (scheduled + workflow_dispatch). Releasing a binary has nothing to do with
@@ -490,11 +503,20 @@ jobs:
         # until the just-published one is confirmed intact. Forgejo attachments
         # are a duplicate archive (GitHub is the canonical download channel and
         # keeps full history); see scripts/prune-release-assets.sh for why.
+        # No `|| echo WARN` here any more. That clause turned "the script is not
+        # in this tree" into a green run three releases running (see the restore
+        # step in build). The release is already published and verified above,
+        # so a red prune step cannot undo it -- but it can be seen, and an unseen
+        # failure is what let 491 MB accumulate.
         run: |
-          set -uo pipefail
+          set -euo pipefail
           cd /home/spex/work/voxis
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            echo "ERROR: worktree HEAD $(git rev-parse --short HEAD) != origin/main $(git rev-parse --short origin/main); the restore step in build did not do its job"
+            exit 1
+          fi
+          [ -x scripts/prune-release-assets.sh ] || { echo "ERROR: scripts/prune-release-assets.sh missing from $(git rev-parse --short HEAD)"; exit 1; }
           tag="${{ needs.build.outputs.tag }}"
           FORGEJO_API="${GITHUB_SERVER_URL%/}/api/v1/repos/${GITHUB_REPOSITORY}" \
           FORGEJO_TOKEN="${GITHUB_TOKEN}" \
-            bash scripts/prune-release-assets.sh --keep-tag "$tag" --apply || \
-              echo "WARN: release-asset prune failed; disk will grow but the release is intact"
+            bash scripts/prune-release-assets.sh --keep-tag "$tag" --apply
