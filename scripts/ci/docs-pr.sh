@@ -39,13 +39,20 @@ if [ -z "$GH_TOK" ]; then
   marker "SKIPPED — no github.com auth (gh auth token empty)"
   exit 0
 fi
-AUTH_URL="https://x-access-token:${GH_TOK}@github.com/${REPO_SLUG}.git"
+# The token travels in a per-command header, never in the URL. `git clone`
+# writes the remote URL into .git/config verbatim and that file sits at
+# -rw-rw-r-- in a directory every host CI job can read; the previous form
+# left a full-account gho_ token readable on disk between weekly runs, and
+# git remote -v / reflog / error messages would all have echoed it. Same
+# construction docs.yml already uses for the Forgejo fetch.
+CLONE_URL="https://github.com/${REPO_SLUG}.git"
+GH_AUTH_HDR="Authorization: basic $(printf 'x-access-token:%s' "$GH_TOK" | base64 -w0)"
 
 export GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never
 
 # Fresh isolated clone of github main (shallow).
 rm -rf "$WORKDIR"
-if ! timeout 180 git clone --depth 1 "$AUTH_URL" "$WORKDIR" 2>/dev/null; then
+if ! timeout 180 git -c http.extraheader="$GH_AUTH_HDR" clone --depth 1 "$CLONE_URL" "$WORKDIR" 2>/dev/null; then
   marker "FAILED — could not clone github main"
   exit 0
 fi
@@ -97,7 +104,7 @@ fi
 
 git checkout -b "$BR"
 git commit -q -m "docs: regenerate screenshots + audit fixes ($(date +%Y-%m-%d))"
-if ! timeout 120 git push -u origin "$BR" 2>/dev/null; then
+if ! timeout 120 git -c http.extraheader="$GH_AUTH_HDR" push -u origin "$BR" 2>/dev/null; then
   marker "FAILED — could not push $BR"
   exit 0
 fi
