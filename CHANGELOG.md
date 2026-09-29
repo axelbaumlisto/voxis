@@ -1,5 +1,19 @@
 # Changelog
 
+## @voxis/tauri-plugin-voxis (guest-js) 0.8.0
+
+- **`board: false`**: the expanded window without its dark `#111` board — only
+  the theme is drawn (naked lays the always-shown `idleTheme` window over
+  terminal text; owner 2026-09-29: «доска оверлея совсем прозрачной должна
+  быть»). Default unchanged; the compact handle keeps its fill.
+- **Fix: an `idleTheme` window was born 8px off where it then stayed.**
+  `initialPosition` was the expanded window's top-left, while `setPosition`
+  (0.7.0) means the compact resting spot and grows from it — so the host's
+  first re-anchor to the SAME spot moved the window by the size difference
+  (naked: window 64×64 at x=770 over a 56×56 ring at x=762 after the first
+  viewport change). One rule (`placeAtRest`) now places both. A persisted
+  position keeps its meaning (the pill's own last top-left).
+
 ## Unreleased (Voxis desktop)
 
 ### Fix

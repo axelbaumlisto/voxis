@@ -165,6 +165,14 @@ export interface MountOverlayOptions {
    */
   idleTheme?: boolean;
   /**
+   * Default `true`: the expanded window sits on a dark board (`#111`). Pass
+   * `false` for a host that lays the always-shown window (`idleTheme`) OVER
+   * its own content — only the theme is drawn, the board is transparent
+   * (naked, owner 2026-09-29: «доска оверлея совсем прозрачной должна
+   * быть»). The compact handle (ring + dot) keeps its fill either way.
+   */
+  board?: boolean;
+  /**
    * Injectable theme module (tests/harness), same spirit as `client`
    * above — bypasses `themes/registry.ts`'s `resolveTheme` entirely
    * (no real theme, e.g. WebGL, ever mounts) while `theme` still governs
@@ -183,6 +191,7 @@ interface OverlayConfig {
   driver: "client" | "host";
   client: VoxisClient | undefined;
   idleTheme: boolean;
+  board: boolean;
   themeModule: ThemeModule | undefined;
 }
 
@@ -265,6 +274,7 @@ export class VoxisOverlayElement extends HTMLElement {
         padding: 0;
         z-index: 2147483647;
       }
+      .pill.no-board.state-expanded { background: transparent; }
       .pill.state-compact {
         border: 2px solid rgba(255, 255, 255, 0.35);
       }
@@ -304,7 +314,7 @@ export class VoxisOverlayElement extends HTMLElement {
     `;
 
     this.pillEl = document.createElement("button");
-    this.pillEl.className = "pill";
+    this.pillEl.className = config.board ? "pill" : "pill no-board";
     this.pillEl.type = "button";
     this.pillEl.setAttribute("aria-label", "Voxis dictation");
 
@@ -369,11 +379,21 @@ export class VoxisOverlayElement extends HTMLElement {
     // Initial position — `env(safe-area-inset-*)` isn't computable until
     // connected (needs `document.body`); harmless default (bottom-right,
     // clamped) until the first `reposition()`.
-    const initial =
-      loadPosition(config.storageKey) ?? resolveInitialPosition(config.initialPosition, this.currentSize(), readEffectiveViewport());
-    const clamped = clampToViewport(initial, this.currentSize(), this.safeArea(), readEffectiveViewport());
-    this.pillEl.style.left = `${clamped.x}px`;
-    this.pillEl.style.top = `${clamped.y}px`;
+    // A persisted spot is where the pill itself last stood (a drag/snap
+    // saves the pill's own top-left); anything else is the compact RESTING
+    // spot, placed by the same rule `setPosition` uses — so an `idleTheme`
+    // window is born grown from that spot, exactly where the host's first
+    // re-anchor will put it (before: born with the spot as its top-left,
+    // then jumped by the size difference on the first `setPosition` —
+    // naked 2026-09-29, 8px off the ring after the first viewport change).
+    const persisted = loadPosition(config.storageKey);
+    if (persisted) {
+      const clamped = clampToViewport(persisted, this.currentSize(), this.safeArea(), readEffectiveViewport());
+      this.pillEl.style.left = `${clamped.x}px`;
+      this.pillEl.style.top = `${clamped.y}px`;
+    } else {
+      this.placeAtRest(resolveInitialPosition(config.initialPosition, COMPACT_SIZE, readEffectiveViewport()));
+    }
 
     this.wireViewportReflow();
   }
@@ -448,6 +468,12 @@ export class VoxisOverlayElement extends HTMLElement {
    */
   setPosition(p: Point): void {
     if (!this.pillEl || !this.config) return;
+    this.placeAtRest(p);
+  }
+
+  /** `p` is the compact resting spot: recorded, and the pill placed on it (compact) or grown from it (expanded). The one rule for the initial placement and every `setPosition`. */
+  private placeAtRest(p: Point): void {
+    if (!this.pillEl) return;
     const compact = clampToViewport(p, COMPACT_SIZE, this.safeArea(), readEffectiveViewport());
     this.compactPosition = compact;
     const placed =
@@ -772,6 +798,7 @@ export function mountOverlay(container: HTMLElement = document.body, options: Mo
     // only reached in `driver: "client"` mode.
     client: driver === "host" ? options.client : options.client ?? createClient(),
     idleTheme: options.idleTheme ?? false,
+    board: options.board ?? true,
     themeModule: options.themeModule,
   });
   container.appendChild(el);

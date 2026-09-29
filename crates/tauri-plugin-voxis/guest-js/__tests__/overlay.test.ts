@@ -881,6 +881,30 @@ describe("<voxis-overlay> live seams setPosition/setTheme [T3]", () => {
     expect(parseFloat(pill.style.top)).toBe(20);
   });
 
+  it("idleTheme: the window is BORN where setPosition would put it — initialPosition is the compact resting spot, grown from, not the window's top-left (naked 2026-09-29: 8px off the ring after the first re-anchor)", () => {
+    const { module } = countingThemeModule();
+    const spot = { x: 300, y: window.innerHeight - COMPACT_SIZE.height - 10 };
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, idleTheme: true, initialPosition: spot });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+    const born = { x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) };
+    expect(born).toEqual(growToExpandedPosition(spot, { width: 120, height: 120 }, { top: 0, right: 0, bottom: 0, left: 0 }, readEffectiveViewport()));
+
+    el.setPosition(spot); // the host's re-anchor to the SAME spot does not move it
+    expect({ x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) }).toEqual(born);
+  });
+
+  it("board: false — the expanded window has no board (class no-board, transparent in the shadow style); the default keeps it", () => {
+    const { module } = countingThemeModule();
+    const bare = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, idleTheme: true, board: false });
+    const barePill = bare.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+    expect(barePill.classList.contains("no-board")).toBe(true);
+    expect(bare.shadowRoot!.querySelector("style")!.textContent).toContain(".pill.no-board.state-expanded { background: transparent; }");
+    bare.remove();
+
+    const boarded = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, idleTheme: true });
+    expect((boarded.shadowRoot!.querySelector(".pill") as HTMLButtonElement).classList.contains("no-board")).toBe(false);
+  });
+
   it("setTheme while compact only records the new theme/size (no mount, no resize event); the next expansion adopts it", () => {
     const { module, calls } = countingThemeModule();
     const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });

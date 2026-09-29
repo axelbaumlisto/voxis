@@ -168,6 +168,17 @@ webview unmodified).
   `driver: "host"`.
 - `idleTheme?: boolean` (default `false`) — see "Compact/expanded
   lifecycle" below.
+- `board?: boolean` (default `true`) — `false` drops the dark board under
+  the expanded window (0.8.0): only the theme is drawn, for a host that lays
+  an always-shown window (`idleTheme`) over its own content. The compact
+  handle keeps its fill.
+
+`initialPosition` is the compact RESTING spot in every lifecycle (0.8.0),
+the same meaning `setPosition` has had since 0.7.0: an `idleTheme` window is
+born grown from it, where the host's first `setPosition` to the same spot
+leaves it (0.7.0 placed the window's top-left there, and the first
+re-anchor then moved it by the size difference). A persisted position is
+still the pill's own last top-left.
 
 ### Compact/expanded lifecycle (theme-sized overlay)
 
