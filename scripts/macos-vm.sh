@@ -247,15 +247,40 @@ cmd_naked() {
   wait_for_ssh
 }
 
+# The VM builds the COMMITTED tree, never the working copy. The host
+# checkout at /home/spex/work/voxis is shared with every other job on this
+# machine, and v0.1.9 + v0.1.10 (2026-10-06) both shipped without macOS
+# because something on the host rewrote src-tauri/Cargo.toml (dropping
+# `macos-private-api`) seconds after the release job checked the tag out —
+# the tarball picked that up and `transparent()` failed to compile in the VM.
+# `git archive HEAD` is exactly the tag's bytes, whatever the working tree
+# looks like; any difference is printed so the culprit is at least visible.
+sync_source_tarball() {
+  local proj_dir="$1"
+  if git -C "$proj_dir" rev-parse --verify HEAD >/dev/null 2>&1; then
+    local dirty; dirty="$(git -C "$proj_dir" status --porcelain --untracked-files=no)"
+    if [[ -n "$dirty" ]]; then
+      echo "::warning::host checkout differs from HEAD — the VM gets HEAD's tree, not these edits:"
+      echo "$dirty"
+      git -C "$proj_dir" --no-pager diff --stat | tail -3
+    fi
+    git -C "$proj_dir" archive --format=tar.gz -o /tmp/voxis-src.tar.gz HEAD
+    echo "source: git archive $(git -C "$proj_dir" rev-parse --short HEAD)"
+  else
+    ( cd "$proj_dir" && tar czf /tmp/voxis-src.tar.gz \
+        --exclude='./target' --exclude='./src-tauri/target' --exclude='./.git' \
+        --exclude='./node_modules' --exclude='./dist' -C "$proj_dir" . )
+    echo "source: working tree (not a git checkout)"
+  fi
+}
+
 cmd_build() {
   local proj_dir; proj_dir="$(cd "$(dirname "$0")/.." && pwd)"
   command -v sshpass >/dev/null || { echo "sshpass required"; exit 1; }
   mkdir -p "$proj_dir/artifacts"
   ssh_vm 'echo ok' >/dev/null 2>&1 || cmd_naked
   echo "Syncing source into VM ..."
-  ( cd "$proj_dir" && tar czf /tmp/voxis-src.tar.gz \
-      --exclude='./target' --exclude='./src-tauri/target' --exclude='./.git' \
-      --exclude='./node_modules' --exclude='./dist' -C "$proj_dir" . )
+  sync_source_tarball "$proj_dir"
   sshpass -p "$VM_PASS" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -P "$SSH_HOST_PORT" /tmp/voxis-src.tar.gz "$VM_USER@localhost:/tmp/"
   ssh_vm 'rm -rf ~/voxis && mkdir -p ~/voxis && tar xzf /tmp/voxis-src.tar.gz -C ~/voxis'
@@ -319,9 +344,7 @@ cmd_build_gui() {
   ssh_vm 'echo ok' >/dev/null 2>&1 || cmd_naked
 
   echo "Syncing source into VM ..."
-  ( cd "$proj_dir" && tar czf /tmp/voxis-src.tar.gz \
-      --exclude='./target' --exclude='./src-tauri/target' --exclude='./.git' \
-      --exclude='./node_modules' --exclude='./dist' -C "$proj_dir" . )
+  sync_source_tarball "$proj_dir"
   sshpass -p "$VM_PASS" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -P "$SSH_HOST_PORT" /tmp/voxis-src.tar.gz "$VM_USER@localhost:/tmp/"
   # Preserve target/ across the wipe: reuses Lane 1's (`build`) compiled
