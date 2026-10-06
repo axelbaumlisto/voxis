@@ -3,7 +3,7 @@ use crate::audio::sync::lock_or_recover;
 use crate::audio::AudioError;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, StreamConfig};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -34,6 +34,7 @@ pub(crate) fn spawn_recording_thread(
     rms_peak_bits: Arc<AtomicU32>,
     max_samples: Arc<AtomicUsize>,
     cap_hit: Arc<AtomicBool>,
+    callbacks: Arc<AtomicU64>,
 ) -> JoinHandle<()> {
     let stream_config: StreamConfig = config.clone().into();
     let channels = stream_config.channels as usize;
@@ -57,6 +58,7 @@ pub(crate) fn spawn_recording_thread(
             rms_peak_bits,
             max_samples,
             cap_hit,
+            callbacks,
         ) {
             Some(s) => s,
             None => return,
@@ -83,6 +85,7 @@ fn build_and_play_stream(
     rms_peak_bits: Arc<AtomicU32>,
     max_samples: Arc<AtomicUsize>,
     cap_hit: Arc<AtomicBool>,
+    callbacks: Arc<AtomicU64>,
 ) -> Option<cpal::Stream> {
     // Wrap build_stream_for_format in catch_unwind to handle cpal panics
     // when microphone permission is denied
@@ -98,6 +101,7 @@ fn build_and_play_stream(
             rms_peak_bits,
             max_samples,
             cap_hit,
+            callbacks,
         )
     }));
 
@@ -203,6 +207,7 @@ fn build_stream_for_format(
     rms_peak_bits: Arc<AtomicU32>,
     max_samples: Arc<AtomicUsize>,
     cap_hit: Arc<AtomicBool>,
+    callbacks: Arc<AtomicU64>,
 ) -> Result<cpal::Stream, AudioError> {
     match format {
         SampleFormat::F32 => build_stream::<f32>(
@@ -215,6 +220,7 @@ fn build_stream_for_format(
             rms_peak_bits,
             max_samples,
             cap_hit,
+            callbacks,
         ),
         SampleFormat::I16 => build_stream::<i16>(
             device,
@@ -226,6 +232,7 @@ fn build_stream_for_format(
             rms_peak_bits,
             max_samples,
             cap_hit,
+            callbacks,
         ),
         SampleFormat::U16 => build_stream::<u16>(
             device,
@@ -237,6 +244,7 @@ fn build_stream_for_format(
             rms_peak_bits,
             max_samples,
             cap_hit,
+            callbacks,
         ),
         _ => Err(AudioError::StreamError("Unsupported sample format".into())),
     }
@@ -254,6 +262,7 @@ fn build_stream<T>(
     rms_peak_bits: Arc<AtomicU32>,
     max_samples: Arc<AtomicUsize>,
     cap_hit: Arc<AtomicBool>,
+    callbacks: Arc<AtomicU64>,
 ) -> Result<cpal::Stream, AudioError>
 where
     T: cpal::Sample + cpal::SizedSample,
@@ -265,6 +274,11 @@ where
         .build_input_stream(
             config,
             move |data: &[T], _: &cpal::InputCallbackInfo| {
+                // Liveness: a stream whose CoreAudio device was deactivated
+                // under it (USB re-enumeration) still `play()`s OK but never
+                // calls back. `AudioRecorder` reads this to tell "quiet" from
+                // "dead" (2026-10-06, BY-V re-plugged for half a second).
+                callbacks.fetch_add(1, Ordering::Relaxed);
                 let mut samples_guard = lock_or_recover(&samples);
                 process_chunk(
                     data,

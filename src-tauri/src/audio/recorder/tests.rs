@@ -351,3 +351,94 @@ fn test_start_refused_while_stopping() {
         "start() must NOT clear `stopping` — only StoppingGuard's Drop may"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Dead-stream liveness (2026-10-06: a USB mic re-enumerated for 0.6 s; the
+// always-on stream kept "resuming" fine and delivered nothing for an hour).
+// A fake recording thread stands in for cpal: it honours Play/Pause/Close on
+// the command channel exactly like `run_command_loop`, but either calls back
+// (bumps `callbacks`) or stays silent — the one difference between a live and
+// a dead device as the recorder can observe it.
+// ---------------------------------------------------------------------------
+
+fn install_fake_stream(recorder: &AudioRecorder, alive: bool) {
+    let (tx, rx) = mpsc::channel::<RecordCommand>();
+    let is_recording = Arc::clone(&recorder.is_recording);
+    let callbacks = Arc::clone(&recorder.callbacks);
+    let handle = std::thread::spawn(move || loop {
+        match rx.recv() {
+            Ok(RecordCommand::Play) => {
+                is_recording.store(true, Ordering::SeqCst);
+                if alive {
+                    // a live stream calls back every buffer
+                    let cb = Arc::clone(&callbacks);
+                    let rec = Arc::clone(&is_recording);
+                    std::thread::spawn(move || {
+                        while rec.load(Ordering::SeqCst) {
+                            cb.fetch_add(1, Ordering::Relaxed);
+                            std::thread::sleep(std::time::Duration::from_millis(5));
+                        }
+                    });
+                }
+            }
+            Ok(RecordCommand::Pause) => is_recording.store(false, Ordering::SeqCst),
+            Ok(RecordCommand::Close) | Err(_) => {
+                is_recording.store(false, Ordering::SeqCst);
+                return;
+            }
+        }
+    });
+    *lock_or_recover(&recorder.stop_tx) = Some(tx);
+    *lock_or_recover(&recorder.thread_handle) = Some(handle);
+    recorder.is_ready.store(true, Ordering::SeqCst);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn resume_trusts_a_stream_that_calls_back() {
+    let recorder = AudioRecorder::new();
+    install_fake_stream(&recorder, true);
+    assert!(recorder.try_resume_recording(), "a live paused stream resumes");
+    assert!(recorder.is_recording());
+    recorder.close();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn resume_refuses_a_stream_that_reports_recording_but_never_calls_back_and_tears_it_down() {
+    let recorder = AudioRecorder::new();
+    install_fake_stream(&recorder, false);
+    let t0 = std::time::Instant::now();
+    assert!(!recorder.try_resume_recording(), "a dead stream is not a resume");
+    assert!(t0.elapsed() >= AudioRecorder::RESUME_LIVENESS, "it waited the full liveness window first");
+    assert!(!recorder.is_ready.load(Ordering::SeqCst), "the dead thread is gone: the next start() opens the device by name");
+    assert!(lock_or_recover(&recorder.stop_tx).is_none());
+    assert!(!recorder.is_recording());
+}
+
+#[test]
+fn stop_after_a_long_hold_with_zero_callbacks_is_a_device_error_not_an_empty_wav() {
+    let recorder = AudioRecorder::new();
+    install_fake_stream(&recorder, false);
+    recorder.is_recording.store(true, Ordering::SeqCst);
+    *lock_or_recover(&recorder.session_started) =
+        Some(std::time::Instant::now() - std::time::Duration::from_millis(1500));
+    match recorder.stop() {
+        Err(AudioError::NoAudioFromDevice { held_ms }) => assert!(held_ms >= 1500),
+        other => panic!("expected NoAudioFromDevice, got {other:?}"),
+    }
+    assert!(!recorder.is_ready.load(Ordering::SeqCst), "the dead stream was closed");
+}
+
+#[test]
+fn stop_after_a_tap_with_zero_callbacks_is_still_just_an_empty_recording() {
+    // Under DEAD_DEVICE_MIN_HOLD a buffer-less stop is a tap, not a dead
+    // device: the orchestrator's "too short" rule owns that case.
+    let recorder = AudioRecorder::new();
+    install_fake_stream(&recorder, false);
+    recorder.is_recording.store(true, Ordering::SeqCst);
+    *lock_or_recover(&recorder.session_started) = Some(std::time::Instant::now());
+    let wav = recorder.stop().expect("an empty WAV, no error");
+    assert!(crate::audio::wav_duration_ms(&wav).unwrap_or(0) < 300);
+    recorder.close();
+}

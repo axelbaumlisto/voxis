@@ -4,7 +4,7 @@ use crate::audio::vad::{filter_with_vad, VoiceActivityDetector, SILERO_FRAME_SAM
 use crate::audio::TRANSCRIPTION_SAMPLE_RATE;
 use crate::audio::{downsample, get_device, list_devices, samples_to_wav, AudioDevice, AudioError};
 use cpal::traits::DeviceTrait;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -42,6 +42,18 @@ pub struct AudioRecorder {
     /// callback only stops *pushing into the buffer* — an active stop is
     /// the guard's job (plan Layer 2/3), not this primitive's.
     cap_hit: Arc<AtomicBool>,
+    /// Total cpal input callbacks this recorder's CURRENT stream has
+    /// delivered. The liveness signal: a stream whose device was deactivated
+    /// under it (USB re-enumeration, 2026-10-06: BY-V unplugged and back in
+    /// 0.6 s) still `play()`s without error and never calls back.
+    /// `try_resume_recording` refuses to trust such a stream and `stop()`
+    /// turns "held N s, zero callbacks" into an error instead of an empty
+    /// WAV the orchestrator would file as "too short".
+    callbacks: Arc<AtomicU64>,
+    /// `callbacks` at the moment the current session started (`start()`).
+    callbacks_at_start: AtomicU64,
+    /// When the current session started — for `stop()`'s dead-device rule.
+    session_started: Mutex<Option<std::time::Instant>>,
     stop_tx: Mutex<Option<mpsc::Sender<RecordCommand>>>,
     thread_handle: Mutex<Option<JoinHandle<()>>>,
     /// Optional VAD applied to downsampled (16 kHz) samples in `stop()`.
@@ -85,6 +97,9 @@ impl AudioRecorder {
             rms_peak_bits: Arc::new(AtomicU32::new(0)),
             max_samples: Arc::new(AtomicUsize::new(usize::MAX)),
             cap_hit: Arc::new(AtomicBool::new(false)),
+            callbacks: Arc::new(AtomicU64::new(0)),
+            callbacks_at_start: AtomicU64::new(0),
+            session_started: Mutex::new(None),
             stop_tx: Mutex::new(None),
             thread_handle: Mutex::new(None),
             vad: Mutex::new(None),
@@ -141,6 +156,9 @@ impl AudioRecorder {
         self.reset_vad();
         self.rms_peak_bits.store(0, Ordering::SeqCst);
         self.cap_hit.store(false, Ordering::SeqCst);
+        self.callbacks_at_start
+            .store(self.callbacks.load(Ordering::Relaxed), Ordering::Relaxed);
+        *lock_or_recover(&self.session_started) = Some(std::time::Instant::now());
 
         #[cfg(target_os = "macos")]
         {
@@ -150,6 +168,9 @@ impl AudioRecorder {
         }
 
         let (device, config) = self.get_device_config(device_id)?;
+        // A fresh stream starts its own callback count from this baseline too.
+        self.callbacks_at_start
+            .store(self.callbacks.load(Ordering::Relaxed), Ordering::Relaxed);
         let rx = self.setup_stop_channel();
         let handle = spawn_recording_thread(
             device,
@@ -163,6 +184,7 @@ impl AudioRecorder {
             Arc::clone(&self.rms_peak_bits),
             Arc::clone(&self.max_samples),
             Arc::clone(&self.cap_hit),
+            Arc::clone(&self.callbacks),
         );
 
         let mut thread_handle = lock_or_recover(&self.thread_handle);
@@ -170,24 +192,55 @@ impl AudioRecorder {
         Ok(())
     }
 
+    /// How long a RESUMED stream may stay silent (no cpal callback) before
+    /// it is declared dead and reopened. A live input stream calls back
+    /// every buffer (~10–50 ms); 400 ms is many buffers late on any device.
+    /// A hold at least this long with ZERO callbacks is a dead device, not a
+    /// tap (a tap is under 300 ms and legitimately produces few/no buffers).
+    const DEAD_DEVICE_MIN_HOLD: std::time::Duration = std::time::Duration::from_millis(1000);
+
+    #[cfg(target_os = "macos")]
+    const RESUME_LIVENESS: std::time::Duration = std::time::Duration::from_millis(400);
+
+    /// Resume the paused always-on stream. Returns `false` (after tearing
+    /// the old thread down) when the stream reports recording but delivers
+    /// NO callbacks within `RESUME_LIVENESS` — the device behind it is gone
+    /// (CoreAudio deactivated it; a re-plugged USB mic comes back as a NEW
+    /// device id) and `start()` must open the current one by name instead.
+    /// Before 2026-10-06 this trusted `is_recording` alone, and a dead
+    /// stream was "resumed" for every recording until the app restarted.
     #[cfg(target_os = "macos")]
     fn try_resume_recording(&self) -> bool {
         if !self.is_ready.load(Ordering::SeqCst) {
             return false;
         }
 
+        let before = self.callbacks.load(Ordering::Relaxed);
         let stop_tx = lock_or_recover(&self.stop_tx);
-        if let Some(ref tx) = *stop_tx {
-            if tx.send(RecordCommand::Play).is_ok() {
-                drop(stop_tx);
-                for _ in 0..100 {
-                    if self.is_recording.load(Ordering::SeqCst) {
-                        return true;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
-            }
+        let Some(tx) = stop_tx.as_ref() else { return false };
+        if tx.send(RecordCommand::Play).is_err() {
+            return false;
         }
+        drop(stop_tx);
+
+        let deadline = std::time::Instant::now() + Self::RESUME_LIVENESS;
+        let mut recording = false;
+        while std::time::Instant::now() < deadline {
+            recording = recording || self.is_recording.load(Ordering::SeqCst);
+            if recording && self.callbacks.load(Ordering::Relaxed) > before {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        tracing::warn!(
+            recording,
+            waited_ms = Self::RESUME_LIVENESS.as_millis() as u64,
+            "always-on audio stream resumed but delivered no audio — its device is gone; reopening by name"
+        );
+        self.close();
+        self.is_ready.store(false, Ordering::SeqCst);
+        self.is_recording.store(false, Ordering::SeqCst);
         false
     }
 
@@ -293,6 +346,26 @@ impl AudioRecorder {
 
         let samples = self.get_samples();
         let sample_rate = self.sample_rate.load(Ordering::SeqCst);
+
+        // Dead-device rule: held for a real while, and the stream never
+        // called back once. That is not a short recording to drop quietly
+        // — it is a microphone that is not delivering, and the user must be
+        // told (2026-10-06: five 6–16 s holds filed as "too short (0ms)").
+        // The dead stream is closed so the NEXT start reopens the device.
+        let held = lock_or_recover(&self.session_started)
+            .map(|t| t.elapsed())
+            .unwrap_or_default();
+        let delivered = self
+            .callbacks
+            .load(Ordering::Relaxed)
+            .saturating_sub(self.callbacks_at_start.load(Ordering::Relaxed));
+        if delivered == 0 && held >= Self::DEAD_DEVICE_MIN_HOLD {
+            tracing::error!(held_ms = held.as_millis() as u64, "audio device delivered no samples for the whole recording");
+            self.close();
+            self.is_ready.store(false, Ordering::SeqCst);
+            self.is_recording.store(false, Ordering::SeqCst);
+            return Err(AudioError::NoAudioFromDevice { held_ms: held.as_millis() as u64 });
+        }
 
         let (downsampled, final_rate) = if sample_rate > TRANSCRIPTION_SAMPLE_RATE {
             (

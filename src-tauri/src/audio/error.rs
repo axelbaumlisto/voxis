@@ -25,6 +25,13 @@ pub enum AudioError {
     StopInProgress,
     #[error("Recording thread error: {0}")]
     ThreadError(String),
+    /// The input stream started without error and was held for `held_ms`,
+    /// yet delivered not one buffer — the device behind it is gone or
+    /// muted at the hardware level (a re-plugged USB mic, a Bluetooth mic
+    /// that dropped). Surfaced as a user-facing error, never filed as a
+    /// "too short" recording.
+    #[error("Microphone delivered no audio for {}s — check the device or pick another one in Settings", held_ms / 1000)]
+    NoAudioFromDevice { held_ms: u64 },
 }
 
 #[cfg(test)]

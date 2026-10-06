@@ -17,6 +17,21 @@
 ## Unreleased (Voxis desktop)
 
 ### Fix
+- **Dictation went silent after a USB microphone blinked, until the app was
+  restarted** (owner's Mac, 2026-10-06, BY-V). CoreAudio deactivated the mic
+  for 0.6 s and brought it back as a NEW device; the always-on stream (the
+  "Pause/Play" fast-resume path on macOS) kept resuming the OLD one, which
+  `play()`s without error and never calls back. Every hold — 6, 12, 16 s —
+  came out as 0 ms of audio and was filed as a "too short" recording:
+  nothing in History, no error anywhere. Two rules now:
+  1. a resumed stream must deliver a callback within 400 ms or it is torn
+     down and the device reopened by name (self-heal, no restart);
+  2. a hold ≥ 1 s with zero callbacks is `NoAudioFromDevice` — a visible
+     error ("Microphone delivered no audio for N s — check the device or
+     pick another one in Settings"), and the dead stream is closed so the
+     next start reopens. Taps under 1 s keep the quiet "too short" path.
+  Tests drive both with a fake stream that honours Play/Pause/Close like
+  cpal's loop but either calls back or stays silent.
 - **Secure Input banner could stay stale in an occluded window.** WKWebView
   reports `document.visibilityState === "hidden"` while the window is covered,
   and the 5 s poll skipped that case — so the banner reflected the state from
