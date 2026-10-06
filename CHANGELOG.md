@@ -14,6 +14,14 @@
   viewport change). One rule (`placeAtRest`) now places both. A persisted
   position keeps its meaning (the pill's own last top-left).
 
+## v0.1.10 (Voxis desktop)
+
+Same code as v0.1.9. v0.1.9 shipped without macOS artifacts: the CI host's
+persistent checkout carried a stray local edit that removed `macos-private-api`
+from `src-tauri/Cargo.toml`, the VM built exactly that, and `transparent()`
+failed to compile. Published tags are immutable, so this is the macOS release;
+the release job now stashes host leftovers before building (`release.yml`).
+
 ## v0.1.9 (Voxis desktop)
 
 ### Fix

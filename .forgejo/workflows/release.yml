@@ -177,7 +177,20 @@ jobs:
           git remote set-url origin "${CI_GIT_BASE:-$GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           git -c http.extraheader="Authorization: basic $(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 -w0)" \
             fetch --force origin "refs/tags/${{ steps.tag.outputs.tag }}" "refs/heads/main:refs/remotes/origin/main"
+          # The persistent host checkout is shared with everything else that
+          # runs on this host, and a stray local edit survives `git checkout`
+          # whenever the file is identical between the two commits. v0.1.9
+          # (2026-10-06) shipped WITHOUT macOS because a local hunk had
+          # removed `macos-private-api` from src-tauri/Cargo.toml and the VM
+          # faithfully built that. Leftovers are stashed (never discarded),
+          # named, and the build proceeds from the tag's exact tree.
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            echo "::warning::host checkout had local modifications; stashing them as 'ci-host leftovers' so the tag's tree is built:"
+            git --no-pager status --porcelain --untracked-files=no
+            git stash push -m "ci-host leftovers $(date +%F) (release ${{ steps.tag.outputs.tag }})" >/dev/null
+          fi
           git checkout FETCH_HEAD --detach
+          [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "ERROR: checkout is still dirty"; git --no-pager status --porcelain; exit 1; }
           actual=$(git --no-pager describe --tags --exact-match HEAD 2>/dev/null || echo 'none')
           echo "checked out: $actual  HEAD: $(git rev-parse --short HEAD)"
           expected="${{ steps.tag.outputs.tag }}"; expected="${expected#v}"
