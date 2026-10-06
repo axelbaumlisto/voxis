@@ -238,9 +238,7 @@ impl AudioRecorder {
             waited_ms = Self::RESUME_LIVENESS.as_millis() as u64,
             "always-on audio stream resumed but delivered no audio — its device is gone; reopening by name"
         );
-        self.close();
-        self.is_ready.store(false, Ordering::SeqCst);
-        self.is_recording.store(false, Ordering::SeqCst);
+        self.abandon_dead_stream();
         false
     }
 
@@ -361,9 +359,7 @@ impl AudioRecorder {
             .saturating_sub(self.callbacks_at_start.load(Ordering::Relaxed));
         if delivered == 0 && held >= Self::DEAD_DEVICE_MIN_HOLD {
             tracing::error!(held_ms = held.as_millis() as u64, "audio device delivered no samples for the whole recording");
-            self.close();
-            self.is_ready.store(false, Ordering::SeqCst);
-            self.is_recording.store(false, Ordering::SeqCst);
+            self.abandon_dead_stream();
             return Err(AudioError::NoAudioFromDevice { held_ms: held.as_millis() as u64 });
         }
 
@@ -439,6 +435,21 @@ impl AudioRecorder {
         self.send_close_command();
         self.join_recording_thread();
         self.clear_stop_sender();
+    }
+
+    /// Let go of a stream declared DEAD without waiting for it. `close()`
+    /// joins the recording thread, and that thread's last act is dropping
+    /// the cpal stream — on a CoreAudio device that no longer exists that
+    /// dispose is exactly the call one must not block the hotkey path on.
+    /// The thread gets `Close`, its handle is dropped (detached), and it
+    /// finishes on its own; the next `start()` builds a fresh stream on a
+    /// fresh thread meanwhile.
+    fn abandon_dead_stream(&self) {
+        self.send_close_command();
+        let _detached = lock_or_recover(&self.thread_handle).take();
+        self.clear_stop_sender();
+        self.is_ready.store(false, Ordering::SeqCst);
+        self.is_recording.store(false, Ordering::SeqCst);
     }
 
     fn send_close_command(&self) {
