@@ -14,7 +14,7 @@
   viewport change). One rule (`placeAtRest`) now places both. A persisted
   position keeps its meaning (the pill's own last top-left).
 
-## Unreleased (Voxis desktop)
+## v0.1.9 (Voxis desktop)
 
 ### Fix
 - **Dictation went silent after a USB microphone blinked, until the app was
