@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { LlmProvider } from "../lib/commands";
 import { validateProviderForm } from "../lib/providerValidation";
 import {
@@ -68,6 +68,14 @@ export function useProviderForm({
   const [saving, setSaving] = useState(false);
 
   // Initialize modelsText from provider models
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (provider?.models) {
       setModelsText(modelsToText(provider.models));
@@ -127,9 +135,14 @@ export function useProviderForm({
       });
       onClose();
     } catch (err) {
-      setError(getErrorMessage(err));
+      if (mounted.current) setError(getErrorMessage(err));
     } finally {
-      setSaving(false);
+      // `onClose()` above normally unmounts the modal before this line runs;
+      // a setState on an unmounted component is React's "can't perform a
+      // state update" — and under vitest it surfaces as an error AFTER the
+      // environment is torn down (CI runs 194/196, 2026-10-06: the only red
+      // in an otherwise green suite).
+      if (mounted.current) setSaving(false);
     }
   }, [mode, provider, name, apiUrl, models, defaultModel, existingIds, onSave, onClose]);
 
