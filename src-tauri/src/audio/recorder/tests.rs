@@ -365,11 +365,11 @@ fn install_fake_stream(recorder: &AudioRecorder, alive: bool) {
     let (tx, rx) = mpsc::channel::<RecordCommand>();
     let is_recording = Arc::clone(&recorder.is_recording);
     let callbacks = Arc::clone(&recorder.callbacks);
+    // The same shape as `run_command_loop`: a Play/Pause loop on macOS, a
+    // single wait-for-Close elsewhere (the enum has no Play/Pause there).
+    #[cfg(target_os = "macos")]
     let handle = std::thread::spawn(move || loop {
-        // Off macOS the loop never sees Play/Pause; these stay referenced.
-        let _ = (&alive, &callbacks);
         match rx.recv() {
-            #[cfg(target_os = "macos")]
             Ok(RecordCommand::Play) => {
                 is_recording.store(true, Ordering::SeqCst);
                 if alive {
@@ -384,13 +384,18 @@ fn install_fake_stream(recorder: &AudioRecorder, alive: bool) {
                     });
                 }
             }
-            #[cfg(target_os = "macos")]
             Ok(RecordCommand::Pause) => is_recording.store(false, Ordering::SeqCst),
             Ok(RecordCommand::Close) | Err(_) => {
                 is_recording.store(false, Ordering::SeqCst);
                 return;
             }
         }
+    });
+    #[cfg(not(target_os = "macos"))]
+    let handle = std::thread::spawn(move || {
+        let _ = (alive, callbacks);
+        let _ = rx.recv();
+        is_recording.store(false, Ordering::SeqCst);
     });
     *lock_or_recover(&recorder.stop_tx) = Some(tx);
     *lock_or_recover(&recorder.thread_handle) = Some(handle);
