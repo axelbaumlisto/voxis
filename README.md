@@ -25,6 +25,7 @@ Published docs: <https://docs.voxis.top/>
 - [Themes](https://docs.voxis.top/themes.html)
 - [Self-Hosted Transcription](https://docs.voxis.top/self-hosted-transcription.html)
 - [Security](https://docs.voxis.top/security.html)
+- [Security policy (repository)](SECURITY.md)
 - [Troubleshooting](https://docs.voxis.top/troubleshooting.html)
 
 `CLAUDE.md` is optional contributor guidance for AI coding assistants; normal user and developer documentation starts with this README and the published docs above.
