@@ -12,6 +12,25 @@ jobs:
       GIT_PAGER: cat
       PAGER: cat
     steps:
+      - name: reap stale ci containers
+        run: |
+          set -euo pipefail
+          now=$(date +%s)
+          seen=""
+          for id in $(
+            docker ps -aq --filter "label=voxis.ci.owner" 2>/dev/null || true
+            docker ps -aq --filter "ancestor=voxis-ci:latest" 2>/dev/null || true
+          ); do
+            case " $seen " in *" $id "*) continue;; esac
+            seen="$seen $id"
+            created=$(docker inspect --format '{{.Created}}' "$id" 2>/dev/null) || continue
+            created_ts=$(date -d "$created" +%s 2>/dev/null) || continue
+            age=$(( now - created_ts ))
+            if [ "$age" -ge 7200 ]; then
+              docker rm -f "$id" >/dev/null 2>&1 || true
+            fi
+          done
+
       - name: checkout (manual; Forgejo /git subpath breaks actions/checkout URL)
         run: |
           set -euo pipefail
@@ -26,9 +45,16 @@ jobs:
       - name: ci-required (frontend build + clippy + tdd + lib/bin tests) in voxis-ci image
         run: |
           set -euo pipefail
+          name="voxis-ci-fast-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+          docker rm -f "$name" >/dev/null 2>&1 || true
           cache="$HOME/.cache/voxis-ci"
           mkdir -p "$cache/cargo" "$cache/target" "$cache/home"
+          # timeout-minutes on the job cancels the runner step but the container survives
+          # on the host with its bind-mount intact -- three clipshot containers accumulated
+          # 28 core-days this way. An in-container timeout ensures self-termination.
           docker run --rm \
+            --name "$name" \
+            --label voxis.ci.owner=fast \
             -v "$PWD":/w -w /w \
             -v "$cache/cargo":/tmp/cargo-home \
             -v "$cache/target":/tmp/ci-target \
@@ -38,6 +64,7 @@ jobs:
             -e HOME=/tmp/cihome \
             --user "$(id -u):$(id -g)" \
             voxis-ci:latest \
+            timeout --signal=TERM --kill-after=30s 50m \
             bash -euo pipefail -c '
               echo "=== frontend build (dist required by tauri) ===" &&
               bun install --frozen-lockfile && bun run build &&
@@ -67,6 +94,25 @@ jobs:
       GIT_PAGER: cat
       PAGER: cat
     steps:
+      - name: reap stale ci containers
+        run: |
+          set -euo pipefail
+          now=$(date +%s)
+          seen=""
+          for id in $(
+            docker ps -aq --filter "label=voxis.ci.owner" 2>/dev/null || true
+            docker ps -aq --filter "ancestor=voxis-ci:latest" 2>/dev/null || true
+          ); do
+            case " $seen " in *" $id "*) continue;; esac
+            seen="$seen $id"
+            created=$(docker inspect --format '{{.Created}}' "$id" 2>/dev/null) || continue
+            created_ts=$(date -d "$created" +%s 2>/dev/null) || continue
+            age=$(( now - created_ts ))
+            if [ "$age" -ge 7200 ]; then
+              docker rm -f "$id" >/dev/null 2>&1 || true
+            fi
+          done
+
       - name: checkout (manual; Forgejo /git subpath breaks actions/checkout URL)
         run: |
           set -euo pipefail
@@ -81,9 +127,13 @@ jobs:
       - name: voxis-fake-stt tests + host-min real-binary smoke (mock capture + fake-stt, no real mic/Groq) in voxis-ci image
         run: |
           set -euo pipefail
+          name="voxis-ci-host-min-e2e-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+          docker rm -f "$name" >/dev/null 2>&1 || true
           cache="$HOME/.cache/voxis-ci"
           mkdir -p "$cache/cargo" "$cache/target" "$cache/home"
           docker run --rm \
+            --name "$name" \
+            --label voxis.ci.owner=host-min-e2e \
             -v "$PWD":/w -w /w \
             -v "$cache/cargo":/tmp/cargo-home \
             -v "$cache/target":/tmp/ci-target \
@@ -93,6 +143,7 @@ jobs:
             -e HOME=/tmp/cihome \
             --user "$(id -u):$(id -g)" \
             voxis-ci:latest \
+            timeout --signal=TERM --kill-after=30s 25m \
             bash -euo pipefail -c '
               echo "=== [required] voxis-fake-stt unit + protocol-compat + fixture tests ===" &&
               cargo test -p voxis-fake-stt &&
@@ -121,6 +172,25 @@ jobs:
       GIT_PAGER: cat
       PAGER: cat
     steps:
+      - name: reap stale ci containers
+        run: |
+          set -euo pipefail
+          now=$(date +%s)
+          seen=""
+          for id in $(
+            docker ps -aq --filter "label=voxis.ci.owner" 2>/dev/null || true
+            docker ps -aq --filter "ancestor=voxis-ci:latest" 2>/dev/null || true
+          ); do
+            case " $seen " in *" $id "*) continue;; esac
+            seen="$seen $id"
+            created=$(docker inspect --format '{{.Created}}' "$id" 2>/dev/null) || continue
+            created_ts=$(date -d "$created" +%s 2>/dev/null) || continue
+            age=$(( now - created_ts ))
+            if [ "$age" -ge 7200 ]; then
+              docker rm -f "$id" >/dev/null 2>&1 || true
+            fi
+          done
+
       - name: checkout (manual; Forgejo /git subpath breaks actions/checkout URL)
         run: |
           set -euo pipefail
@@ -135,9 +205,13 @@ jobs:
       - name: voxis-core + tauri-plugin-voxis + voxis-fake-stt test + clippy, guest-js build/test, in voxis-ci image
         run: |
           set -euo pipefail
+          name="voxis-ci-core-plugin-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+          docker rm -f "$name" >/dev/null 2>&1 || true
           cache="$HOME/.cache/voxis-ci"
           mkdir -p "$cache/cargo" "$cache/target" "$cache/home"
           docker run --rm \
+            --name "$name" \
+            --label voxis.ci.owner=core-plugin \
             -v "$PWD":/w -w /w \
             -v "$cache/cargo":/tmp/cargo-home \
             -v "$cache/target":/tmp/ci-target \
@@ -147,6 +221,7 @@ jobs:
             -e HOME=/tmp/cihome \
             --user "$(id -u):$(id -g)" \
             voxis-ci:latest \
+            timeout --signal=TERM --kill-after=30s 25m \
             bash -euo pipefail -c '
               echo "=== [required] cargo test -p voxis-core -p tauri-plugin-voxis -p voxis-fake-stt (NOT --workspace, see job comment) ===" &&
               cargo test -p voxis-core -p tauri-plugin-voxis -p voxis-fake-stt &&
@@ -191,8 +266,12 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
+          name="voxis-ci-audit-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+          docker rm -f "$name" >/dev/null 2>&1 || true
           cache="$HOME/.cache/voxis-ci"
           docker run --rm \
+            --name "$name" \
+            --label voxis.ci.owner=audit \
             -v "$PWD":/w -w /w \
             -v "$cache/cargo":/tmp/cargo-home \
             -v "$cache/target":/tmp/ci-target \
@@ -202,6 +281,7 @@ jobs:
             -e HOME=/tmp/cihome \
             --user "$(id -u):$(id -g)" \
             voxis-ci:latest \
+            timeout --signal=TERM --kill-after=30s 10m \
             bash -euo pipefail -c '
               if command -v cargo-audit >/dev/null 2>&1; then
                 cargo audit
