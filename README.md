@@ -144,5 +144,3 @@ see `CHANGELOG.md` for its own version history.
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-<!-- owner edit during ring run b1abf845: ADR 0009 declined-merge live proof -->
