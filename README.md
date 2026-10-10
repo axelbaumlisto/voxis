@@ -144,3 +144,10 @@ see `CHANGELOG.md` for its own version history.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Dependency refresh policy
+
+Dependencies are refreshed within manifest constraints by the ring on request
+(`ring-deps` block, `cargo: *`). Lock files are written only by the package
+manager, never edited by hand. Every refresh must pass the full offline test
+suite before it merges.
