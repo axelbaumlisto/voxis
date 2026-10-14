@@ -239,6 +239,15 @@
           "disabledReason": { "en": "No API key — the dictation pill is off", "ru": "Нет API-ключа — пилюля диктовки выключена" }
         },
         {
+          "key": "overlayHidden",
+          "kind": "toggle",
+          "store": "host",
+          "default": false,
+          "label": { "en": "Hide the pill (hotkey or chip only)", "ru": "Не показывать пилюлю (хоткей или чип)" },
+          "enabledWhen": { "query": "status", "path": "hasApiKey", "truthy": true },
+          "disabledReason": { "en": "No API key — the dictation pill is off", "ru": "Нет API-ключа — пилюля диктовки выключена" }
+        },
+        {
           "key": "overlayPlacement",
           "kind": "select",
           "store": "host",
@@ -249,9 +258,9 @@
             { "value": "bottom-left", "label": { "en": "Bottom left", "ru": "Слева снизу" } },
             { "value": "top-right", "label": { "en": "Top right", "ru": "Справа сверху" } },
             { "value": "top-left", "label": { "en": "Top left", "ru": "Слева сверху" } },
-            { "value": "center", "label": { "en": "Center", "ru": "По центру" } },
-            { "value": "hidden", "label": { "en": "Don't show (hotkey or chip only)", "ru": "Не показывать (хоткей или чип)" } }
+            { "value": "center", "label": { "en": "Center", "ru": "По центру" } }
           ],
+          "visibleWhen": { "query": "values", "path": "overlayHidden", "notEquals": true },
           "enabledWhen": { "query": "status", "path": "hasApiKey", "truthy": true },
           "disabledReason": { "en": "No API key — the dictation pill is off", "ru": "Нет API-ключа — пилюля диктовки выключена" }
         },
@@ -267,7 +276,7 @@
           "label": { "en": "Horizontal offset", "ru": "Отступ по горизонтали" },
           "visibleWhen": {
             "all": [
-              { "query": "values", "path": "overlayPlacement", "notEquals": "hidden" },
+              { "query": "values", "path": "overlayHidden", "notEquals": true },
               { "query": "values", "path": "overlayPlacement", "notEquals": "center" }
             ]
           },
@@ -286,7 +295,7 @@
           "label": { "en": "Vertical offset", "ru": "Отступ по вертикали" },
           "visibleWhen": {
             "all": [
-              { "query": "values", "path": "overlayPlacement", "notEquals": "hidden" },
+              { "query": "values", "path": "overlayHidden", "notEquals": true },
               { "query": "values", "path": "overlayPlacement", "notEquals": "center" }
             ]
           },

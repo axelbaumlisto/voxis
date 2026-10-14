@@ -1,5 +1,19 @@
 # Changelog
 
+## `tauri-plugin-voxis` 0.7.1 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.1
+
+- **Hiding the pill no longer forgets its corner** (owner 14.10). The
+  settings manifest's `overlayPlacement` select loses its 6th «hidden»
+  option and keeps only the five positions (`bottom-right` default,
+  `bottom-left`, `top-right`, `top-left`, `center`); a new host toggle
+  `overlayHidden` (default `false`, «Hide the pill (hotkey or chip only)» /
+  «Не показывать пилюлю (хоткей или чип)», `enabledWhen` `status.hasApiKey`)
+  hides it. `overlayPlacement` and the offsets are `visibleWhen`
+  `overlayHidden != true` (offsets additionally hidden for `center`).
+  Hosts that persisted `overlayPlacement: "hidden"` should migrate it to
+  `overlayHidden: true` + the default corner. Manifest-only change; no
+  Rust behaviour change.
+
 ## `tauri-plugin-voxis` 0.7.0 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.0
 
 - **The plugin describes its own settings.** guest-js exports a JSON settings

@@ -78,7 +78,7 @@ describe("voxis settings manifest", () => {
     const byKey = Object.fromEntries(fields.map((f) => [f.key, f]));
     expect(byKey.apiKey).toMatchObject({ kind: "secret", store: "plugin", required: true, requiredStatus: { query: "status", path: "hasApiKey" } });
     expect(byKey.apiKey!.hint?.en).toMatch(/Save.*\.vxp/);
-    for (const key of ["theme", "overlayPlacement", "overlayOffsetX", "overlayOffsetY"]) {
+    for (const key of ["theme", "overlayHidden", "overlayPlacement", "overlayOffsetX", "overlayOffsetY"]) {
       expect(byKey[key]!.enabledWhen, key).toEqual({ query: "status", path: "hasApiKey", truthy: true });
       expect(byKey[key]!.disabledReason?.en, key).toBe("No API key — the dictation pill is off");
     }
@@ -86,7 +86,25 @@ describe("voxis settings manifest", () => {
     expect(byKey.hotkey!.visibleWhen).toEqual({ query: "status", path: "hotkeySupported", truthy: true });
     expect(byKey.importDesktop!.visibleWhen).toEqual({ query: "status", path: "desktop", truthy: true });
     expect(byKey.importFile).toMatchObject({ kind: "file-import", command: "apply_profile", accept: [".vxp"] });
-    for (const key of ["enabled", "overlayPlacement", "dictationChord"]) expect(byKey[key]!.store, key).toBe("host");
+    for (const key of ["enabled", "overlayHidden", "overlayPlacement", "overlayOffsetX", "overlayOffsetY", "dictationChord"]) {
+      expect(byKey[key]!.store, key).toBe("host");
+    }
+  });
+
+  it("hiding the pill is its own toggle, so the corner is not forgotten (owner 14.10)", () => {
+    const byKey = Object.fromEntries(fields.map((f) => [f.key, f]));
+    expect(byKey.overlayHidden).toMatchObject({ kind: "toggle", store: "host", default: false });
+    expect(byKey.overlayHidden!.label).toEqual({ en: "Hide the pill (hotkey or chip only)", ru: "Не показывать пилюлю (хоткей или чип)" });
+    const placement = byKey.overlayPlacement as { options?: Array<{ value: unknown }>; default?: unknown };
+    expect(placement.default).toBe("bottom-right");
+    expect(placement.options!.map((o) => o.value)).toEqual(["bottom-right", "bottom-left", "top-right", "top-left", "center"]);
+    const notHidden = { query: "values", path: "overlayHidden", notEquals: true };
+    expect(byKey.overlayPlacement!.visibleWhen).toEqual(notHidden);
+    for (const key of ["overlayOffsetX", "overlayOffsetY"]) {
+      expect(byKey[key]!.visibleWhen, key).toEqual({
+        all: [notHidden, { query: "values", path: "overlayPlacement", notEquals: "center" }],
+      });
+    }
   });
 
   it("action/file-import commands are real plugin commands", () => {

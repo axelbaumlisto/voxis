@@ -8,7 +8,7 @@ the Rust command/event contract in `../contract/fixtures/*.json` and
 manual update here (the fixture-snapshot tests on both sides are the
 safety net, not a generator).
 
-Currently versioned **`0.9.0`** (0.9.0: settings manifest + `getSettings`/`setSettings`), independently of the Rust crate's own
+Currently versioned **`0.9.1`** (0.9.1: `overlayHidden` toggle split from `overlayPlacement`; 0.9.0: settings manifest + `getSettings`/`setSettings`), independently of the Rust crate's own
 version — bump each on its own schedule. (`0.4.0`, additive: new
 `setProvider(opts)` command for typing a Groq key / self-hosted URL in
 directly, no Voxis desktop needed. `0.2.0` earlier: the pill now resolves
@@ -102,7 +102,7 @@ with `all`/`any`, `visibleWhen`/`enabledWhen`+`disabledReason`/
 `required`+`requiredStatus`) is documented at the top of `src/settings.ts`.
 `validateSettingsManifest(m)` returns the list of problems (empty = valid).
 `store: "plugin"` fields go through `getSettings()`/`setSettings()`;
-`store: "host"` fields (`enabled`, `overlayPlacement`, `overlayOffsetX/Y`,
+`store: "host"` fields (`enabled`, `overlayHidden`, `overlayPlacement`, `overlayOffsetX/Y`,
 `dictationChord`) are the host's to persist.
 
 ## `mountOverlay` — the `<voxis-overlay>` web component
