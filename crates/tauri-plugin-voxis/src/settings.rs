@@ -37,30 +37,63 @@ pub const PROVIDER_GROQ: &str = "groq";
 /// (`apiUrlOverride` required).
 pub const PROVIDER_SELF_HOSTED: &str = "selfHosted";
 
-/// Ids of the builtin overlay themes this plugin ships
-/// (`guest-js/src/themes/generated/<id>/`). Rust has no theme engine, so
-/// the list is spelled out; `tests::builtin_theme_ids_match_guest_js` fails
-/// when a theme is added or removed there without updating it here.
-pub const BUILTIN_THEME_IDS: &[&str] = &[
-    "all_aquarium",
-    "default",
-    "didinium_drift",
-    "drifting_contour",
-    "duo_aquarium",
-    "euglena_drift",
-    "handy_pill",
-    "lavalamp",
-    "living_reed",
-    "metaballs",
-    "metaballs25d",
-    "metaballs3d",
-    "neon",
-    "paramecium_solo",
-    "quiet_reed",
-    "radiolarian",
-    "vorticella_bloom",
-    "winamp_classic",
+/// The builtin overlay themes this plugin ships
+/// (`guest-js/src/themes/generated/<id>/`) as `(id, name)`: the name is the
+/// theme's own `theme.json` `"name"` (its registry metadata, a proper name —
+/// not translated). Rust has no theme engine, so the table is spelled out;
+/// `tests::builtin_themes_match_guest_js` fails when a theme is added,
+/// removed or renamed there without updating it here.
+pub const BUILTIN_THEMES: &[(&str, &str)] = &[
+    ("all_aquarium", "All Aquarium"),
+    ("default", "Default"),
+    ("didinium_drift", "Didinium Drift"),
+    ("drifting_contour", "Drifting Contour"),
+    ("duo_aquarium", "Duo Aquarium"),
+    ("euglena_drift", "Euglena Drift"),
+    ("handy_pill", "Handy Pill"),
+    ("lavalamp", "Lava Lamp"),
+    ("living_reed", "Living Reed"),
+    ("metaballs", "Metaballs"),
+    ("metaballs25d", "Metaballs 2.5D"),
+    ("metaballs3d", "Metaballs 3D"),
+    ("neon", "Neon"),
+    ("paramecium_solo", "Paramecium Solo"),
+    ("quiet_reed", "Quiet Reed"),
+    ("radiolarian", "Radiolarian"),
+    ("vorticella_bloom", "Vorticella Bloom"),
+    ("winamp_classic", "Winamp Classic"),
 ];
+
+fn is_builtin_theme(id: &str) -> bool {
+    BUILTIN_THEMES.iter().any(|(t, _)| *t == id)
+}
+
+/// `{ en, ru }` text, as everywhere in the settings manifest.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LocalizedText {
+    pub en: String,
+    pub ru: String,
+}
+
+/// One dynamic select option — the manifest's `{ value, label }` shape
+/// (same as a static `options` entry).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SelectOption {
+    pub value: String,
+    pub label: LocalizedText,
+}
+
+/// `status.themes`: every builtin theme as `{ value: id, label: { en, ru } }`.
+/// Theme names are proper names, so `ru` repeats `en`.
+pub fn theme_options() -> Vec<SelectOption> {
+    BUILTIN_THEMES
+        .iter()
+        .map(|(id, name)| SelectOption {
+            value: id.to_string(),
+            label: LocalizedText { en: name.to_string(), ru: name.to_string() },
+        })
+        .collect()
+}
 
 /// The readable `store: "plugin"` values. `apiKey` is deliberately absent.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -102,8 +135,11 @@ pub struct SettingsStatus {
     pub unsupported_reason: Option<String>,
     /// Plugin session state (`idle`/`recording`/`transcribing`/`error`).
     pub state: State,
-    /// Selectable theme ids (`BUILTIN_THEME_IDS`).
+    /// Selectable theme ids (`BUILTIN_THEMES`). Kept for hosts/manifests
+    /// older than 0.7.2; the theme select reads `themes`.
     pub theme_ids: Vec<String>,
+    /// 0.7.2: the same themes with display names, `{ value, label }[]`.
+    pub themes: Vec<SelectOption>,
     /// This crate's version.
     pub plugin_version: String,
     /// One line for bug reports: version · platform · state · key · provider.
@@ -159,7 +195,8 @@ pub fn get(state: &PluginState) -> Result<SettingsSnapshot, PluginError> {
             dictation_supported: unsupported_reason.is_none(),
             unsupported_reason,
             state: session_state,
-            theme_ids: BUILTIN_THEME_IDS.iter().map(|s| s.to_string()).collect(),
+            theme_ids: BUILTIN_THEMES.iter().map(|(id, _)| id.to_string()).collect(),
+            themes: theme_options(),
             plugin_version,
             diagnostics,
         },
@@ -240,7 +277,7 @@ pub fn set(state: &PluginState, values: Value) -> Result<SettingsSnapshot, Plugi
     // theme stays selectable without being re-validated).
     if let Some(theme) = opt_string(&values, "theme")?.map(|t| t.trim().to_string()) {
         if theme != profile.theme {
-            if !BUILTIN_THEME_IDS.contains(&theme.as_str()) {
+            if !is_builtin_theme(&theme) {
                 return Err(invalid("theme", format!("unknown theme {theme:?}")));
             }
             profile.theme = theme;
@@ -350,7 +387,13 @@ mod tests {
         assert_eq!(snap.status.provider_label, "Groq");
         assert!(!snap.status.hotkey_supported);
         assert!(snap.status.dictation_supported);
-        assert_eq!(snap.status.theme_ids.len(), BUILTIN_THEME_IDS.len());
+        assert_eq!(snap.status.theme_ids.len(), BUILTIN_THEMES.len());
+        let ids: Vec<&str> = snap.status.themes.iter().map(|o| o.value.as_str()).collect();
+        assert_eq!(ids, snap.status.theme_ids.iter().map(String::as_str).collect::<Vec<_>>(), "themes and themeIds agree");
+        let wire = serde_json::to_value(&snap.status).unwrap();
+        let aquarium = wire["themes"].as_array().unwrap().iter().find(|o| o["value"] == "all_aquarium").unwrap();
+        assert_eq!(aquarium["label"], json!({ "en": "All Aquarium", "ru": "All Aquarium" }));
+        assert_eq!(wire["themeIds"][0], "all_aquarium");
         assert_eq!(snap.status.plugin_version, env!("CARGO_PKG_VERSION"));
     }
 
@@ -493,16 +536,20 @@ mod tests {
     }
 
     #[test]
-    fn builtin_theme_ids_match_guest_js() {
+    fn builtin_themes_match_guest_js() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("guest-js/src/themes/generated");
-        let mut ids: Vec<String> = std::fs::read_dir(&dir)
+        let mut themes: Vec<(String, String)> = std::fs::read_dir(&dir)
             .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.path().join("theme.json").exists())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .map(|e| {
+                let meta: Value = serde_json::from_str(&std::fs::read_to_string(e.path().join("theme.json")).unwrap()).unwrap();
+                (e.file_name().to_string_lossy().into_owned(), meta["name"].as_str().expect("theme.json name").to_string())
+            })
             .collect();
-        ids.sort();
-        assert_eq!(ids, BUILTIN_THEME_IDS.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        themes.sort();
+        let expected: Vec<(String, String)> = BUILTIN_THEMES.iter().map(|(i, n)| (i.to_string(), n.to_string())).collect();
+        assert_eq!(themes, expected);
     }
 
     fn manifest() -> Value {

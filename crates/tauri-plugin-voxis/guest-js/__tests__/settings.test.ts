@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createClient, type InvokeFn } from "../src/client";
 import {
   collectSettingsConditions,
+  dynamicOptionLabel,
   INPUT_FIELD_KINDS,
   settingsManifest,
   validateSettingsManifest,
@@ -19,6 +20,7 @@ import {
 } from "../src/settings";
 import { COMMAND_NAMES } from "../src/types/contract";
 import * as index from "../src/index";
+import { ThemeRegistry } from "../src/themes/registry";
 
 const m = voxisSettingsManifest;
 const fields = m.sections.flatMap((s) => s.fields);
@@ -82,7 +84,7 @@ describe("voxis settings manifest", () => {
       expect(byKey[key]!.enabledWhen, key).toEqual({ query: "status", path: "hasApiKey", truthy: true });
       expect(byKey[key]!.disabledReason?.en, key).toBe("No API key — the dictation pill is off");
     }
-    expect(byKey.theme).toMatchObject({ kind: "select", optionsFrom: { query: "status", path: "themeIds" } });
+    expect(byKey.theme).toMatchObject({ kind: "select", optionsFrom: { query: "status", path: "themes" } });
     expect(byKey.hotkey!.visibleWhen).toEqual({ query: "status", path: "hotkeySupported", truthy: true });
     expect(byKey.importDesktop!.visibleWhen).toEqual({ query: "status", path: "desktop", truthy: true });
     expect(byKey.importFile).toMatchObject({ kind: "file-import", command: "apply_profile", accept: [".vxp"] });
@@ -105,6 +107,30 @@ describe("voxis settings manifest", () => {
         all: [notHidden, { query: "values", path: "overlayPlacement", notEquals: "center" }],
       });
     }
+  });
+
+  it("the theme select shows theme names, not raw ids (owner 14.10); themeIds stays declared", () => {
+    expect(m.status.themes).toMatchObject({ type: "options" });
+    expect(m.status.themeIds).toMatchObject({ type: "string[]" });
+    const theme = fields.find((f) => f.key === "theme");
+    expect(theme).toMatchObject({ kind: "select", optionsFrom: { query: "status", path: "themes" } });
+    // What settings_get sends (Rust `theme_options()`), checked against the
+    // themes' own theme.json names.
+    const wire = Object.keys(ThemeRegistry)
+      .sort()
+      .map((id) => {
+        const name = JSON.parse(readFileSync(resolve(__dirname, `../src/themes/generated/${id}/theme.json`), "utf8")).name as string;
+        return { value: id, label: { en: name, ru: name } };
+      });
+    const byId = Object.fromEntries(wire.map((o) => [o.value, dynamicOptionLabel(o, "ru")]));
+    expect(byId).toMatchObject({ all_aquarium: "All Aquarium", didinium_drift: "Didinium Drift", winamp_classic: "Winamp Classic" });
+  });
+
+  it("dynamicOptionLabel handles every optionsFrom item shape", () => {
+    expect(dynamicOptionLabel("neon", "en")).toBe("neon");
+    expect(dynamicOptionLabel({ value: "s", label: "⌘S" }, "ru")).toBe("⌘S");
+    expect(dynamicOptionLabel({ value: "a", label: { en: "A", ru: "А" } }, "ru")).toBe("А");
+    expect(dynamicOptionLabel({ value: "a", label: { en: "A", ru: "" } }, "ru")).toBe("A");
   });
 
   it("action/file-import commands are real plugin commands", () => {
@@ -150,6 +176,16 @@ describe("validateSettingsManifest rejects", () => {
     expect(errors).toMatch(/exactly one of equals \| notEquals \| truthy/);
     expect(errors).toMatch(/unknown kind "slider"/);
     expect(errors).toMatch(/exactly one of options \| optionsFrom/);
+  });
+
+  it("optionsFrom pointing at a path not declared as a list", () => {
+    const bad = clone();
+    const theme = bad.sections.flatMap((s) => s.fields).find((f) => f.key === "theme") as { optionsFrom?: { query: string; path: string } };
+    theme.optionsFrom = { query: "status", path: "providerLabel" };
+    expect(validateSettingsManifest(bad).join("\n")).toMatch(/status path "providerLabel" must be declared "string\[\]" or "options"/);
+    // The pre-0.9.2 source (a plain id list) is still valid.
+    theme.optionsFrom = { query: "status", path: "themeIds" };
+    expect(validateSettingsManifest(bad)).toEqual([]);
   });
 
   it("enabledWhen without a disabledReason, required without requiredStatus", () => {

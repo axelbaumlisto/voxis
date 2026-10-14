@@ -13,7 +13,8 @@
     "dictationSupported": { "type": "boolean", "description": "This build can record on this platform." },
     "unsupportedReason": { "type": "string", "description": "Why dictation is unavailable, or null." },
     "state": { "type": "string", "description": "idle, recording, transcribing or error." },
-    "themeIds": { "type": "string[]", "description": "Selectable overlay theme ids." },
+    "themeIds": { "type": "string[]", "description": "Selectable overlay theme ids (kept for older manifests; the theme select reads themes)." },
+    "themes": { "type": "options", "description": "Selectable overlay themes as { value: id, label: { en, ru } }[]; labels are the themes' own names." },
     "pluginVersion": { "type": "string", "description": "tauri-plugin-voxis crate version." },
     "diagnostics": { "type": "string", "description": "One line for bug reports." }
   },
@@ -234,7 +235,7 @@
           "kind": "select",
           "store": "plugin",
           "label": { "en": "Pill theme", "ru": "Тема пилюли" },
-          "optionsFrom": { "query": "status", "path": "themeIds" },
+          "optionsFrom": { "query": "status", "path": "themes" },
           "enabledWhen": { "query": "status", "path": "hasApiKey", "truthy": true },
           "disabledReason": { "en": "No API key — the dictation pill is off", "ru": "Нет API-ключа — пилюля диктовки выключена" }
         },

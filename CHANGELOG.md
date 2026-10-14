@@ -1,5 +1,22 @@
 # Changelog
 
+## `tauri-plugin-voxis` 0.7.2 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.2
+
+- **The pill theme select shows theme names, not raw ids** (owner 14.10:
+  `all_aquarium`, `didinium_drift`, `winamp_classic`). `settings_get`
+  `status` gains `themes: { value, label: { en, ru } }[]` — `value` is the
+  theme id, `label` the theme's own `theme.json` `"name"` (`All Aquarium`,
+  `Lava Lamp`, `Metaballs 2.5D`, …; proper names, so `ru` = `en`). The
+  manifest declares `status.themes` as `"options"` and the `theme` select's
+  `optionsFrom` now points at it. `status.themeIds` stays (declared, still
+  sent) for compatibility.
+- Schema v1 (no version bump, additive): the `optionsFrom` item shape is
+  now spelled out — `string` or `DynamicSelectOption { value, label }`
+  with `label` either `{ en, ru }` or a plain string; new helper
+  `dynamicOptionLabel(item, lang)`. `validateSettingsManifest` now also
+  rejects an `optionsFrom` whose `status`/`host` path is not declared
+  `"string[]"` or `"options"`.
+
 ## `tauri-plugin-voxis` 0.7.1 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.1
 
 - **Hiding the pill no longer forgets its corner** (owner 14.10). The

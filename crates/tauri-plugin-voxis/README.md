@@ -30,18 +30,18 @@ dependency against this repo's private Forgejo remote (`zverozabr/voxis`,
 ```toml
 # host's src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-voxis = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.7.1", features = ["desktop"] }
-voxis-core = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.7.1" }
+tauri-plugin-voxis = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.7.2", features = ["desktop"] }
+voxis-core = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.7.2" }
 ```
 
-- **Pin by a `plugin-v*` tag** (current: `plugin-v0.7.1`; naked pins it in
+- **Pin by a `plugin-v*` tag** (current: `plugin-v0.7.2`; naked pins it in
   `src-tauri/Cargo.toml`). Tags are cut ONLY by `scripts/tag-plugin.sh
   <X.Y.Z> "<msg>"`, which runs the desktop tests + clippy, the guest-js
   build/tests, the iOS cross-build + Swift tests and (where an NDK exists)
   the Android `cargo check` first — and they are immutable: a bad tag costs
   the next patch number, never a re-push (`plugin-v0.3.0` → `0.3.1`,
   `0.5.0` → `0.5.1` both happened). The JS half (`guest-js`,
-  `@voxis/tauri-plugin-voxis`) has its OWN version (0.9.1 today) and reaches
+  `@voxis/tauri-plugin-voxis`) has its OWN version (0.9.2 today) and reaches
   a host as a vendored `bun pm pack` tarball — see "guest-js" below.
 - **How an update reaches a device.** There is no plugin "file" on a phone
   or a Mac: the Rust crate is compiled INTO the host app and the guest-js is
@@ -157,7 +157,7 @@ Every command is `Result<T, PluginError>`; see "Errors" below for the
 | `set_hotkey` | `(spec: HotkeySpec)` | An EMPTY `key` (`""`) **disarms**: no target, no OS listener spawned if none ran yet — the host-side "plugin off" switch (0.6.0). Desktop only (`hotkey == None` on iOS/no-`desktop`-feature builds → `Ok(())`, silent no-op — there is no OS-level backend to bind to). See "HotkeySpec" below for the accepted syntax and the one real rejection path (`permissionDenied`). |
 | `set_consent` | `(granted: bool)` | Per-(host, provider) gate; `start()` refuses until this is `true` at least once for the plugin's currently-configured provider (`[R1-Safety S6]`). |
 | `hold_lease` | `(sessionId)` | Heartbeat for Hold-mode sessions — guest-js's `lease.ts` calls this once per second while a hold gesture is active; 3 missed beats → the session is cancelled server-side (`LeaseLost`) even if the webview died silently. Not needed for Toggle-mode sessions. |
-| `settings_get` | `() -> { values, status }` | 0.7.0, for a host's config-driven settings tab (manifest: guest-js `settingsManifest()`). `values`: `provider` (`"groq"`\|`"selfHosted"`), `apiUrlOverride`, `model`, `hotkey`, `theme` — **never** the API key. `status`: `hasApiKey`, `provider`, `providerLabel`, `providerHost`, `platform`, `desktop`, `hotkeySupported`, `dictationSupported`, `unsupportedReason`, `state`, `themeIds`, `pluginVersion`, `diagnostics`. Reads the same profile storage as `get_profile`. |
+| `settings_get` | `() -> { values, status }` | 0.7.0, for a host's config-driven settings tab (manifest: guest-js `settingsManifest()`). `values`: `provider` (`"groq"`\|`"selfHosted"`), `apiUrlOverride`, `model`, `hotkey`, `theme` — **never** the API key. `status`: `hasApiKey`, `provider`, `providerLabel`, `providerHost`, `platform`, `desktop`, `hotkeySupported`, `dictationSupported`, `unsupportedReason`, `state`, `themeIds` (ids, kept for compatibility), `themes` (0.7.2: `{ value: id, label: { en, ru } }[]`, labels = the themes' own names, what the manifest's theme select reads), `pluginVersion`, `diagnostics`. Reads the same profile storage as `get_profile`. |
 | `settings_set` | `(values) -> { values, status }` | Partial patch over the same profile/secret/hotkey storage as `set_provider`/`set_hotkey` (no second store). `apiKey` absent/null/empty keeps the stored key. Bad values reject `{ kind: "invalid", field, message }` with nothing saved (unknown key, non-http(s) URL, self-hosted without URL, unknown theme, unparseable hotkey). A changed `hotkey` is armed on the OS backend. `alreadyRecording` while a session is live; a provider-host change resets consent. |
 
 ## Events

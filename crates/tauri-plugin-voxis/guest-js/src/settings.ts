@@ -19,8 +19,11 @@
  * ## Field kinds
  * - `toggle` — boolean.
  * - `select` — static `options`, or `optionsFrom` a query path holding
- *   either `string[]` (value = label) or `{ value, label }[]`. A current
- *   value missing from the options must still be shown as selected.
+ *   either `string[]` (value = label) or `{ value, label }[]`
+ *   (`DynamicSelectOption`: `label` is `{ en, ru }` like a static option's,
+ *   or a plain string shown as-is). The referenced `status`/`host` path must
+ *   be declared with type `"string[]"` or `"options"`. A current value
+ *   missing from the options must still be shown as selected.
  * - `text` — string (`inputType: "url"` for URLs).
  * - `secret` — write-only: never read back; the input starts empty
  *   («leave empty to keep»), `setStatus` says set/unset. Send it in
@@ -126,6 +129,23 @@ export interface SettingsFieldBase {
 export interface SelectOption {
   value: string;
   label: LocalizedText;
+}
+
+/**
+ * One item of an `optionsFrom` list that is not a bare string. `label` is
+ * `{ en, ru }` (as in `SelectOption`; Voxis's `status.themes`) or a plain
+ * string rendered as-is (host-supplied lists may use either).
+ */
+export interface DynamicSelectOption {
+  value: string;
+  label: LocalizedText | string;
+}
+
+/** Display text of an `optionsFrom` item (`string` | `DynamicSelectOption`). */
+export function dynamicOptionLabel(item: string | DynamicSelectOption, lang: keyof LocalizedText): string {
+  if (typeof item === "string") return item;
+  if (typeof item.label === "string") return item.label;
+  return item.label[lang] || item.label.en || item.value;
 }
 
 export interface ToggleField extends SettingsFieldBase {
@@ -347,7 +367,16 @@ export function validateSettingsManifest(input: unknown): string[] {
                 if (!isObject(o) || typeof o.value !== "string" || !isLocalized(o.label)) err(`${fw}.options[${i}]`, "needs { value, label: { en, ru } }");
               });
           }
-          if (hasFrom) checkRef(`${fw}.optionsFrom`, f.optionsFrom);
+          if (hasFrom) {
+            checkRef(`${fw}.optionsFrom`, f.optionsFrom);
+            const ref = f.optionsFrom;
+            if (isObject(ref) && typeof ref.path === "string" && (ref.query === "status" || ref.query === "host")) {
+              const decl = (ref.query === "status" ? status : host)[ref.path];
+              if (isObject(decl) && decl.type !== "string[]" && decl.type !== "options") {
+                err(`${fw}.optionsFrom`, `${ref.query} path "${ref.path}" must be declared "string[]" or "options"`);
+              }
+            }
+          }
           break;
         }
         case "secret":
@@ -438,7 +467,10 @@ export interface VoxisSettingsStatus {
   dictationSupported: boolean;
   unsupportedReason: string | null;
   state: "idle" | "recording" | "transcribing" | "error";
+  /** Theme ids; kept for compatibility — the theme select reads `themes`. */
   themeIds: string[];
+  /** 0.9.2: the same themes with their names (`ru` = `en`: proper names). */
+  themes: Array<{ value: string; label: LocalizedText }>;
   pluginVersion: string;
   diagnostics: string;
 }
