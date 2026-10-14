@@ -1,6 +1,6 @@
 ## Default Permission
 
-Allows all voxis dictation-plugin commands: start, stop, cancel, state, get_profile, apply_profile, import_profile_from_desktop, import_profile_from_qr, set_provider, set_hotkey, set_consent, hold_lease.
+Allows all voxis dictation-plugin commands: start, stop, cancel, state, get_profile, apply_profile, import_profile_from_desktop, import_profile_from_qr, set_provider, set_hotkey, set_consent, hold_lease, settings_get, settings_set.
 
 #### This default permission set includes the following:
 
@@ -16,6 +16,8 @@ Allows all voxis dictation-plugin commands: start, stop, cancel, state, get_prof
 - `allow-set-hotkey`
 - `allow-set-consent`
 - `allow-hold-lease`
+- `allow-settings-get`
+- `allow-settings-set`
 
 ## Permission Table
 
@@ -256,6 +258,58 @@ Enables the set_provider command without any pre-configured scope.
 <td>
 
 Denies the set_provider command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`voxis:allow-settings-get`
+
+</td>
+<td>
+
+Enables the settings_get command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`voxis:deny-settings-get`
+
+</td>
+<td>
+
+Denies the settings_get command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`voxis:allow-settings-set`
+
+</td>
+<td>
+
+Enables the settings_set command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`voxis:deny-settings-set`
+
+</td>
+<td>
+
+Denies the settings_set command without any pre-configured scope.
 
 </td>
 </tr>

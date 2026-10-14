@@ -27,6 +27,7 @@ import type {
   VoxisProfileDto,
 } from "./types/contract";
 import { LEVEL_EVENT, RESULT_EVENT, STATE_EVENT } from "./types/contract";
+import { settingsManifest, type SettingsManifest, type VoxisSettingsPatch, type VoxisSettingsSnapshot } from "./settings";
 
 /** An IPC `invoke`-shaped function — matches `@tauri-apps/api/core`'s `invoke`. */
 export type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
@@ -77,6 +78,21 @@ export interface VoxisClient {
   setHotkey(spec: HotkeySpec): Promise<void>;
   setConsent(consented: boolean): Promise<void>;
   holdLease(id: SessionId): Promise<void>;
+  /**
+   * 0.9.0: the settings wrapper's read — `{ values, status }`
+   * (`settings_get`). Never carries the API key; `status.hasApiKey` says
+   * set/unset.
+   */
+  getSettings(): Promise<VoxisSettingsSnapshot>;
+  /**
+   * 0.9.0: write a partial patch (`settings_set`); resolves the fresh
+   * `{ values, status }`. Rejects `{ kind: "invalid", field, message }`
+   * for a bad value (nothing saved), `{ kind: "alreadyRecording" }` while
+   * a session is live. `apiKey` absent/`null`/`""` keeps the stored key.
+   */
+  setSettings(values: VoxisSettingsPatch): Promise<VoxisSettingsSnapshot>;
+  /** 0.9.0: this plugin's settings manifest (local, no IPC). */
+  settingsManifest(): SettingsManifest;
   /**
    * `start(mode)`, then resolve on the next `voxis://result` event — the
    * plan's `dictate({mode}): Promise<DictationResult>` convenience
@@ -150,6 +166,9 @@ export function createClient(deps: VoxisClientDeps = {}): VoxisClient {
     setHotkey: (spec: HotkeySpec) => invoke<void>(pluginCommand("set_hotkey"), { spec }),
     setConsent: (consented) => invoke<void>(pluginCommand("set_consent"), { consented }),
     holdLease: (id) => invoke<void>(pluginCommand("hold_lease"), { id }),
+    getSettings: () => invoke<VoxisSettingsSnapshot>(pluginCommand("settings_get")),
+    setSettings: (values) => invoke<VoxisSettingsSnapshot>(pluginCommand("settings_set"), { values }),
+    settingsManifest,
 
     // `[fixed per REJECT-FIX L4]` The result listener used to attach
     // *after* `start()` resolved, and `dictate()` never settled at all

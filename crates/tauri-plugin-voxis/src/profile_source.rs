@@ -101,7 +101,7 @@ impl SecretSink for SecretStoreSink<'_> {
 /// next `start()` sees the imported settings), and builds the
 /// `ImportSummary` every import path (`import_from_desktop`,
 /// `import_from_qr`, `apply_profile_bytes`) returns.
-fn apply_imported_profile(
+pub(crate) fn apply_imported_profile(
     state: &PluginState,
     source: &str,
     profile: VoxisProfile,
@@ -244,7 +244,7 @@ pub fn current_profile(state: &PluginState) -> Result<VoxisProfile, PluginError>
     Ok(profile)
 }
 
-fn has_secret(state: &PluginState, name: &str) -> Result<bool, PluginError> {
+pub(crate) fn has_secret(state: &PluginState, name: &str) -> Result<bool, PluginError> {
     Ok(state
         .secrets
         .get(name)
@@ -388,7 +388,7 @@ const GROQ_PROVIDER_HOST: &str = "api.groq.com";
 /// Validates a caller-supplied `apiUrlOverride` is a syntactically valid
 /// http(s) URL with a host — `config::validate_config` does not check this
 /// field, so `set_provider` enforces it here before persisting.
-fn validate_http_url(url: &str) -> Result<(), PluginError> {
+pub(crate) fn validate_http_url(url: &str) -> Result<(), PluginError> {
     let parsed = reqwest::Url::parse(url)
         .map_err(|e| PluginError::Profile { message: format!("apiUrlOverride is not a valid URL: {e}") })?;
     match parsed.scheme() {

@@ -1,0 +1,166 @@
+// crates/tauri-plugin-voxis/guest-js/__tests__/settings.test.ts
+/**
+ * 0.9.0 settings manifest: Voxis's manifest validates against schema v1,
+ * every human-readable text has en + ru, every condition/reference points
+ * at a declared status/host path or an input field, and the client's
+ * getSettings/setSettings hit the right commands.
+ */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { createClient, type InvokeFn } from "../src/client";
+import {
+  collectSettingsConditions,
+  INPUT_FIELD_KINDS,
+  settingsManifest,
+  validateSettingsManifest,
+  voxisSettingsManifest,
+  type SettingsManifest,
+} from "../src/settings";
+import { COMMAND_NAMES } from "../src/types/contract";
+import * as index from "../src/index";
+
+const m = voxisSettingsManifest;
+const fields = m.sections.flatMap((s) => s.fields);
+
+function clone(): SettingsManifest {
+  return settingsManifest();
+}
+
+describe("voxis settings manifest", () => {
+  it("validates against schema v1", () => {
+    expect(validateSettingsManifest(m)).toEqual([]);
+  });
+
+  it("is plain JSON (round-trips unchanged)", () => {
+    expect(JSON.parse(JSON.stringify(m))).toEqual(m);
+  });
+
+  it("every localized text has non-empty en and ru, and nothing else", () => {
+    const seen: string[] = [];
+    const walk = (v: unknown, at: string) => {
+      if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${at}[${i}]`));
+      if (typeof v !== "object" || v === null) return;
+      const o = v as Record<string, unknown>;
+      if ("en" in o || "ru" in o) {
+        seen.push(at);
+        expect(Object.keys(o).sort(), at).toEqual(["en", "ru"]);
+        expect(typeof o.en === "string" && o.en.trim().length > 0, `${at}.en`).toBe(true);
+        expect(typeof o.ru === "string" && o.ru.trim().length > 0, `${at}.ru`).toBe(true);
+        return;
+      }
+      for (const [k, x] of Object.entries(o)) walk(x, `${at}.${k}`);
+    };
+    walk(m, "manifest");
+    // Every field and section has a label/title, so there must be plenty.
+    expect(seen.length).toBeGreaterThan(fields.length + m.sections.length);
+    for (const f of fields) expect(f.label, f.key).toBeDefined();
+  });
+
+  it("every condition references a declared status/host path or an input field", () => {
+    const valueKeys = new Set(fields.filter((f) => INPUT_FIELD_KINDS.includes(f.kind)).map((f) => f.key));
+    const conditions = collectSettingsConditions(m);
+    expect(conditions.length).toBeGreaterThan(0);
+    for (const c of conditions) {
+      if (c.query === "status") expect(Object.keys(m.status), c.path).toContain(c.path);
+      else if (c.query === "host") expect(Object.keys(m.host ?? {}), c.path).toContain(c.path);
+      else expect([...valueKeys], c.path).toContain(c.path);
+    }
+    // requiredStatus / setStatus / sources point at declared status paths too.
+    for (const f of fields) {
+      for (const ref of [f.requiredStatus, "setStatus" in f ? f.setStatus : undefined]) {
+        if (ref) expect(Object.keys(m.status), `${f.key}`).toContain(ref.path);
+      }
+    }
+  });
+
+  it("encodes the owner's rules: key required, pill controls need a key, desktop-only fields", () => {
+    const byKey = Object.fromEntries(fields.map((f) => [f.key, f]));
+    expect(byKey.apiKey).toMatchObject({ kind: "secret", store: "plugin", required: true, requiredStatus: { query: "status", path: "hasApiKey" } });
+    expect(byKey.apiKey!.hint?.en).toMatch(/Save.*\.vxp/);
+    for (const key of ["theme", "overlayPlacement", "overlayOffsetX", "overlayOffsetY"]) {
+      expect(byKey[key]!.enabledWhen, key).toEqual({ query: "status", path: "hasApiKey", truthy: true });
+      expect(byKey[key]!.disabledReason?.en, key).toBe("No API key — the dictation pill is off");
+    }
+    expect(byKey.theme).toMatchObject({ kind: "select", optionsFrom: { query: "status", path: "themeIds" } });
+    expect(byKey.hotkey!.visibleWhen).toEqual({ query: "status", path: "hotkeySupported", truthy: true });
+    expect(byKey.importDesktop!.visibleWhen).toEqual({ query: "status", path: "desktop", truthy: true });
+    expect(byKey.importFile).toMatchObject({ kind: "file-import", command: "apply_profile", accept: [".vxp"] });
+    for (const key of ["enabled", "overlayPlacement", "dictationChord"]) expect(byKey[key]!.store, key).toBe("host");
+  });
+
+  it("action/file-import commands are real plugin commands", () => {
+    for (const f of fields) {
+      if (f.kind === "action" || f.kind === "file-import") expect(COMMAND_NAMES as readonly string[]).toContain(f.command);
+    }
+  });
+
+  it("settingsManifest() is a copy, and both are exported from the package root", () => {
+    const copy = settingsManifest();
+    copy.sections.length = 0;
+    expect(voxisSettingsManifest.sections.length).toBeGreaterThan(0);
+    expect(index.voxisSettingsManifest).toBe(voxisSettingsManifest);
+    expect(typeof index.settingsManifest).toBe("function");
+  });
+
+  it("matches the JSON file the Rust tests read", () => {
+    const raw = JSON.parse(readFileSync(resolve(__dirname, "../src/voxis-settings-manifest.json"), "utf8"));
+    expect(raw).toEqual(m);
+  });
+});
+
+describe("validateSettingsManifest rejects", () => {
+  it("a label missing ru", () => {
+    const bad = clone();
+    (bad.sections[0]!.fields[0]!.label as { ru?: string }).ru = undefined;
+    expect(validateSettingsManifest(bad).join("\n")).toMatch(/label must be \{ en, ru \}/);
+  });
+
+  it("a condition on an undeclared status path", () => {
+    const bad = clone();
+    bad.sections[0]!.fields[0]!.visibleWhen = { query: "status", path: "nope", truthy: true };
+    expect(validateSettingsManifest(bad).join("\n")).toMatch(/status path "nope" is not declared/);
+  });
+
+  it("a condition with two operators, an unknown kind, a select with both option sources", () => {
+    const bad = clone();
+    bad.sections[0]!.fields[0]!.visibleWhen = { query: "values", path: "provider", equals: "x", truthy: true } as never;
+    (bad.sections[1]!.fields[0] as { kind: string }).kind = "slider";
+    const theme = bad.sections.flatMap((s) => s.fields).find((f) => f.key === "theme") as { options?: unknown[] };
+    theme.options = [{ value: "a", label: { en: "a", ru: "a" } }];
+    const errors = validateSettingsManifest(bad).join("\n");
+    expect(errors).toMatch(/exactly one of equals \| notEquals \| truthy/);
+    expect(errors).toMatch(/unknown kind "slider"/);
+    expect(errors).toMatch(/exactly one of options \| optionsFrom/);
+  });
+
+  it("enabledWhen without a disabledReason, required without requiredStatus", () => {
+    const bad = clone();
+    const f = bad.sections.flatMap((s) => s.fields).find((x) => x.key === "theme")!;
+    delete f.disabledReason;
+    const k = bad.sections.flatMap((s) => s.fields).find((x) => x.key === "apiKey")!;
+    delete k.requiredStatus;
+    const errors = validateSettingsManifest(bad).join("\n");
+    expect(errors).toMatch(/enabledWhen needs a disabledReason/);
+    expect(errors).toMatch(/requiredStatus: ref needs/);
+  });
+});
+
+describe("client settings commands", () => {
+  it("getSettings/setSettings invoke settings_get/settings_set", async () => {
+    const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
+    const snapshot = { values: { provider: "groq" }, status: { hasApiKey: false } };
+    const invoke: InvokeFn = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return snapshot as never;
+    });
+    const client = createClient({ invoke });
+    expect(await client.getSettings()).toBe(snapshot);
+    expect(await client.setSettings({ apiKey: "k", theme: "neon" })).toBe(snapshot);
+    expect(calls).toEqual([
+      { cmd: "plugin:voxis|settings_get", args: undefined },
+      { cmd: "plugin:voxis|settings_set", args: { values: { apiKey: "k", theme: "neon" } } },
+    ]);
+    expect(client.settingsManifest()).toEqual(voxisSettingsManifest);
+  });
+});

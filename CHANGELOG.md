@@ -1,5 +1,25 @@
 # Changelog
 
+## `tauri-plugin-voxis` 0.7.0 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.0
+
+- **The plugin describes its own settings.** guest-js exports a JSON settings
+  manifest (`voxisSettingsManifest`, `settingsManifest()`; schema v1 types +
+  `validateSettingsManifest` in `settings.ts`): sections of fields
+  (`toggle`/`select`/`text`/`secret`/`number`/`status`/`action`/`file-import`),
+  `{ en, ru }` labels, and declared behaviour — the API key is `required`
+  (red until `status.hasApiKey`), every pill control is `enabledWhen`
+  `status.hasApiKey` («No API key — the dictation pill is off»), the global
+  hotkey and «Import from Voxis desktop» show only where the build has them.
+  Host-owned prefs (`enabled`, `overlayPlacement`, offsets, `dictationChord`)
+  are described with `store: "host"`. A host renders a tab from it instead of
+  a hand-written Voxis form.
+- **New commands `settings_get` / `settings_set`** (in `voxis:default`;
+  desktop and mobile): `{ values, status }` over the existing profile,
+  secret store, hotkey backend and theme — no second store. The API key is
+  write-only (never returned; empty keeps it). Bad values reject
+  `{ kind: "invalid", field, message }` and save nothing. guest-js:
+  `getSettings()`, `setSettings(values)`.
+
 ## @voxis/tauri-plugin-voxis (guest-js) 0.8.0
 
 - **`board: false`**: the expanded window without its dark `#111` board — only

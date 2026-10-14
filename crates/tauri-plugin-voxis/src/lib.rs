@@ -21,7 +21,7 @@
 //! - `pipeline`: the real capture -> guard -> transcription -> dictionary
 //!   -> llm -> `DictationResult` pipeline (Task 3b).
 //! - `error`: the one `PluginError` every command returns.
-//! - `commands`: the twelve Tauri commands, thin wrappers around
+//! - `commands`: the fourteen Tauri commands, thin wrappers around
 //!   testable `do_*` functions operating on `&PluginState` (no Tauri
 //!   runtime needed to unit-test the actual logic).
 //!
@@ -63,6 +63,7 @@ pub mod pipeline;
 pub mod profile_source;
 pub mod secrets;
 pub mod session;
+pub mod settings;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -482,7 +483,7 @@ fn desktop_hotkey_factory<R: Runtime>(app: tauri::AppHandle<R>, events: Arc<dyn 
 type HotkeyFactory<R> = fn(tauri::AppHandle<R>, Arc<dyn EventSink>) -> Arc<dyn HotkeyController>;
 
 /// The invoke-handler/`on_page_load`/`on_event` chain shared by every
-/// `TauriPlugin` this crate builds (`build`, `init_ios`) — the twelve
+/// `TauriPlugin` this crate builds (`build`, `init_ios`) — the fourteen
 /// JS-facing commands never change per-platform, and both the Hold-mode
 /// webview-reload guard and the process-exit guard below apply just as
 /// much to an iOS host's single webview as to desktop's. Only `.setup(..)`
@@ -504,6 +505,8 @@ fn plugin_builder<R: Runtime>() -> Builder<R> {
             commands::set_hotkey,
             commands::set_consent,
             commands::hold_lease,
+            commands::settings_get,
+            commands::settings_set,
         ])
         // `[R1-Safety S4]` / review finding F1: a dead/reloaded webview
         // must not leave a Hold session's mic open. `on_page_load` fires

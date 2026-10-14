@@ -1,4 +1,4 @@
-//! The twelve Tauri commands the plugin registers (`build.rs`'s
+//! The fourteen Tauri commands the plugin registers (`build.rs`'s
 //! `COMMANDS`, `lib.rs`'s `generate_handler!`). Each is a thin
 //! `#[tauri::command]` wrapper around a `do_*` function that takes
 //! `&PluginState` directly \u2014 the `do_*` functions are what
@@ -261,6 +261,24 @@ pub(crate) fn do_set_hotkey(state: &PluginState, spec: &HotkeySpec) -> Result<()
 #[tauri::command]
 pub fn set_hotkey(state: TauriState<'_, PluginState>, spec: HotkeySpec) -> Result<(), PluginError> {
     do_set_hotkey(&state, &spec)
+}
+
+/// 0.7.0: the settings wrapper's read — `{ values, status }`
+/// (`settings.rs`). Never carries a secret.
+#[tauri::command]
+pub fn settings_get(state: TauriState<'_, PluginState>) -> Result<crate::settings::SettingsSnapshot, PluginError> {
+    crate::settings::get(&state)
+}
+
+/// 0.7.0: the settings wrapper's write — a partial `values` patch;
+/// returns the fresh `{ values, status }` or `{ kind: "invalid", field,
+/// message }` (`settings.rs`).
+#[tauri::command]
+pub fn settings_set(
+    state: TauriState<'_, PluginState>,
+    values: serde_json::Value,
+) -> Result<crate::settings::SettingsSnapshot, PluginError> {
+    crate::settings::set(&state, values)
 }
 
 #[tauri::command]

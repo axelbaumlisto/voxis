@@ -38,6 +38,8 @@ export const COMMAND_NAMES = [
   "set_hotkey",
   "set_consent",
   "hold_lease",
+  "settings_get",
+  "settings_set",
 ] as const;
 
 export type CommandName = (typeof COMMAND_NAMES)[number];

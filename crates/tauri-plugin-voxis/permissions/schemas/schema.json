@@ -403,6 +403,30 @@
           "markdownDescription": "Denies the set_provider command without any pre-configured scope."
         },
         {
+          "description": "Enables the settings_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-settings-get",
+          "markdownDescription": "Enables the settings_get command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the settings_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-settings-get",
+          "markdownDescription": "Denies the settings_get command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the settings_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-settings-set",
+          "markdownDescription": "Enables the settings_set command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the settings_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-settings-set",
+          "markdownDescription": "Denies the settings_set command without any pre-configured scope."
+        },
+        {
           "description": "Enables the start command without any pre-configured scope.",
           "type": "string",
           "const": "allow-start",
@@ -439,10 +463,10 @@
           "markdownDescription": "Denies the stop command without any pre-configured scope."
         },
         {
-          "description": "Allows all voxis dictation-plugin commands: start, stop, cancel, state, get_profile, apply_profile, import_profile_from_desktop, import_profile_from_qr, set_provider, set_hotkey, set_consent, hold_lease.\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-cancel`\n- `allow-state`\n- `allow-get-profile`\n- `allow-apply-profile`\n- `allow-import-profile-from-desktop`\n- `allow-import-profile-from-qr`\n- `allow-set-provider`\n- `allow-set-hotkey`\n- `allow-set-consent`\n- `allow-hold-lease`",
+          "description": "Allows all voxis dictation-plugin commands: start, stop, cancel, state, get_profile, apply_profile, import_profile_from_desktop, import_profile_from_qr, set_provider, set_hotkey, set_consent, hold_lease, settings_get, settings_set.\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-cancel`\n- `allow-state`\n- `allow-get-profile`\n- `allow-apply-profile`\n- `allow-import-profile-from-desktop`\n- `allow-import-profile-from-qr`\n- `allow-set-provider`\n- `allow-set-hotkey`\n- `allow-set-consent`\n- `allow-hold-lease`\n- `allow-settings-get`\n- `allow-settings-set`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Allows all voxis dictation-plugin commands: start, stop, cancel, state, get_profile, apply_profile, import_profile_from_desktop, import_profile_from_qr, set_provider, set_hotkey, set_consent, hold_lease.\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-cancel`\n- `allow-state`\n- `allow-get-profile`\n- `allow-apply-profile`\n- `allow-import-profile-from-desktop`\n- `allow-import-profile-from-qr`\n- `allow-set-provider`\n- `allow-set-hotkey`\n- `allow-set-consent`\n- `allow-hold-lease`"
+          "markdownDescription": "Allows all voxis dictation-plugin commands: start, stop, cancel, state, get_profile, apply_profile, import_profile_from_desktop, import_profile_from_qr, set_provider, set_hotkey, set_consent, hold_lease, settings_get, settings_set.\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-cancel`\n- `allow-state`\n- `allow-get-profile`\n- `allow-apply-profile`\n- `allow-import-profile-from-desktop`\n- `allow-import-profile-from-qr`\n- `allow-set-provider`\n- `allow-set-hotkey`\n- `allow-set-consent`\n- `allow-hold-lease`\n- `allow-settings-get`\n- `allow-settings-set`"
         }
       ]
     }

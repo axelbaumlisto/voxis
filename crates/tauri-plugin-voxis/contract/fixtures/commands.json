@@ -10,5 +10,7 @@
   "set_provider",
   "set_hotkey",
   "set_consent",
-  "hold_lease"
+  "hold_lease",
+  "settings_get",
+  "settings_set"
 ]

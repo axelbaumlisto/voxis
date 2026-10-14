@@ -94,6 +94,12 @@ pub enum PluginError {
     /// server (`import_profile_from_qr`).
     #[error("profile error: {message}")]
     Profile { message: String },
+    /// `settings_set` (0.7.0): one value failed validation. `field` is the
+    /// settings-manifest field key (`apiUrlOverride`, `theme`, `hotkey`,
+    /// ...) so a host renders the message under THAT field; nothing was
+    /// persisted. Wire shape: `{ kind: "invalid", field, message }`.
+    #[error("invalid value for '{field}': {message}")]
+    Invalid { field: String, message: String },
 }
 
 impl From<voxis_core::profile::ProfileError> for PluginError {
@@ -166,6 +172,16 @@ mod tests {
         assert_eq!(value, serde_json::json!({"kind": "noApiKey", "message": "set a provider first"}));
         let value = serde_json::to_value(PluginError::UnsupportedPlatform { message: "android".to_string() }).unwrap();
         assert_eq!(value, serde_json::json!({"kind": "unsupportedPlatform", "message": "android"}));
+    }
+
+    #[test]
+    fn invalid_serializes_with_kind_and_field() {
+        let value = serde_json::to_value(PluginError::Invalid {
+            field: "apiUrlOverride".to_string(),
+            message: "not a URL".to_string(),
+        })
+        .unwrap();
+        assert_eq!(value, serde_json::json!({"kind": "invalid", "field": "apiUrlOverride", "message": "not a URL"}));
     }
 
     #[test]

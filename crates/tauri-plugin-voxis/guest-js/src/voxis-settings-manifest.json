@@ -1,0 +1,321 @@
+{
+  "schemaVersion": 1,
+  "pluginId": "voxis",
+  "title": { "en": "Dictation (Voxis)", "ru": "Диктовка (Voxis)" },
+  "status": {
+    "hasApiKey": { "type": "boolean", "description": "A transcription API key is stored (never the key itself)." },
+    "provider": { "type": "string", "description": "\"groq\" or \"selfHosted\"." },
+    "providerLabel": { "type": "string", "description": "\"Groq\" or \"Self-hosted <host>\"." },
+    "providerHost": { "type": "string", "description": "The host consent is keyed on." },
+    "platform": { "type": "string", "description": "Build OS: macos, windows, linux, ios, android." },
+    "desktop": { "type": "boolean", "description": "A desktop OS (a Voxis desktop install may exist)." },
+    "hotkeySupported": { "type": "boolean", "description": "This build has a global hotkey backend." },
+    "dictationSupported": { "type": "boolean", "description": "This build can record on this platform." },
+    "unsupportedReason": { "type": "string", "description": "Why dictation is unavailable, or null." },
+    "state": { "type": "string", "description": "idle, recording, transcribing or error." },
+    "themeIds": { "type": "string[]", "description": "Selectable overlay theme ids." },
+    "pluginVersion": { "type": "string", "description": "tauri-plugin-voxis crate version." },
+    "diagnostics": { "type": "string", "description": "One line for bug reports." }
+  },
+  "host": {
+    "dictationChordChoices": {
+      "type": "options",
+      "description": "The host's in-app chord candidates ({ value, label }[]), minus keys the host already binds."
+    },
+    "diagnostics": {
+      "type": "string",
+      "description": "The host's own diagnostics line (pill position, viewport, build)."
+    }
+  },
+  "sections": [
+    {
+      "id": "dictation",
+      "title": { "en": "Dictation", "ru": "Диктовка" },
+      "fields": [
+        {
+          "key": "enabled",
+          "kind": "toggle",
+          "store": "host",
+          "default": true,
+          "label": { "en": "Voxis dictation", "ru": "Диктовка Voxis" },
+          "help": {
+            "en": "Off: no hotkey, no pill, no microphone. For a computer that already runs the Voxis app.",
+            "ru": "Выключено: ни хоткея, ни пилюли, ни микрофона. Для компьютера, где уже стоит приложение Voxis."
+          }
+        },
+        {
+          "key": "unsupportedPlatform",
+          "kind": "status",
+          "store": "plugin",
+          "tone": "warning",
+          "visibleWhen": { "query": "status", "path": "dictationSupported", "equals": false },
+          "label": {
+            "en": "Dictation is not available on this platform. Provider settings are kept.",
+            "ru": "Диктовка на этой платформе недоступна. Настройки провайдера сохраняются."
+          }
+        }
+      ]
+    },
+    {
+      "id": "provider",
+      "title": { "en": "Provider", "ru": "Провайдер" },
+      "visibleWhen": { "query": "values", "path": "enabled", "truthy": true },
+      "fields": [
+        {
+          "key": "apiKeyStatus",
+          "kind": "status",
+          "store": "plugin",
+          "label": { "en": "API key", "ru": "API-ключ" },
+          "source": { "query": "status", "path": "hasApiKey" },
+          "valueLabels": {
+            "true": { "en": "API key set", "ru": "API-ключ задан" },
+            "false": { "en": "No API key", "ru": "API-ключа нет" }
+          },
+          "required": true,
+          "requiredStatus": { "query": "status", "path": "hasApiKey" },
+          "hint": {
+            "en": "Enter the key and Save, or import a .vxp",
+            "ru": "Введите ключ и нажмите «Сохранить» или импортируйте .vxp"
+          }
+        },
+        {
+          "key": "provider",
+          "kind": "select",
+          "store": "plugin",
+          "label": { "en": "Provider", "ru": "Провайдер" },
+          "options": [
+            { "value": "groq", "label": { "en": "Groq (default)", "ru": "Groq (по умолчанию)" } },
+            { "value": "selfHosted", "label": { "en": "Self-hosted server", "ru": "Свой сервер" } }
+          ]
+        },
+        {
+          "key": "apiUrlOverride",
+          "kind": "text",
+          "store": "plugin",
+          "inputType": "url",
+          "label": { "en": "Server URL", "ru": "URL сервера" },
+          "placeholder": { "en": "https://…", "ru": "https://…" },
+          "visibleWhen": { "query": "values", "path": "provider", "equals": "selfHosted" }
+        },
+        {
+          "key": "apiKey",
+          "kind": "secret",
+          "store": "plugin",
+          "label": { "en": "API key", "ru": "API-ключ" },
+          "placeholder": { "en": "gsk_… — leave empty to keep", "ru": "gsk_… — пусто: оставить как есть" },
+          "setStatus": { "query": "status", "path": "hasApiKey" },
+          "required": true,
+          "requiredStatus": { "query": "status", "path": "hasApiKey" },
+          "hint": {
+            "en": "Enter the key and Save, or import a .vxp",
+            "ru": "Введите ключ и нажмите «Сохранить» или импортируйте .vxp"
+          }
+        },
+        {
+          "key": "model",
+          "kind": "text",
+          "store": "plugin",
+          "label": { "en": "Model", "ru": "Модель" },
+          "placeholder": { "en": "whisper-large-v3-turbo", "ru": "whisper-large-v3-turbo" },
+          "help": { "en": "Empty keeps the current model.", "ru": "Пусто — оставить текущую." }
+        },
+        {
+          "key": "providerStatus",
+          "kind": "status",
+          "store": "plugin",
+          "label": { "en": "In use", "ru": "Сейчас" },
+          "source": { "query": "status", "path": "providerLabel" }
+        }
+      ]
+    },
+    {
+      "id": "import",
+      "title": { "en": "Import", "ru": "Импорт" },
+      "visibleWhen": { "query": "values", "path": "enabled", "truthy": true },
+      "fields": [
+        {
+          "key": "importDesktop",
+          "kind": "action",
+          "store": "plugin",
+          "label": { "en": "Import from Voxis desktop", "ru": "Импорт из Voxis desktop" },
+          "command": "import_profile_from_desktop",
+          "visibleWhen": { "query": "status", "path": "desktop", "truthy": true },
+          "successMessage": { "en": "Profile imported", "ru": "Профиль импортирован" },
+          "errorMessages": {
+            "notFound": {
+              "en": "Voxis desktop not found on this computer — import a .vxp instead",
+              "ru": "Voxis desktop на этом компьютере не найден — импортируйте .vxp"
+            },
+            "alreadyRecording": { "en": "Stop dictation first", "ru": "Сначала остановите диктовку" }
+          }
+        },
+        {
+          "key": "importFile",
+          "kind": "file-import",
+          "store": "plugin",
+          "label": { "en": "Import .vxp file…", "ru": "Импорт файла .vxp…" },
+          "command": "apply_profile",
+          "accept": [".vxp"],
+          "passphrase": {
+            "label": { "en": "Profile passphrase", "ru": "Пароль профиля" },
+            "submit": { "en": "Import", "ru": "Импортировать" }
+          },
+          "args": {
+            "bytes": { "$input": "bytes" },
+            "keySource": { "type": "passphrase", "phrase": { "$input": "passphrase" } }
+          },
+          "successMessage": { "en": "Profile imported", "ru": "Профиль импортирован" },
+          "errorMessages": {
+            "profile": {
+              "en": "Could not import this file with that passphrase",
+              "ru": "Не удалось импортировать файл с этим паролем"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "trigger",
+      "title": { "en": "Hotkey", "ru": "Клавиша" },
+      "visibleWhen": { "query": "values", "path": "enabled", "truthy": true },
+      "fields": [
+        {
+          "key": "hotkey",
+          "kind": "select",
+          "store": "plugin",
+          "label": { "en": "Dictation hotkey", "ru": "Клавиша диктовки" },
+          "help": { "en": "Global: works in any app. Hold to talk.", "ru": "Глобальная: работает в любом приложении. Держите и говорите." },
+          "visibleWhen": { "query": "status", "path": "hotkeySupported", "truthy": true },
+          "options": [
+            { "value": "alt_r", "label": { "en": "Right Option/Alt", "ru": "Правый Option/Alt" } },
+            { "value": "ctrl_r", "label": { "en": "Right Control", "ru": "Правый Control" } },
+            { "value": "shift_r", "label": { "en": "Right Shift", "ru": "Правый Shift" } },
+            { "value": "cmd_r", "label": { "en": "Right Command", "ru": "Правый Command" } },
+            { "value": "f2", "label": { "en": "F2", "ru": "F2" } },
+            { "value": "f3", "label": { "en": "F3", "ru": "F3" } },
+            { "value": "f4", "label": { "en": "F4", "ru": "F4" } },
+            { "value": "f5", "label": { "en": "F5", "ru": "F5" } },
+            { "value": "f6", "label": { "en": "F6", "ru": "F6" } },
+            { "value": "f7", "label": { "en": "F7", "ru": "F7" } },
+            { "value": "f8", "label": { "en": "F8", "ru": "F8" } },
+            { "value": "f9", "label": { "en": "F9", "ru": "F9" } },
+            { "value": "f10", "label": { "en": "F10", "ru": "F10" } },
+            { "value": "f11", "label": { "en": "F11", "ru": "F11" } },
+            { "value": "f12", "label": { "en": "F12", "ru": "F12" } }
+          ],
+          "errorMessages": {
+            "permissionDenied": {
+              "en": "The hotkey needs Accessibility / Input Monitoring permission (System Settings → Privacy & Security).",
+              "ru": "Клавише нужно разрешение «Универсальный доступ» / «Мониторинг ввода» (Системные настройки → Конфиденциальность)."
+            }
+          }
+        },
+        {
+          "key": "dictationChord",
+          "kind": "select",
+          "store": "host",
+          "default": "s",
+          "label": { "en": "Shortcut in the app", "ru": "Сочетание в приложении" },
+          "help": {
+            "en": "Works while the app is open: tap to start and stop, hold to talk.",
+            "ru": "Работает, пока приложение открыто: нажатие — начать и остановить, удержание — говорить."
+          },
+          "optionsFrom": { "query": "host", "path": "dictationChordChoices" }
+        }
+      ]
+    },
+    {
+      "id": "pill",
+      "title": { "en": "Pill", "ru": "Пилюля" },
+      "visibleWhen": { "query": "values", "path": "enabled", "truthy": true },
+      "fields": [
+        {
+          "key": "theme",
+          "kind": "select",
+          "store": "plugin",
+          "label": { "en": "Pill theme", "ru": "Тема пилюли" },
+          "optionsFrom": { "query": "status", "path": "themeIds" },
+          "enabledWhen": { "query": "status", "path": "hasApiKey", "truthy": true },
+          "disabledReason": { "en": "No API key — the dictation pill is off", "ru": "Нет API-ключа — пилюля диктовки выключена" }
+        },
+        {
+          "key": "overlayPlacement",
+          "kind": "select",
+          "store": "host",
+          "default": "bottom-right",
+          "label": { "en": "Pill position", "ru": "Положение пилюли" },
+          "options": [
+            { "value": "bottom-right", "label": { "en": "Bottom right", "ru": "Справа снизу" } },
+            { "value": "bottom-left", "label": { "en": "Bottom left", "ru": "Слева снизу" } },
+            { "value": "top-right", "label": { "en": "Top right", "ru": "Справа сверху" } },
+            { "value": "top-left", "label": { "en": "Top left", "ru": "Слева сверху" } },
+            { "value": "center", "label": { "en": "Center", "ru": "По центру" } },
+            { "value": "hidden", "label": { "en": "Don't show (hotkey or chip only)", "ru": "Не показывать (хоткей или чип)" } }
+          ],
+          "enabledWhen": { "query": "status", "path": "hasApiKey", "truthy": true },
+          "disabledReason": { "en": "No API key — the dictation pill is off", "ru": "Нет API-ключа — пилюля диктовки выключена" }
+        },
+        {
+          "key": "overlayOffsetX",
+          "kind": "number",
+          "store": "host",
+          "default": 16,
+          "min": -4096,
+          "max": 4096,
+          "step": 1,
+          "unit": "px",
+          "label": { "en": "Horizontal offset", "ru": "Отступ по горизонтали" },
+          "visibleWhen": {
+            "all": [
+              { "query": "values", "path": "overlayPlacement", "notEquals": "hidden" },
+              { "query": "values", "path": "overlayPlacement", "notEquals": "center" }
+            ]
+          },
+          "enabledWhen": { "query": "status", "path": "hasApiKey", "truthy": true },
+          "disabledReason": { "en": "No API key — the dictation pill is off", "ru": "Нет API-ключа — пилюля диктовки выключена" }
+        },
+        {
+          "key": "overlayOffsetY",
+          "kind": "number",
+          "store": "host",
+          "default": 96,
+          "min": -4096,
+          "max": 4096,
+          "step": 1,
+          "unit": "px",
+          "label": { "en": "Vertical offset", "ru": "Отступ по вертикали" },
+          "visibleWhen": {
+            "all": [
+              { "query": "values", "path": "overlayPlacement", "notEquals": "hidden" },
+              { "query": "values", "path": "overlayPlacement", "notEquals": "center" }
+            ]
+          },
+          "enabledWhen": { "query": "status", "path": "hasApiKey", "truthy": true },
+          "disabledReason": { "en": "No API key — the dictation pill is off", "ru": "Нет API-ключа — пилюля диктовки выключена" }
+        }
+      ]
+    },
+    {
+      "id": "diagnostics",
+      "title": { "en": "Diagnostics", "ru": "Диагностика" },
+      "fields": [
+        {
+          "key": "pluginDiagnostics",
+          "kind": "status",
+          "store": "plugin",
+          "monospace": true,
+          "label": { "en": "Plugin", "ru": "Плагин" },
+          "source": { "query": "status", "path": "diagnostics" }
+        },
+        {
+          "key": "hostDiagnostics",
+          "kind": "status",
+          "store": "host",
+          "monospace": true,
+          "label": { "en": "Host", "ru": "Хост" },
+          "source": { "query": "host", "path": "diagnostics" }
+        }
+      ]
+    }
+  ]
+}
