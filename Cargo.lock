@@ -5410,7 +5410,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-voxis"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "cpal",
  "mockito",

@@ -27,7 +27,9 @@
  * - `text` — string (`inputType: "url"` for URLs).
  * - `secret` — write-only: never read back; the input starts empty
  *   («leave empty to keep»), `setStatus` says set/unset. Send it in
- *   `settings_set` only when the user typed something.
+ *   `settings_set` only when the user typed something — EXCEPT the
+ *   explicit erase: `"apiKey": null` in the patch clears the stored
+ *   key (0.9.3; an empty/whitespace string still keeps it).
  * - `number` — `min`/`max`/`step`, optional `unit`.
  * - `status` — a read-only line: `label` + the value at `source` (mapped
  *   through `valueLabels` when the value is a boolean/string key there).
@@ -452,7 +454,7 @@ export interface VoxisSettingsValues {
   theme: string;
 }
 
-/** `settings_set` patch: any subset; `apiKey` absent/`null`/`""` keeps the stored key. */
+/** `settings_set` patch: any subset. `apiKey`: absent keeps the stored key, `null` erases it (0.9.3), `""`/whitespace keeps it, any other string replaces it. */
 export type VoxisSettingsPatch = Partial<VoxisSettingsValues> & { apiKey?: string | null };
 
 /** `settings_get().status` — mirrors `SettingsStatus` in `src/settings.rs`. */

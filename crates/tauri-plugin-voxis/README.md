@@ -30,11 +30,11 @@ dependency against this repo's private Forgejo remote (`zverozabr/voxis`,
 ```toml
 # host's src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-voxis = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.7.2", features = ["desktop"] }
-voxis-core = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.7.2" }
+tauri-plugin-voxis = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.7.3", features = ["desktop"] }
+voxis-core = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.7.3" }
 ```
 
-- **Pin by a `plugin-v*` tag** (current: `plugin-v0.7.2`; naked pins it in
+- **Pin by a `plugin-v*` tag** (current: `plugin-v0.7.3`; naked pins it in
   `src-tauri/Cargo.toml`). Tags are cut ONLY by `scripts/tag-plugin.sh
   <X.Y.Z> "<msg>"`, which runs the desktop tests + clippy, the guest-js
   build/tests, the iOS cross-build + Swift tests and (where an NDK exists)
@@ -158,7 +158,7 @@ Every command is `Result<T, PluginError>`; see "Errors" below for the
 | `set_consent` | `(granted: bool)` | Per-(host, provider) gate; `start()` refuses until this is `true` at least once for the plugin's currently-configured provider (`[R1-Safety S6]`). |
 | `hold_lease` | `(sessionId)` | Heartbeat for Hold-mode sessions — guest-js's `lease.ts` calls this once per second while a hold gesture is active; 3 missed beats → the session is cancelled server-side (`LeaseLost`) even if the webview died silently. Not needed for Toggle-mode sessions. |
 | `settings_get` | `() -> { values, status }` | 0.7.0, for a host's config-driven settings tab (manifest: guest-js `settingsManifest()`). `values`: `provider` (`"groq"`\|`"selfHosted"`), `apiUrlOverride`, `model`, `hotkey`, `theme` — **never** the API key. `status`: `hasApiKey`, `provider`, `providerLabel`, `providerHost`, `platform`, `desktop`, `hotkeySupported`, `dictationSupported`, `unsupportedReason`, `state`, `themeIds` (ids, kept for compatibility), `themes` (0.7.2: `{ value: id, label: { en, ru } }[]`, labels = the themes' own names, what the manifest's theme select reads), `pluginVersion`, `diagnostics`. Reads the same profile storage as `get_profile`. |
-| `settings_set` | `(values) -> { values, status }` | Partial patch over the same profile/secret/hotkey storage as `set_provider`/`set_hotkey` (no second store). `apiKey` absent/null/empty keeps the stored key. Bad values reject `{ kind: "invalid", field, message }` with nothing saved (unknown key, non-http(s) URL, self-hosted without URL, unknown theme, unparseable hotkey). A changed `hotkey` is armed on the OS backend. `alreadyRecording` while a session is live; a provider-host change resets consent. |
+| `settings_set` | `(values) -> { values, status }` | Partial patch over the same profile/secret/hotkey storage as `set_provider`/`set_hotkey` (no second store). `apiKey`: **absent keeps** the stored key, **`null` erases** it (0.7.3 — the secret is deleted from the `SecretStore`, `status.hasApiKey` flips to `false`, dictation stays enabled), an **empty/whitespace string keeps** it («leave empty to keep»), any other string replaces it. Bad values reject `{ kind: "invalid", field, message }` with nothing saved (unknown key, non-http(s) URL, self-hosted without URL, unknown theme, unparseable hotkey). A changed `hotkey` is armed on the OS backend. `alreadyRecording` while a session is live; a provider-host change resets consent. |
 
 ## Events
 

@@ -88,9 +88,17 @@ export interface VoxisClient {
    * 0.9.0: write a partial patch (`settings_set`); resolves the fresh
    * `{ values, status }`. Rejects `{ kind: "invalid", field, message }`
    * for a bad value (nothing saved), `{ kind: "alreadyRecording" }` while
-   * a session is live. `apiKey` absent/`null`/`""` keeps the stored key.
+   * a session is live. `apiKey`: absent keeps the stored key, `null`
+   * ERASES it (0.9.3), `""` keeps it (the «leave empty to keep» form
+   * value), any other string replaces it.
    */
   setSettings(values: VoxisSettingsPatch): Promise<VoxisSettingsSnapshot>;
+  /**
+   * 0.9.3: erase the stored transcription API key (`settings_set` with
+   * `{ apiKey: null }`) — for a device stuck with a wrong key. Resolves
+   * the fresh `{ values, status }` (`status.hasApiKey === false`).
+   */
+  clearApiKey(): Promise<VoxisSettingsSnapshot>;
   /** 0.9.0: this plugin's settings manifest (local, no IPC). */
   settingsManifest(): SettingsManifest;
   /**
@@ -168,6 +176,7 @@ export function createClient(deps: VoxisClientDeps = {}): VoxisClient {
     holdLease: (id) => invoke<void>(pluginCommand("hold_lease"), { id }),
     getSettings: () => invoke<VoxisSettingsSnapshot>(pluginCommand("settings_get")),
     setSettings: (values) => invoke<VoxisSettingsSnapshot>(pluginCommand("settings_set"), { values }),
+    clearApiKey: () => invoke<VoxisSettingsSnapshot>(pluginCommand("settings_set"), { values: { apiKey: null } }),
     settingsManifest,
 
     // `[fixed per REJECT-FIX L4]` The result listener used to attach

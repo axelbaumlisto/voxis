@@ -1,5 +1,23 @@
 # Changelog
 
+## `tauri-plugin-voxis` 0.7.3 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.3
+
+- **A WRONG API key can now be REMOVED, not only replaced** (owner
+  14–15.10: a device stuck with a bad key had to reinstall).
+  `settings_set`'s `apiKey` becomes three-valued: **absent keeps** the
+  stored key (unchanged — old guests sending partial patches are
+  unaffected), **`null` erases** it (the secret is deleted from the
+  `SecretStore`, `status.hasApiKey` flips to `false`, dictation stays
+  enabled — only `start`'s `noApiKey` gate cares), and an
+  **empty/whitespace string keeps** it (the «leave empty to keep» form
+  value, unchanged). No separate command; `set_provider`'s `""` = clear
+  semantics are untouched.
+- guest-js 0.9.3: `VoxisSettingsPatch.apiKey` is documented as
+  `string | null` with the three-valued semantics, and the client gains
+  `clearApiKey()` — a helper sending `{ apiKey: null }`. The manifest's
+  `apiKey` field spells the contract out in `help` (empty save keeps;
+  removal is the explicit null erase via `clearApiKey`).
+
 ## `tauri-plugin-voxis` 0.7.2 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.2
 
 - **The pill theme select shows theme names, not raw ids** (owner 14.10:

@@ -17,6 +17,7 @@ import {
   validateSettingsManifest,
   voxisSettingsManifest,
   type SettingsManifest,
+  type VoxisSettingsPatch,
 } from "../src/settings";
 import { COMMAND_NAMES } from "../src/types/contract";
 import * as index from "../src/index";
@@ -216,5 +217,22 @@ describe("client settings commands", () => {
       { cmd: "plugin:voxis|settings_set", args: { values: { apiKey: "k", theme: "neon" } } },
     ]);
     expect(client.settingsManifest()).toEqual(voxisSettingsManifest);
+  });
+
+  it("clearApiKey() sends settings_set with { apiKey: null } (0.9.3 explicit erase; an empty string still keeps)", async () => {
+    const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
+    const snapshot = { values: { provider: "groq" }, status: { hasApiKey: false } };
+    const invoke: InvokeFn = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return snapshot as never;
+    });
+    const client = createClient({ invoke });
+    expect(await client.clearApiKey()).toBe(snapshot);
+    expect(calls).toEqual([{ cmd: "plugin:voxis|settings_set", args: { values: { apiKey: null } } }]);
+    // The patch type still accepts the three apiKey shapes the wire
+    // defines: replace (string), explicit erase (null), keep ("").
+    const patches: VoxisSettingsPatch[] = [{ apiKey: "gsk_new" }, { apiKey: null }, { apiKey: "" }, { theme: "neon" }];
+    for (const patch of patches) await client.setSettings(patch);
+    expect(calls.slice(1).map((c) => c.args)).toEqual(patches.map((values) => ({ values })));
   });
 });

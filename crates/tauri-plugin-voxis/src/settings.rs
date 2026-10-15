@@ -16,8 +16,18 @@
 //!
 //! Secrets: `apiKey` is write-only. `settings_get` never carries it (not
 //! even masked) — `status.hasApiKey` says set/unset. In `settings_set`,
-//! `apiKey` absent, `null` or empty/whitespace keeps the stored key
-//! ("leave empty to keep"); any other string replaces it.
+//! `apiKey` absent keeps the stored key; `null` erases it (0.7.3 — a
+//! device stuck with a wrong key can now clear it without reinstalling);
+//! an empty/whitespace string keeps it ("leave empty to keep"); any other
+//! string replaces it.
+//!
+//! Wire semantics (the full truth table):
+//! - key absent from the patch  → keeps the stored key (or none)
+//! - `"apiKey": null`           → erases the stored key (secret deleted;
+//!   `status.hasApiKey` flips to `false`, dictation stays enabled)
+//! - `"apiKey": ""` / whitespace→ keeps the stored key (back-compat:
+//!   the old «blank keeps» contract for a settings form's untouched input)
+//! - any other string           → replaces the stored key
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -304,14 +314,23 @@ pub fn set(state: &PluginState, values: Value) -> Result<SettingsSnapshot, Plugi
         }
     }
 
-    // apiKey: absent/null/empty keeps the stored key.
+    // apiKey: absent keeps the stored key, an explicit `null` erases it
+    // (0.7.3), an empty/whitespace string keeps it («leave empty to
+    // keep» — a settings form sends its untouched input), any other
+    // string replaces it.
     let mut secrets = voxis_core::profile::ProfileSecrets::default();
-    if let Some(key) = opt_string(&values, "apiKey")? {
-        let key = key.trim();
-        if !key.is_empty() {
-            secrets.api_key = Some(voxis_core::profile::Secret::new(key.to_owned()));
-            profile.config.api_key_ref = Some(voxis_core::profile::API_KEY_SECRET_NAME.to_string());
+    let mut clear_api_key = false;
+    match values.get("apiKey") {
+        None => {}
+        Some(Value::Null) => clear_api_key = true,
+        Some(Value::String(s)) => {
+            let key = s.trim();
+            if !key.is_empty() {
+                secrets.api_key = Some(voxis_core::profile::Secret::new(key.to_owned()));
+                profile.config.api_key_ref = Some(voxis_core::profile::API_KEY_SECRET_NAME.to_string());
+            }
         }
+        Some(_) => return Err(invalid("apiKey", "must be a string or null")),
     }
 
     let old_host = profile_source::provider_host_of(profile.config.api_url_override.as_deref());
@@ -319,6 +338,16 @@ pub fn set(state: &PluginState, values: Value) -> Result<SettingsSnapshot, Plugi
     profile.config.api_url_override = new_url;
 
     profile_source::apply_imported_profile(state, "manual", profile, secrets)?;
+
+    // `apply_to` only ever *writes* secrets, never deletes — an explicit
+    // `apiKey: null` clear is a separate `SecretStore::delete` after the
+    // profile was persisted (same shape as `set_provider`'s clear path).
+    if clear_api_key {
+        state
+            .secrets
+            .delete(voxis_core::profile::API_KEY_SECRET_NAME)
+            .map_err(|e| PluginError::Store { message: format!("clearing api key: {e}") })?;
+    }
 
     if old_host != new_host {
         state
@@ -460,11 +489,42 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let s = state(&tmp, None);
         set(&s, json!({ "apiKey": KEY })).unwrap();
-        for patch in [json!({ "apiKey": "" }), json!({ "apiKey": "   " }), json!({ "apiKey": null }), json!({ "model": "m2" })] {
+        for patch in [json!({ "apiKey": "" }), json!({ "apiKey": "   " }), json!({ "model": "m2" })] {
             let snap = set(&s, patch.clone()).unwrap();
             assert!(snap.status.has_api_key, "{patch} must keep the key");
             assert_eq!(s.secrets.get(voxis_core::profile::API_KEY_SECRET_NAME).unwrap().unwrap().expose(), KEY);
         }
+        // Absent field: a patch without apiKey at all is untouched too.
+        assert!(set(&s, json!({ "model": "m3" })).unwrap().status.has_api_key);
+    }
+
+    /// 0.7.3: `"apiKey": null` erases the stored key (owner 14–15.10: a
+    /// device stuck with a WRONG key could replace but never remove it).
+    /// The secret is deleted from the store, `status.hasApiKey` flips to
+    /// `false`, and nothing else changes — dictation stays enabled (the
+    /// pipeline keeps its config; only `start`'s noApiKey gate cares).
+    #[test]
+    fn null_api_key_erases_the_stored_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = state(&tmp, None);
+        set(&s, json!({ "apiKey": KEY, "model": "whisper-1" })).unwrap();
+        assert!(get(&s).unwrap().status.has_api_key);
+
+        let snap = set(&s, json!({ "apiKey": null })).unwrap();
+        assert!(!snap.status.has_api_key, "null must erase the key");
+        assert_eq!(s.secrets.get(voxis_core::profile::API_KEY_SECRET_NAME).unwrap(), None);
+        assert_eq!(snap.values.model, "whisper-1", "nothing else changed");
+        assert!(snap.status.dictation_supported, "dictation stays enabled");
+
+        // The snapshot's wire shape never carries the key value.
+        let wire = serde_json::to_string(&snap).unwrap();
+        assert!(!wire.contains(KEY));
+        assert!(!wire.contains("apiKey\""));
+
+        // A key can be set again after a clear (round trip).
+        let again = set(&s, json!({ "apiKey": KEY })).unwrap();
+        assert!(again.status.has_api_key);
+        assert_eq!(s.secrets.get(voxis_core::profile::API_KEY_SECRET_NAME).unwrap().unwrap().expose(), KEY);
     }
 
     #[test]
