@@ -112,8 +112,8 @@
             "ru": "Введите ключ и нажмите «Сохранить» или импортируйте .vxp"
           },
           "help": {
-            "en": "Leave it empty to keep the saved key. To remove it, press «Forget the key».",
-            "ru": "Пустое поле — оставить сохранённый ключ. Чтобы удалить его, нажмите «Забыть ключ»."
+            "en": "Leave it empty to keep the saved key.",
+            "ru": "Пустое поле — оставить сохранённый ключ."
           }
         },
         {

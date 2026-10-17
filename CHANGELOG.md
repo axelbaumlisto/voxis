@@ -1,5 +1,20 @@
 # Changelog
 
+## `tauri-plugin-voxis` 0.7.5 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.5
+
+- **The API key field's help no longer names a button that may not be on
+  screen** (owner 17.10: on an iPhone/iPad with NO key stored, the field
+  still read «Leave it empty to keep the saved key. To remove it, press
+  «Forget the key».» — but «Forget the key» is only rendered when a key
+  exists, so the sentence described a control the person could not see).
+  The `apiKey` `help` is now state-neutral and lets the button speak for
+  itself: en «Leave it empty to keep the saved key.» / ru «Пустое поле —
+  оставить сохранённый ключ.». Nothing else changed; 0.7.4's copy fix
+  (no `null`/`clearApiKey`/implementation words in human-facing strings)
+  stays, and the guest-js test that pins this help now also rejects
+  «Forget the key»/«Забыть ключ» in any human-facing manifest string — it
+  found no other reference.
+
 ## `tauri-plugin-voxis` 0.7.4 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.4
 
 - **The API key field's help text speaks to a person, not an implementer**

@@ -94,11 +94,15 @@ describe("voxis settings manifest", () => {
     }
   });
 
-  it("the apiKey help is user copy, not implementation notes (owner 16.10)", () => {
+  it("the apiKey help is state-neutral user copy (owner 16.10 / 17.10)", () => {
     const byKey = Object.fromEntries(fields.map((f) => [f.key, f]));
+    // With NO key stored the «Forget the key» button is not rendered at all
+    // (it appears only when `status.hasApiKey` is true), so the help must not
+    // describe it: on the owner's iPhone/iPad the field pointed at a control
+    // that was not on screen. The button speaks for itself.
     expect(byKey.apiKey!.help).toEqual({
-      en: "Leave it empty to keep the saved key. To remove it, press «Forget the key».",
-      ru: "Пустое поле — оставить сохранённый ключ. Чтобы удалить его, нажмите «Забыть ключ».",
+      en: "Leave it empty to keep the saved key.",
+      ru: "Пустое поле — оставить сохранённый ключ.",
     });
     // No identifiers or wire-level words in anything a person reads: the
     // field's help used to spell out «null erase» and `clearApiKey`.
@@ -116,10 +120,16 @@ describe("voxis settings manifest", () => {
       }
     };
     walk(m, "manifest");
+    // No human-facing string points at a control the person may not be
+    // seeing: «Forget the key» exists only while a key is stored.
+    const invisibleControl = /Forget the key|Забыть ключ/;
     for (const [at, text] of texts) {
       for (const lang of ["en", "ru"] as const) {
         const s = (text as Record<string, string>)[lang];
-        if (typeof s === "string") expect(s, `${at}.${lang}`).not.toMatch(jargon);
+        if (typeof s === "string") {
+          expect(s, `${at}.${lang}`).not.toMatch(jargon);
+          expect(s, `${at}.${lang}`).not.toMatch(invisibleControl);
+        }
       }
     }
   });

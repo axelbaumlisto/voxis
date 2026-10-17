@@ -8,7 +8,7 @@ the Rust command/event contract in `../contract/fixtures/*.json` and
 manual update here (the fixture-snapshot tests on both sides are the
 safety net, not a generator).
 
-Currently versioned **`0.9.4`** (0.9.4: the manifest's `apiKey` help is plain user copy — "Leave it empty to keep the saved key. To remove it, press «Forget the key»." — instead of naming `null` and `clearApiKey`; 0.9.3: `settings_set`'s `apiKey` is three-valued — absent keeps, `null` erases, `""` keeps — plus a `clearApiKey()` helper; 0.9.2: the theme select shows theme names via `status.themes`; 0.9.1: `overlayHidden` toggle split from `overlayPlacement`; 0.9.0: settings manifest + `getSettings`/`setSettings`), independently of the Rust crate's own
+Currently versioned **`0.9.5`** (0.9.5: the manifest's `apiKey` help is state-neutral — "Leave it empty to keep the saved key." — because the «Forget the key» button it used to describe is only rendered when a key exists, so with no key stored the sentence named a control the person cannot see (owner's iPhone/iPad); 0.9.4: that help became plain user copy instead of naming `null` and `clearApiKey`; 0.9.3: `settings_set`'s `apiKey` is three-valued — absent keeps, `null` erases, `""` keeps — plus a `clearApiKey()` helper; 0.9.2: the theme select shows theme names via `status.themes`; 0.9.1: `overlayHidden` toggle split from `overlayPlacement`; 0.9.0: settings manifest + `getSettings`/`setSettings`), independently of the Rust crate's own
 version — bump each on its own schedule. (`0.4.0`, additive: new
 `setProvider(opts)` command for typing a Groq key / self-hosted URL in
 directly, no Voxis desktop needed. `0.2.0` earlier: the pill now resolves
