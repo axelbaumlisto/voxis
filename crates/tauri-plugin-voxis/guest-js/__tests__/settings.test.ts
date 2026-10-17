@@ -94,6 +94,36 @@ describe("voxis settings manifest", () => {
     }
   });
 
+  it("the apiKey help is user copy, not implementation notes (owner 16.10)", () => {
+    const byKey = Object.fromEntries(fields.map((f) => [f.key, f]));
+    expect(byKey.apiKey!.help).toEqual({
+      en: "Leave it empty to keep the saved key. To remove it, press «Forget the key».",
+      ru: "Пустое поле — оставить сохранённый ключ. Чтобы удалить его, нажмите «Забыть ключ».",
+    });
+    // No identifiers or wire-level words in anything a person reads: the
+    // field's help used to spell out «null erase» and `clearApiKey`.
+    const jargon = /\bnull\b|clearApiKey|settings_set|host action|\bapiKey\b/i;
+    const humanProps = ["label", "help", "hint", "placeholder", "disabledReason", "successMessage"] as const;
+    const texts: Array<[string, unknown]> = [];
+    const walk = (v: unknown, at: string) => {
+      if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${at}[${i}]`));
+      if (typeof v !== "object" || v === null) return;
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+        if ((humanProps as readonly string[]).includes(k)) texts.push([`${at}.${k}`, x]);
+        else if (k === "errorMessages") {
+          for (const [code, msg] of Object.entries(x as Record<string, unknown>)) texts.push([`${at}.errorMessages.${code}`, msg]);
+        } else walk(x, `${at}.${k}`);
+      }
+    };
+    walk(m, "manifest");
+    for (const [at, text] of texts) {
+      for (const lang of ["en", "ru"] as const) {
+        const s = (text as Record<string, string>)[lang];
+        if (typeof s === "string") expect(s, `${at}.${lang}`).not.toMatch(jargon);
+      }
+    }
+  });
+
   it("hiding the pill is its own toggle, so the corner is not forgotten (owner 14.10)", () => {
     const byKey = Object.fromEntries(fields.map((f) => [f.key, f]));
     expect(byKey.overlayHidden).toMatchObject({ kind: "toggle", store: "host", default: false });

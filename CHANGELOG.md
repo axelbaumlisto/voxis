@@ -1,5 +1,20 @@
 # Changelog
 
+## `tauri-plugin-voxis` 0.7.4 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.4
+
+- **The API key field's help text speaks to a person, not an implementer**
+  (owner 16.10: on an iPhone 15 the Settings → Dictation (Voxis) field
+  rendered «…a separate host action (an explicit null erase — see
+  clearApiKey)…» verbatim). The manifest's `apiKey` `help` is now:
+  en «Leave it empty to keep the saved key. To remove it, press «Forget
+  the key».» / ru «Пустое поле — оставить сохранённый ключ. Чтобы удалить
+  его, нажмите «Забыть ключ».». No identifiers, no `null`, no
+  implementation words — the three-valued wire contract stays documented
+  in `client.ts`/`CHANGELOG`, where it belongs. A guest-js test now pins
+  that copy and rejects `null`/`clearApiKey`/`settings_set`/`host action`
+  in any human-facing manifest string (label/help/hint/placeholder/
+  disabledReason/successMessage/errorMessages); it found no other leak.
+
 ## `tauri-plugin-voxis` 0.7.3 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.3
 
 - **A WRONG API key can now be REMOVED, not only replaced** (owner

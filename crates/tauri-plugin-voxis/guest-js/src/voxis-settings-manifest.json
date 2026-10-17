@@ -112,8 +112,8 @@
             "ru": "Введите ключ и нажмите «Сохранить» или импортируйте .vxp"
           },
           "help": {
-            "en": "Leave empty to keep the stored key. Removing the key is a separate host action (an explicit null erase — see clearApiKey); an empty save never removes it.",
-            "ru": "Пустое поле — оставить сохранённый ключ. Удаление ключа — отдельное действие хоста (явная очистка, null; см. clearApiKey): пустое сохранение ключ не убирает."
+            "en": "Leave it empty to keep the saved key. To remove it, press «Forget the key».",
+            "ru": "Пустое поле — оставить сохранённый ключ. Чтобы удалить его, нажмите «Забыть ключ»."
           }
         },
         {

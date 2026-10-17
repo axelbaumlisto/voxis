@@ -18,8 +18,8 @@ microphone and real Groq; a live-iPad end-to-end run exists (see
 `research/plugin-plan/T11_ipad_run_2026-09-16.md`) driving this plugin from
 a real host (`naked`) — that integration work is not itself part of this
 crate/repo. `guest-js` is versioned separately (`@voxis/tauri-plugin-voxis`,
-currently `0.6.0`) and is **not** on the same version number as this Rust
-crate (currently `0.6.0`) — bump each independently when either changes.
+currently `0.9.4`) and is **not** on the same version number as this Rust
+crate (currently `0.7.4`) — bump each independently when either changes.
 
 ## Installation
 
@@ -30,18 +30,18 @@ dependency against this repo's private Forgejo remote (`zverozabr/voxis`,
 ```toml
 # host's src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-voxis = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.7.3", features = ["desktop"] }
-voxis-core = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.7.3" }
+tauri-plugin-voxis = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.7.4", features = ["desktop"] }
+voxis-core = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugin-v0.7.4" }
 ```
 
-- **Pin by a `plugin-v*` tag** (current: `plugin-v0.7.3`; naked pins it in
+- **Pin by a `plugin-v*` tag** (current: `plugin-v0.7.4`; naked pins it in
   `src-tauri/Cargo.toml`). Tags are cut ONLY by `scripts/tag-plugin.sh
   <X.Y.Z> "<msg>"`, which runs the desktop tests + clippy, the guest-js
   build/tests, the iOS cross-build + Swift tests and (where an NDK exists)
   the Android `cargo check` first — and they are immutable: a bad tag costs
   the next patch number, never a re-push (`plugin-v0.3.0` → `0.3.1`,
   `0.5.0` → `0.5.1` both happened). The JS half (`guest-js`,
-  `@voxis/tauri-plugin-voxis`) has its OWN version (0.9.2 today) and reaches
+  `@voxis/tauri-plugin-voxis`) has its OWN version (0.9.4 today) and reaches
   a host as a vendored `bun pm pack` tarball — see "guest-js" below.
 - **How an update reaches a device.** There is no plugin "file" on a phone
   or a Mac: the Rust crate is compiled INTO the host app and the guest-js is
@@ -342,7 +342,9 @@ Typed API + a `<voxis-overlay>` web component. See `guest-js/README.md` for
 the full API surface (`createClient`, `mountOverlay`, `HotkeyMachine`,
 driver modes) and `docs/THEMES.md`'s "Appendix: `tauri-plugin-voxis`'s own
 `<voxis-overlay>`" for the theme-engine reuse. Currently versioned
-`0.7.0` (0.7.0: in `driver:"host"` mode `setPosition` means "the compact
+`0.9.4` (0.9.4: the settings manifest's `apiKey` help is plain user copy —
+"Leave it empty to keep the saved key. To remove it, press «Forget
+the key»."; 0.7.0: in `driver:"host"` mode `setPosition` means "the compact
 pill rests here" in EVERY lifecycle state — expanded is placed as a grow
 from that spot and the next shrink lands on it; 0.5.1: no self-move on
 viewport changes in host mode; 0.6.0: the Siri/Shortcuts intent relay
