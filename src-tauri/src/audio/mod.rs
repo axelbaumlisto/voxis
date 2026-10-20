@@ -6,6 +6,7 @@
 mod devices;
 mod encoder;
 mod error;
+#[cfg(target_os = "macos")]
 mod hotplug;
 mod level;
 mod recorder;

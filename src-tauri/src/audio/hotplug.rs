@@ -38,7 +38,6 @@ pub(crate) fn must_rebind(devices_changed: bool, stream_ready: bool) -> bool {
     devices_changed && stream_ready
 }
 
-#[cfg(target_os = "macos")]
 fn arm() {
     ARM.call_once(|| unsafe {
         use std::os::raw::{c_uint, c_void};
@@ -114,9 +113,6 @@ fn arm() {
         }
     });
 }
-
-#[cfg(not(target_os = "macos"))]
-fn arm() {}
 
 #[cfg(test)]
 mod tests {
