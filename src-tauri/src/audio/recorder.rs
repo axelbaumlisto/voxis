@@ -186,15 +186,9 @@ impl AudioRecorder {
             config,
             rx,
             Arc::clone(&self.samples),
-            Arc::clone(&self.audio_level),
-            Arc::clone(&self.audio_boost),
             Arc::clone(&self.is_recording),
             Arc::clone(&self.is_ready),
-            Arc::clone(&self.rms_peak_bits),
-            Arc::clone(&self.max_samples),
-            Arc::clone(&self.cap_hit),
-            Arc::clone(&self.callbacks),
-            Arc::clone(&self.nonzero_seen),
+            self.signals(),
         );
 
         let mut thread_handle = lock_or_recover(&self.thread_handle);
@@ -205,9 +199,9 @@ impl AudioRecorder {
     /// How long a RESUMED stream may stay silent (no cpal callback) before
     /// it is declared dead and reopened. A live input stream calls back
     /// every buffer (~10–50 ms); 400 ms is many buffers late on any device.
-    /// A hold at least this long with ZERO callbacks is a dead device, not a
-    /// tap (a tap is under 300 ms and legitimately produces few/no buffers).
-    const DEAD_DEVICE_MIN_HOLD: std::time::Duration = std::time::Duration::from_millis(1000);
+    /// See `voxis_core::guard::DEAD_DEVICE_MIN_HOLD_MS`.
+    const DEAD_DEVICE_MIN_HOLD: std::time::Duration =
+        std::time::Duration::from_millis(voxis_core::guard::DEAD_DEVICE_MIN_HOLD_MS);
 
     #[cfg(target_os = "macos")]
     const RESUME_LIVENESS: std::time::Duration = std::time::Duration::from_millis(400);
@@ -250,6 +244,20 @@ impl AudioRecorder {
         );
         self.abandon_dead_stream();
         false
+    }
+
+    /// The callback-facing view of this recorder's state (one struct, so the
+    /// stream layer needs no new parameter per signal — see `signals.rs`).
+    fn signals(&self) -> super::signals::StreamSignals {
+        super::signals::StreamSignals {
+            audio_level: Arc::clone(&self.audio_level),
+            audio_boost: Arc::clone(&self.audio_boost),
+            rms_peak_bits: Arc::clone(&self.rms_peak_bits),
+            max_samples: Arc::clone(&self.max_samples),
+            cap_hit: Arc::clone(&self.cap_hit),
+            callbacks: Arc::clone(&self.callbacks),
+            nonzero_seen: Arc::clone(&self.nonzero_seen),
+        }
     }
 
     fn clear_samples(&self) {
@@ -367,8 +375,10 @@ impl AudioRecorder {
             .callbacks
             .load(Ordering::Relaxed)
             .saturating_sub(self.callbacks_at_start.load(Ordering::Relaxed));
+        // No callbacks and callbacks-of-zeros are the same thing here: both
+        // leave `nonzero_seen` false (see `voxis_core::guard::is_digital_silence`).
         let heard = self.nonzero_seen.load(Ordering::Relaxed);
-        if held >= Self::DEAD_DEVICE_MIN_HOLD && (delivered == 0 || !heard) {
+        if held >= Self::DEAD_DEVICE_MIN_HOLD && !heard {
             tracing::error!(
                 held_ms = held.as_millis() as u64,
                 callbacks = delivered,

@@ -8,6 +8,7 @@ mod encoder;
 mod error;
 mod level;
 mod recorder;
+mod signals;
 mod stream;
 mod sync;
 pub mod vad;

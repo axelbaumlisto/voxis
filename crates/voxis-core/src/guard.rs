@@ -56,6 +56,26 @@ use std::collections::VecDeque;
 // Pure stop/press decision enums (moved from orchestrator::recording.rs)
 // =============================================================================
 
+/// How long a take may run on EXACT digital silence before the guard stops
+/// it — see [`is_digital_silence`] and `StopReason::DeviceSilent`.
+pub const DEAD_STREAM_SILENCE_MS: u32 = 2_000;
+
+/// A hold at least this long with no audible sample is a dead device at
+/// `stop()`; anything shorter is a tap (which legitimately produces nothing).
+pub const DEAD_DEVICE_MIN_HOLD_MS: u64 = 1_000;
+
+/// Exact digital silence: every sample 0.0. NOT "quiet" — a live microphone
+/// always carries a noise floor. Sustained zeros mean the stream is attached
+/// to a device the OS already deactivated (USB re-enumeration under a running
+/// stream: CoreAudio keeps the old IOProc alive and feeds zeros — 2026-10-20,
+/// BY-V) or the mic is hardware-muted. The two windows that act on it differ
+/// on purpose: `DEAD_STREAM_SILENCE_MS` stops a take that is still running
+/// (the user is dictating into the void), `DEAD_DEVICE_MIN_HOLD_MS` is the
+/// floor for reporting it at `stop()`.
+pub fn is_digital_silence(peak: f32) -> bool {
+    peak == 0.0
+}
+
 /// Why `stop_recording` is being called.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopReason {

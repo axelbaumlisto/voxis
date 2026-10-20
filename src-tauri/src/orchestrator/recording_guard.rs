@@ -102,11 +102,10 @@ use crate::audio::AudioRecorder;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 pub(crate) use voxis_core::guard::GuardCfg;
-use voxis_core::guard::{guard_step, GuardEvent, GuardState};
+use voxis_core::guard::{
+    guard_step, is_digital_silence, GuardEvent, GuardState, DEAD_STREAM_SILENCE_MS,
+};
 
-/// Exact digital silence this long is a dead/muted stream, not a pause: a
-/// live microphone's noise floor is never 0.0 (see `StopReason::DeviceSilent`).
-pub const DEAD_STREAM_SILENCE_MS: u32 = 2_000;
 
 // `SilenceWindow`, `GuardCfg`/`from_app_config`, `GuardState`, `GuardEvent`,
 // `guard_step`, `native_cap_samples`, `effective_max_recording_ms`,
@@ -196,7 +195,7 @@ pub(crate) fn spawn_recording_guard(
             // to a hardware-muted mic. Stop now — the user is dictating into
             // the void — and let `recorder.stop()` name the cause, close the
             // stale stream and make the NEXT press reopen the device.
-            if state.max_rms_peak == 0.0 && state.elapsed_ms >= DEAD_STREAM_SILENCE_MS {
+            if is_digital_silence(state.max_rms_peak) && state.elapsed_ms >= DEAD_STREAM_SILENCE_MS {
                 tracing::warn!(
                     "Recording guard: {DEAD_STREAM_SILENCE_MS}ms of exact digital silence \
                      (not one sample above 0.0) — the input stream is not delivering audio"

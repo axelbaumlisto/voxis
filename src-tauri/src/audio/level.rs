@@ -1,7 +1,8 @@
 use cpal::FromSample;
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::f32::consts::PI;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use super::signals::StreamSignals;
+use std::sync::atomic::Ordering;
 
 /// Number of frequency bins to display.
 pub const SPECTRUM_BARS: usize = 32;
@@ -26,19 +27,14 @@ pub(crate) fn process_chunk<T>(
     data: &[T],
     channels: usize,
     samples: &mut Vec<f32>,
-    audio_level: &AtomicU32,
-    audio_boost: &AtomicU32,
-    rms_peak_bits: &AtomicU32,
-    max_samples: &AtomicUsize,
-    cap_hit: &AtomicBool,
-    nonzero_seen: &AtomicBool,
+    signals: &StreamSignals,
 ) where
     T: cpal::Sample,
     f32: FromSample<T>,
 {
     // Convert current chunk to mono f32 for RMS calculation
     let mut chunk_samples: Vec<f32> = Vec::with_capacity(data.len() / channels.max(1));
-    let max = max_samples.load(Ordering::Relaxed);
+    let max = signals.max_samples.load(Ordering::Relaxed);
 
     // Convert to mono f32; stop growing the persisted buffer once it
     // reaches `max` (per-sample check, so the buffer never exceeds the
@@ -59,7 +55,7 @@ pub(crate) fn process_chunk<T>(
         // (USB re-enumeration, 2026-10-20 — callbacks kept coming, every
         // sample was 0). Recorded here, judged in `AudioRecorder::stop`.
         if mono != 0.0 {
-            nonzero_seen.store(true, Ordering::Relaxed);
+            signals.nonzero_seen.store(true, Ordering::Relaxed);
         }
         if samples.len() < max {
             samples.push(mono);
@@ -69,7 +65,7 @@ pub(crate) fn process_chunk<T>(
         chunk_samples.push(mono);
     }
     if hit {
-        cap_hit.store(true, Ordering::Relaxed);
+        signals.cap_hit.store(true, Ordering::Relaxed);
     }
 
     // Calculate RMS from CURRENT chunk (not entire buffer) for responsive visualization
@@ -84,12 +80,12 @@ pub(crate) fn process_chunk<T>(
         // samples): `NaN.to_bits()` sorts above every finite value and
         // would otherwise latch until the next `take_rms_peak()` drain.
         if rms.is_finite() {
-            rms_peak_bits.fetch_max(rms.to_bits(), Ordering::Relaxed);
+            signals.rms_peak_bits.fetch_max(rms.to_bits(), Ordering::Relaxed);
         }
         // Scale to 0-100 with configurable boost for different microphone sensitivities
-        let boost = audio_boost.load(Ordering::Relaxed) as f32 / 10.0;
+        let boost = signals.audio_boost.load(Ordering::Relaxed) as f32 / 10.0;
         let level = (rms * boost).min(100.0) as u32;
-        audio_level.store(level, Ordering::SeqCst);
+        signals.audio_level.store(level, Ordering::SeqCst);
     }
 }
 

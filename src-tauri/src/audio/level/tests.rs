@@ -382,45 +382,25 @@ fn test_reset_clears_noise_floor() {
 // `process_chunk` primitives — boost-independent peak RMS + sample cap.
 // ---------------------------------------------------------------------
 
+/// One `StreamSignals` per simulated stream — the struct the callback now
+/// receives instead of nine separate atomics (review: parameter creep).
+fn signals_with_boost(tenths: u32) -> StreamSignals {
+    let s = StreamSignals::default();
+    s.audio_boost.store(tenths, Ordering::Relaxed);
+    s
+}
+
 #[test]
 fn test_process_chunk_rms_peak_is_boost_independent() {
-    let audio_level = AtomicU32::new(0);
-
-    let rms_peak_bits_high = AtomicU32::new(0);
-    let max_samples_high = AtomicUsize::new(usize::MAX);
-    let cap_hit_high = AtomicBool::new(false);
-    let nonzero_seen = AtomicBool::new(false);
     let mut samples_high: Vec<f32> = Vec::new();
-    let high_boost = AtomicU32::new(10_000); // 1000.0x — max clamp
-    process_chunk(
-        &[0.1f32; 64],
-        1,
-        &mut samples_high,
-        &audio_level,
-        &high_boost,
-        &rms_peak_bits_high,
-        &max_samples_high,
-        &cap_hit_high,
-        &nonzero_seen,    );
-    let peak_with_high_boost = f32::from_bits(rms_peak_bits_high.load(Ordering::SeqCst));
+    let high = signals_with_boost(10_000); // 1000.0x — max clamp
+    process_chunk(&[0.1f32; 64], 1, &mut samples_high, &high);
+    let peak_with_high_boost = f32::from_bits(high.rms_peak_bits.load(Ordering::SeqCst));
 
-    let rms_peak_bits_low = AtomicU32::new(0);
-    let max_samples_low = AtomicUsize::new(usize::MAX);
-    let cap_hit_low = AtomicBool::new(false);
-    let nonzero_seen = AtomicBool::new(false);
     let mut samples_low: Vec<f32> = Vec::new();
-    let low_boost = AtomicU32::new(1_000); // 100.0x — min clamp
-    process_chunk(
-        &[0.1f32; 64],
-        1,
-        &mut samples_low,
-        &audio_level,
-        &low_boost,
-        &rms_peak_bits_low,
-        &max_samples_low,
-        &cap_hit_low,
-        &nonzero_seen,    );
-    let peak_with_low_boost = f32::from_bits(rms_peak_bits_low.load(Ordering::SeqCst));
+    let low = signals_with_boost(1_000); // 100.0x — min clamp
+    process_chunk(&[0.1f32; 64], 1, &mut samples_low, &low);
+    let peak_with_low_boost = f32::from_bits(low.rms_peak_bits.load(Ordering::SeqCst));
 
     assert!(
         (peak_with_high_boost - peak_with_low_boost).abs() < 1e-6,
@@ -437,36 +417,13 @@ fn test_process_chunk_rms_peak_is_boost_independent() {
 
 #[test]
 fn test_process_chunk_peak_tracks_loudest_chunk_then_take_resets() {
-    let audio_level = AtomicU32::new(0);
-    let audio_boost = AtomicU32::new(8000);
-    let rms_peak_bits = AtomicU32::new(0);
-    let max_samples = AtomicUsize::new(usize::MAX);
-    let cap_hit = AtomicBool::new(false);
-    let nonzero_seen = AtomicBool::new(false);
+    let sig = signals_with_boost(8000);
     let mut samples: Vec<f32> = Vec::new();
 
-    process_chunk(
-        &[0.1f32; 64],
-        1,
-        &mut samples,
-        &audio_level,
-        &audio_boost,
-        &rms_peak_bits,
-        &max_samples,
-        &cap_hit,
-        &nonzero_seen,    );
-    process_chunk(
-        &[0.02f32; 64],
-        1,
-        &mut samples,
-        &audio_level,
-        &audio_boost,
-        &rms_peak_bits,
-        &max_samples,
-        &cap_hit,
-        &nonzero_seen,    );
+    process_chunk(&[0.1f32; 64], 1, &mut samples, &sig);
+    process_chunk(&[0.02f32; 64], 1, &mut samples, &sig);
 
-    let peak = f32::from_bits(rms_peak_bits.load(Ordering::SeqCst));
+    let peak = f32::from_bits(sig.rms_peak_bits.load(Ordering::SeqCst));
     assert!(
         (peak - 0.1).abs() < 1e-4,
         "fetch_max must retain the louder chunk's RMS across calls, got {}",
@@ -474,10 +431,10 @@ fn test_process_chunk_peak_tracks_loudest_chunk_then_take_resets() {
     );
 
     // This is exactly what AudioRecorder::take_rms_peak does.
-    let taken = f32::from_bits(rms_peak_bits.swap(0, Ordering::AcqRel));
+    let taken = f32::from_bits(sig.rms_peak_bits.swap(0, Ordering::AcqRel));
     assert!((taken - 0.1).abs() < 1e-4);
     assert_eq!(
-        rms_peak_bits.load(Ordering::SeqCst),
+        sig.rms_peak_bits.load(Ordering::SeqCst),
         0,
         "peak must read back 0 immediately after draining"
     );
@@ -485,26 +442,13 @@ fn test_process_chunk_peak_tracks_loudest_chunk_then_take_resets() {
 
 #[test]
 fn test_process_chunk_respects_sample_cap() {
-    let audio_level = AtomicU32::new(0);
-    let audio_boost = AtomicU32::new(8000);
-    let rms_peak_bits = AtomicU32::new(0);
-    let max_samples = AtomicUsize::new(25);
-    let cap_hit = AtomicBool::new(false);
-    let nonzero_seen = AtomicBool::new(false);
+    let sig = signals_with_boost(8000);
+    sig.max_samples.store(25, Ordering::SeqCst);
     let mut samples: Vec<f32> = Vec::new();
 
     // 4 chunks of 10 samples each = 40 raw samples pushed against a cap of 25.
     for _ in 0..4 {
-        process_chunk(
-            &[0.05f32; 10],
-            1,
-            &mut samples,
-            &audio_level,
-            &audio_boost,
-            &rms_peak_bits,
-            &max_samples,
-            &cap_hit,
-            &nonzero_seen,        );
+        process_chunk(&[0.05f32; 10], 1, &mut samples, &sig);
     }
 
     assert_eq!(
@@ -513,38 +457,43 @@ fn test_process_chunk_respects_sample_cap() {
         "buffer must never exceed the cap (per-sample check)"
     );
     assert!(
-        cap_hit.load(Ordering::SeqCst),
+        sig.cap_hit.load(Ordering::SeqCst),
         "cap_hit must be set once the cap is reached"
     );
     assert!(
-        audio_level.load(Ordering::SeqCst) > 0,
+        sig.audio_level.load(Ordering::SeqCst) > 0,
         "level must still be computed for capped-out chunks (visualizer keeps working)"
     );
 }
 
 #[test]
 fn test_process_chunk_no_cap_by_default() {
-    let audio_level = AtomicU32::new(0);
-    let audio_boost = AtomicU32::new(8000);
-    let rms_peak_bits = AtomicU32::new(0);
-    let max_samples = AtomicUsize::new(usize::MAX);
-    let cap_hit = AtomicBool::new(false);
-    let nonzero_seen = AtomicBool::new(false);
+    let sig = signals_with_boost(8000);
     let mut samples: Vec<f32> = Vec::new();
 
     for _ in 0..50 {
-        process_chunk(
-            &[0.05f32; 100],
-            1,
-            &mut samples,
-            &audio_level,
-            &audio_boost,
-            &rms_peak_bits,
-            &max_samples,
-            &cap_hit,
-            &nonzero_seen,        );
+        process_chunk(&[0.05f32; 100], 1, &mut samples, &sig);
     }
 
     assert_eq!(samples.len(), 5000);
-    assert!(!cap_hit.load(Ordering::SeqCst));
+    assert!(!sig.cap_hit.load(Ordering::SeqCst));
+}
+
+#[test]
+fn test_process_chunk_marks_nonzero_seen_only_for_real_signal() {
+    // The detector behind `StopReason::DeviceSilent` / `NoAudioFromDevice`.
+    let sig = signals_with_boost(8000);
+    let mut samples: Vec<f32> = Vec::new();
+    for _ in 0..8 {
+        process_chunk(&[0.0f32; 64], 1, &mut samples, &sig);
+    }
+    assert!(
+        !sig.nonzero_seen.load(Ordering::SeqCst),
+        "exact zeros must never count as signal"
+    );
+    process_chunk(&[0.0001f32; 64], 1, &mut samples, &sig);
+    assert!(
+        sig.nonzero_seen.load(Ordering::SeqCst),
+        "one non-zero sample (a mic's noise floor) is enough"
+    );
 }

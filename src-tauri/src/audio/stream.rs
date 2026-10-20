@@ -1,9 +1,10 @@
+use super::signals::StreamSignals;
 use crate::audio::level::process_chunk;
 use crate::audio::sync::lock_or_recover;
 use crate::audio::AudioError;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, StreamConfig};
-use std::sync::atomic::{AtomicU64, AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -27,15 +28,9 @@ pub(crate) fn spawn_recording_thread(
     config: cpal::SupportedStreamConfig,
     rx: mpsc::Receiver<RecordCommand>,
     samples: Arc<Mutex<Vec<f32>>>,
-    audio_level: Arc<AtomicU32>,
-    audio_boost: Arc<AtomicU32>,
     is_recording: Arc<AtomicBool>,
     is_ready: Arc<AtomicBool>,
-    rms_peak_bits: Arc<AtomicU32>,
-    max_samples: Arc<AtomicUsize>,
-    cap_hit: Arc<AtomicBool>,
-    callbacks: Arc<AtomicU64>,
-    nonzero_seen: Arc<AtomicBool>,
+    signals: StreamSignals,
 ) -> JoinHandle<()> {
     let stream_config: StreamConfig = config.clone().into();
     let channels = stream_config.channels as usize;
@@ -51,22 +46,16 @@ pub(crate) fn spawn_recording_thread(
             device,
             &stream_config,
             samples,
-            audio_level.clone(),
-            audio_boost.clone(),
+            signals.clone(),
             channels,
             &is_recording,
             &is_ready,
-            rms_peak_bits,
-            max_samples,
-            cap_hit,
-            callbacks,
-            nonzero_seen,
         ) {
             Some(s) => s,
             None => return,
         };
 
-        run_command_loop(rx, &stream, &audio_level, &is_recording);
+        run_command_loop(rx, &stream, &signals.audio_level, &is_recording);
     })
 }
 
@@ -79,16 +68,10 @@ fn build_and_play_stream(
     device: cpal::Device,
     stream_config: &StreamConfig,
     samples: Arc<Mutex<Vec<f32>>>,
-    audio_level: Arc<AtomicU32>,
-    audio_boost: Arc<AtomicU32>,
+    signals: StreamSignals,
     channels: usize,
     is_recording: &AtomicBool,
     is_ready: &AtomicBool,
-    rms_peak_bits: Arc<AtomicU32>,
-    max_samples: Arc<AtomicUsize>,
-    cap_hit: Arc<AtomicBool>,
-    callbacks: Arc<AtomicU64>,
-    nonzero_seen: Arc<AtomicBool>,
 ) -> Option<cpal::Stream> {
     // Wrap build_stream_for_format in catch_unwind to handle cpal panics
     // when microphone permission is denied
@@ -98,14 +81,8 @@ fn build_and_play_stream(
             &device,
             stream_config,
             samples,
-            audio_level.clone(),
-            audio_boost.clone(),
+            signals.clone(),
             channels,
-            rms_peak_bits,
-            max_samples,
-            cap_hit,
-            callbacks,
-            nonzero_seen,
         )
     }));
 
@@ -205,54 +182,30 @@ fn build_stream_for_format(
     device: &cpal::Device,
     config: &StreamConfig,
     samples: Arc<Mutex<Vec<f32>>>,
-    audio_level: Arc<AtomicU32>,
-    audio_boost: Arc<AtomicU32>,
+    signals: StreamSignals,
     channels: usize,
-    rms_peak_bits: Arc<AtomicU32>,
-    max_samples: Arc<AtomicUsize>,
-    cap_hit: Arc<AtomicBool>,
-    callbacks: Arc<AtomicU64>,
-    nonzero_seen: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, AudioError> {
     match format {
         SampleFormat::F32 => build_stream::<f32>(
             device,
             config,
             samples,
-            audio_level,
-            audio_boost,
+            signals.clone(),
             channels,
-            rms_peak_bits,
-            max_samples,
-            cap_hit,
-            callbacks,
-            nonzero_seen,
         ),
         SampleFormat::I16 => build_stream::<i16>(
             device,
             config,
             samples,
-            audio_level,
-            audio_boost,
+            signals.clone(),
             channels,
-            rms_peak_bits,
-            max_samples,
-            cap_hit,
-            callbacks,
-            nonzero_seen,
         ),
         SampleFormat::U16 => build_stream::<u16>(
             device,
             config,
             samples,
-            audio_level,
-            audio_boost,
+            signals.clone(),
             channels,
-            rms_peak_bits,
-            max_samples,
-            cap_hit,
-            callbacks,
-            nonzero_seen,
         ),
         _ => Err(AudioError::StreamError("Unsupported sample format".into())),
     }
@@ -264,14 +217,8 @@ fn build_stream<T>(
     device: &cpal::Device,
     config: &StreamConfig,
     samples: Arc<Mutex<Vec<f32>>>,
-    audio_level: Arc<AtomicU32>,
-    audio_boost: Arc<AtomicU32>,
+    signals: StreamSignals,
     channels: usize,
-    rms_peak_bits: Arc<AtomicU32>,
-    max_samples: Arc<AtomicUsize>,
-    cap_hit: Arc<AtomicBool>,
-    callbacks: Arc<AtomicU64>,
-    nonzero_seen: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, AudioError>
 where
     T: cpal::Sample + cpal::SizedSample,
@@ -287,19 +234,9 @@ where
                 // under it (USB re-enumeration) still `play()`s OK but never
                 // calls back. `AudioRecorder` reads this to tell "quiet" from
                 // "dead" (2026-10-06, BY-V re-plugged for half a second).
-                callbacks.fetch_add(1, Ordering::Relaxed);
+                signals.callbacks.fetch_add(1, Ordering::Relaxed);
                 let mut samples_guard = lock_or_recover(&samples);
-                process_chunk(
-                    data,
-                    channels,
-                    &mut samples_guard,
-                    &audio_level,
-                    &audio_boost,
-                    &rms_peak_bits,
-                    &max_samples,
-                    &cap_hit,
-                    &nonzero_seen,
-                );
+                process_chunk(data, channels, &mut samples_guard, &signals);
             },
             err_fn,
             None,
