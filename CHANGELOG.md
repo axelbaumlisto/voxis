@@ -98,6 +98,27 @@
   write-only (never returned; empty keeps it). Bad values reject
   `{ kind: "invalid", field, message }` and save nothing. guest-js:
   `getSettings()`, `setSettings(values)`.
+## v0.1.11 (Voxis desktop)
+
+### Fix
+- **Dictation still died (and needed app restarts) after the USB mic
+  re-enumerated** — the 0.1.10 fix only covered a stream with NO callbacks.
+  Owner's Mac 2026-10-20: coreaudiod deactivated BY-V at 15:21:41 and
+  activated it again 0.3 s later, but CoreAudio kept the OLD IOProc alive:
+  callbacks kept arriving, every sample exactly 0.0. Three takes (3.7 s,
+  0.5 s, 3.0 s) were recorded as pure digital silence, Whisper returned
+  "Продолжение следует…", the hallucination guard threw it away — nothing in
+  History, no error, and only an app restart produced a working stream
+  (verified: `ffmpeg` from the same device had signal, so the hardware was
+  fine). Two additions:
+  1. the recording guard stops a take after 2 s whose PEAK is still exactly
+     0.0 (`StopReason::DeviceSilent`) — a live mic always has a noise floor,
+     so exact zeros mean a stale/muted stream, not a quiet room;
+  2. `AudioRecorder::stop` treats "held ≥ 1 s with no non-zero sample" as
+     `NoAudioFromDevice` (visible error), abandons the stale stream without
+     joining it, so the NEXT press opens the device afresh — no restart.
+  Tests: guard decision mapping, signalled-vs-silent stop paths, and the
+  silent-while-callbacks-flow case.
 
 ## @voxis/tauri-plugin-voxis (guest-js) 0.8.0
 

@@ -440,6 +440,41 @@ fn stop_after_a_long_hold_with_zero_callbacks_is_a_device_error_not_an_empty_wav
 }
 
 #[test]
+fn stop_after_callbacks_of_pure_digital_silence_is_a_device_error_too() {
+    // 2026-10-20: BY-V re-enumerated at 15:21 while Voxis held the always-on
+    // stream. CoreAudio kept the OLD IOProc alive: callbacks every buffer, all
+    // zeros. A live mic always has a noise floor, so exact zeros for a whole
+    // hold mean the stream is stale (or the mic is muted) — never "a quiet
+    // room", and never a silent no-op for the user.
+    let recorder = AudioRecorder::new();
+    install_fake_stream(&recorder, true); // callbacks DO arrive...
+    recorder.is_recording.store(true, Ordering::SeqCst);
+    recorder.nonzero_seen.store(false, Ordering::SeqCst); // ...all zeros
+    *lock_or_recover(&recorder.session_started) =
+        Some(std::time::Instant::now() - std::time::Duration::from_millis(2000));
+    match recorder.stop() {
+        Err(AudioError::NoAudioFromDevice { held_ms }) => assert!(held_ms >= 2000),
+        other => panic!("expected NoAudioFromDevice, got {other:?}"),
+    }
+    assert!(!recorder.is_ready.load(Ordering::SeqCst), "the stale stream was closed so the next press reopens the device");
+}
+
+#[test]
+fn a_hold_that_heard_anything_at_all_is_a_normal_recording() {
+    let recorder = AudioRecorder::new();
+    install_fake_stream(&recorder, true);
+    recorder.is_recording.store(true, Ordering::SeqCst);
+    recorder.nonzero_seen.store(true, Ordering::SeqCst);
+    *lock_or_recover(&recorder.session_started) =
+        Some(std::time::Instant::now() - std::time::Duration::from_millis(2000));
+    // A real stream: callbacks arrived AND they carried signal.
+    recorder.callbacks.store(recorder.callbacks_at_start.load(Ordering::Relaxed) + 40, Ordering::Relaxed);
+    let out = recorder.stop();
+    assert!(out.is_ok(), "a real signal follows the normal path, got {out:?}");
+    recorder.close();
+}
+
+#[test]
 fn stop_after_a_tap_with_zero_callbacks_is_still_just_an_empty_recording() {
     // Under DEAD_DEVICE_MIN_HOLD a buffer-less stop is a tap, not a dead
     // device: the orchestrator's "too short" rule owns that case.

@@ -96,7 +96,9 @@ pub(crate) fn stop_decision(
         return StopDecision::Recover;
     }
     match reason {
-        StopReason::Cancel | StopReason::SilenceTimeoutNoSpeech => StopDecision::Discard,
+        StopReason::Cancel | StopReason::SilenceTimeoutNoSpeech | StopReason::DeviceSilent => {
+            StopDecision::Discard
+        }
         _ => StopDecision::Finalize,
     }
 }
@@ -741,6 +743,14 @@ impl RecordingCoordinator {
                      breadcrumb path — expected to always resolve via StopDecision::Recover"
                 );
             }
+            // DeviceSilent resolves to Discard and is normally turned into a
+            // `NoAudioFromDevice` error by `recorder.stop()` before this
+            // point; the arm exists so the match stays exhaustive.
+            StopReason::DeviceSilent => {
+                tracing::debug!(
+                    "stop_recording(DeviceSilent) reached the Finalize/Discard breadcrumb path"
+                );
+            }
         }
 
         if matches!(decision, StopDecision::Discard) {
@@ -1064,6 +1074,27 @@ mod stop_decision_tests {
         assert_eq!(
             stop_decision(Stage::Recording, false, StopReason::TogglePress),
             StopDecision::Recover
+        );
+    }
+
+    #[test]
+    fn test_stop_decision_device_silent_discards() {
+        // 2026-10-20: a USB mic re-enumerated under the always-on stream; every
+        // later take was exact digital silence. The guard stops such a take
+        // with DeviceSilent — it must never be transcribed (zeros produce a
+        // stock-phrase hallucination) and it must not be treated as speech.
+        assert_eq!(
+            stop_decision(Stage::Recording, true, StopReason::DeviceSilent),
+            StopDecision::Discard
+        );
+        // ...and it recovers like anything else when the recorder already died.
+        assert_eq!(
+            stop_decision(Stage::Recording, false, StopReason::DeviceSilent),
+            StopDecision::Recover
+        );
+        assert_eq!(
+            stop_decision(Stage::Idle, true, StopReason::DeviceSilent),
+            StopDecision::Skip
         );
     }
 

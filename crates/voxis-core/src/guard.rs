@@ -90,6 +90,16 @@ pub enum StopReason {
     /// Layer 2/3 recording guard: recording exceeded the configured (or
     /// absolute) maximum duration.
     MaxDuration,
+    /// Layer 2 recording guard: the session heard EXACTLY zero — not "quiet",
+    /// which is a noise floor, but digital silence, every sample 0.0. A live
+    /// microphone never does that; a stream attached to a device CoreAudio
+    /// already deactivated does (USB re-enumeration under a running stream,
+    /// 2026-10-20: BY-V blinked at 15:21 and every later take was zeros), as
+    /// does a hardware-muted mic. The guard stops the take fast instead of
+    /// letting the user dictate into the void; `AudioRecorder::stop` then
+    /// reports `NoAudioFromDevice`, closes the stale stream and the next
+    /// press reopens the device — no restart.
+    DeviceSilent,
     /// The recording guard observed `AudioRecorder::is_recording() ==
     /// false` while it was still polling — the recording thread stopped
     /// on its own (a stream build/play failure after `start()` returned

@@ -50,6 +50,13 @@ pub struct AudioRecorder {
     /// turns "held N s, zero callbacks" into an error instead of an empty
     /// WAV the orchestrator would file as "too short".
     callbacks: Arc<AtomicU64>,
+    /// Set by the cpal callback the moment ANY non-zero sample arrives in the
+    /// current session. Cleared on `start()`. "No callbacks" and "callbacks
+    /// of pure digital silence" are two faces of the same dead device — an
+    /// iOS/macOS device that re-enumerated under a running stream keeps its
+    /// old IOProc alive with zeros (2026-10-20, BY-V), so counting callbacks
+    /// alone is not enough.
+    nonzero_seen: Arc<AtomicBool>,
     /// `callbacks` at the moment the current session started (`start()`).
     callbacks_at_start: AtomicU64,
     /// When the current session started — for `stop()`'s dead-device rule.
@@ -98,6 +105,7 @@ impl AudioRecorder {
             max_samples: Arc::new(AtomicUsize::new(usize::MAX)),
             cap_hit: Arc::new(AtomicBool::new(false)),
             callbacks: Arc::new(AtomicU64::new(0)),
+            nonzero_seen: Arc::new(AtomicBool::new(false)),
             callbacks_at_start: AtomicU64::new(0),
             session_started: Mutex::new(None),
             stop_tx: Mutex::new(None),
@@ -156,6 +164,7 @@ impl AudioRecorder {
         self.reset_vad();
         self.rms_peak_bits.store(0, Ordering::SeqCst);
         self.cap_hit.store(false, Ordering::SeqCst);
+        self.nonzero_seen.store(false, Ordering::SeqCst);
         self.callbacks_at_start
             .store(self.callbacks.load(Ordering::Relaxed), Ordering::Relaxed);
         *lock_or_recover(&self.session_started) = Some(std::time::Instant::now());
@@ -185,6 +194,7 @@ impl AudioRecorder {
             Arc::clone(&self.max_samples),
             Arc::clone(&self.cap_hit),
             Arc::clone(&self.callbacks),
+            Arc::clone(&self.nonzero_seen),
         );
 
         let mut thread_handle = lock_or_recover(&self.thread_handle);
@@ -357,8 +367,14 @@ impl AudioRecorder {
             .callbacks
             .load(Ordering::Relaxed)
             .saturating_sub(self.callbacks_at_start.load(Ordering::Relaxed));
-        if delivered == 0 && held >= Self::DEAD_DEVICE_MIN_HOLD {
-            tracing::error!(held_ms = held.as_millis() as u64, "audio device delivered no samples for the whole recording");
+        let heard = self.nonzero_seen.load(Ordering::Relaxed);
+        if held >= Self::DEAD_DEVICE_MIN_HOLD && (delivered == 0 || !heard) {
+            tracing::error!(
+                held_ms = held.as_millis() as u64,
+                callbacks = delivered,
+                digital_silence = delivered > 0 && !heard,
+                "audio device delivered no audible samples for the whole recording — its stream is stale or the mic is muted"
+            );
             self.abandon_dead_stream();
             return Err(AudioError::NoAudioFromDevice { held_ms: held.as_millis() as u64 });
         }

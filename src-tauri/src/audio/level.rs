@@ -31,6 +31,7 @@ pub(crate) fn process_chunk<T>(
     rms_peak_bits: &AtomicU32,
     max_samples: &AtomicUsize,
     cap_hit: &AtomicBool,
+    nonzero_seen: &AtomicBool,
 ) where
     T: cpal::Sample,
     f32: FromSample<T>,
@@ -52,6 +53,14 @@ pub(crate) fn process_chunk<T>(
             .map(|s| <f32 as FromSample<T>>::from_sample_(*s))
             .sum::<f32>()
             / channels.max(1) as f32;
+        // Digital silence is not "quiet": a live microphone always carries a
+        // noise floor. Exact zeros for a whole recording mean the stream is
+        // attached to a device instance CoreAudio has already deactivated
+        // (USB re-enumeration, 2026-10-20 — callbacks kept coming, every
+        // sample was 0). Recorded here, judged in `AudioRecorder::stop`.
+        if mono != 0.0 {
+            nonzero_seen.store(true, Ordering::Relaxed);
+        }
         if samples.len() < max {
             samples.push(mono);
         } else {

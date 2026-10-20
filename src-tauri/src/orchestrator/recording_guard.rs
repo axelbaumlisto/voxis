@@ -104,6 +104,10 @@ use tokio_util::sync::CancellationToken;
 pub(crate) use voxis_core::guard::GuardCfg;
 use voxis_core::guard::{guard_step, GuardEvent, GuardState};
 
+/// Exact digital silence this long is a dead/muted stream, not a pause: a
+/// live microphone's noise floor is never 0.0 (see `StopReason::DeviceSilent`).
+pub const DEAD_STREAM_SILENCE_MS: u32 = 2_000;
+
 // `SilenceWindow`, `GuardCfg`/`from_app_config`, `GuardState`, `GuardEvent`,
 // `guard_step`, `native_cap_samples`, `effective_max_recording_ms`,
 // `guard_max_recording_ms`, and their unit tests (including the
@@ -184,6 +188,25 @@ pub(crate) fn spawn_recording_guard(
 
             let rms_peak = recorder.take_rms_peak();
             let cap_hit = recorder.cap_hit();
+
+            // Digital silence, not "quiet": a live mic always has a noise
+            // floor, so a session whose PEAK is still exactly 0.0 after this
+            // long is attached to a device CoreAudio has already deactivated
+            // (USB re-enumeration under the always-on stream, 2026-10-20) or
+            // to a hardware-muted mic. Stop now — the user is dictating into
+            // the void — and let `recorder.stop()` name the cause, close the
+            // stale stream and make the NEXT press reopen the device.
+            if state.max_rms_peak == 0.0 && state.elapsed_ms >= DEAD_STREAM_SILENCE_MS {
+                tracing::warn!(
+                    "Recording guard: {DEAD_STREAM_SILENCE_MS}ms of exact digital silence \
+                     (not one sample above 0.0) — the input stream is not delivering audio"
+                );
+                crate::diagnostics::breadcrumbs::sites::recording_auto_stopped_silence_no_speech();
+                if !token.is_cancelled() {
+                    coordinator.stop_recording(StopReason::DeviceSilent).await;
+                }
+                break;
+            }
 
             match guard_step(&mut state, rms_peak, cap_hit, &cfg) {
                 GuardEvent::None => {}

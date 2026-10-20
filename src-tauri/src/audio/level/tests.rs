@@ -389,6 +389,7 @@ fn test_process_chunk_rms_peak_is_boost_independent() {
     let rms_peak_bits_high = AtomicU32::new(0);
     let max_samples_high = AtomicUsize::new(usize::MAX);
     let cap_hit_high = AtomicBool::new(false);
+    let nonzero_seen = AtomicBool::new(false);
     let mut samples_high: Vec<f32> = Vec::new();
     let high_boost = AtomicU32::new(10_000); // 1000.0x — max clamp
     process_chunk(
@@ -400,12 +401,13 @@ fn test_process_chunk_rms_peak_is_boost_independent() {
         &rms_peak_bits_high,
         &max_samples_high,
         &cap_hit_high,
-    );
+        &nonzero_seen,    );
     let peak_with_high_boost = f32::from_bits(rms_peak_bits_high.load(Ordering::SeqCst));
 
     let rms_peak_bits_low = AtomicU32::new(0);
     let max_samples_low = AtomicUsize::new(usize::MAX);
     let cap_hit_low = AtomicBool::new(false);
+    let nonzero_seen = AtomicBool::new(false);
     let mut samples_low: Vec<f32> = Vec::new();
     let low_boost = AtomicU32::new(1_000); // 100.0x — min clamp
     process_chunk(
@@ -417,7 +419,7 @@ fn test_process_chunk_rms_peak_is_boost_independent() {
         &rms_peak_bits_low,
         &max_samples_low,
         &cap_hit_low,
-    );
+        &nonzero_seen,    );
     let peak_with_low_boost = f32::from_bits(rms_peak_bits_low.load(Ordering::SeqCst));
 
     assert!(
@@ -440,6 +442,7 @@ fn test_process_chunk_peak_tracks_loudest_chunk_then_take_resets() {
     let rms_peak_bits = AtomicU32::new(0);
     let max_samples = AtomicUsize::new(usize::MAX);
     let cap_hit = AtomicBool::new(false);
+    let nonzero_seen = AtomicBool::new(false);
     let mut samples: Vec<f32> = Vec::new();
 
     process_chunk(
@@ -451,7 +454,7 @@ fn test_process_chunk_peak_tracks_loudest_chunk_then_take_resets() {
         &rms_peak_bits,
         &max_samples,
         &cap_hit,
-    );
+        &nonzero_seen,    );
     process_chunk(
         &[0.02f32; 64],
         1,
@@ -461,7 +464,7 @@ fn test_process_chunk_peak_tracks_loudest_chunk_then_take_resets() {
         &rms_peak_bits,
         &max_samples,
         &cap_hit,
-    );
+        &nonzero_seen,    );
 
     let peak = f32::from_bits(rms_peak_bits.load(Ordering::SeqCst));
     assert!(
@@ -487,6 +490,7 @@ fn test_process_chunk_respects_sample_cap() {
     let rms_peak_bits = AtomicU32::new(0);
     let max_samples = AtomicUsize::new(25);
     let cap_hit = AtomicBool::new(false);
+    let nonzero_seen = AtomicBool::new(false);
     let mut samples: Vec<f32> = Vec::new();
 
     // 4 chunks of 10 samples each = 40 raw samples pushed against a cap of 25.
@@ -500,7 +504,7 @@ fn test_process_chunk_respects_sample_cap() {
             &rms_peak_bits,
             &max_samples,
             &cap_hit,
-        );
+            &nonzero_seen,        );
     }
 
     assert_eq!(
@@ -525,6 +529,7 @@ fn test_process_chunk_no_cap_by_default() {
     let rms_peak_bits = AtomicU32::new(0);
     let max_samples = AtomicUsize::new(usize::MAX);
     let cap_hit = AtomicBool::new(false);
+    let nonzero_seen = AtomicBool::new(false);
     let mut samples: Vec<f32> = Vec::new();
 
     for _ in 0..50 {
@@ -537,7 +542,7 @@ fn test_process_chunk_no_cap_by_default() {
             &rms_peak_bits,
             &max_samples,
             &cap_hit,
-        );
+            &nonzero_seen,        );
     }
 
     assert_eq!(samples.len(), 5000);

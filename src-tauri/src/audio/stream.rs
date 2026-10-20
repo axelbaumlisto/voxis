@@ -35,6 +35,7 @@ pub(crate) fn spawn_recording_thread(
     max_samples: Arc<AtomicUsize>,
     cap_hit: Arc<AtomicBool>,
     callbacks: Arc<AtomicU64>,
+    nonzero_seen: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     let stream_config: StreamConfig = config.clone().into();
     let channels = stream_config.channels as usize;
@@ -59,6 +60,7 @@ pub(crate) fn spawn_recording_thread(
             max_samples,
             cap_hit,
             callbacks,
+            nonzero_seen,
         ) {
             Some(s) => s,
             None => return,
@@ -86,6 +88,7 @@ fn build_and_play_stream(
     max_samples: Arc<AtomicUsize>,
     cap_hit: Arc<AtomicBool>,
     callbacks: Arc<AtomicU64>,
+    nonzero_seen: Arc<AtomicBool>,
 ) -> Option<cpal::Stream> {
     // Wrap build_stream_for_format in catch_unwind to handle cpal panics
     // when microphone permission is denied
@@ -102,6 +105,7 @@ fn build_and_play_stream(
             max_samples,
             cap_hit,
             callbacks,
+            nonzero_seen,
         )
     }));
 
@@ -208,6 +212,7 @@ fn build_stream_for_format(
     max_samples: Arc<AtomicUsize>,
     cap_hit: Arc<AtomicBool>,
     callbacks: Arc<AtomicU64>,
+    nonzero_seen: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, AudioError> {
     match format {
         SampleFormat::F32 => build_stream::<f32>(
@@ -221,6 +226,7 @@ fn build_stream_for_format(
             max_samples,
             cap_hit,
             callbacks,
+            nonzero_seen,
         ),
         SampleFormat::I16 => build_stream::<i16>(
             device,
@@ -233,6 +239,7 @@ fn build_stream_for_format(
             max_samples,
             cap_hit,
             callbacks,
+            nonzero_seen,
         ),
         SampleFormat::U16 => build_stream::<u16>(
             device,
@@ -245,6 +252,7 @@ fn build_stream_for_format(
             max_samples,
             cap_hit,
             callbacks,
+            nonzero_seen,
         ),
         _ => Err(AudioError::StreamError("Unsupported sample format".into())),
     }
@@ -263,6 +271,7 @@ fn build_stream<T>(
     max_samples: Arc<AtomicUsize>,
     cap_hit: Arc<AtomicBool>,
     callbacks: Arc<AtomicU64>,
+    nonzero_seen: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, AudioError>
 where
     T: cpal::Sample + cpal::SizedSample,
@@ -289,6 +298,7 @@ where
                     &rms_peak_bits,
                     &max_samples,
                     &cap_hit,
+                    &nonzero_seen,
                 );
             },
             err_fn,
