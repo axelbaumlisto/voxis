@@ -171,7 +171,23 @@ impl AudioRecorder {
 
         #[cfg(target_os = "macos")]
         {
-            if self.try_resume_recording() {
+            // A device re-enumeration is a NORMAL event (a USB mic blinks, a
+            // Bluetooth route changes) — not an error to report. The paused
+            // always-on stream is still bound to the OLD device object and
+            // would feed zeros forever, so it is dropped and this start()
+            // opens the CURRENT device by name below.
+            if super::hotplug::must_rebind(
+                super::hotplug::take_device_change(),
+                self.is_ready.load(Ordering::SeqCst),
+            ) {
+                tracing::info!(
+                    "audio device list changed since the last take — dropping the stale always-on stream and opening the current device"
+                );
+                // Abandon, never `close()`: the stale stream may be parked
+                // inside CoreAudio's teardown for a device that no longer
+                // exists, and the hotkey path must not wait on that.
+                self.abandon_dead_stream();
+            } else if self.try_resume_recording() {
                 return Ok(());
             }
         }

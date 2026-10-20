@@ -6,6 +6,7 @@
 mod devices;
 mod encoder;
 mod error;
+mod hotplug;
 mod level;
 mod recorder;
 mod signals;

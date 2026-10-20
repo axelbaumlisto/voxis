@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.1.12 (Voxis desktop)
+
+### Fix
+- **A device re-enumeration is now a silent rebind, not an error** (owner
+  2026-10-20: «деактивировал и деактивировал это не должно быть ошибкой»).
+  0.1.11 caught the dead stream (2 s of exact zeros → visible error → next
+  press reopens). It was still the wrong shape: the mic coming back is
+  normal, and the app should simply follow it. `audio/hotplug.rs` registers
+  one CoreAudio listener on `kAudioHardwarePropertyDevices` (plain C
+  callback, no blocks, no new crates) and latches the change; the next
+  `start()` drops the stale always-on stream without waiting on its teardown
+  and opens the CURRENT device by name — so the first take after a USB blink
+  works, with no message and no restart. The 2 s digital-silence guard stays
+  as the safety net for the cases the listener cannot see (muted mic, a
+  listener that failed to arm).
+
 ## `tauri-plugin-voxis` 0.7.5 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.5
 
 - **The API key field's help no longer names a button that may not be on
