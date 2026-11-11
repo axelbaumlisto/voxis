@@ -289,7 +289,8 @@ function mount(container, api) {
   function bail(reason) {
     console.warn("lavalamp: WebGL unavailable, skipping", reason);
     canvas.remove();
-    return { unmount() {} };
+    return { unmount() {
+    } };
   }
   const gl = canvas.getContext("webgl", { premultipliedAlpha: true, alpha: true });
   if (!gl) {

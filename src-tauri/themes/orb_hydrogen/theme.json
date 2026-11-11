@@ -1,0 +1,31 @@
+{
+  "manifest_version": 2,
+  "id": "orb_hydrogen",
+  "name": "Orb · Hydrogen",
+  "description": "Quantum orbital |psi|^2 over dark metal with rainbow chroma bands (WebGL). Ported from Orbkit's shdr-11 (MIT).",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Orbkit shdr-11 (MIT) — https://github.com/zzzzshawn/orbkit",
+  "params": {
+    "speed": 0.9,
+    "rotSpeed": 0.5,
+    "radius": 0.9,
+    "swell": 0.07,
+    "posScale": 0.5,
+    "flowSpeed": 0.35,
+    "flowAmp": 0.45,
+    "flowScale": 0.3,
+    "precess": 0.3,
+    "radialPow": 0.5,
+    "radialDecay": 1,
+    "probPow": 0.4,
+    "probGain": 3,
+    "waveFreq": 4,
+    "chromaSpread": 0.18,
+    "glow": 0.9,
+    "metalDark": 0,
+    "baseVis": 0.12
+  }
+}

@@ -5002,7 +5002,8 @@ function createCellRenderer(container, opts) {
         driftPhaseOffset = seed.driftPhaseOffset;
         restoredPose = wanderPoseFromState(saved, width, height, resolveBaseRadius(width, height, params, growth), params);
       }
-    } catch {}
+    } catch {
+    }
   }
   let rafId = null;
   const tick = () => {
@@ -5650,7 +5651,8 @@ function createCellRenderer(container, opts) {
           ...wander ? { fx: wander.x / width, fy: wander.y / height, heading: wander.heading } : {}
         }));
         lastPersist = now;
-      } catch {}
+      } catch {
+      }
     }
     rafId = requestAnimationFrame(tick);
   };

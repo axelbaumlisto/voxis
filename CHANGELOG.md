@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased (Voxis desktop)
+
+### Add
+- **`orb_hydrogen` theme** — the first of Orbkit's WebGL orbs ported to the
+  overlay theme contract (`mount(container, api)`): hydrogen orbital |psi|² on
+  a rotating dome, rainbow chroma bands over dark metal, 160×160. Orbkit's
+  `idle | thinking | speaking` states map straight onto ours
+  (idle → idle, recording → speaking with `uInput` ← `audioLevel`,
+  transcribing → thinking), and its `integrate: true` rate params arrive as
+  pre-integrated clocks, so a state change glides instead of jumping phase.
+  Manifest carries a machine-readable `credit` (Orbkit `shdr-11`, MIT).
+  Source and header: `src/theme-engine/builtin/orb_hydrogen/`.
+
 ## v0.1.12 (Voxis desktop)
 
 ### Fix
