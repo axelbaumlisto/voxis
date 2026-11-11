@@ -50,6 +50,25 @@ const SLOP_PX = 6;
 function DragGrip() {
   const [dragging, setDragging] = useState(false);
   const [armed, setArmed] = useState(false);
+  // Hover-reveal: the grip is invisible until the pointer is over the overlay,
+  // so at rest the user sees only the orb (the grip no longer sits on top of
+  // it). Entering the tiny overlay window fades the grip in so it can be grabbed.
+  const [hovered, setHovered] = useState(false);
+  useEffect(() => {
+    const onEnter = () => setHovered(true);
+    // pointerout fires for internal element transitions too; only hide when the
+    // pointer actually leaves the window (relatedTarget === null).
+    const onLeave = (e: PointerEvent) => {
+      if (e.relatedTarget === null) setHovered(false);
+    };
+    window.addEventListener("pointerover", onEnter);
+    window.addEventListener("pointerout", onLeave);
+    return () => {
+      window.removeEventListener("pointerover", onEnter);
+      window.removeEventListener("pointerout", onLeave);
+    };
+  }, []);
+  const visible = hovered || armed || dragging;
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const raf = useRef<number | null>(null);
   const st = useRef<{
@@ -191,8 +210,8 @@ function DragGrip() {
       onDoubleClick={onDoubleClick}
       style={{
         position: "fixed",
-        left: 2,
-        top: 2,
+        left: -3,
+        top: -3,
         width: 16,
         height: 16,
         display: "flex",
@@ -203,11 +222,10 @@ function DragGrip() {
         color: "#fff",
         background: dragging
           ? "rgba(236,72,153,0.95)"
-          : armed
-            ? "rgba(236,72,153,0.85)"
-            : "rgba(236,72,153,0.7)",
+          : "rgba(236,72,153,0.85)",
         boxShadow: "0 1px 3px rgba(0,0,0,0.5)",
-        opacity: dragging ? 1 : 0.85,
+        opacity: visible ? (dragging ? 1 : 0.9) : 0,
+        pointerEvents: visible ? "auto" : "none",
         transition: "opacity 120ms, background 120ms",
         touchAction: "none",
         userSelect: "none",
