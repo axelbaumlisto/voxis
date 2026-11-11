@@ -81,44 +81,60 @@ impl WebviewOverlay {
         position: OverlayPositionConfig,
         margin: i32,
         custom_pos: Option<(i32, i32)>,
+        init_size: Option<(u32, u32)>,
     ) -> Result<Self, String> {
         let label = OVERLAY_PANEL_LABEL.to_string();
+        let (w, h) = init_size.unwrap_or((PILL_WIDTH, PILL_HEIGHT));
 
-        // Reuse an existing webview if registered (idempotent reinit).
-        if app.get_webview_window(&label).is_some() {
-            let (x, y) = resolve_initial_position(&app, position, margin, custom_pos);
-            if let Some(w) = app.get_webview_window(&label) {
-                let _ = w.set_position(LogicalPosition::new(x, y));
-                let _ = w.set_size(LogicalSize::new(
-                    PILL_WIDTH as f64,
-                    PILL_HEIGHT as f64,
-                ));
-                let _ = w.show();
+        // Reuse an existing webview ONLY if it is already the right size.
+        // KWin/XWayland honours build-time geometry hints but ignores runtime
+        // resizes of a Dock window, so a size change can't be applied in place
+        // — the window must be destroyed and rebuilt at the new (w × h). When
+        // the size already matches (the common reinit, e.g. a same-size theme
+        // swap or a position/margin change), we reuse it and just reposition.
+        if let Some(win) = app.get_webview_window(&label) {
+            if window_logical_size_matches(&win, w, h) {
+                let (x, y) = resolve_initial_position(&app, position, margin, custom_pos);
+                let _ = win.set_position(LogicalPosition::new(x, y));
+                let _ = win.show();
+                return Ok(Self {
+                    running: Arc::new(AtomicBool::new(true)),
+                    app,
+                    label,
+                    position,
+                    margin,
+                    custom_pos,
+                });
             }
-            return Ok(Self {
-                running: Arc::new(AtomicBool::new(true)),
-                app,
-                label,
-                position,
-                margin,
-                custom_pos,
-            });
+            // Size differs → fall through to destroy + rebuild below.
         }
 
         let (init_x, init_y) = resolve_initial_position(&app, position, margin, custom_pos);
 
         // WebviewWindow::builder MUST run on the main thread on macOS (AppKit
         // invariant) and is safer to dispatch there everywhere. Use an
-        // mpsc-rendezvous to wait for the build result.
+        // mpsc-rendezvous to wait for the build result. The window is BUILT at
+        // (w × h): KWin/XWayland honours build-time geometry hints but ignores
+        // later runtime resizes of a Dock window, so the initial size must be
+        // right at build.
         let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
         let label_for_thread = label.clone();
         let app_for_thread = app.clone();
         let dispatched = app.run_on_main_thread(move || {
+            // If a wrong-sized window exists, destroy it synchronously first so
+            // the rebuild can reclaim the `overlay` label and get fresh
+            // build-time geometry hints. `destroy()` (unlike `close()`) removes
+            // the window immediately, so there's no label-already-exists race.
+            if let Some(old) = app_for_thread.get_webview_window(&label_for_thread) {
+                let _ = old.destroy();
+            }
             let result = build_overlay_window(
                 &app_for_thread,
                 &label_for_thread,
                 init_x,
                 init_y,
+                w,
+                h,
             );
             let _ = tx.send(result);
         });
@@ -163,11 +179,15 @@ fn build_overlay_window(
     label: &str,
     x: f64,
     y: f64,
+    w: u32,
+    h: u32,
 ) -> Result<(), String> {
     // `inner_size` and `position` accept f64 in logical pixels; we use
-    // explicit min_inner_size + max_inner_size to pin the pill to the
-    // Handy 172×36 footprint on Linux/GTK which otherwise can ignore
-    // size hints for transparent windows.
+    // explicit min_inner_size + max_inner_size to pin the window to the
+    // theme footprint. This matters on Linux/GTK + KWin, which HONOURS the
+    // build-time geometry hints but IGNORES later runtime resizes of a Dock
+    // window — so the only reliable way to size the overlay is to build the
+    // window at the right (w × h) and rebuild it when the theme size changes.
     // `mut` is only needed for the debug-only devtools toggle below.
     #[cfg_attr(not(debug_assertions), allow(unused_mut))]
     let mut builder = tauri::WebviewWindowBuilder::new(
@@ -176,9 +196,9 @@ fn build_overlay_window(
         WebviewUrl::App("overlay.html".into()),
     )
     .title("Recording Overlay")
-    .inner_size(PILL_WIDTH as f64, PILL_HEIGHT as f64)
-    .min_inner_size(PILL_WIDTH as f64, PILL_HEIGHT as f64)
-    .max_inner_size(PILL_WIDTH as f64, PILL_HEIGHT as f64)
+    .inner_size(w as f64, h as f64)
+    .min_inner_size(w as f64, h as f64)
+    .max_inner_size(w as f64, h as f64)
     .position(x, y)
     .decorations(false)
     .resizable(false)
@@ -208,12 +228,9 @@ fn build_overlay_window(
 
     // Some compositors (notably GNOME/Mutter, Plasma/KWin) ignore inner_size
     // for borderless transparent windows during build. Re-assert both size
-    // and position explicitly post-build so the pill always lands at exactly
-    // PILL_WIDTH x PILL_HEIGHT.
-    let _ = window.set_size(LogicalSize::new(
-        PILL_WIDTH as f64,
-        PILL_HEIGHT as f64,
-    ));
+    // and position explicitly post-build so the window always lands at exactly
+    // w × h.
+    let _ = window.set_size(LogicalSize::new(w as f64, h as f64));
     let _ = window.set_position(LogicalPosition::new(x, y));
 
     // Tauri upstream #6125 / WebKitGTK hardcodes a 200×200 minimum natural
@@ -227,7 +244,7 @@ fn build_overlay_window(
     // so the compositor sees the correct geometry immediately.
     #[cfg(target_os = "linux")]
     {
-        let _ = window.with_webview(|webview| {
+        let _ = window.with_webview(move |webview| {
             use gtk::prelude::{Cast, GtkWindowExt, WidgetExt};
             let wv = webview.inner();
             wv.set_size_request(1, 1);
@@ -235,10 +252,7 @@ fn build_overlay_window(
             // compositor has already cached the 200×200 constraints.
             if let Some(toplevel) = wv.toplevel() {
                 if let Ok(gtk_window) = toplevel.downcast::<gtk::Window>() {
-                    gtk_window.resize(
-                        PILL_WIDTH as i32,
-                        PILL_HEIGHT as i32,
-                    );
+                    gtk_window.resize(w as i32, h as i32);
                     // Never steal keyboard focus from the active app: a click on
                     // the pill still delivers the pointer event to WebKit (so
                     // click-to-dictate works), but the WM must not transfer input
@@ -253,10 +267,7 @@ fn build_overlay_window(
         });
         // Re-assert via Tauri's own set_size after the GTK-level fix so
         // the inner webview layout is also notified.
-        let _ = window.set_size(LogicalSize::new(
-            PILL_WIDTH as f64,
-            PILL_HEIGHT as f64,
-        ));
+        let _ = window.set_size(LogicalSize::new(w as f64, h as f64));
     }
 
     // Now that the GTK focus policy has been applied (before show),
@@ -349,6 +360,21 @@ fn compute_initial_position(
     margin: i32,
 ) -> (f64, f64) {
     compute_position_for(app, position, margin, PILL_WIDTH, PILL_HEIGHT)
+}
+
+/// True when `win`'s current inner size equals `(w, h)` in logical px.
+/// Used to decide whether a reinit can reuse the window or must rebuild it at
+/// a new size (KWin honours build-time hints, not runtime resizes).
+fn window_logical_size_matches(win: &tauri::WebviewWindow, w: u32, h: u32) -> bool {
+    match (win.inner_size(), win.scale_factor()) {
+        (Ok(sz), Ok(scale)) => {
+            let scale = scale.max(1.0);
+            let lw = (sz.width as f64 / scale).round() as u32;
+            let lh = (sz.height as f64 / scale).round() as u32;
+            lw == w && lh == h
+        }
+        _ => false,
+    }
 }
 
 /// Resolve the overlay's initial (x, y): the user-dragged `custom_pos`

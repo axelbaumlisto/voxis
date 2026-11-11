@@ -67,6 +67,10 @@ impl OverlayManager {
             (Some(x), Some(y)) => Some((x, y)),
             _ => None,
         };
+        // Build the overlay window at the configured theme's footprint so
+        // KWin/XWayland sizes it correctly from the start (it ignores later
+        // runtime resizes of a Dock window).
+        let init_size = self.theme_overlay_size(&config.overlay.theme);
         let new_overlay = create_overlay(CreateOverlayParams {
             enabled: config.overlay.enabled,
             position,
@@ -77,6 +81,7 @@ impl OverlayManager {
             backend: &config.overlay.backend,
             app_handle: Some(self.app.clone()),
             custom_pos,
+            init_size,
         });
         *self.overlay.lock().await = new_overlay;
 

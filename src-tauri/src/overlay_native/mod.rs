@@ -26,6 +26,10 @@ pub struct CreateOverlayParams<'a> {
     /// User-dragged absolute position (logical px). When `Some`, overrides
     /// `position` + `margin`.
     pub custom_pos: Option<(i32, i32)>,
+    /// Initial window size (logical px) from the configured theme's manifest.
+    /// The overlay window is BUILT at this size because KWin/XWayland ignores
+    /// runtime resizes of a Dock window. `None` falls back to the pill default.
+    pub init_size: Option<(u32, u32)>,
 }
 
 /// Create an overlay backend based on configuration.
@@ -56,6 +60,7 @@ pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend
             params.position,
             params.margin,
             params.custom_pos,
+            params.init_size,
         ) {
             Ok(o) => Some(Box::new(o)),
             Err(e) => {
@@ -115,6 +120,7 @@ mod tests {
             backend,
             app_handle: None,
             custom_pos: None,
+            init_size: None,
         }
     }
 
