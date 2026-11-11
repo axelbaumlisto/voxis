@@ -501,12 +501,19 @@ pub(crate) fn apply_overlay_size(
                     // window never shrinks to the theme size (base_size moves
                     // but min/max don't). Re-pin the hints to (w, h) here so
                     // the compositor actually resizes the window.
-                    let geo = gtk::gdk::Geometry::builder()
-                        .min_width(w as i32)
-                        .min_height(h as i32)
-                        .max_width(w as i32)
-                        .max_height(h as i32)
-                        .build();
+                    let geo = gtk::gdk::Geometry::new(
+                        w as i32, // min_width
+                        h as i32, // min_height
+                        w as i32, // max_width
+                        h as i32, // max_height
+                        w as i32, // base_width
+                        h as i32, // base_height
+                        1,        // width_inc
+                        1,        // height_inc
+                        0.0,      // min_aspect
+                        0.0,      // max_aspect
+                        gtk::gdk::Gravity::NorthWest,
+                    );
                     gtk_window.set_geometry_hints(
                         None::<&gtk::Widget>,
                         Some(&geo),
