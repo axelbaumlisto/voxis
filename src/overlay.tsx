@@ -13,7 +13,7 @@
  * KISS: one useOverlayState(), one ThemeHost, one params useEffect.
  */
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { useOverlayState } from "./hooks/useOverlayState";
@@ -174,7 +174,7 @@ function DragGrip() {
     // Not armed → a tap: pass through (do nothing).
   };
 
-  const onDoubleClick = (e: ReactPointerEvent) => {
+  const onDoubleClick = (e: ReactMouseEvent) => {
     e.stopPropagation();
     reset();
     void invoke("clear_overlay_custom_position");
