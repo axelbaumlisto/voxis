@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (Voxis desktop)
+## v0.1.14 (Voxis desktop)
 
 ### Add
 - **All 33 Orbkit orbs are now themes** (was 5): `orb_*` — Dispersion,
