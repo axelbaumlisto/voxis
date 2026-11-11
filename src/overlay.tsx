@@ -81,7 +81,6 @@ function DragGrip() {
       raf.current = null;
     }
     st.current = null;
-    setArmed(false);
     setDragging(false);
   };
 
