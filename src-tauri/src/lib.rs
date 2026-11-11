@@ -175,6 +175,10 @@ pub fn specta_bindings_builder() -> tauri_specta::Builder<tauri::Wry> {
         crate::commands::overlay::read_theme_script,
         crate::commands::overlay::get_theme_manifest,
         crate::commands::overlay::debug_log_overlay,
+        crate::commands::overlay::move_overlay_window,
+        crate::commands::overlay::get_overlay_window_position,
+        crate::commands::overlay::set_overlay_custom_position,
+        crate::commands::overlay::clear_overlay_custom_position,
         // recording
         crate::commands::recording::list_audio_devices,
         crate::commands::recording::start_recording,

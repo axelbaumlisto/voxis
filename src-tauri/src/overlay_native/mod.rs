@@ -23,6 +23,9 @@ pub struct CreateOverlayParams<'a> {
     pub audio_boost: f32,
     pub backend: &'a str,
     pub app_handle: Option<tauri::AppHandle>,
+    /// User-dragged absolute position (logical px). When `Some`, overrides
+    /// `position` + `margin`.
+    pub custom_pos: Option<(i32, i32)>,
 }
 
 /// Create an overlay backend based on configuration.
@@ -52,6 +55,7 @@ pub fn create_overlay(params: CreateOverlayParams<'_>) -> Box<dyn OverlayBackend
             app.clone(),
             params.position,
             params.margin,
+            params.custom_pos,
         ) {
             Ok(o) => Some(Box::new(o)),
             Err(e) => {
@@ -110,6 +114,7 @@ mod tests {
             audio_boost: 800.0,
             backend,
             app_handle: None,
+            custom_pos: None,
         }
     }
 

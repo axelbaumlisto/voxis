@@ -62,6 +62,9 @@ pub struct WebviewOverlay {
     position: OverlayPositionConfig,
     /// Margin from the screen edge, in logical pixels.
     margin: i32,
+    /// User-dragged absolute position (logical px). When `Some`, overrides
+    /// the computed `position` + `margin` placement.
+    custom_pos: Option<(i32, i32)>,
 }
 
 impl WebviewOverlay {
@@ -77,12 +80,13 @@ impl WebviewOverlay {
         app: AppHandle,
         position: OverlayPositionConfig,
         margin: i32,
+        custom_pos: Option<(i32, i32)>,
     ) -> Result<Self, String> {
         let label = OVERLAY_PANEL_LABEL.to_string();
 
         // Reuse an existing webview if registered (idempotent reinit).
         if app.get_webview_window(&label).is_some() {
-            let (x, y) = compute_initial_position(&app, position, margin);
+            let (x, y) = resolve_initial_position(&app, position, margin, custom_pos);
             if let Some(w) = app.get_webview_window(&label) {
                 let _ = w.set_position(LogicalPosition::new(x, y));
                 let _ = w.set_size(LogicalSize::new(
@@ -97,10 +101,11 @@ impl WebviewOverlay {
                 label,
                 position,
                 margin,
+                custom_pos,
             });
         }
 
-        let (init_x, init_y) = compute_initial_position(&app, position, margin);
+        let (init_x, init_y) = resolve_initial_position(&app, position, margin, custom_pos);
 
         // WebviewWindow::builder MUST run on the main thread on macOS (AppKit
         // invariant) and is safer to dispatch there everywhere. Use an
@@ -129,6 +134,7 @@ impl WebviewOverlay {
             label,
             position,
             margin,
+            custom_pos,
         })
     }
 
@@ -345,6 +351,52 @@ fn compute_initial_position(
     compute_position_for(app, position, margin, PILL_WIDTH, PILL_HEIGHT)
 }
 
+/// Resolve the overlay's initial (x, y): the user-dragged `custom_pos`
+/// (clamped to the monitor) when set, otherwise the configured placement.
+fn resolve_initial_position(
+    app: &AppHandle,
+    position: OverlayPositionConfig,
+    margin: i32,
+    custom_pos: Option<(i32, i32)>,
+) -> (f64, f64) {
+    match custom_pos {
+        Some((x, y)) => clamp_point_to_monitor(app, x as f64, y as f64, PILL_WIDTH, PILL_HEIGHT),
+        None => compute_initial_position(app, position, margin),
+    }
+}
+
+/// Clamp a top-left (x, y) in logical px so a `w Ã h` window stays fully on
+/// the primary/main monitor. Mirrors the clamp in `compute_position_for`.
+pub(crate) fn clamp_point_to_monitor(
+    app: &AppHandle,
+    x: f64,
+    y: f64,
+    w: u32,
+    h: u32,
+) -> (f64, f64) {
+    let monitor = app
+        .get_webview_window("main")
+        .and_then(|win| win.current_monitor().ok().flatten())
+        .or_else(|| {
+            app.available_monitors()
+                .ok()
+                .and_then(|m| m.into_iter().next())
+        });
+    let Some(monitor) = monitor else {
+        return (x.max(0.0), y.max(0.0));
+    };
+    let scale = monitor.scale_factor().max(1.0);
+    let fp = monitor.position();
+    let fs = monitor.size();
+    let fx = fp.x as f64 / scale;
+    let fy = fp.y as f64 / scale;
+    let fw = (fs.width as f64 / scale) as i32;
+    let fh = (fs.height as f64 / scale) as i32;
+    let cx = x.clamp(fx, fx + (fw - w as i32).max(0) as f64);
+    let cy = y.clamp(fy, fy + (fh - h as i32).max(0) as f64);
+    (cx, cy)
+}
+
 /// Resolve (x, y) for the overlay window at size `w × h`.
 /// Larger `h` moves the top upward, keeping the bottom edge fixed — the
 /// window grows toward the top of the screen, not downward off-screen.
@@ -534,6 +586,15 @@ impl OverlayBackend for WebviewOverlay {
                 w,
                 h,
             );
+            // A user-dragged position wins over the bottom-anchored placement
+            // apply_overlay_size just applied: re-pin to the dragged spot
+            // (clamped to the monitor for the new size) so a theme change
+            // doesn't snap the overlay back to its configured corner.
+            if let Some((cx, cy)) = self.custom_pos {
+                let (x, y) =
+                    clamp_point_to_monitor(&self.app, cx as f64, cy as f64, w, h);
+                let _ = window.set_position(LogicalPosition::new(x, y));
+            }
         }
     }
 

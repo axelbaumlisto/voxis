@@ -3,10 +3,13 @@
 use crate::overlay::{self, OverlayPosition, OverlayState};
 use crate::overlay_native::{ThemeInfo, ThemeTestResult};
 use crate::setup::ThemeEngineState;
+use crate::error::BoxedIntoCommandError;
+use crate::overlay_native::OVERLAY_PANEL_LABEL;
 use crate::storage::{AppPaths, StorageFactory};
 use crate::theme_engine::{ThemeEngineLoader, ThemeManifest};
 use crate::OrchestratorState;
 use tauri::AppHandle;
+use tauri::Manager;
 use tauri::State;
 
 /// Show the overlay window with the given state.
@@ -257,6 +260,70 @@ pub fn get_theme_manifest(
 #[specta::specta]
 pub fn debug_log_overlay(message: String) {
     tracing::info!("overlay-diag: {}", message);
+}
+
+/// Live-move the overlay window to `(x, y)` in LOGICAL px WITHOUT persisting.
+/// Called on every pointer-move of an interactive grip drag; the frontend has
+/// already clamped `(x, y)` to the screen. Dispatched to the main thread
+/// because window geometry mutation must run there on macOS/GTK.
+#[tauri::command]
+#[specta::specta]
+pub fn move_overlay_window(x: i32, y: i32, app: AppHandle) -> Result<(), String> {
+    let app2 = app.clone();
+    app.run_on_main_thread(move || {
+        if let Some(w) = app2.get_webview_window(OVERLAY_PANEL_LABEL) {
+            let _ = w.set_position(tauri::LogicalPosition::new(x as f64, y as f64));
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Current overlay window top-left in LOGICAL px — the drag start reference.
+#[tauri::command]
+#[specta::specta]
+pub fn get_overlay_window_position(app: AppHandle) -> Result<(i32, i32), String> {
+    let w = app
+        .get_webview_window(OVERLAY_PANEL_LABEL)
+        .ok_or_else(|| "overlay window not found".to_string())?;
+    let pos = w.outer_position().map_err(|e| e.to_string())?;
+    let scale = w.scale_factor().unwrap_or(1.0).max(1.0);
+    Ok(((pos.x as f64 / scale) as i32, (pos.y as f64 / scale) as i32))
+}
+
+/// Persist a user-dragged overlay position and re-pin the overlay there so it
+/// survives restarts and theme changes.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_overlay_custom_position(
+    x: i32,
+    y: i32,
+    paths: State<'_, AppPaths>,
+    orchestrator_state: State<'_, OrchestratorState>,
+) -> Result<(), String> {
+    let factory = StorageFactory::new(paths.inner().clone());
+    let mut config = factory.config().load().unwrap_or_default();
+    config.overlay.custom_x = Some(x);
+    config.overlay.custom_y = Some(y);
+    factory.config().save(&config).cmd_err()?;
+    orchestrator_state.orchestrator.reinit_overlay(&config).await;
+    Ok(())
+}
+
+/// Clear the user-dragged position; the overlay returns to its configured
+/// preset placement (`position` + `margin`).
+#[tauri::command]
+#[specta::specta]
+pub async fn clear_overlay_custom_position(
+    paths: State<'_, AppPaths>,
+    orchestrator_state: State<'_, OrchestratorState>,
+) -> Result<(), String> {
+    let factory = StorageFactory::new(paths.inner().clone());
+    let mut config = factory.config().load().unwrap_or_default();
+    config.overlay.custom_x = None;
+    config.overlay.custom_y = None;
+    factory.config().save(&config).cmd_err()?;
+    orchestrator_state.orchestrator.reinit_overlay(&config).await;
+    Ok(())
 }
 
 /// Run overlay demo mode (debug only).

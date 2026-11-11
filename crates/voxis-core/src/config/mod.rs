@@ -165,6 +165,15 @@ pub struct OverlayConfig {
     /// webview overlay for back-compat.
     #[serde(default = "default_overlay_backend")]
     pub backend: String,
+    /// User-dragged overlay position (logical px, top-left of the window).
+    /// When BOTH are `Some`, they override `position` + `margin`: the overlay
+    /// is placed at these exact coordinates (clamped to the monitor). Set by
+    /// dragging the overlay grip; cleared when the user picks a preset
+    /// `position` from Settings.
+    #[serde(default)]
+    pub custom_x: Option<i32>,
+    #[serde(default)]
+    pub custom_y: Option<i32>,
 }
 
 impl Default for OverlayConfig {
@@ -177,6 +186,8 @@ impl Default for OverlayConfig {
             audio_boost: DEFAULT_AUDIO_BOOST,
             theme: DEFAULT_OVERLAY_THEME.into(),
             backend: default_overlay_backend(),
+            custom_x: None,
+            custom_y: None,
         }
     }
 }

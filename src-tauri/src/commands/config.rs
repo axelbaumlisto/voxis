@@ -20,7 +20,7 @@ pub fn get_config(paths: State<AppPaths>) -> Result<AppConfig, String> {
 #[tauri::command]
 #[specta::specta]
 pub async fn save_config(
-    config: AppConfig,
+    mut config: AppConfig,
     paths: State<'_, AppPaths>,
     hotkey_state: State<'_, HotkeyState>,
     orchestrator_state: State<'_, OrchestratorState>,
@@ -32,6 +32,16 @@ pub async fn save_config(
 
     let factory = get_factory(&paths);
     let old_config = factory.config().load().unwrap_or_default();
+
+    // Picking a preset overlay position (or margin) from Settings clears any
+    // user-dragged custom position, so the preset actually takes effect
+    // instead of being silently overridden by the stale drag coordinates.
+    if config.overlay.position != old_config.overlay.position
+        || config.overlay.margin != old_config.overlay.margin
+    {
+        config.overlay.custom_x = None;
+        config.overlay.custom_y = None;
+    }
 
     // Validate before saving
     let errors = crate::config::validate_config(&config);

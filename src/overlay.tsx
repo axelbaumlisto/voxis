@@ -13,7 +13,9 @@
  * KISS: one useOverlayState(), one ThemeHost, one params useEffect.
  */
 import { useEffect, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import ReactDOM from "react-dom/client";
+import { invoke } from "@tauri-apps/api/core";
 import { useOverlayState } from "./hooks/useOverlayState";
 import ThemeHost from "./theme-engine/ThemeHost";
 import { fetchThemeModule } from "./theme-engine/fetchModule";
@@ -22,6 +24,202 @@ import { commands } from "./bindings";
 import type { ThemeState } from "./theme-engine/contract";
 import { createPressController } from "./overlay/pressController";
 import { isCanvasOpaqueAt } from "./overlay/hitTest";
+
+/**
+ * Semi-transparent drag grip on the LEFT edge of the overlay.
+ *
+ * Interaction (option B, per owner):
+ *  - PRESS-AND-HOLD the grip (≥ ARM_MS, pointer roughly still) → drag arms;
+ *    the overlay OS window then follows the pointer and the final spot is
+ *    persisted (survives restarts + theme changes).
+ *  - A single short TAP passes through: it neither drags nor is consumed — the
+ *    grip only reacts to a hold.
+ *  - DOUBLE-CLICK resets to the configured preset position.
+ *
+ * The grip is a SIBLING of the dictation pill (not a child), so its pointer
+ * events never reach the pill's hold-to-dictate handler — holding the grip
+ * drags, holding the pill dictates.
+ *
+ * Window moves go through Rust commands (move_overlay_window /
+ * set_overlay_custom_position) so the overlay webview needs no window
+ * permissions; `screenX/screenY` (stable as the window moves) drive the delta.
+ */
+const ARM_MS = 300;
+const SLOP_PX = 6;
+
+function DragGrip() {
+  const [dragging, setDragging] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const raf = useRef<number | null>(null);
+  const st = useRef<{
+    pointerId: number;
+    startScreenX: number;
+    startScreenY: number;
+    baseX: number | null;
+    baseY: number | null;
+    lastX: number;
+    lastY: number;
+    armedNow: boolean;
+    pendingScreen: { x: number; y: number } | null;
+  } | null>(null);
+
+  const clearTimer = () => {
+    if (timer.current !== null) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+  };
+
+  const reset = () => {
+    clearTimer();
+    if (raf.current !== null) {
+      cancelAnimationFrame(raf.current);
+      raf.current = null;
+    }
+    st.current = null;
+    setArmed(false);
+    setDragging(false);
+  };
+
+  const flush = () => {
+    raf.current = null;
+    const s = st.current;
+    if (!s || !s.armedNow || s.baseX === null || s.baseY === null || !s.pendingScreen) return;
+    const nx = Math.round(s.baseX + (s.pendingScreen.x - s.startScreenX));
+    const ny = Math.round(s.baseY + (s.pendingScreen.y - s.startScreenY));
+    s.lastX = nx;
+    s.lastY = ny;
+    void invoke("move_overlay_window", { x: nx, y: ny });
+  };
+
+  const scheduleMove = (screenX: number, screenY: number) => {
+    const s = st.current;
+    if (!s) return;
+    s.pendingScreen = { x: screenX, y: screenY };
+    if (raf.current === null) raf.current = requestAnimationFrame(flush);
+  };
+
+  const onPointerDown = (e: ReactPointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* captured pointer may already be gone — the drag still tracks */
+    }
+    st.current = {
+      pointerId: e.pointerId,
+      startScreenX: e.screenX,
+      startScreenY: e.screenY,
+      baseX: null,
+      baseY: null,
+      lastX: 0,
+      lastY: 0,
+      armedNow: false,
+      pendingScreen: null,
+    };
+    // Fetch the window's current top-left so armed moves are absolute. Resolves
+    // in ~ms, long before ARM_MS, so it's ready by the time the drag arms.
+    void invoke<[number, number]>("get_overlay_window_position")
+      .then(([x, y]) => {
+        if (st.current && st.current.pointerId === e.pointerId) {
+          st.current.baseX = x;
+          st.current.baseY = y;
+          st.current.lastX = x;
+          st.current.lastY = y;
+        }
+      })
+      .catch(() => {
+        /* leave base null — arming without a base simply won't move */
+      });
+    clearTimer();
+    timer.current = setTimeout(() => {
+      const s = st.current;
+      if (!s || s.pointerId !== e.pointerId) return;
+      s.armedNow = true;
+      setArmed(true);
+      setDragging(true);
+    }, ARM_MS);
+  };
+
+  const onPointerMove = (e: ReactPointerEvent) => {
+    const s = st.current;
+    if (!s || s.pointerId !== e.pointerId) return;
+    if (!s.armedNow) {
+      // Moved past the slop before the hold matured → this is a tap-drag, not
+      // a hold: abandon, let it pass through (no drag).
+      const dx = e.screenX - s.startScreenX;
+      const dy = e.screenY - s.startScreenY;
+      if (dx * dx + dy * dy > SLOP_PX * SLOP_PX) reset();
+      return;
+    }
+    e.preventDefault();
+    scheduleMove(e.screenX, e.screenY);
+  };
+
+  const onPointerUp = (e: ReactPointerEvent) => {
+    const s = st.current;
+    if (!s || s.pointerId !== e.pointerId) {
+      reset();
+      return;
+    }
+    const wasArmed = s.armedNow;
+    const { lastX, lastY, baseX } = s;
+    reset();
+    if (wasArmed && baseX !== null) {
+      void invoke("set_overlay_custom_position", { x: lastX, y: lastY });
+    }
+    // Not armed → a tap: pass through (do nothing).
+  };
+
+  const onDoubleClick = (e: ReactPointerEvent) => {
+    e.stopPropagation();
+    reset();
+    void invoke("clear_overlay_custom_position");
+  };
+
+  return (
+    <div
+      aria-label="Move overlay (hold to drag, double-click to reset)"
+      title="Hold to drag · double-click to reset"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={reset}
+      onDoubleClick={onDoubleClick}
+      style={{
+        position: "fixed",
+        left: 1,
+        top: "50%",
+        transform: "translateY(-50%)",
+        width: 14,
+        height: 28,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 7,
+        cursor: dragging ? "grabbing" : "grab",
+        color: "#fff",
+        background: dragging
+          ? "rgba(0,0,0,0.45)"
+          : armed
+            ? "rgba(0,0,0,0.35)"
+            : "rgba(0,0,0,0.18)",
+        opacity: dragging ? 0.9 : 0.35,
+        transition: "opacity 120ms, background 120ms",
+        touchAction: "none",
+        userSelect: "none",
+        zIndex: 2147483647,
+        lineHeight: 1,
+        fontSize: 12,
+      }}
+    >
+      ⠿
+    </div>
+  );
+}
 
 export function OverlayApp() {
   const snapshot = useOverlayState();
@@ -122,22 +320,25 @@ export function OverlayApp() {
   }, []);
 
   return (
-    <div
-      ref={wrapperRef}
-      data-press-target
-      style={{ width: "100%", height: "100%", touchAction: "none" }}
-    >
-      <ThemeHost
-        themeId={themeId}
-        state={state}
-        fetchModule={fetchThemeModule}
-        fallbackModule={fallbackTheme}
-        onCancel={() => void commands.cancelOperation()}
-        params={params}
-        width={size.width || undefined}
-        height={size.height || undefined}
-      />
-    </div>
+    <>
+      <div
+        ref={wrapperRef}
+        data-press-target
+        style={{ width: "100%", height: "100%", touchAction: "none" }}
+      >
+        <ThemeHost
+          themeId={themeId}
+          state={state}
+          fetchModule={fetchThemeModule}
+          fallbackModule={fallbackTheme}
+          onCancel={() => void commands.cancelOperation()}
+          params={params}
+          width={size.width || undefined}
+          height={size.height || undefined}
+        />
+      </div>
+      <DragGrip />
+    </>
   );
 }
 

@@ -63,6 +63,10 @@ impl OverlayManager {
     async fn init(&self, config: &AppConfig) {
         let position = OverlayPositionConfig::parse(&config.overlay.position);
         let size = OverlaySizeConfig::parse(&config.overlay.size);
+        let custom_pos = match (config.overlay.custom_x, config.overlay.custom_y) {
+            (Some(x), Some(y)) => Some((x, y)),
+            _ => None,
+        };
         let new_overlay = create_overlay(CreateOverlayParams {
             enabled: config.overlay.enabled,
             position,
@@ -72,6 +76,7 @@ impl OverlayManager {
             audio_boost: config.overlay.audio_boost,
             backend: &config.overlay.backend,
             app_handle: Some(self.app.clone()),
+            custom_pos,
         });
         *self.overlay.lock().await = new_overlay;
 

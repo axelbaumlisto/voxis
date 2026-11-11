@@ -27,11 +27,11 @@ function ThemeSelect({ label, description, value, onChange }: ThemeSelectProps) 
         ? `Theme list unavailable: ${error}`
         : description;
 
-  const runPreview = async (reloadFromDisk: boolean) => {
+  const runPreview = async (reloadFromDisk: boolean, themeId: string = value) => {
     try {
       setPreviewing(true);
       setPreviewError(null);
-      await previewVisualizationTheme(value, reloadFromDisk);
+      await previewVisualizationTheme(themeId, reloadFromDisk);
       if (reloadFromDisk) {
         await reload();
       }
@@ -42,13 +42,21 @@ function ThemeSelect({ label, description, value, onChange }: ThemeSelectProps) 
     }
   };
 
+  // Live preview: selecting a theme (incl. arrow-key navigation in the
+  // dropdown) immediately shows it on the overlay so the user can browse
+  // themes by sight. Persists the choice AND previews it.
+  const handleChange = (next: string) => {
+    onChange(next);
+    void runPreview(false, next);
+  };
+
   return (
     <FieldWrapper label={label} description={helperText}>
       <ThemeSelectControl
         label={label}
         value={value}
         options={options}
-        onChange={onChange}
+        onChange={handleChange}
       />
       <div className="theme-preview-actions">
         <button
