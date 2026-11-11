@@ -46,29 +46,33 @@ import { isCanvasOpaqueAt } from "./overlay/hitTest";
  */
 const ARM_MS = 300;
 const SLOP_PX = 6;
+const IDLE_HIDE_MS = 1600;
 
 function DragGrip() {
   const [dragging, setDragging] = useState(false);
   const [armed, setArmed] = useState(false);
-  // Hover-reveal: the grip is invisible until the pointer is over the overlay,
-  // so at rest the user sees only the orb (the grip no longer sits on top of
-  // it). Entering the tiny overlay window fades the grip in so it can be grabbed.
-  const [hovered, setHovered] = useState(false);
+  // Idle-reveal: the grip shows on pointer ACTIVITY over the overlay and hides
+  // after a short idle timeout. This does NOT rely on pointerout/leave events —
+  // the overlay's borderless Dock webview does not reliably deliver them on
+  // X11/Wayland, which is why the grip used to get stuck visible. A timer always
+  // fires, so the grip reliably disappears once the mouse stops moving over it.
+  const [active, setActive] = useState(false);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const onEnter = () => setHovered(true);
-    // pointerout fires for internal element transitions too; only hide when the
-    // pointer actually leaves the window (relatedTarget === null).
-    const onLeave = (e: PointerEvent) => {
-      if (e.relatedTarget === null) setHovered(false);
+    const bump = () => {
+      setActive(true);
+      if (hideTimer.current !== null) clearTimeout(hideTimer.current);
+      hideTimer.current = setTimeout(() => setActive(false), IDLE_HIDE_MS);
     };
-    window.addEventListener("pointerover", onEnter);
-    window.addEventListener("pointerout", onLeave);
+    window.addEventListener("pointermove", bump);
+    window.addEventListener("pointerover", bump);
     return () => {
-      window.removeEventListener("pointerover", onEnter);
-      window.removeEventListener("pointerout", onLeave);
+      window.removeEventListener("pointermove", bump);
+      window.removeEventListener("pointerover", bump);
+      if (hideTimer.current !== null) clearTimeout(hideTimer.current);
     };
   }, []);
-  const visible = hovered || armed || dragging;
+  const visible = active || armed || dragging;
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const raf = useRef<number | null>(null);
   const st = useRef<{
@@ -99,10 +103,13 @@ function DragGrip() {
     st.current = null;
     setArmed(false);
     setDragging(false);
-    // After a drag the pointer is usually off the window and pointer-capture
-    // swallowed the pointerout, so `hovered` can stay stuck true. Clear it so
-    // the grip fades away once the drag ends; it reappears on the next hover.
-    setHovered(false);
+    // Hide immediately when the drag ends and cancel any pending idle timer —
+    // the grip reappears on the next pointer activity over the overlay.
+    if (hideTimer.current !== null) {
+      clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+    setActive(false);
   };
 
   const flush = () => {
@@ -205,6 +212,7 @@ function DragGrip() {
 
   return (
     <div
+      data-testid="overlay-drag-grip"
       aria-label="Move overlay (hold to drag, double-click to reset)"
       title="Hold to drag · double-click to reset"
       onPointerDown={onPointerDown}
@@ -214,10 +222,10 @@ function DragGrip() {
       onDoubleClick={onDoubleClick}
       style={{
         position: "fixed",
-        left: 4,
-        top: 4,
-        width: 15,
-        height: 15,
+        left: 0,
+        top: 0,
+        width: 13,
+        height: 13,
         boxSizing: "border-box",
         display: "flex",
         alignItems: "center",
@@ -226,8 +234,8 @@ function DragGrip() {
         cursor: dragging ? "grabbing" : "grab",
         color: "#fff",
         background: dragging
-          ? "rgba(236,72,153,0.98)"
-          : "rgba(236,72,153,0.88)",
+          ? "rgba(34,197,94,0.98)"
+          : "rgba(34,197,94,0.9)",
         boxShadow: "0 1px 4px rgba(0,0,0,0.45)",
         opacity: visible ? 1 : 0,
         pointerEvents: visible ? "auto" : "none",
@@ -235,8 +243,8 @@ function DragGrip() {
         touchAction: "none",
         userSelect: "none",
         zIndex: 2147483647,
-        lineHeight: "15px",
-        fontSize: 9,
+        lineHeight: "13px",
+        fontSize: 8,
         fontWeight: 700,
         textAlign: "center",
       }}
