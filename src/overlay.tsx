@@ -99,6 +99,10 @@ function DragGrip() {
     st.current = null;
     setArmed(false);
     setDragging(false);
+    // After a drag the pointer is usually off the window and pointer-capture
+    // swallowed the pointerout, so `hovered` can stay stuck true. Clear it so
+    // the grip fades away once the drag ends; it reappears on the next hover.
+    setHovered(false);
   };
 
   const flush = () => {
@@ -210,32 +214,34 @@ function DragGrip() {
       onDoubleClick={onDoubleClick}
       style={{
         position: "fixed",
-        left: -3,
-        top: -3,
-        width: 16,
-        height: 16,
+        left: 4,
+        top: 4,
+        width: 15,
+        height: 15,
+        boxSizing: "border-box",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        borderRadius: 5,
+        borderRadius: "50%",
         cursor: dragging ? "grabbing" : "grab",
         color: "#fff",
         background: dragging
-          ? "rgba(236,72,153,0.95)"
-          : "rgba(236,72,153,0.85)",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.5)",
-        opacity: visible ? (dragging ? 1 : 0.9) : 0,
+          ? "rgba(236,72,153,0.98)"
+          : "rgba(236,72,153,0.88)",
+        boxShadow: "0 1px 4px rgba(0,0,0,0.45)",
+        opacity: visible ? 1 : 0,
         pointerEvents: visible ? "auto" : "none",
-        transition: "opacity 120ms, background 120ms",
+        transition: "opacity 140ms ease",
         touchAction: "none",
         userSelect: "none",
         zIndex: 2147483647,
-        lineHeight: 1,
-        fontSize: 11,
+        lineHeight: "15px",
+        fontSize: 9,
         fontWeight: 700,
+        textAlign: "center",
       }}
     >
-      ⠿
+      ✛
     </div>
   );
 }
