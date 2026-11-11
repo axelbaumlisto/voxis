@@ -170,9 +170,9 @@ pub struct OverlayConfig {
     /// is placed at these exact coordinates (clamped to the monitor). Set by
     /// dragging the overlay grip; cleared when the user picks a preset
     /// `position` from Settings.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_x: Option<i32>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_y: Option<i32>,
 }
 
