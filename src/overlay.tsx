@@ -191,29 +191,30 @@ function DragGrip() {
       onDoubleClick={onDoubleClick}
       style={{
         position: "fixed",
-        left: 1,
-        top: "50%",
-        transform: "translateY(-50%)",
-        width: 14,
-        height: 28,
+        left: 2,
+        top: 2,
+        width: 16,
+        height: 16,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        borderRadius: 7,
+        borderRadius: 5,
         cursor: dragging ? "grabbing" : "grab",
         color: "#fff",
         background: dragging
-          ? "rgba(0,0,0,0.45)"
+          ? "rgba(236,72,153,0.95)"
           : armed
-            ? "rgba(0,0,0,0.35)"
-            : "rgba(0,0,0,0.18)",
-        opacity: dragging ? 0.9 : 0.35,
+            ? "rgba(236,72,153,0.85)"
+            : "rgba(236,72,153,0.7)",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.5)",
+        opacity: dragging ? 1 : 0.85,
         transition: "opacity 120ms, background 120ms",
         touchAction: "none",
         userSelect: "none",
         zIndex: 2147483647,
         lineHeight: 1,
-        fontSize: 12,
+        fontSize: 11,
+        fontWeight: 700,
       }}
     >
       ⠿

@@ -493,6 +493,25 @@ pub(crate) fn apply_overlay_size(
             wv.set_size_request(1, 1);
             if let Some(toplevel) = wv.toplevel() {
                 if let Ok(gtk_window) = toplevel.downcast::<gtk::Window>() {
+                    // CRITICAL: the window was built with min_inner_size ==
+                    // max_inner_size == PILL (320×108), which bakes fixed
+                    // WM_NORMAL_HINTS (min==max). Tauri's set_min_size/
+                    // set_max_size above do NOT update those GTK geometry
+                    // hints, so KWin/XWayland keeps enforcing 320×108 and the
+                    // window never shrinks to the theme size (base_size moves
+                    // but min/max don't). Re-pin the hints to (w, h) here so
+                    // the compositor actually resizes the window.
+                    let geo = gtk::gdk::Geometry::builder()
+                        .min_width(w as i32)
+                        .min_height(h as i32)
+                        .max_width(w as i32)
+                        .max_height(h as i32)
+                        .build();
+                    gtk_window.set_geometry_hints(
+                        None::<&gtk::Widget>,
+                        Some(&geo),
+                        gtk::gdk::WindowHints::MIN_SIZE | gtk::gdk::WindowHints::MAX_SIZE,
+                    );
                     gtk_window.resize(w as i32, h as i32);
                     // Re-assert focus policy (already applied at build;
                     // these are harmless no-ops on an already-
