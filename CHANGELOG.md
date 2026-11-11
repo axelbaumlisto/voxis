@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (Voxis desktop)
+## v0.1.13 (Voxis desktop)
 
 ### Add
 - **Orb theme family from Orbkit** (https://github.com/zzzzshawn/orbkit): five
