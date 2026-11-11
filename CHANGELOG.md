@@ -3,15 +3,23 @@
 ## Unreleased (Voxis desktop)
 
 ### Add
-- **`orb_hydrogen` theme** — the first of Orbkit's WebGL orbs ported to the
-  overlay theme contract (`mount(container, api)`): hydrogen orbital |psi|² on
-  a rotating dome, rainbow chroma bands over dark metal, 160×160. Orbkit's
-  `idle | thinking | speaking` states map straight onto ours
-  (idle → idle, recording → speaking with `uInput` ← `audioLevel`,
-  transcribing → thinking), and its `integrate: true` rate params arrive as
-  pre-integrated clocks, so a state change glides instead of jumping phase.
-  Manifest carries a machine-readable `credit` (Orbkit `shdr-11`, MIT).
-  Source and header: `src/theme-engine/builtin/orb_hydrogen/`.
+- **Orb theme family from Orbkit** (https://github.com/zzzzshawn/orbkit): five
+  WebGL orbs ported to the overlay theme contract — `orb_hydrogen`
+  (|psi|² orbital), `orb_ion` (plasma globe), `orb_nimbus` (volumetric cloud),
+  `orb_phosphor` (CRT ASCII matrix), `orb_dither` (1-bit dithered dome). One
+  shared adapter, `builtin/_shared/orb-kit.ts`, carries the whole contract:
+  orbkit's `idle | thinking | speaking` states map onto our modes (recording
+  → speaking with `uInput` ← `audioLevel`), its `integrate: true` rates become
+  accumulated clocks so a mode change glides instead of jumping phase, colour
+  uniforms (`uC_*`) come from the orb's schema, and every orb inherits the
+  same 2× supersample / graceful-WebGL-fallback / full-dispose behaviour.
+  Each theme is then only its shader plus a table of numbers. Every manifest
+  carries a machine-readable `credit` — Orbkit's own orbs (these five) are MIT;
+  if a themed port of XorDev's shaders is added later it is NON-COMMERCIAL
+  only, and `credit` is what makes that mechanically removable.
+  Gates: `src/theme-engine/builtin/__tests__/orb_family.test.ts` (structure,
+  credit, square size) and `e2e/orb-themes.spec.ts` (real Chromium +
+  SwiftShader: each orb compiles, draws, and changes with the voice level).
 
 ## v0.1.12 (Voxis desktop)
 

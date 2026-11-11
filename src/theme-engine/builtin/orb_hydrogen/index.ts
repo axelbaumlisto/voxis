@@ -1,80 +1,23 @@
 // orb_hydrogen — hydrogen orbital |psi|^2 on a rotating dome, rainbow chroma bands.
 //
 // PORTED FROM ORBKIT (https://github.com/zzzzshawn/orbkit), orb `shdr-11`
-// ("Hydrogen"). Orbkit's own orb: MIT, like its runtime — no third-party terms.
-// The fragment shader below is orbkit's, kept verbatim except for the uniform
-// names and the helper prelude (its `orbUV()`/`noise`/`fbm` live here inline,
-// because a theme bundle must have ZERO runtime imports — see the manifest
-// note in docs/THEMES.md).
+// ("Hydrogen") — Orbkit's own orb, MIT like its runtime, no third-party terms.
+// The shader body is orbkit's, verbatim; the prelude (`uRes`/`uInput`/
+// `noise`/`fbm`/`orbUV`) and the WebGL lifetime live in `_shared/orb-kit.ts`,
+// which is what lets every ported orb stay a shader + a table of numbers.
 //
-// Porting contract: orbkit orbs are written for `idle | thinking | speaking`
-// with a `uInput` (user speech energy) → Voxis's `ThemeState` maps 1:1:
-//   idle                                  → idle       preset
-//   recording                             → speaking   preset, uInput ← audioLevel
-//   transcribing                          → thinking   preset
-//   error                                 → idle       preset
-// Rate params arrive as pre-integrated clocks (`integrate: true` in orbkit),
-// which is what `uP_speed`/`uP_flowSpeed` are here: changing speed changes the
-// rate, never the phase.
-//
-// Self-contained: `import type` only (0 runtime imports in the bundled theme.js).
-import type { ThemeApi, ThemeInstance, ThemeState } from "../../contract";
-
-const VERT = `
-attribute vec2 aPos;
-void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
-`;
+// Porting map (kit-side): idle → idle preset, recording → speaking with
+// `uInput` ← audioLevel, transcribing → thinking. `speed`/`flowSpeed` are
+// RATES in orbkit (`integrate: true`) — the kit accumulates them into clocks,
+// so a state change glides instead of jumping the phase.
+import { mountOrb, type OrbVariant } from "../_shared/orb-kit";
+import type { ThemeApi, ThemeInstance } from "../../contract";
 
 const FRAG = `
 precision highp float;
 
-uniform vec2  uRes;
-uniform float uInput;   // 0..1 — the user's voice (audioLevel)
-uniform float uOutput;  // 0..1 — the orb's own excitement, tracks uInput
-uniform float uP_speed;       // integrated clock (orbkit 'speed', integrate: true)
-uniform float uP_rotSpeed;
-uniform float uP_radius;
-uniform float uP_swell;
-uniform float uP_posScale;
-uniform float uP_flowSpeed;   // integrated clock (orbkit 'flowSpeed', integrate: true)
-uniform float uP_flowAmp;
-uniform float uP_flowScale;
-uniform float uP_precess;
-uniform float uP_radialPow;
-uniform float uP_radialDecay;
-uniform float uP_probPow;
-uniform float uP_probGain;
-uniform float uP_waveFreq;
-uniform float uP_chromaSpread;
-uniform float uP_glow;
-uniform float uP_metalDark;
-uniform float uP_baseVis;
 
 // ---- orbkit's ORB_GLSL_HELPERS, inlined (see the header) -------------------
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
-float noise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  return mix(
-    mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
-    mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
-    f.y
-  );
-}
-float fbm(vec2 p) {
-  float v = 0.0;
-  float a = 0.5;
-  for (int i = 0; i < 5; i++) {
-    v += a * noise(p);
-    p = p * 2.03 + vec2(11.7, 7.3);
-    a *= 0.5;
-  }
-  return v;
-}
-vec2 orbUV() { return (2.0 * gl_FragCoord.xy - uRes) / min(uRes.x, uRes.y); }
-// ---------------------------------------------------------------------------
-
 const float PI = 3.14159265359;
 
 void main() {
@@ -182,206 +125,38 @@ void main() {
 }
 `;
 
-/** Numeric knobs, orbkit's `params` (idle defaults are the schema defaults). */
-type Params = Record<string, number>;
 
-const PARAM_KEYS = [
-  "speed",
-  "rotSpeed",
-  "radius",
-  "swell",
-  "posScale",
-  "flowSpeed",
-  "flowAmp",
-  "flowScale",
-  "precess",
-  "radialPow",
-  "radialDecay",
-  "probPow",
-  "probGain",
-  "waveFreq",
-  "chromaSpread",
-  "glow",
-  "metalDark",
-  "baseVis",
-] as const;
-
-/** orbkit `statePresets.idle` — also the manifest defaults. */
-const IDLE: Params = {
+/** orbkit `params` idle defaults — also the manifest defaults. */
+const DEFAULTS = {
   speed: 0.9, rotSpeed: 0.5, radius: 0.9, swell: 0.07, posScale: 0.5,
   flowSpeed: 0.35, flowAmp: 0.45, flowScale: 0.3, precess: 0.3,
   radialPow: 0.5, radialDecay: 1, probPow: 0.4, probGain: 3, waveFreq: 4,
   chromaSpread: 0.18, glow: 0.9, metalDark: 0, baseVis: 0.12,
+} as const;
+
+/** orbkit `statePresets` — idle, thinking (transcribing), speaking (recording). */
+const VARIANTS: OrbVariant = {
+  id: "orb_hydrogen",
+  frag: FRAG,
+  defaults: DEFAULTS,
+  clocks: ["speed", "flowSpeed"],
+  presets: {
+    idle: DEFAULTS,
+    recording: {
+      speed: 2.45, rotSpeed: 0.5, radius: 0.9, swell: 0.07, posScale: 1,
+      flowSpeed: 2.75, flowAmp: 0.8, flowScale: 2.2, precess: 1.3,
+      radialPow: 0.5, radialDecay: 1, probPow: 0.31, probGain: 4.3, waveFreq: 4,
+      chromaSpread: 0.12, glow: 0.9, metalDark: 0, baseVis: 0.12,
+    },
+    transcribing: {
+      speed: 0.9, rotSpeed: 0.5, radius: 0.9, swell: 0.07, posScale: 0.65,
+      flowSpeed: 0.35, flowAmp: 1.1, flowScale: 0.3, precess: 0,
+      radialPow: 0.5, radialDecay: 1.9, probPow: 0.4, probGain: 3, waveFreq: 4,
+      chromaSpread: 0.41, glow: 0.9, metalDark: 0, baseVis: 0.12,
+    },
+  },
 };
-
-/** orbkit `statePresets.speaking` — the "the user is talking" look. */
-const RECORDING: Params = {
-  speed: 2.45, rotSpeed: 0.5, radius: 0.9, swell: 0.07, posScale: 1,
-  flowSpeed: 2.75, flowAmp: 0.8, flowScale: 2.2, precess: 1.3,
-  radialPow: 0.5, radialDecay: 1, probPow: 0.31, probGain: 4.3, waveFreq: 4,
-  chromaSpread: 0.12, glow: 0.9, metalDark: 0, baseVis: 0.12,
-};
-
-/** orbkit `statePresets.thinking` — restless but not loud (transcribing). */
-const THINKING: Params = {
-  speed: 0.9, rotSpeed: 0.5, radius: 0.9, swell: 0.07, posScale: 0.65,
-  flowSpeed: 0.35, flowAmp: 1.1, flowScale: 0.3, precess: 0,
-  radialPow: 0.5, radialDecay: 1.9, probPow: 0.4, probGain: 3, waveFreq: 4,
-  chromaSpread: 0.41, glow: 0.9, metalDark: 0, baseVis: 0.12,
-};
-
-function presetFor(mode: ThemeState["mode"]): Params {
-  // orbkit's three states map onto ours; `error` keeps the calm idle look —
-  // a theme must never look like it is shouting at the user.
-  if (mode === "recording") return RECORDING;
-  if (mode === "transcribing") return THINKING;
-  return IDLE;
-}
-
-function readParams(raw: unknown): Params {
-  const out: Params = { ...IDLE };
-  if (raw && typeof raw === "object") {
-    for (const key of PARAM_KEYS) {
-      const v = (raw as Record<string, unknown>)[key];
-      if (typeof v === "number" && Number.isFinite(v)) out[key] = v;
-    }
-  }
-  return out;
-}
 
 export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
-  const W = api.size.width;
-  const H = api.size.height;
-  // Same 2x supersample rule as the builtin shader themes (see lavalamp):
-  // exact 2:1 downscaling is an exact box filter, so the orb's silhouette gets
-  // real AA — at 3:1 bilinear skips source pixels and the staircase survives.
-  const renderScale = 2;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = W * renderScale;
-  canvas.height = H * renderScale;
-  canvas.style.width = "100%";
-  canvas.style.height = "100%";
-  canvas.style.display = "block";
-  container.appendChild(canvas);
-
-  function bail(reason: string): ThemeInstance {
-    console.warn("orb_hydrogen: WebGL unavailable, skipping", reason);
-    canvas.remove();
-    return { unmount() {} };
-  }
-
-  const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: true, antialias: false });
-  if (!gl) return bail("no webgl context");
-
-  function shader(type: number, src: string): WebGLShader | null {
-    const s = gl!.createShader(type);
-    if (!s) return null;
-    gl!.shaderSource(s, src);
-    gl!.compileShader(s);
-    if (!gl!.getShaderParameter(s, gl!.COMPILE_STATUS)) {
-      console.warn("orb_hydrogen: shader compile failed", gl!.getShaderInfoLog(s));
-      gl!.deleteShader(s);
-      return null;
-    }
-    return s;
-  }
-
-  const vs = shader(gl.VERTEX_SHADER, VERT);
-  const fs = shader(gl.FRAGMENT_SHADER, FRAG);
-  const prog = gl.createProgram();
-  if (!vs || !fs || !prog) return bail("shader/program");
-  gl.attachShader(prog, vs);
-  gl.attachShader(prog, fs);
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-    return bail(`link: ${gl.getProgramInfoLog(prog)}`);
-  }
-  gl.useProgram(prog);
-
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
-  const aPos = gl.getAttribLocation(prog, "aPos");
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-
-  const u = (name: string) => gl.getUniformLocation(prog, name);
-  const uRes = u("uRes");
-  const uInput = u("uInput");
-  const uOutput = u("uOutput");
-  const uLoc: Record<string, WebGLUniformLocation | null> = {};
-  for (const key of PARAM_KEYS) uLoc[key] = u(`uP_${key}`);
-
-  gl.uniform2f(uRes, canvas.width, canvas.height);
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-  gl.clearColor(0, 0, 0, 0);
-
-  const configured = readParams(api.params);
-  const current: Params = { ...configured };
-  let target: Params = presetFor("idle");
-  let level = 0;
-  let smoothLevel = 0;
-  // orbkit's `integrate: true` params: the shader reads a CLOCK, so speed
-  // changes the rate instead of jumping the phase.
-  let phaseAnim = 0;
-  let phaseFlow = 0;
-  let raf = 0;
-
-  const off = api.onState((state) => {
-    target = presetFor(state.mode);
-    level = Number.isFinite(state.audioLevel) ? Math.min(1, Math.max(0, state.audioLevel)) : 0;
-  });
-
-  let last = performance.now();
-  const ease = (dt: number) => 1 - Math.exp(-dt / 0.28); // ~280 ms, like the engine's glide
-
-  const frame = (now: number) => {
-    raf = requestAnimationFrame(frame);
-    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
-    last = now;
-
-    const k = ease(dt);
-    for (const key of PARAM_KEYS) {
-      // Explicit manifest params always win over the state preset (orbkit's
-      // rule: "params passed explicitly always win over the preset").
-      const t = api.params && typeof api.params === "object" && key in (api.params as object)
-        ? configured[key]
-        : target[key];
-      current[key] += (t - current[key]) * k;
-    }
-    smoothLevel += (level - smoothLevel) * (1 - Math.exp(-dt / 0.08));
-
-    phaseAnim += dt * current.speed;
-    phaseFlow += dt * current.flowSpeed;
-
-    for (const key of PARAM_KEYS) gl.uniform1f(uLoc[key], current[key]);
-    // The shader's two clocks replace the two integrated params.
-    gl.uniform1f(uLoc.speed, phaseAnim);
-    gl.uniform1f(uLoc.flowSpeed, phaseFlow);
-    // `uInput` is the user's voice. `uOutput` is orbkit's "agent speech"; there
-    // is no agent here, so the orb's own excitement simply tracks the same
-    // level at a lower weight — that is what makes the surface respond to you.
-    gl.uniform1f(uInput, smoothLevel);
-    gl.uniform1f(uOutput, smoothLevel * 0.35);
-
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-  };
-  raf = requestAnimationFrame(frame);
-
-  return {
-    unmount() {
-      cancelAnimationFrame(raf);
-      off();
-      gl.useProgram(null);
-      gl.deleteBuffer(buf);
-      gl.deleteProgram(prog);
-      gl.deleteShader(vs);
-      gl.deleteShader(fs);
-      canvas.remove();
-    },
-  };
+  return mountOrb(container, api, VARIANTS);
 }

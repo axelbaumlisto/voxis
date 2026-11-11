@@ -1,0 +1,31 @@
+{
+  "manifest_version": 2,
+  "id": "orb_phosphor",
+  "name": "Orb · Phosphor",
+  "description": "ASCII glyph matrix in CRT green wrapped on the ball (WebGL).",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Orbkit `shdr-23` (MIT) — https://github.com/zzzzshawn/orbkit",
+  "params": {
+    "drift": 0.55,
+    "scroll": 0.05,
+    "speed": 0.5,
+    "pulse": 0.0,
+    "spin": 0.12,
+    "radius": 0.9,
+    "cells": 40.0,
+    "scale": 1.6,
+    "density": 0.48,
+    "dropout": 0.48,
+    "light": 0.6,
+    "rim": 0.45,
+    "gain": 1.0,
+    "contrast": 1.0,
+    "colors": {
+      "glow": "#57ffc9",
+      "deep": "#0b3b2d"
+    }
+  }
+}

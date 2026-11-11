@@ -1,0 +1,35 @@
+{
+  "manifest_version": 2,
+  "id": "orb_nimbus",
+  "name": "Orb · Nimbus",
+  "description": "Light diffusing through a cloud — volumetric march with self-shadowing (WebGL).",
+  "api_version": 1,
+  "overlay_width": 200,
+  "overlay_height": 200,
+  "entry": "theme.js",
+  "credit": "Orbkit `shdr-21` (MIT) — https://github.com/zzzzshawn/orbkit",
+  "params": {
+    "speed": 10.0,
+    "camDist": 4.4,
+    "focal": 1.8,
+    "radius": 2.0,
+    "scale": 0.8,
+    "churn": 0.3,
+    "threshold": 0.075,
+    "edgeSoft": 0.8,
+    "density": 3.2,
+    "absorb": 1.4,
+    "shadowAbsorb": 2.4,
+    "shadowLift": 0.55,
+    "aniso": 0.45,
+    "lightSpin": 0.12,
+    "power": 1.9,
+    "ambient": 0.12,
+    "exposure": 1.0,
+    "alphaGain": 1.5,
+    "colors": {
+      "light": "#ffd7a3",
+      "shadow": "#3a4a8c"
+    }
+  }
+}

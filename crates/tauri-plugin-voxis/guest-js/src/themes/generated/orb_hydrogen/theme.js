@@ -1,34 +1,10 @@
-// src/theme-engine/builtin/orb_hydrogen/index.ts
-var VERT = `
-attribute vec2 aPos;
-void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
-`;
-var FRAG = `
+// src/theme-engine/builtin/_shared/orb-kit.ts
+var ORB_PRELUDE = `
 precision highp float;
-
 uniform vec2  uRes;
 uniform float uInput;   // 0..1 — the user's voice (audioLevel)
 uniform float uOutput;  // 0..1 — the orb's own excitement, tracks uInput
-uniform float uP_speed;       // integrated clock (orbkit 'speed', integrate: true)
-uniform float uP_rotSpeed;
-uniform float uP_radius;
-uniform float uP_swell;
-uniform float uP_posScale;
-uniform float uP_flowSpeed;   // integrated clock (orbkit 'flowSpeed', integrate: true)
-uniform float uP_flowAmp;
-uniform float uP_flowScale;
-uniform float uP_precess;
-uniform float uP_radialPow;
-uniform float uP_radialDecay;
-uniform float uP_probPow;
-uniform float uP_probGain;
-uniform float uP_waveFreq;
-uniform float uP_chromaSpread;
-uniform float uP_glow;
-uniform float uP_metalDark;
-uniform float uP_baseVis;
 
-// ---- orbkit's ORB_GLSL_HELPERS, inlined (see the header) -------------------
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
 float noise(vec2 p) {
   vec2 i = floor(p);
@@ -51,8 +27,182 @@ float fbm(vec2 p) {
   return v;
 }
 vec2 orbUV() { return (2.0 * gl_FragCoord.xy - uRes) / min(uRes.x, uRes.y); }
-// ---------------------------------------------------------------------------
 
+// GLSL ES 1.0 has no tanh() (ES 3.0 only); shader-golf listings lean on it as
+// a tone-mapper. Clamped against exp() overflow for the non-negative
+// accumulators those shaders produce.
+vec3 tanh3(vec3 x) {
+  x = clamp(x, -10.0, 10.0);
+  vec3 e = exp(2.0 * x);
+  return (e - 1.0) / (e + 1.0);
+}
+`;
+var VERT = `
+attribute vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+function hexToRgb(hex) {
+  let h = hex.replace("#", "").trim();
+  if (h.length === 3)
+    h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  const n = parseInt(h, 16);
+  if (h.length !== 6 || Number.isNaN(n))
+    return [1, 1, 1];
+  return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+}
+function presetFor(variant, mode) {
+  return variant.presets?.[mode] ?? variant.defaults;
+}
+function readOverrides(raw, defaults) {
+  const out = { ...defaults };
+  if (raw && typeof raw === "object") {
+    for (const key of Object.keys(defaults)) {
+      const v = raw[key];
+      if (typeof v === "number" && Number.isFinite(v))
+        out[key] = v;
+    }
+  }
+  return out;
+}
+function mountOrb(container, api, variant) {
+  const renderScale = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = api.size.width * renderScale;
+  canvas.height = api.size.height * renderScale;
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+  canvas.style.display = "block";
+  container.appendChild(canvas);
+  const bail = (reason) => {
+    console.warn(`${variant.id}: WebGL unavailable (${reason}), skipping`);
+    canvas.remove();
+    return { unmount() {
+    } };
+  };
+  const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: true, antialias: false });
+  if (!gl)
+    return bail("no context");
+  const compile = (type, src) => {
+    const s = gl.createShader(type);
+    if (!s)
+      return null;
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      console.warn(`${variant.id}: shader compile failed`, gl.getShaderInfoLog(s));
+      gl.deleteShader(s);
+      return null;
+    }
+    return s;
+  };
+  const keys = Object.keys(variant.defaults);
+  const colorKeys = Object.keys(variant.colors ?? {});
+  const decls = [
+    ...keys.map((k) => `uniform float uP_${k};`),
+    ...colorKeys.map((k) => `uniform vec3 uC_${k};`)
+  ].join(`
+`);
+  const vs = compile(gl.VERTEX_SHADER, VERT);
+  const fs = compile(gl.FRAGMENT_SHADER, `${ORB_PRELUDE}
+${decls}
+${variant.frag}`);
+  const prog = gl.createProgram();
+  if (!vs || !fs || !prog)
+    return bail("program");
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+    return bail(`link: ${gl.getProgramInfoLog(prog)}`);
+  gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(prog, "aPos");
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+  const uRes = gl.getUniformLocation(prog, "uRes");
+  const uInput = gl.getUniformLocation(prog, "uInput");
+  const uOutput = gl.getUniformLocation(prog, "uOutput");
+  const loc = {};
+  for (const k of keys)
+    loc[k] = gl.getUniformLocation(prog, `uP_${k}`);
+  const colorLoc = {};
+  for (const k of colorKeys)
+    colorLoc[k] = gl.getUniformLocation(prog, `uC_${k}`);
+  gl.uniform2f(uRes, canvas.width, canvas.height);
+  const liveColors = api.params?.colors;
+  for (const k of colorKeys) {
+    const hex = typeof liveColors?.[k] === "string" ? liveColors[k] : variant.colors[k];
+    const [r, g, b] = hexToRgb(hex);
+    gl.uniform3f(colorLoc[k], r, g, b);
+  }
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.clearColor(0, 0, 0, 0);
+  const overrides = readOverrides(api.params, variant.defaults);
+  const hasOverride = {};
+  for (const k of keys) {
+    hasOverride[k] = !!(api.params && typeof api.params === "object" && (k in api.params));
+  }
+  const current = { ...variant.defaults };
+  const clocks = {};
+  for (const k of variant.clocks ?? [])
+    clocks[k] = 0;
+  let target = presetFor(variant, "idle");
+  let level = 0;
+  let smoothLevel = 0;
+  let raf = 0;
+  const off = api.onState((state) => {
+    target = presetFor(variant, state.mode);
+    level = Number.isFinite(state.audioLevel) ? Math.min(1, Math.max(0, state.audioLevel)) : 0;
+  });
+  let last = performance.now();
+  const frame = (now) => {
+    raf = requestAnimationFrame(frame);
+    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+    last = now;
+    const k = 1 - Math.exp(-dt / 0.28);
+    for (const key of keys) {
+      const t = hasOverride[key] ? overrides[key] : target[key] ?? variant.defaults[key];
+      current[key] += (t - current[key]) * k;
+    }
+    smoothLevel += (level - smoothLevel) * (1 - Math.exp(-dt / 0.08));
+    for (const key of keys) {
+      if (key in clocks) {
+        clocks[key] += dt * current[key];
+        gl.uniform1f(loc[key], clocks[key]);
+      } else {
+        gl.uniform1f(loc[key], current[key]);
+      }
+    }
+    gl.uniform1f(uInput, smoothLevel);
+    gl.uniform1f(uOutput, smoothLevel * 0.35);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  };
+  raf = requestAnimationFrame(frame);
+  return {
+    unmount() {
+      cancelAnimationFrame(raf);
+      off();
+      gl.useProgram(null);
+      gl.deleteBuffer(buf);
+      gl.deleteProgram(prog);
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      canvas.remove();
+    }
+  };
+}
+
+// src/theme-engine/builtin/orb_hydrogen/index.ts
+var FRAG = `
+precision highp float;
+
+
+// ---- orbkit's ORB_GLSL_HELPERS, inlined (see the header) -------------------
 const float PI = 3.14159265359;
 
 void main() {
@@ -159,27 +309,7 @@ void main() {
   gl_FragColor = vec4(surfaceColor * a, a);
 }
 `;
-var PARAM_KEYS = [
-  "speed",
-  "rotSpeed",
-  "radius",
-  "swell",
-  "posScale",
-  "flowSpeed",
-  "flowAmp",
-  "flowScale",
-  "precess",
-  "radialPow",
-  "radialDecay",
-  "probPow",
-  "probGain",
-  "waveFreq",
-  "chromaSpread",
-  "glow",
-  "metalDark",
-  "baseVis"
-];
-var IDLE = {
+var DEFAULTS = {
   speed: 0.9,
   rotSpeed: 0.5,
   radius: 0.9,
@@ -199,175 +329,57 @@ var IDLE = {
   metalDark: 0,
   baseVis: 0.12
 };
-var RECORDING = {
-  speed: 2.45,
-  rotSpeed: 0.5,
-  radius: 0.9,
-  swell: 0.07,
-  posScale: 1,
-  flowSpeed: 2.75,
-  flowAmp: 0.8,
-  flowScale: 2.2,
-  precess: 1.3,
-  radialPow: 0.5,
-  radialDecay: 1,
-  probPow: 0.31,
-  probGain: 4.3,
-  waveFreq: 4,
-  chromaSpread: 0.12,
-  glow: 0.9,
-  metalDark: 0,
-  baseVis: 0.12
-};
-var THINKING = {
-  speed: 0.9,
-  rotSpeed: 0.5,
-  radius: 0.9,
-  swell: 0.07,
-  posScale: 0.65,
-  flowSpeed: 0.35,
-  flowAmp: 1.1,
-  flowScale: 0.3,
-  precess: 0,
-  radialPow: 0.5,
-  radialDecay: 1.9,
-  probPow: 0.4,
-  probGain: 3,
-  waveFreq: 4,
-  chromaSpread: 0.41,
-  glow: 0.9,
-  metalDark: 0,
-  baseVis: 0.12
-};
-function presetFor(mode) {
-  if (mode === "recording")
-    return RECORDING;
-  if (mode === "transcribing")
-    return THINKING;
-  return IDLE;
-}
-function readParams(raw) {
-  const out = { ...IDLE };
-  if (raw && typeof raw === "object") {
-    for (const key of PARAM_KEYS) {
-      const v = raw[key];
-      if (typeof v === "number" && Number.isFinite(v))
-        out[key] = v;
+var VARIANTS = {
+  id: "orb_hydrogen",
+  frag: FRAG,
+  defaults: DEFAULTS,
+  clocks: ["speed", "flowSpeed"],
+  presets: {
+    idle: DEFAULTS,
+    recording: {
+      speed: 2.45,
+      rotSpeed: 0.5,
+      radius: 0.9,
+      swell: 0.07,
+      posScale: 1,
+      flowSpeed: 2.75,
+      flowAmp: 0.8,
+      flowScale: 2.2,
+      precess: 1.3,
+      radialPow: 0.5,
+      radialDecay: 1,
+      probPow: 0.31,
+      probGain: 4.3,
+      waveFreq: 4,
+      chromaSpread: 0.12,
+      glow: 0.9,
+      metalDark: 0,
+      baseVis: 0.12
+    },
+    transcribing: {
+      speed: 0.9,
+      rotSpeed: 0.5,
+      radius: 0.9,
+      swell: 0.07,
+      posScale: 0.65,
+      flowSpeed: 0.35,
+      flowAmp: 1.1,
+      flowScale: 0.3,
+      precess: 0,
+      radialPow: 0.5,
+      radialDecay: 1.9,
+      probPow: 0.4,
+      probGain: 3,
+      waveFreq: 4,
+      chromaSpread: 0.41,
+      glow: 0.9,
+      metalDark: 0,
+      baseVis: 0.12
     }
   }
-  return out;
-}
+};
 function mount(container, api) {
-  const W = api.size.width;
-  const H = api.size.height;
-  const renderScale = 2;
-  const canvas = document.createElement("canvas");
-  canvas.width = W * renderScale;
-  canvas.height = H * renderScale;
-  canvas.style.width = "100%";
-  canvas.style.height = "100%";
-  canvas.style.display = "block";
-  container.appendChild(canvas);
-  function bail(reason) {
-    console.warn("orb_hydrogen: WebGL unavailable, skipping", reason);
-    canvas.remove();
-    return { unmount() {
-    } };
-  }
-  const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: true, antialias: false });
-  if (!gl)
-    return bail("no webgl context");
-  function shader(type, src) {
-    const s = gl.createShader(type);
-    if (!s)
-      return null;
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-      console.warn("orb_hydrogen: shader compile failed", gl.getShaderInfoLog(s));
-      gl.deleteShader(s);
-      return null;
-    }
-    return s;
-  }
-  const vs = shader(gl.VERTEX_SHADER, VERT);
-  const fs = shader(gl.FRAGMENT_SHADER, FRAG);
-  const prog = gl.createProgram();
-  if (!vs || !fs || !prog)
-    return bail("shader/program");
-  gl.attachShader(prog, vs);
-  gl.attachShader(prog, fs);
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-    return bail(`link: ${gl.getProgramInfoLog(prog)}`);
-  }
-  gl.useProgram(prog);
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
-  const aPos = gl.getAttribLocation(prog, "aPos");
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-  const u = (name) => gl.getUniformLocation(prog, name);
-  const uRes = u("uRes");
-  const uInput = u("uInput");
-  const uOutput = u("uOutput");
-  const uLoc = {};
-  for (const key of PARAM_KEYS)
-    uLoc[key] = u(`uP_${key}`);
-  gl.uniform2f(uRes, canvas.width, canvas.height);
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-  gl.clearColor(0, 0, 0, 0);
-  const configured = readParams(api.params);
-  const current = { ...configured };
-  let target = presetFor("idle");
-  let level = 0;
-  let smoothLevel = 0;
-  let phaseAnim = 0;
-  let phaseFlow = 0;
-  let raf = 0;
-  const off = api.onState((state) => {
-    target = presetFor(state.mode);
-    level = Number.isFinite(state.audioLevel) ? Math.min(1, Math.max(0, state.audioLevel)) : 0;
-  });
-  let last = performance.now();
-  const ease = (dt) => 1 - Math.exp(-dt / 0.28);
-  const frame = (now) => {
-    raf = requestAnimationFrame(frame);
-    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
-    last = now;
-    const k = ease(dt);
-    for (const key of PARAM_KEYS) {
-      const t = api.params && typeof api.params === "object" && key in api.params ? configured[key] : target[key];
-      current[key] += (t - current[key]) * k;
-    }
-    smoothLevel += (level - smoothLevel) * (1 - Math.exp(-dt / 0.08));
-    phaseAnim += dt * current.speed;
-    phaseFlow += dt * current.flowSpeed;
-    for (const key of PARAM_KEYS)
-      gl.uniform1f(uLoc[key], current[key]);
-    gl.uniform1f(uLoc.speed, phaseAnim);
-    gl.uniform1f(uLoc.flowSpeed, phaseFlow);
-    gl.uniform1f(uInput, smoothLevel);
-    gl.uniform1f(uOutput, smoothLevel * 0.35);
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-  };
-  raf = requestAnimationFrame(frame);
-  return {
-    unmount() {
-      cancelAnimationFrame(raf);
-      off();
-      gl.useProgram(null);
-      gl.deleteBuffer(buf);
-      gl.deleteProgram(prog);
-      gl.deleteShader(vs);
-      gl.deleteShader(fs);
-      canvas.remove();
-    }
-  };
+  return mountOrb(container, api, VARIANTS);
 }
 export {
   mount

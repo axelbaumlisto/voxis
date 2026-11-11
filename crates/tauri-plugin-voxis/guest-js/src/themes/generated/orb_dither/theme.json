@@ -1,0 +1,28 @@
+{
+  "manifest_version": 2,
+  "id": "orb_dither",
+  "name": "Orb · Dither",
+  "description": "Lit plasma dome quantized to chunky two-tone pixels, 1-bit style (WebGL).",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Orbkit `shdr-14` (MIT) — https://github.com/zzzzshawn/orbkit",
+  "params": {
+    "speed": 0.5,
+    "spin": 0.15,
+    "radius": 0.9,
+    "cells": 140.0,
+    "levels": 3.0,
+    "scale": 1.5,
+    "plasma": 0.9,
+    "light": 0.9,
+    "rim": 0.35,
+    "gain": 1.0,
+    "contrast": 1.1,
+    "colors": {
+      "ink": "#101426",
+      "paper": "#cfe6ff"
+    }
+  }
+}
