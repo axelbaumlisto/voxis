@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (Voxis desktop)
+## v0.1.15 (Voxis desktop)
 
 ### Change
 - **One WebGL lifetime for every shader theme** (`builtin/_shared/gl-theme.ts`):
