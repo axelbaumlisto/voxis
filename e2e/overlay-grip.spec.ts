@@ -35,25 +35,22 @@ async function opacity(page: import("@playwright/test").Page) {
 }
 
 test.describe("overlay drag grip", () => {
-  test("hidden at rest, shows on activity, hides after idle", async ({ page }) => {
+  test("hidden at rest, shows on hover, hides when pointer leaves", async ({ page }) => {
     await page.goto("/overlay.html?theme=orb_ion");
     await page.waitForSelector("[data-testid='theme-host']", { timeout: 5000 });
     await page.waitForSelector(GRIP, { state: "attached", timeout: 5000 });
 
-    // At rest (no pointer activity) the grip is transparent.
-    expect(await opacity(page)).toBeLessThan(0.1);
+    // At rest (pointer not over the overlay) the grip is transparent.
+    await page.mouse.move(300, 300);
+    await expect.poll(() => opacity(page), { timeout: 1000 }).toBeLessThan(0.1);
 
-    // Pointer activity over the overlay reveals it.
+    // Hovering the overlay reveals it (CSS body:hover).
     await page.mouse.move(36, 36);
-    await page.mouse.move(20, 20);
-    await expect
-      .poll(() => opacity(page), { timeout: 1000 })
-      .toBeGreaterThan(0.9);
+    await expect.poll(() => opacity(page), { timeout: 1000 }).toBeGreaterThan(0.9);
 
-    // After the idle timeout (1.6s) with no further movement it hides again.
-    await expect
-      .poll(() => opacity(page), { timeout: 3000 })
-      .toBeLessThan(0.1);
+    // Moving the pointer off the overlay hides it again — no blink, no stick.
+    await page.mouse.move(300, 300);
+    await expect.poll(() => opacity(page), { timeout: 1000 }).toBeLessThan(0.1);
   });
 
   test("sits in the top-left corner and is small", async ({ page }) => {

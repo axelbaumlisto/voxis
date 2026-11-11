@@ -25,6 +25,23 @@
         align-items: center;
         justify-content: center;
       }
+      /* Drag grip: hidden until the pointer is over the overlay. CSS :hover is
+       * maintained by the layout engine from the real pointer position, so it
+       * neither sticks (unlike JS pointerout, which the Dock webview drops) nor
+       * blinks (unlike a JS idle timer). */
+      .drag-grip {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 140ms ease;
+      }
+      body:hover .drag-grip {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .drag-grip.dragging {
+        opacity: 1 !important;
+        pointer-events: auto !important;
+      }
     </style>
   </head>
   <body>
