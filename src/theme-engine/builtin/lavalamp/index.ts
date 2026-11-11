@@ -11,6 +11,7 @@
 // Self-contained: `import type` only — the bundled theme.js must have 0 runtime
 // imports so it works verbatim when copied into the user themes folder.
 import type { ThemeApi, ThemeInstance, ThemeState } from "../../contract";
+import { createGlSurface, isBailed, type GlSurface } from "../_shared/gl-theme";
 
 const VERT = `
 attribute vec2 aPos;
@@ -284,18 +285,6 @@ function resolveColors(colors: unknown): number[][] {
   return out as number[][];
 }
 
-function compile(gl: WebGLRenderingContext, type: number, src: string): WebGLShader {
-  const sh = gl.createShader(type) as WebGLShader;
-  gl.shaderSource(sh, src);
-  gl.compileShader(sh);
-  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-    const log = gl.getShaderInfoLog(sh);
-    gl.deleteShader(sh);
-    throw new Error("lavalamp shader compile failed: " + log);
-  }
-  return sh;
-}
-
 /**
  * Mount a 3D raymarched metaballs visualizer. Same contract as metaballs.
  */
@@ -313,68 +302,22 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   // box filter (every source pixel contributes once) — clean AA. At 3:1 it
   // SKIPS 5 of every 9 supersampled pixels and the staircase survives.
   // Ref: bartwronski.com bilinear down/upsampling; KhronosGroup/WebGL#3360.
-  const renderScale = 2;
+  // ONE WebGL lifetime for every shader theme — see `_shared/gl-theme.ts`.
+  const made = createGlSurface(container, {
+    id: "lavalamp",
+    size: { width: W, height: H },
+    vert: VERT,
+    frag: FRAG,
+  });
+  if (isBailed(made)) return made;
+  const surface: GlSurface = made;
+  const gl = surface.gl;
 
-  const canvas = document.createElement("canvas");
-  canvas.width = W * renderScale;
-  canvas.height = H * renderScale;
-  canvas.style.width = "100%";
-  canvas.style.height = "100%";
-  canvas.style.display = "block";
-  container.appendChild(canvas);
+  const uRes = surface.uniform("uResolution");
+  const uPhase = surface.uniform("uPhase");
+  const uLevel = surface.uniform("uLevel");
+  const uColorMode = surface.uniform("uColorMode");
 
-  // Graceful fallback: embeddable components must never throw and crash the host.
-  // On any unrecoverable WebGL failure, remove the canvas, warn once, and return
-  // a valid no-op instance so callers can still call unmount() safely.
-  function bail(reason: string): ThemeInstance {
-    console.warn("lavalamp: WebGL unavailable, skipping", reason);
-    canvas.remove();
-    return { unmount() {} };
-  }
-
-  // premultipliedAlpha:true + shader outputs premultiplied rgb: filtering and
-  // compositing only commute under premultiplied alpha (IQ “premultiplied
-  // alpha” article) — straight alpha gets RGB interpolated independently of A
-  // during the compositor's downscale/blend, fringing the silhouette.
-  const gl = canvas.getContext("webgl", { premultipliedAlpha: true, alpha: true }) as
-    | WebGLRenderingContext
-    | null;
-  if (!gl) {
-    return bail("getContext('webgl') returned null");
-  }
-
-  const prog = gl.createProgram() as WebGLProgram;
-  let vs!: WebGLShader, fs!: WebGLShader;
-  try {
-    vs = compile(gl, gl.VERTEX_SHADER, VERT);
-    fs = compile(gl, gl.FRAGMENT_SHADER, FRAG);
-  } catch (e) {
-    return bail(e instanceof Error ? e.message : String(e));
-  }
-  gl.attachShader(prog, vs);
-  gl.attachShader(prog, fs);
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-    const log = gl.getProgramInfoLog(prog);
-    return bail("program link failed: " + log);
-  }
-  gl.useProgram(prog);
-
-  // fullscreen triangle pair
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  const aPos = gl.getAttribLocation(prog, "aPos");
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-
-  const uRes = gl.getUniformLocation(prog, "uResolution");
-  const uPhase = gl.getUniformLocation(prog, "uPhase");
-  const uLevel = gl.getUniformLocation(prog, "uLevel");
-  const uColorMode = gl.getUniformLocation(prog, "uColorMode");
-
-  // S2: read api.params with defensive defaults (defaults == current look) and
-  // set the static tunables once — they don't change per frame.
   const params = (api.params && typeof api.params === "object" ? api.params : {}) as Record<string, unknown>;
   const shine = numOr(params.shine, 28.0, 1.0, 400.0);
   const specW = numOr(params.specWeight, 0.6, 0.0, 2.0);
@@ -383,42 +326,27 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
   const zoom = numOr(params.zoom, 1.7, 0.5, 4.0);
   const cols = resolveColors(params.colors);
 
-  gl.uniform1f(gl.getUniformLocation(prog, "uShine"), shine);
-  gl.uniform1f(gl.getUniformLocation(prog, "uSpecW"), specW);
-  gl.uniform1f(gl.getUniformLocation(prog, "uSaturation"), saturation);
-  gl.uniform1f(gl.getUniformLocation(prog, "uZoom"), zoom);
-  gl.uniform3f(gl.getUniformLocation(prog, "uCol1"), cols[0][0], cols[0][1], cols[0][2]);
-  gl.uniform3f(gl.getUniformLocation(prog, "uCol2"), cols[1][0], cols[1][1], cols[1][2]);
-  gl.uniform3f(gl.getUniformLocation(prog, "uCol3"), cols[2][0], cols[2][1], cols[2][2]);
-  gl.uniform3f(gl.getUniformLocation(prog, "uCol4"), cols[3][0], cols[3][1], cols[3][2]);
+  gl.uniform2f(uRes, surface.canvas.width, surface.canvas.height);
+  gl.uniform1f(surface.uniform("uShine"), shine);
+  gl.uniform1f(surface.uniform("uSpecW"), specW);
+  gl.uniform1f(surface.uniform("uSaturation"), saturation);
+  gl.uniform1f(surface.uniform("uZoom"), zoom);
+  gl.uniform3f(surface.uniform("uCol1"), cols[0][0], cols[0][1], cols[0][2]);
+  gl.uniform3f(surface.uniform("uCol2"), cols[1][0], cols[1][1], cols[1][2]);
+  gl.uniform3f(surface.uniform("uCol3"), cols[2][0], cols[2][1], cols[2][2]);
+  gl.uniform3f(surface.uniform("uCol4"), cols[3][0], cols[3][1], cols[3][2]);
 
-  gl.viewport(0, 0, canvas.width, canvas.height);
-  gl.uniform2f(uRes, canvas.width, canvas.height);
-
-  let mode = "idle";
-  let level = 0;
-  let smoothLevel = 0;
-  // Orbit phase integrated on the CPU each frame. Decoupling phase from
-  // (speed * uTime) means a change in speed alters the RATE only, never the
-  // absolute phase — so audio-driven speed changes can't teleport the blobs.
   let phase = 0;
-  let prevNow = performance.now();
-  const start = prevNow;
-  let raf = 0;
-  let running = true;
-
-  const unsubscribe = api.onState((s: ThemeState) => {
+  let smoothLevel = 0;
+  let mode: ThemeState["mode"] = "idle";
+  let level = 0;
+  const unsubscribe = api.onState((s) => {
     mode = s.mode;
-    level = Number.isFinite(s.audioLevel) ? Math.max(0, Math.min(1, s.audioLevel)) : 0;
+    level = Number.isFinite(s.audioLevel) ? Math.min(1, Math.max(0, s.audioLevel)) : 0;
   });
 
-  function frame() {
-    if (!running) return;
-    const now = performance.now();
-    const t = (now - start) / 1000;
-    // real elapsed seconds, clamped to avoid a huge first-frame / tab-restore jump
-    const dt = Math.max(0, Math.min(0.05, (now - prevNow) / 1000));
-    prevNow = now;
+  surface.run((dt, elapsed) => {
+    const t = elapsed;
     // S3: map mode -> (target energy level, orbit-speed churn). Computed ONCE per
     // frame in JS (no per-pixel cost); modeSpeed multiplies the phase rate below.
     //   idle        : calm slow breathing  ~0.12 +/- 0.04*sin   speed 0.8
@@ -454,38 +382,15 @@ export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
     const spdJs = 0.5 * energy * speed * modeSpeed;
     phase += spdJs * dt;
 
-    gl!.uniform1f(uPhase, phase);
-    gl!.uniform1f(uLevel, smoothLevel);
-    gl!.uniform1f(uColorMode, mode === "error" ? 1.0 : 0.0);
-    gl!.clearColor(0, 0, 0, 0);
-    gl!.clear(gl!.COLOR_BUFFER_BIT);
-    gl!.drawArrays(gl!.TRIANGLES, 0, 3);
-    raf = requestAnimationFrame(frame);
-  }
-
-  function onVisibility() {
-    if (document.hidden) {
-      running = false;
-      cancelAnimationFrame(raf);
-    } else if (!running) {
-      running = true;
-      raf = requestAnimationFrame(frame);
-    }
-  }
-  document.addEventListener("visibilitychange", onVisibility);
-  raf = requestAnimationFrame(frame);
+    gl.uniform1f(uPhase, phase);
+    gl.uniform1f(uLevel, smoothLevel);
+    gl.uniform1f(uColorMode, mode === "error" ? 1.0 : 0.0);
+  });
 
   return {
     unmount() {
-      running = false;
       unsubscribe();
-      document.removeEventListener("visibilitychange", onVisibility);
-      cancelAnimationFrame(raf);
-      gl!.deleteBuffer(buf);
-      gl!.deleteProgram(prog);
-      const ext = gl!.getExtension("WEBGL_lose_context");
-      if (ext) ext.loseContext();
-      canvas.remove();
+      surface.dispose();
     },
   };
 }

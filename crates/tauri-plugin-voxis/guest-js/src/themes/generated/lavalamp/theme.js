@@ -1,3 +1,114 @@
+// src/theme-engine/builtin/_shared/gl-theme.ts
+function createGlSurface(container, opts) {
+  const renderScale = opts.renderScale ?? 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = opts.size.width * renderScale;
+  canvas.height = opts.size.height * renderScale;
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+  canvas.style.display = "block";
+  container.appendChild(canvas);
+  const bail = (reason) => {
+    console.warn(`${opts.id}: WebGL unavailable (${reason}), skipping`);
+    canvas.remove();
+    return { unmount() {
+    } };
+  };
+  const gl = canvas.getContext("webgl", {
+    alpha: true,
+    premultipliedAlpha: true,
+    antialias: false
+  });
+  if (!gl)
+    return bail("no webgl context");
+  const compile = (type, src) => {
+    const sh = gl.createShader(type);
+    if (!sh)
+      return null;
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      console.warn(`${opts.id}: shader compile failed`, gl.getShaderInfoLog(sh));
+      gl.deleteShader(sh);
+      return null;
+    }
+    return sh;
+  };
+  const vs = compile(gl.VERTEX_SHADER, opts.vert);
+  const fs = compile(gl.FRAGMENT_SHADER, opts.frag);
+  const prog = gl.createProgram();
+  if (!vs || !fs || !prog)
+    return bail("shader/program");
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+    return bail(`link: ${gl.getProgramInfoLog(prog)}`);
+  gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(prog, "aPos");
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.clearColor(0, 0, 0, 0);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  let raf = 0;
+  let last = 0;
+  let elapsed = 0;
+  let frameCb = null;
+  let disposed = false;
+  const tick = (now) => {
+    if (disposed || !frameCb)
+      return;
+    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+    last = now;
+    elapsed += dt;
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    frameCb(dt, elapsed);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    raf = requestAnimationFrame(tick);
+  };
+  const onVisibility = () => {
+    if (disposed)
+      return;
+    if (document.hidden) {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    } else if (!raf && frameCb) {
+      last = performance.now();
+      raf = requestAnimationFrame(tick);
+    }
+  };
+  document.addEventListener("visibilitychange", onVisibility);
+  return {
+    gl,
+    canvas,
+    uniform: (name) => gl.getUniformLocation(prog, name),
+    run(frame) {
+      frameCb = frame;
+      last = performance.now();
+      raf = requestAnimationFrame(tick);
+    },
+    dispose() {
+      disposed = true;
+      cancelAnimationFrame(raf);
+      document.removeEventListener("visibilitychange", onVisibility);
+      gl.useProgram(null);
+      gl.deleteBuffer(buf);
+      gl.deleteProgram(prog);
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      canvas.remove();
+    }
+  };
+}
+function isBailed(surface) {
+  return typeof surface.unmount === "function" && !("run" in surface);
+}
+
 // src/theme-engine/builtin/lavalamp/index.ts
 var VERT = `
 attribute vec2 aPos;
@@ -264,64 +375,23 @@ function resolveColors(colors) {
     return DEFAULT_COLORS;
   return out;
 }
-function compile(gl, type, src) {
-  const sh = gl.createShader(type);
-  gl.shaderSource(sh, src);
-  gl.compileShader(sh);
-  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-    const log = gl.getShaderInfoLog(sh);
-    gl.deleteShader(sh);
-    throw new Error("lavalamp shader compile failed: " + log);
-  }
-  return sh;
-}
 function mount(container, api) {
   const W = api.size.width;
   const H = api.size.height;
-  const renderScale = 2;
-  const canvas = document.createElement("canvas");
-  canvas.width = W * renderScale;
-  canvas.height = H * renderScale;
-  canvas.style.width = "100%";
-  canvas.style.height = "100%";
-  canvas.style.display = "block";
-  container.appendChild(canvas);
-  function bail(reason) {
-    console.warn("lavalamp: WebGL unavailable, skipping", reason);
-    canvas.remove();
-    return { unmount() {
-    } };
-  }
-  const gl = canvas.getContext("webgl", { premultipliedAlpha: true, alpha: true });
-  if (!gl) {
-    return bail("getContext('webgl') returned null");
-  }
-  const prog = gl.createProgram();
-  let vs, fs;
-  try {
-    vs = compile(gl, gl.VERTEX_SHADER, VERT);
-    fs = compile(gl, gl.FRAGMENT_SHADER, FRAG);
-  } catch (e) {
-    return bail(e instanceof Error ? e.message : String(e));
-  }
-  gl.attachShader(prog, vs);
-  gl.attachShader(prog, fs);
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-    const log = gl.getProgramInfoLog(prog);
-    return bail("program link failed: " + log);
-  }
-  gl.useProgram(prog);
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  const aPos = gl.getAttribLocation(prog, "aPos");
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-  const uRes = gl.getUniformLocation(prog, "uResolution");
-  const uPhase = gl.getUniformLocation(prog, "uPhase");
-  const uLevel = gl.getUniformLocation(prog, "uLevel");
-  const uColorMode = gl.getUniformLocation(prog, "uColorMode");
+  const made = createGlSurface(container, {
+    id: "lavalamp",
+    size: { width: W, height: H },
+    vert: VERT,
+    frag: FRAG
+  });
+  if (isBailed(made))
+    return made;
+  const surface = made;
+  const gl = surface.gl;
+  const uRes = surface.uniform("uResolution");
+  const uPhase = surface.uniform("uPhase");
+  const uLevel = surface.uniform("uLevel");
+  const uColorMode = surface.uniform("uColorMode");
   const params = api.params && typeof api.params === "object" ? api.params : {};
   const shine = numOr(params.shine, 28, 1, 400);
   const specW = numOr(params.specWeight, 0.6, 0, 2);
@@ -329,35 +399,25 @@ function mount(container, api) {
   const speed = numOr(params.speed, 1, 0, 5);
   const zoom = numOr(params.zoom, 1.7, 0.5, 4);
   const cols = resolveColors(params.colors);
-  gl.uniform1f(gl.getUniformLocation(prog, "uShine"), shine);
-  gl.uniform1f(gl.getUniformLocation(prog, "uSpecW"), specW);
-  gl.uniform1f(gl.getUniformLocation(prog, "uSaturation"), saturation);
-  gl.uniform1f(gl.getUniformLocation(prog, "uZoom"), zoom);
-  gl.uniform3f(gl.getUniformLocation(prog, "uCol1"), cols[0][0], cols[0][1], cols[0][2]);
-  gl.uniform3f(gl.getUniformLocation(prog, "uCol2"), cols[1][0], cols[1][1], cols[1][2]);
-  gl.uniform3f(gl.getUniformLocation(prog, "uCol3"), cols[2][0], cols[2][1], cols[2][2]);
-  gl.uniform3f(gl.getUniformLocation(prog, "uCol4"), cols[3][0], cols[3][1], cols[3][2]);
-  gl.viewport(0, 0, canvas.width, canvas.height);
-  gl.uniform2f(uRes, canvas.width, canvas.height);
+  gl.uniform2f(uRes, surface.canvas.width, surface.canvas.height);
+  gl.uniform1f(surface.uniform("uShine"), shine);
+  gl.uniform1f(surface.uniform("uSpecW"), specW);
+  gl.uniform1f(surface.uniform("uSaturation"), saturation);
+  gl.uniform1f(surface.uniform("uZoom"), zoom);
+  gl.uniform3f(surface.uniform("uCol1"), cols[0][0], cols[0][1], cols[0][2]);
+  gl.uniform3f(surface.uniform("uCol2"), cols[1][0], cols[1][1], cols[1][2]);
+  gl.uniform3f(surface.uniform("uCol3"), cols[2][0], cols[2][1], cols[2][2]);
+  gl.uniform3f(surface.uniform("uCol4"), cols[3][0], cols[3][1], cols[3][2]);
+  let phase = 0;
+  let smoothLevel = 0;
   let mode = "idle";
   let level = 0;
-  let smoothLevel = 0;
-  let phase = 0;
-  let prevNow = performance.now();
-  const start = prevNow;
-  let raf = 0;
-  let running = true;
   const unsubscribe = api.onState((s) => {
     mode = s.mode;
-    level = Number.isFinite(s.audioLevel) ? Math.max(0, Math.min(1, s.audioLevel)) : 0;
+    level = Number.isFinite(s.audioLevel) ? Math.min(1, Math.max(0, s.audioLevel)) : 0;
   });
-  function frame() {
-    if (!running)
-      return;
-    const now = performance.now();
-    const t = (now - start) / 1000;
-    const dt = Math.max(0, Math.min(0.05, (now - prevNow) / 1000));
-    prevNow = now;
+  surface.run((dt, elapsed) => {
+    const t = elapsed;
     let target, modeSpeed;
     if (mode === "idle") {
       target = 0.12 + 0.04 * Math.sin(t * 0.6);
@@ -380,34 +440,11 @@ function mount(container, api) {
     gl.uniform1f(uPhase, phase);
     gl.uniform1f(uLevel, smoothLevel);
     gl.uniform1f(uColorMode, mode === "error" ? 1 : 0);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    raf = requestAnimationFrame(frame);
-  }
-  function onVisibility() {
-    if (document.hidden) {
-      running = false;
-      cancelAnimationFrame(raf);
-    } else if (!running) {
-      running = true;
-      raf = requestAnimationFrame(frame);
-    }
-  }
-  document.addEventListener("visibilitychange", onVisibility);
-  raf = requestAnimationFrame(frame);
+  });
   return {
     unmount() {
-      running = false;
       unsubscribe();
-      document.removeEventListener("visibilitychange", onVisibility);
-      cancelAnimationFrame(raf);
-      gl.deleteBuffer(buf);
-      gl.deleteProgram(prog);
-      const ext = gl.getExtension("WEBGL_lose_context");
-      if (ext)
-        ext.loseContext();
-      canvas.remove();
+      surface.dispose();
     }
   };
 }

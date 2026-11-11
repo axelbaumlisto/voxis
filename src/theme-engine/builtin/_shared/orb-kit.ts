@@ -24,6 +24,7 @@
 //   - No WebGL (or a shader that fails to compile) is a WARN and a no-op
 //     instance, never a throw: an embeddable theme must not crash the host.
 import type { ThemeApi, ThemeInstance, ThemeMode, ThemeState } from "../../contract";
+import { createGlSurface, FULLSCREEN_VERT, isBailed, type GlSurface } from "./gl-theme";
 
 /** The prelude every orb shader may assume (orbkit's `ORB_GLSL_HELPERS`). */
 export const ORB_PRELUDE = `
@@ -65,11 +66,6 @@ vec3 tanh3(vec3 x) {
   vec3 e = exp(2.0 * x);
   return (e - 1.0) / (e + 1.0);
 }
-`;
-
-const VERT = `
-attribute vec2 aPos;
-void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
 `;
 
 export interface OrbVariant {
@@ -116,80 +112,40 @@ function readOverrides(raw: unknown, defaults: Readonly<Record<string, number>>)
 }
 
 export function mountOrb(container: HTMLElement, api: ThemeApi, variant: OrbVariant): ThemeInstance {
-  const renderScale = 2;
-  const canvas = document.createElement("canvas");
-  canvas.width = api.size.width * renderScale;
-  canvas.height = api.size.height * renderScale;
-  canvas.style.width = "100%";
-  canvas.style.height = "100%";
-  canvas.style.display = "block";
-  container.appendChild(canvas);
-
-  const bail = (reason: string): ThemeInstance => {
-    console.warn(`${variant.id}: WebGL unavailable (${reason}), skipping`);
-    canvas.remove();
-    return { unmount() {} };
-  };
-
-  const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: true, antialias: false });
-  if (!gl) return bail("no context");
-
-  const compile = (type: number, src: string): WebGLShader | null => {
-    const s = gl.createShader(type);
-    if (!s) return null;
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-      console.warn(`${variant.id}: shader compile failed`, gl.getShaderInfoLog(s));
-      gl.deleteShader(s);
-      return null;
-    }
-    return s;
-  };
-
   const keys = Object.keys(variant.defaults);
   const colorKeys = Object.keys(variant.colors ?? {});
   const decls = [
     ...keys.map((k) => `uniform float uP_${k};`),
     ...colorKeys.map((k) => `uniform vec3 uC_${k};`),
   ].join("\n");
-  const vs = compile(gl.VERTEX_SHADER, VERT);
-  const fs = compile(gl.FRAGMENT_SHADER, `${ORB_PRELUDE}\n${decls}\n${variant.frag}`);
-  const prog = gl.createProgram();
-  if (!vs || !fs || !prog) return bail("program");
-  gl.attachShader(prog, vs);
-  gl.attachShader(prog, fs);
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return bail(`link: ${gl.getProgramInfoLog(prog)}`);
-  gl.useProgram(prog);
 
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
-  const aPos = gl.getAttribLocation(prog, "aPos");
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+  const made = createGlSurface(container, {
+    id: variant.id,
+    size: api.size,
+    vert: FULLSCREEN_VERT,
+    frag: `${ORB_PRELUDE}\n${decls}\n${variant.frag}`,
+  });
+  if (isBailed(made)) return made;
+  const surface: GlSurface = made;
+  const { gl } = surface;
 
-  const uRes = gl.getUniformLocation(prog, "uRes");
-  const uTime = gl.getUniformLocation(prog, "uTime");
-  const uAnim = gl.getUniformLocation(prog, "uAnim");
-  const uInput = gl.getUniformLocation(prog, "uInput");
-  const uOutput = gl.getUniformLocation(prog, "uOutput");
+  const uRes = surface.uniform("uRes");
+  const uTime = surface.uniform("uTime");
+  const uAnim = surface.uniform("uAnim");
+  const uInput = surface.uniform("uInput");
+  const uOutput = surface.uniform("uOutput");
   const loc: Record<string, WebGLUniformLocation | null> = {};
-  for (const k of keys) loc[k] = gl.getUniformLocation(prog, `uP_${k}`);
+  for (const k of keys) loc[k] = surface.uniform(`uP_${k}`);
   const colorLoc: Record<string, WebGLUniformLocation | null> = {};
-  for (const k of colorKeys) colorLoc[k] = gl.getUniformLocation(prog, `uC_${k}`);
+  for (const k of colorKeys) colorLoc[k] = surface.uniform(`uC_${k}`);
 
-  gl.uniform2f(uRes, canvas.width, canvas.height);
+  gl.uniform2f(uRes, surface.canvas.width, surface.canvas.height);
   const liveColors = (api.params as { colors?: Record<string, unknown> } | null)?.colors;
   for (const k of colorKeys) {
     const hex = typeof liveColors?.[k] === "string" ? (liveColors[k] as string) : variant.colors![k];
     const [r, g, b] = hexToRgb(hex);
     gl.uniform3f(colorLoc[k], r, g, b);
   }
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-  gl.clearColor(0, 0, 0, 0);
 
   const overrides = readOverrides(api.params, variant.defaults);
   const hasOverride: Record<string, boolean> = {};
@@ -203,30 +159,20 @@ export function mountOrb(container: HTMLElement, api: ThemeApi, variant: OrbVari
   let target = presetFor(variant, "idle");
   let level = 0;
   let smoothLevel = 0;
-  // orbkit: `uTime` runs at half real time; `uAnim` advances faster the louder
-  // the voice is, which is how its "flow" reads as a reaction rather than a loop.
-  let elapsed = 0;
   let anim = 0;
-  let raf = 0;
 
   const off = api.onState((state: ThemeState) => {
     target = presetFor(variant, state.mode);
     level = Number.isFinite(state.audioLevel) ? Math.min(1, Math.max(0, state.audioLevel)) : 0;
   });
 
-  let last = performance.now();
-  const frame = (now: number) => {
-    raf = requestAnimationFrame(frame);
-    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
-    last = now;
-
+  surface.run((dt, elapsed) => {
     const k = 1 - Math.exp(-dt / 0.28); // ~280 ms glide, orbkit's feel
     for (const key of keys) {
       const t = hasOverride[key] ? overrides[key] : (target[key] ?? variant.defaults[key]);
       current[key] += (t - current[key]) * k;
     }
     smoothLevel += (level - smoothLevel) * (1 - Math.exp(-dt / 0.08));
-    elapsed += dt;
     anim += dt * (0.4 + 2.2 * smoothLevel);
 
     for (const key of keys) {
@@ -237,27 +183,20 @@ export function mountOrb(container: HTMLElement, api: ThemeApi, variant: OrbVari
         gl.uniform1f(loc[key], current[key]);
       }
     }
+    // uTime is orbkit's half-speed ambient clock; uAnim accelerates with the
+    // voice, which is what makes the flow read as a reaction, not a loop.
     gl.uniform1f(uTime, elapsed * 0.5);
     gl.uniform1f(uAnim, anim);
     gl.uniform1f(uInput, smoothLevel);
+    // Orbkit's `uOutput` means "the agent is speaking"; there is no agent here,
+    // so the orb's own excitement tracks the same level at a lower weight.
     gl.uniform1f(uOutput, smoothLevel * 0.35);
-
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-  };
-  raf = requestAnimationFrame(frame);
+  });
 
   return {
     unmount() {
-      cancelAnimationFrame(raf);
       off();
-      gl.useProgram(null);
-      gl.deleteBuffer(buf);
-      gl.deleteProgram(prog);
-      gl.deleteShader(vs);
-      gl.deleteShader(fs);
-      canvas.remove();
+      surface.dispose();
     },
   };
 }

@@ -38,6 +38,23 @@ describe("orb family (Orbkit ports)", () => {
       // orbUV(), which normalises by min(w, h).
       expect(manifest.overlay_width).toBe(manifest.overlay_height);
       expect(manifest.params).toBeTypeOf("object");
+
+      // ONE source of truth check: `DEFAULTS` in the theme and `params` in the
+      // manifest are the same numbers. They are generated together, but nothing
+      // stopped a hand edit from drifting them apart — and a drifted manifest
+      // silently changes what the user sees versus what the shader defaults to.
+      const src = fs.readFileSync(path.join(BUILTIN, id, "index.ts"), "utf8");
+      const block = src.slice(src.indexOf("const DEFAULTS = {"), src.indexOf("} as const;"));
+      const inCode: Record<string, number> = {};
+      for (const m of block.matchAll(/([A-Za-z_][A-Za-z0-9_]*):\s*(-?[0-9.]+)/g)) {
+        inCode[m[1]] = Number(m[2]);
+      }
+      const inManifest: Record<string, number> = { ...manifest.params };
+      delete (inManifest as { colors?: unknown }).colors;
+      expect(Object.keys(inCode).sort()).toEqual(Object.keys(inManifest).sort());
+      for (const [k, v] of Object.entries(inCode)) {
+        expect(inManifest[k], `${id}.${k}: manifest ${inManifest[k]} vs theme ${v}`).toBeCloseTo(v, 4);
+      }
     });
   }
 });

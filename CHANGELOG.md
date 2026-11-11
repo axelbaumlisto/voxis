@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased (Voxis desktop)
+
+### Change
+- **One WebGL lifetime for every shader theme** (`builtin/_shared/gl-theme.ts`):
+  canvas + 2× supersample, context, compile/link, the full-screen triangle,
+  the rAF loop with its `visibilitychange` pause, and full disposal now exist
+  ONCE. The orb adapter and both hand-rolled shader themes (metaballs3d,
+  lavalamp) were three copies of that plumbing — the part that must not be got
+  wrong is exactly the part not to triplicate. A theme now owns its shader and
+  its uniforms; the surface clears, draws and cleans up. The refactor caught a
+  real bug in itself: moving `drawArrays` into the surface left the orbs
+  rendering NOTHING until it was put back, which the pixel probe showed
+  instantly (area 38102 → 0 → 38101).
+
 ## v0.1.14 (Voxis desktop)
 
 ### Add
