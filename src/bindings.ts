@@ -1116,7 +1116,7 @@ theme?: string;
  * Legacy values (`"native"`, `"subprocess"`, `"nspanel"`) fall back to the
  * webview overlay for back-compat.
  */
-backend?: string }
+backend?: string; custom_x?: number | null; custom_y?: number | null }
 /**
  * Overlay position on screen.
  */

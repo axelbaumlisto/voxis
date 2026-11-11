@@ -260,6 +260,12 @@ impl ConfigSqliteStorage {
         };
 
         // Overlay
+        let overlay_custom_x = self
+            .get(&conn, "overlay_custom_x")
+            .and_then(|v| v.parse::<i32>().ok());
+        let overlay_custom_y = self
+            .get(&conn, "overlay_custom_y")
+            .and_then(|v| v.parse::<i32>().ok());
         config.overlay = OverlayConfig {
             enabled: self.get_bool(&conn, "overlay_enabled", config.overlay.enabled),
             position: self.get_str(&conn, "overlay_position", &config.overlay.position),
@@ -268,6 +274,8 @@ impl ConfigSqliteStorage {
             audio_boost: self.get_typed(&conn, "overlay_audio_boost", config.overlay.audio_boost),
             theme: self.get_str(&conn, "overlay_theme", &config.overlay.theme),
             backend: self.get_str(&conn, "overlay_backend", &config.overlay.backend),
+            custom_x: overlay_custom_x,
+            custom_y: overlay_custom_y,
         };
 
         // LLM
@@ -440,6 +448,16 @@ impl ConfigSqliteStorage {
         )?;
         self.set(&conn, "overlay_theme", &config.overlay.theme)?;
         self.set(&conn, "overlay_backend", &config.overlay.backend)?;
+        self.set(
+            &conn,
+            "overlay_custom_x",
+            &config.overlay.custom_x.map(|v| v.to_string()).unwrap_or_default(),
+        )?;
+        self.set(
+            &conn,
+            "overlay_custom_y",
+            &config.overlay.custom_y.map(|v| v.to_string()).unwrap_or_default(),
+        )?;
 
         // LLM
         self.set(&conn, "llm_enabled", &config.llm.enabled.to_string())?;
@@ -1244,6 +1262,8 @@ mod tests {
                 audio_boost: 250.0,
                 theme: "neon".to_string(),
                 backend: "none".to_string(),
+                custom_x: Some(137),
+                custom_y: Some(241),
             },
             llm: LlmConfig {
                 enabled: true,
