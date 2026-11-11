@@ -1,25 +1,18 @@
-// orb_hydrogen — hydrogen orbital |psi|^2 on a rotating dome, rainbow chroma bands.
+// orb_hydrogen — A quantum-orbital orb: |psi|^2 of a hydrogen-like wave function projected onto a rotating dome, shaded with rainbow chromatic bands over dark metal. Precession and a drifting flow field keep the pattern from ever visibly looping
 //
 // PORTED FROM ORBKIT (https://github.com/zzzzshawn/orbkit), orb `shdr-11`
-// ("Hydrogen") — Orbkit's own orb, MIT like its runtime, no third-party terms.
-// The shader body is orbkit's, verbatim; the prelude (`uRes`/`uInput`/
-// `noise`/`fbm`/`orbUV`) and the WebGL lifetime live in `_shared/orb-kit.ts`,
-// which is what lets every ported orb stay a shader + a table of numbers.
+// ("Hydrogen") — MIT.
+// Shader body verbatim; the prelude, the colour uniforms and the WebGL lifetime
+// live in `_shared/orb-kit.ts`.
 //
-// Porting map (kit-side): idle → idle preset, recording → speaking with
-// `uInput` ← audioLevel, transcribing → thinking. `speed`/`flowSpeed` are
-// RATES in orbkit (`integrate: true`) — the kit accumulates them into clocks,
-// so a state change glides instead of jumping the phase.
+// Mode map: idle → orbkit `idle`, recording → `speaking` (`uInput` ← the live
+// audioLevel), transcribing → `thinking`. Rates (speed, flowSpeed) are
+// orbkit `integrate: true` and are accumulated into clocks by the kit.
 import { mountOrb, type OrbVariant } from "../_shared/orb-kit";
 import type { ThemeApi, ThemeInstance } from "../../contract";
 
 const FRAG = `
-precision highp float;
-
-
-// ---- orbkit's ORB_GLSL_HELPERS, inlined (see the header) -------------------
 const float PI = 3.14159265359;
-
 void main() {
   vec2 uv = orbUV();
   float r2d = length(uv);
@@ -28,6 +21,11 @@ void main() {
   float nr = clamp(r2d / max(R, 0.001), 0.0, 1.0);
   float z = sqrt(max(1.0 - nr * nr, 0.0));
 
+  // uP_speed and uP_flowSpeed arrive pre-integrated as clocks (see
+  // OrbParamDef.integrate), so state transitions stay phase-continuous.
+  // The state volumes reshape the orbital itself: the params set the base,
+  // input/output excitement bends zoom, radial form, probability and chroma,
+  // so each state settles into a different interference pattern.
   float posScale = uP_posScale * (0.8 + 0.45 * uOutput + 0.2 * uInput);
   float radialPow = uP_radialPow * (0.7 + 0.8 * uOutput);
   float radialDecay = uP_radialDecay * (1.25 - 0.5 * uOutput);
@@ -37,7 +35,7 @@ void main() {
   float chromaSpread = uP_chromaSpread * (0.6 + 0.9 * uOutput + 0.5 * uInput);
 
   // dome point rotated around Y — the fake 3D of the flat disc
-  float animTime = uP_speed;
+  float animTime = uP_speed; // integrated clock
   float cosT = cos(animTime * uP_rotSpeed);
   float sinT = sin(animTime * uP_rotSpeed);
   vec3 sp = vec3(uv / max(R, 0.001), z) * posScale;
@@ -50,8 +48,9 @@ void main() {
   pos = vec3(pos.x, pos.y * cx - pos.z * sx, pos.y * sx + pos.z * cx);
 
   // liquid flow: drifting fbm warps the 3D domain, so the wave function
-  // smears and migrates around the sphere instead of wobbling in place
-  float flowT = uP_flowSpeed;
+  // smears and migrates around the sphere instead of wobbling in place.
+  // (sampled on pos components — continuous everywhere, no phi seam)
+  float flowT = uP_flowSpeed; // integrated clock
   float fAmp = uP_flowAmp * (0.7 + 0.6 * uOutput + 0.4 * uInput);
   vec3 w;
   w.x = fbm(pos.yz * uP_flowScale + vec2(flowT * 0.70, -flowT * 0.40));
@@ -71,12 +70,15 @@ void main() {
   float psi = radial * angular;
   float probability = psi * psi;
 
-  // travelling spiral wave; the azimuthal harmonic count must be a whole
-  // number or sin(phi * f) leaves a vertical meridian seam
+  // travelling spiral wave — the modulation moves across the surface instead
+  // of pulsing in place. The azimuthal harmonic count must be a whole number,
+  // else sin(phi * f) doesn't line up across the +/-PI wrap and leaves a
+  // vertical meridian seam. Snap it to the nearest integer.
   float waveN = max(1.0, floor(waveFreq + 0.5));
   float wavePhase = phi * waveN + theta * 2.5 - animTime * 2.0;
   probability *= (0.85 + 0.15 * sin(wavePhase));
 
+  // drifting bright patches, like convection cells wandering the surface
   float patches = fbm(pos.xy * 1.6 + vec2(flowT * 0.4, -flowT * 0.3));
   probability *= 0.65 + 0.7 * patches;
 
@@ -125,34 +127,74 @@ void main() {
 }
 `;
 
+const DEFAULTS = { speed: 0.9, rotSpeed: 0.5, radius: 0.9, swell: 0.07, posScale: 0.5, flowSpeed: 0.35, flowAmp: 0.45, flowScale: 0.3, precess: 0.3, radialPow: 0.5, radialDecay: 1, probPow: 0.4, probGain: 3, waveFreq: 4, chromaSpread: 0.18, glow: 0.9, metalDark: 0, baseVis: 0.12 } as const;
 
-/** orbkit `params` idle defaults — also the manifest defaults. */
-const DEFAULTS = {
-  speed: 0.9, rotSpeed: 0.5, radius: 0.9, swell: 0.07, posScale: 0.5,
-  flowSpeed: 0.35, flowAmp: 0.45, flowScale: 0.3, precess: 0.3,
-  radialPow: 0.5, radialDecay: 1, probPow: 0.4, probGain: 3, waveFreq: 4,
-  chromaSpread: 0.18, glow: 0.9, metalDark: 0, baseVis: 0.12,
-} as const;
-
-/** orbkit `statePresets` — idle, thinking (transcribing), speaking (recording). */
 const VARIANTS: OrbVariant = {
   id: "orb_hydrogen",
   frag: FRAG,
   defaults: DEFAULTS,
   clocks: ["speed", "flowSpeed"],
+  colors: {  },
   presets: {
-    idle: DEFAULTS,
+    idle: {
+      speed: 0.9,
+      rotSpeed: 0.5,
+      radius: 0.9,
+      swell: 0.07,
+      posScale: 0.5,
+      flowSpeed: 0.35,
+      flowAmp: 0.45,
+      flowScale: 0.3,
+      precess: 0.3,
+      radialPow: 0.5,
+      radialDecay: 1,
+      probPow: 0.4,
+      probGain: 3,
+      waveFreq: 4,
+      chromaSpread: 0.18,
+      glow: 0.9,
+      metalDark: 0,
+      baseVis: 0.12,
+    },
     recording: {
-      speed: 2.45, rotSpeed: 0.5, radius: 0.9, swell: 0.07, posScale: 1,
-      flowSpeed: 2.75, flowAmp: 0.8, flowScale: 2.2, precess: 1.3,
-      radialPow: 0.5, radialDecay: 1, probPow: 0.31, probGain: 4.3, waveFreq: 4,
-      chromaSpread: 0.12, glow: 0.9, metalDark: 0, baseVis: 0.12,
+      speed: 2.45,
+      rotSpeed: 0.5,
+      radius: 0.9,
+      swell: 0.07,
+      posScale: 1,
+      flowSpeed: 2.75,
+      flowAmp: 0.8,
+      flowScale: 2.2,
+      precess: 1.3,
+      radialPow: 0.5,
+      radialDecay: 1,
+      probPow: 0.31,
+      probGain: 4.3,
+      waveFreq: 4,
+      chromaSpread: 0.12,
+      glow: 0.9,
+      metalDark: 0,
+      baseVis: 0.12,
     },
     transcribing: {
-      speed: 0.9, rotSpeed: 0.5, radius: 0.9, swell: 0.07, posScale: 0.65,
-      flowSpeed: 0.35, flowAmp: 1.1, flowScale: 0.3, precess: 0,
-      radialPow: 0.5, radialDecay: 1.9, probPow: 0.4, probGain: 3, waveFreq: 4,
-      chromaSpread: 0.41, glow: 0.9, metalDark: 0, baseVis: 0.12,
+      speed: 0.9,
+      rotSpeed: 0.5,
+      radius: 0.9,
+      swell: 0.07,
+      posScale: 0.65,
+      flowSpeed: 0.35,
+      flowAmp: 1.1,
+      flowScale: 0.3,
+      precess: 0,
+      radialPow: 0.5,
+      radialDecay: 1.9,
+      probPow: 0.4,
+      probGain: 3,
+      waveFreq: 4,
+      chromaSpread: 0.41,
+      glow: 0.9,
+      metalDark: 0,
+      baseVis: 0.12,
     },
   },
 };

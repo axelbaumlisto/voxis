@@ -1,0 +1,37 @@
+{
+  "manifest_version": 2,
+  "id": "orb_falls",
+  "name": "Orb · Falls",
+  "description": "A water film rushing down the ball, fountain-style: vertically squashed cos-octave turbulence scrolls at nine times the clock for the fall rush, a foam blend keeps only a third of the displacement, and the original's sigmoid cliff face is swapped for the sphere's own shell with a traveling ripple (WebGL). Ported from Orbkit shdr-20 — shader by XorDev, non-commercial.",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Shader by XorDev — non-commercial use only, attribution required (Orbkit `shdr-20`, https://github.com/zzzzshawn/orbkit)",
+  "params": {
+    "speed": 0.5,
+    "flow": 3.0,
+    "camDist": 7.0,
+    "focal": 2.25,
+    "tilt": 0.15,
+    "stretch": 0.3,
+    "foam": 0.3,
+    "wall": 3.0,
+    "stepScale": 0.2,
+    "hueScale": 0.85,
+    "envRadius": 2.6,
+    "envCore": 1.0,
+    "fill": 0.4,
+    "stepClamp": 20.0,
+    "scatter": 0.01,
+    "exposure": 22.0,
+    "contrast": 1.15,
+    "saturation": 1.55,
+    "alphaGain": 2.0,
+    "edge": 1.0,
+    "edgeFade": 0.98,
+    "colors": {
+      "tint": "#ffffff"
+    }
+  }
+}

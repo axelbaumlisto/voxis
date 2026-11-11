@@ -1,0 +1,29 @@
+{
+  "manifest_version": 2,
+  "id": "orb_rocaille",
+  "name": "Orb · Rocaille",
+  "description": "Ornate scrollwork wrapped onto a sphere: ten colour layers, each folded by a nine-step feedback warp, sampled through a stereographic projection of the orb's dome so the filigree compresses toward the rim (WebGL). Ported from Orbkit shdr-02 — shader by XorDev, non-commercial.",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Shader by XorDev — non-commercial use only, attribution required (Orbkit `shdr-02`, https://github.com/zzzzshawn/orbkit)",
+  "params": {
+    "speed": 0.5,
+    "swirl": 0.06,
+    "radius": 0.9,
+    "swell": 0.06,
+    "zoom": 4.4,
+    "bulge": 0.35,
+    "warpFreq": 1.5,
+    "hueShift": 0.0,
+    "coreClamp": 0.12,
+    "falloff": 1.0,
+    "gain": 0.55,
+    "rim": 0.12,
+    "rimPow": 2.2,
+    "alphaGain": 2.4,
+    "baseVis": 0.08,
+    "colors": {}
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "manifest_version": 2,
+  "id": "orb_shdr_10",
+  "name": "Orb · SHDR-10",
+  "description": "A lattice of light knitted into the ball's own skin: the listing's tunnel unwrap rewrites each sample as angle, height and radius-minus-shell, and reading that radius from the centre rather than from an axis turns its pipe into a sphere without another line changing. The density is small only where all three cosines of the unwrapped point sit at one AND the sample is on the shell, so a 3D lattice is cut by the ball's surface and what survives is a knitted net. Every march step carries its own warp and colour phase, so forty samples layer into gauze instead of stacking one surface forty times (WebGL). Ported from Orbkit shdr-10 — shader by XorDev, non-commercial.",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Shader by XorDev — non-commercial use only, attribution required (Orbkit `shdr-10`, https://github.com/zzzzshawn/orbkit)",
+  "params": {
+    "speed": 0.6,
+    "scroll": 1.2,
+    "camDist": 7.0,
+    "focal": 2.0,
+    "shellR": 2.6,
+    "wrap": 8.0,
+    "climb": 4.0,
+    "turb": 0.35,
+    "layer": 0.5,
+    "cell": 0.45,
+    "stepScale": 0.15,
+    "hueStep": 0.4,
+    "spread": 1.0,
+    "envRadius": 2.9,
+    "envCore": 0.92,
+    "fill": 0.1,
+    "stepClamp": 300.0,
+    "scatter": 0.004,
+    "exposure": 30.0,
+    "contrast": 1.15,
+    "saturation": 1.2,
+    "alphaGain": 2.0,
+    "edge": 1.0,
+    "edgeFade": 0.98,
+    "colors": {
+      "tint": "#ffffff"
+    }
+  }
+}

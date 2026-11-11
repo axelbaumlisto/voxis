@@ -4,6 +4,8 @@ precision highp float;
 uniform vec2  uRes;
 uniform float uInput;   // 0..1 — the user's voice (audioLevel)
 uniform float uOutput;  // 0..1 — the orb's own excitement, tracks uInput
+uniform float uTime;    // slow ambient clock (half real time), orbkit's rule
+uniform float uAnim;    // flow clock — its speed follows the voice level
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
 float noise(vec2 p) {
@@ -122,6 +124,8 @@ ${variant.frag}`);
   gl.enableVertexAttribArray(aPos);
   gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
   const uRes = gl.getUniformLocation(prog, "uRes");
+  const uTime = gl.getUniformLocation(prog, "uTime");
+  const uAnim = gl.getUniformLocation(prog, "uAnim");
   const uInput = gl.getUniformLocation(prog, "uInput");
   const uOutput = gl.getUniformLocation(prog, "uOutput");
   const loc = {};
@@ -152,6 +156,8 @@ ${variant.frag}`);
   let target = presetFor(variant, "idle");
   let level = 0;
   let smoothLevel = 0;
+  let elapsed = 0;
+  let anim = 0;
   let raf = 0;
   const off = api.onState((state) => {
     target = presetFor(variant, state.mode);
@@ -168,6 +174,8 @@ ${variant.frag}`);
       current[key] += (t - current[key]) * k;
     }
     smoothLevel += (level - smoothLevel) * (1 - Math.exp(-dt / 0.08));
+    elapsed += dt;
+    anim += dt * (0.4 + 2.2 * smoothLevel);
     for (const key of keys) {
       if (key in clocks) {
         clocks[key] += dt * current[key];
@@ -176,6 +184,8 @@ ${variant.frag}`);
         gl.uniform1f(loc[key], current[key]);
       }
     }
+    gl.uniform1f(uTime, elapsed * 0.5);
+    gl.uniform1f(uAnim, anim);
     gl.uniform1f(uInput, smoothLevel);
     gl.uniform1f(uOutput, smoothLevel * 0.35);
     gl.viewport(0, 0, canvas.width, canvas.height);

@@ -1,9 +1,9 @@
-// orb_dither — Lit plasma dome quantized to chunky two-tone pixels, 1-bit style (WebGL)
+// orb_dither — A lit plasma dome quantized to chunky two-tone pixels: lambert light, drifting fbm plasma and a fresnel rim collapse into one luminance, and an 8x8 ordered Bayer matrix — generated procedurally, since GLSL ES 1.0 has neither array initializers nor bitwise ops — snaps it onto a short ink-to-paper tone ladder. Two steps is the classic 1-bit look
 //
 // PORTED FROM ORBKIT (https://github.com/zzzzshawn/orbkit), orb `shdr-14`
-// ("Dither") — Orbkit's own orb, MIT like its runtime. Shader body verbatim; the
-// prelude, the colour uniforms and the WebGL lifetime live in
-// `_shared/orb-kit.ts`.
+// ("Dither") — MIT.
+// Shader body verbatim; the prelude, the colour uniforms and the WebGL lifetime
+// live in `_shared/orb-kit.ts`.
 //
 // Mode map: idle → orbkit `idle`, recording → `speaking` (`uInput` ← the live
 // audioLevel), transcribing → `thinking`. Rates (speed, spin) are

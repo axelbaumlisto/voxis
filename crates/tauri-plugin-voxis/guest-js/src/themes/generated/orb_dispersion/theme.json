@@ -1,0 +1,36 @@
+{
+  "manifest_version": 2,
+  "id": "orb_dispersion",
+  "name": "Orb · Dispersion",
+  "description": "A cut-glass orb whose own shell does the dispersing: rays grazing the turbulence-warped sphere ride it for a long arc so the limb glows, interior sheets split into rainbow striations through per-channel palette phases, and an analytic silhouette keeps the edge knife-sharp (WebGL). Ported from Orbkit shdr-01 — shader by XorDev, non-commercial.",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Shader by XorDev — non-commercial use only, attribution required (Orbkit `shdr-01`, https://github.com/zzzzshawn/orbkit)",
+  "params": {
+    "speed": 0.5,
+    "spin": 0.25,
+    "camDist": 7.0,
+    "focal": 2.25,
+    "tilt": 0.5,
+    "turb": 0.3,
+    "sheets": 7.0,
+    "disperse": 1.0,
+    "stria": 1.0,
+    "envRadius": 2.6,
+    "envCore": 1.0,
+    "fill": 1.5,
+    "stepClamp": 20.0,
+    "scatter": 0.02,
+    "exposure": 60.0,
+    "contrast": 1.0,
+    "saturation": 1.0,
+    "alphaGain": 2.0,
+    "edge": 1.0,
+    "edgeFade": 0.98,
+    "colors": {
+      "tint": "#ffffff"
+    }
+  }
+}

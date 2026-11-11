@@ -1,0 +1,185 @@
+// orb_shdr_04 — A hollow shell of light, faceted by a voxel lattice and approached but never reached: the march sphere-traces a shell at a tenth of the remaining distance per step, so it closes on the surface asymptotically from outside and the accumulated one-over-step is dominated by the last few samples. All six turbulence octaves quantize on the SAME fixed lattice pitch — only the phase multiplier changes — so the displacement is piecewise constant and the shell facets at one crisp scale rather than fractally. Position paints the colour, washing toward a white floor with depth
+//
+// PORTED FROM ORBKIT (https://github.com/zzzzshawn/orbkit), orb `shdr-04`
+// ("SHDR-04") — shader by XORDEV: NON-COMMERCIAL use only, attribution required.
+// Shader body verbatim; the prelude, the colour uniforms and the WebGL lifetime
+// live in `_shared/orb-kit.ts`.
+//
+// Mode map: idle → orbkit `idle`, recording → `speaking` (`uInput` ← the live
+// audioLevel), transcribing → `thinking`. Rates (speed) are
+// orbkit `integrate: true` and are accumulated into clocks by the kit.
+import { mountOrb, type OrbVariant } from "../_shared/orb-kit";
+import type { ThemeApi, ThemeInstance } from "../../contract";
+
+const FRAG = `
+#define STEPS 50
+#define TURB 6
+#define AA 1
+
+// Volume-reactive values, resolved once per fragment in main().
+float geodeTurb;
+float geodeWidth;
+float geodeExposure;
+
+// GLSL ES 1.0 has no round() — it arrived in ES 3.0. The listing quantizes
+// with it, so it ships here.
+vec3 roundv(vec3 x) { return floor(x + 0.5); }
+
+vec3 geodeRender(vec2 fragCoord) {
+  vec2 uv = (2.0 * fragCoord - uRes) / min(uRes.x, uRes.y);
+  vec3 ro = vec3(0.0, 0.0, uP_camDist);
+  vec3 rd = normalize(vec3(uv, -uP_focal));
+
+  float animTime = uP_speed; // integrated clock
+  float shellR = uP_shellR;
+  float pitch = max(uP_pitch, 0.002);
+
+  // the run-away bound for rays that miss the shell entirely
+  float zEnd = uP_camDist + shellR * 2.5;
+
+  vec3 acc = vec3(0.0);
+
+  // The listing starts its march at the camera and lets the trace do the
+  // travelling — see the header. z is the distance already walked.
+  float z = 0.0;
+
+  for (int it = 0; it < STEPS; it++) {
+    vec3 p = ro + rd * z;
+
+    /*
+      Six octaves on ONE lattice. The pitch never changes; only the phase
+      multiplier does, so the displacement is piecewise constant on a
+      single grid and the shell facets at one scale.
+    */
+    for (int j = 0; j < TURB; j++) {
+      float f = float(j) + 2.0;
+      p += geodeTurb * sin(roundv(p.zxy / pitch) * pitch * f - animTime) / f;
+    }
+
+    /*
+      Sphere trace toward the shell, on the WARPED point — so the facets
+      are what the ray is chasing, not a smooth ball underneath them. The
+      slack is the listing's tenth, and the floor is the surface width.
+    */
+    float d = geodeWidth + uP_slack * abs(length(p) - shellR);
+
+    z += d;
+
+    /*
+      Position as colour, washing toward white with depth. Guarded on z:
+      the listing gets away with reading p/z here because its comma
+      operator advances z first, which is worth knowing before anyone
+      reorders these two lines.
+    */
+    acc += (p * uP_hueGain / max(z, 1e-3) + uP_floorLevel) / d;
+
+    if (z > zEnd) break;
+  }
+
+  return acc;
+}
+
+void main() {
+  geodeTurb = uP_turb * (1.0 + 0.5 * uInput);
+  geodeWidth = max(uP_width * (1.0 - 0.4 * uOutput), 0.0002);
+  geodeExposure = uP_exposure * (1.0 - 0.3 * uOutput);
+
+  vec3 acc = vec3(0.0);
+#if AA > 1
+  for (int mx = 0; mx < AA; mx++) {
+    for (int my = 0; my < AA; my++) {
+      vec2 offset = (vec2(float(mx), float(my)) + 0.5) / float(AA) - 0.5;
+      acc += geodeRender(gl_FragCoord.xy + offset);
+    }
+  }
+  acc /= float(AA * AA);
+#else
+  acc = geodeRender(gl_FragCoord.xy);
+#endif
+
+  // tanh tone map per channel — the golfed /2e3 knee is a tunable here
+  vec3 col = tanh3(acc / max(geodeExposure, 1.0));
+  col = pow(clamp(col, 0.0, 1.0), vec3(uP_contrast));
+
+  // saturation about luminance, then the tint
+  float lum = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(vec3(lum), col, uP_saturation);
+  col *= uC_tint;
+
+  // alpha from the brightest channel, not luminance — a deep blue facet
+  // has low luminance but must not go transparent
+  float peak = max(col.r, max(col.g, col.b));
+  float a = clamp(peak * uP_alphaGain, 0.0, 1.0);
+
+  /*
+    Analytic silhouette against the shell, widened by uP_envScale because
+    the turbulence pushes the visible surface OUT past the nominal radius —
+    cut at the bare radius and the facets would be shaved flat all round
+    the limb.
+  */
+  vec3 mrd = normalize(vec3(orbUV(), -uP_focal));
+  float closest = length(cross(vec3(0.0, 0.0, uP_camDist), mrd));
+  float sil = uP_shellR * uP_envScale;
+  float band = mix(0.35, 0.012, clamp(uP_edge, 0.0, 1.0));
+  float mask = 1.0 - smoothstep(sil * (1.0 - band), sil * 1.005, closest);
+  col *= mask;
+  a *= mask;
+
+  // safety taper at the frame boundary — colour as well as alpha
+  float r2d = length(orbUV());
+  float fade = 1.0 - smoothstep(uP_edgeFade, 1.0, r2d);
+  col *= fade;
+  a *= fade;
+
+  // Emitted light, so rgb is already premultiplied — do NOT scale by alpha
+  // again (see the same note in shdr-31).
+  gl_FragColor = vec4(col, a);
+}
+`;
+
+const DEFAULTS = { speed: 0.6, camDist: 9, focal: 1.35, shellR: 5, pitch: 0.3, turb: 0.45, slack: 0.1, width: 0.003, hueGain: 1, floorLevel: 0.8, envScale: 1.16, exposure: 3000, contrast: 1.3, saturation: 1.3, alphaGain: 2, edge: 1, edgeFade: 0.98 } as const;
+
+const VARIANTS: OrbVariant = {
+  id: "orb_shdr_04",
+  frag: FRAG,
+  defaults: DEFAULTS,
+  clocks: ["speed"],
+  colors: { tint: "#ffffff" },
+  presets: {
+    idle: {
+      speed: 0.6,
+      turb: 0.45,
+      width: 0.003,
+      slack: 0.1,
+      hueGain: 1,
+      exposure: 3000,
+      contrast: 1.3,
+    },
+    recording: {
+      speed: 2,
+      pitch: 0.22,
+      turb: 0.8,
+      width: 0.032,
+      slack: 0.165,
+      hueGain: 0.5,
+      floorLevel: 0.82,
+      envScale: 1.67,
+      exposure: 1220,
+      contrast: 0.92,
+      saturation: 1.66,
+    },
+    transcribing: {
+      speed: 1.8,
+      turb: 0.85,
+      width: 0.0012,
+      slack: 0.07,
+      hueGain: 1.7,
+      exposure: 4800,
+      contrast: 1.75,
+    },
+  },
+};
+
+export function mount(container: HTMLElement, api: ThemeApi): ThemeInstance {
+  return mountOrb(container, api, VARIANTS);
+}

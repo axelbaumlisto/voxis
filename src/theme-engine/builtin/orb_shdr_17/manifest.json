@@ -1,0 +1,38 @@
+{
+  "manifest_version": 2,
+  "id": "orb_shdr_17",
+  "name": "Orb · SHDR-17",
+  "description": "A grainy, many-coloured storm raging on the ball: two-level domain-warped fbm on a stereographic wrap of a rotating dome, jovian band shear flowing latitude rings past each other, a four-stop palette with an iridescent cosine rainbow multiplied over it, hashed lightning strikes that strobe while the agent speaks, and two taps of animated white noise — one dithering the gradient into speckle, one as plain film grain (WebGL). Ported from Orbkit shdr-17 (MIT).",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Orbkit `shdr-17` (MIT) — https://github.com/zzzzshawn/orbkit",
+  "params": {
+    "speed": 0.9,
+    "spin": 0.12,
+    "radius": 0.9,
+    "scale": 2.4,
+    "bands": 6.0,
+    "shear": 1.1,
+    "warp": 2.2,
+    "churn": 1.4,
+    "gain": 1.15,
+    "contrast": 1.35,
+    "grain": 0.4,
+    "filmGrain": 0.35,
+    "grainSize": 2.0,
+    "rainbow": 0.65,
+    "flashRate": 1.6,
+    "flash": 1.2,
+    "light": 0.85,
+    "rim": 0.5,
+    "colors": {
+      "deep": "#2a0f4e",
+      "low": "#0fd0c3",
+      "mid": "#ff5e9d",
+      "hot": "#ffd166",
+      "flash": "#eaf4ff"
+    }
+  }
+}

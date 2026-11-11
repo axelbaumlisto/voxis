@@ -2,10 +2,10 @@
   "manifest_version": 2,
   "id": "orb_nimbus",
   "name": "Orb · Nimbus",
-  "description": "Light diffusing through a cloud — volumetric march with self-shadowing (WebGL).",
+  "description": "Light diffusing through a cloud: a true volumetric march with Beer-Lambert transmittance, a second march toward the light for self-shadowing, and a Henyey-Greenstein phase function that blooms the lit limb (WebGL). Ported from Orbkit shdr-21 (MIT).",
   "api_version": 1,
-  "overlay_width": 200,
-  "overlay_height": 200,
+  "overlay_width": 160,
+  "overlay_height": 160,
   "entry": "theme.js",
   "credit": "Orbkit `shdr-21` (MIT) — https://github.com/zzzzshawn/orbkit",
   "params": {

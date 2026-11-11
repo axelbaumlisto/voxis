@@ -1,0 +1,33 @@
+{
+  "manifest_version": 2,
+  "id": "orb_shdr_12",
+  "name": "Orb · SHDR-12",
+  "description": "A ball built from glossy toy bricks: a DDA march through a staggered brickwork lattice — layers alternate their bond direction and every course staggers by a hashed offset, so seams never stack — with studs embossed on every upward face, joints drawn only on true brick boundaries, five tunable plastic colours slidable from per-brick confetti to big moulded patches, and a white Blinn sheen. Thinking blinks bricks out of the outer courses and back, the ball visibly rebuilding itself; speaking snaps it whole, fast and glossy (WebGL). Ported from Orbkit shdr-12 (MIT).",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Orbkit `shdr-12` (MIT) — https://github.com/zzzzshawn/orbkit",
+  "params": {
+    "spin": 0.25,
+    "tilt": 0.55,
+    "rebuild": 0.4,
+    "gap": 0.07,
+    "studs": 18.0,
+    "radius": 0.95,
+    "patch": 0.35,
+    "stud": 0.85,
+    "seam": 0.6,
+    "gloss": 1.0,
+    "light": 1.0,
+    "gain": 1.0,
+    "contrast": 1.0,
+    "colors": {
+      "brickA": "#c4281c",
+      "brickB": "#f2cd37",
+      "brickC": "#1e5aa8",
+      "brickD": "#00852b",
+      "brickE": "#f4f4f4"
+    }
+  }
+}

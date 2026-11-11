@@ -7,6 +7,8 @@
  * metaballs3d pulse spec makes for that theme.
  */
 import { expect, test } from "@playwright/test";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 
 test.use({
   launchOptions: {
@@ -19,7 +21,12 @@ test.use({
   },
 });
 
-const ORBS = ["orb_hydrogen", "orb_ion", "orb_nimbus", "orb_phosphor", "orb_dither"] as const;
+// Every ported orb, discovered from the tree: adding one must not need a test
+// edit (that is the point of the shared adapter).
+const ORBS = readdirSync(join(process.cwd(), "src/theme-engine/builtin"), { withFileTypes: true })
+  .filter((d) => d.isDirectory() && d.name.startsWith("orb_"))
+  .map((d) => d.name)
+  .sort();
 
 for (const id of ORBS) {
   test(`${id}: compiles, draws, and reacts to the voice level`, async ({ page }) => {
@@ -57,13 +64,17 @@ for (const id of ORBS) {
         ctx.drawImage(el, 0, 0);
         const d = ctx.getImageData(0, 0, W, H).data;
         let area = 0, sum = 0, rgb = 0;
+        // A coarse fingerprint of every 16th pixel: two frames of the same
+        // shader differ in MANY of these, so "did the picture change" is a
+        // direct count instead of a threshold on aggregate statistics (which
+        // a full-frame orb can move by only ~2% while visibly reacting).
+        const fp: number[] = [];
         for (let i = 0; i < d.length; i += 4) {
           const a = d[i + 3];
           if (a > 40) { area++; sum += a; rgb += d[i] + d[i + 1] + d[i + 2]; }
+          if ((i >> 2) % 16 === 0) fp.push(d[i], d[i + 1], d[i + 2], a);
         }
-        // Some orbs (a full CRT screen, an LED wall) cover the whole square
-        // with opaque pixels, so alpha area cannot move — the COLOUR must.
-        return { area, meanAlpha: area ? sum / area : 0, meanRgb: area ? rgb / area : 0 };
+        return { area, meanAlpha: area ? sum / area : 0, meanRgb: area ? rgb / area : 0, fp };
       });
 
     // Let a few frames render; a black/blank canvas means the shader bailed.
@@ -82,12 +93,20 @@ for (const id of ORBS) {
 
     expect(quiet.area, "the orb draws something at rest").toBeGreaterThan(50);
     // A voice-reactive orb must change with the level — area OR brightness.
-    const rel = (a: number, b: number) => Math.abs(a - b) / Math.max(1, b);
-    const changed =
-      rel(loud.area, quiet.area) > 0.03 ||
-      rel(loud.meanAlpha, quiet.meanAlpha) > 0.03 ||
-      rel(loud.meanRgb, quiet.meanRgb) > 0.03;
-    expect(changed, `level change must alter the frame (${JSON.stringify({ quiet, loud })})`).toBe(true);
+    // "Reacted" = at least 4% of the sampled pixels visibly moved. Some orbs
+    // are full-frame effects whose aggregate brightness barely shifts; the
+    // picture changing is what the user actually sees.
+    let moved = 0;
+    for (let i = 0; i < quiet.fp.length; i++) {
+      if (Math.abs(quiet.fp[i] - loud.fp[i]) > 12) moved++;
+    }
+    const movedFraction = moved / quiet.fp.length;
+    const changed = movedFraction > 0.04;
+    expect(
+      changed,
+      `level change must alter the frame (moved=${(movedFraction * 100).toFixed(1)}%, ` +
+        `area ${quiet.area}→${loud.area}, rgb ${quiet.meanRgb.toFixed(0)}→${loud.meanRgb.toFixed(0)})`,
+    ).toBe(true);
 
     expect(warnings.filter((w) => /shader compile failed|WebGL unavailable/.test(w))).toEqual([]);
     expect(errors).toEqual([]);

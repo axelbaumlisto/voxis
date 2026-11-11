@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "id": "orb_dither",
   "name": "Orb · Dither",
-  "description": "Lit plasma dome quantized to chunky two-tone pixels, 1-bit style (WebGL).",
+  "description": "A lit plasma dome quantized to chunky two-tone pixels: lambert light, drifting fbm plasma and a fresnel rim collapse into one luminance, and an 8x8 ordered Bayer matrix — generated procedurally, since GLSL ES 1.0 has neither array initializers nor bitwise ops — snaps it onto a short ink-to-paper tone ladder. Two steps is the classic 1-bit look (WebGL). Ported from Orbkit shdr-14 (MIT).",
   "api_version": 1,
   "overlay_width": 160,
   "overlay_height": 160,

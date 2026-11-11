@@ -1,0 +1,37 @@
+{
+  "manifest_version": 2,
+  "id": "orb_shdr_26",
+  "name": "Orb · SHDR-26",
+  "description": "A crazed web of coloured threads knotted to a cell grid: a nine-octave feedback warp carrying a lattice pole term, so the field flows through cell interiors and tears itself around every cell corner, banded by an exponential ridge function that draws a thin bright thread every PI over a lit floor. The per-channel phase is a large fraction of a thread that narrow, so each one separates into three coloured filaments running in parallel, and a fourth-power read of the same ridge lays a white-hot core inside them (WebGL). Ported from Orbkit shdr-26 — shader by XorDev, non-commercial.",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Shader by XorDev — non-commercial use only, attribution required (Orbkit `shdr-26`, https://github.com/zzzzshawn/orbkit)",
+  "params": {
+    "speed": 0.4,
+    "swirl": 0.07,
+    "drift": 0.18,
+    "radius": 0.9,
+    "scale": 9.0,
+    "bulge": 0.25,
+    "warp": 0.85,
+    "pole": 0.25,
+    "poleSoft": 0.012,
+    "pulse": 0.35,
+    "sharp": 4.5,
+    "split": 0.045,
+    "core": 0.45,
+    "floor": 0.9,
+    "gain": 1.0,
+    "contrast": 1.35,
+    "light": 0.7,
+    "rim": 0.45,
+    "colors": {
+      "deep": "#111a2e",
+      "line": "#3fd2ff",
+      "hot": "#fff4d6",
+      "sheen": "#a9d8ff"
+    }
+  }
+}

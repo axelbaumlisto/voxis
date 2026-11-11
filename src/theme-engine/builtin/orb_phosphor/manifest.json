@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "id": "orb_phosphor",
   "name": "Orb · Phosphor",
-  "description": "ASCII glyph matrix in CRT green wrapped on the ball (WebGL).",
+  "description": "An ASCII glyph matrix in CRT green, wrapped on the ball: a resolution-relative grid of woven dash characters whose lit-row count quantizes a streaming fbm field — exactly how ASCII art shades — with blocky dropouts eaten out of the matrix on a coarser super-grid, a stereographic wrap that rolls the weave around the sphere, and a phosphor ramp from deep green to hot glow (WebGL). Ported from Orbkit shdr-23 (MIT).",
   "api_version": 1,
   "overlay_width": 160,
   "overlay_height": 160,

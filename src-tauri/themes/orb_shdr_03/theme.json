@@ -1,0 +1,41 @@
+{
+  "manifest_version": 2,
+  "id": "orb_shdr_03",
+  "name": "Orb · SHDR-03",
+  "description": "A turbulent belt of light girdling the ball, contoured in rainbow along its own distance field: the density is a sphere plus a plane added together, so only their intersection lights up — a great circle dragged out of true by eight octaves of warp. The shell term reads the raw point and the plane term reads the warped one, which is what keeps the ball a clean sphere while the belt writhes across it, and the rotation axis is steered by the previous step's density, so the belt's tilt settles as the ray closes on the surface (WebGL). Ported from Orbkit shdr-03 — shader by XorDev, non-commercial.",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Shader by XorDev — non-commercial use only, attribution required (Orbkit `shdr-03`, https://github.com/zzzzshawn/orbkit)",
+  "params": {
+    "speed": 0.6,
+    "wander": 0.3,
+    "feedback": 1.5,
+    "camDist": 5.0,
+    "focal": 1.05,
+    "shellR": 3.0,
+    "shellW": 0.12,
+    "plane": 0.15,
+    "turb": 0.55,
+    "width": 0.004,
+    "pulse": 0.0,
+    "surge": 0.0,
+    "hue": 25.0,
+    "spread": 1.0,
+    "envRadius": 3.3,
+    "envCore": 0.92,
+    "fill": 0.1,
+    "stepClamp": 1500.0,
+    "scatter": 0.0006,
+    "exposure": 1500.0,
+    "contrast": 1.2,
+    "saturation": 1.25,
+    "alphaGain": 2.0,
+    "edge": 1.0,
+    "edgeFade": 0.98,
+    "colors": {
+      "tint": "#ffffff"
+    }
+  }
+}

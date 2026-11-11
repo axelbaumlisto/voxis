@@ -2,12 +2,12 @@
   "manifest_version": 2,
   "id": "orb_hydrogen",
   "name": "Orb · Hydrogen",
-  "description": "Quantum orbital |psi|^2 over dark metal with rainbow chroma bands (WebGL). Ported from Orbkit's shdr-11 (MIT).",
+  "description": "A quantum-orbital orb: |psi|^2 of a hydrogen-like wave function projected onto a rotating dome, shaded with rainbow chromatic bands over dark metal. Precession and a drifting flow field keep the pattern from ever visibly looping (WebGL). Ported from Orbkit shdr-11 (MIT).",
   "api_version": 1,
   "overlay_width": 160,
   "overlay_height": 160,
   "entry": "theme.js",
-  "credit": "Orbkit shdr-11 (MIT) — https://github.com/zzzzshawn/orbkit",
+  "credit": "Orbkit `shdr-11` (MIT) — https://github.com/zzzzshawn/orbkit",
   "params": {
     "speed": 0.9,
     "rotSpeed": 0.5,
@@ -19,13 +19,14 @@
     "flowScale": 0.3,
     "precess": 0.3,
     "radialPow": 0.5,
-    "radialDecay": 1,
+    "radialDecay": 1.0,
     "probPow": 0.4,
-    "probGain": 3,
-    "waveFreq": 4,
+    "probGain": 3.0,
+    "waveFreq": 4.0,
     "chromaSpread": 0.18,
     "glow": 0.9,
-    "metalDark": 0,
-    "baseVis": 0.12
+    "metalDark": 0.0,
+    "baseVis": 0.12,
+    "colors": {}
   }
 }

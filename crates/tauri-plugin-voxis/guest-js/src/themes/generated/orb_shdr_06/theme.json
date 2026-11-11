@@ -1,0 +1,31 @@
+{
+  "manifest_version": 2,
+  "id": "orb_shdr_06",
+  "name": "Orb · SHDR-06",
+  "description": "A hundred glowing lattices stacked through the depth of the ball, interfering: each layer is a rectangular grid of points lit by the reciprocal of a sine field, seeded with its own frequency pair, and the beat between their spacings is the image. The layers are projected from the point the view ray reaches at each depth, closed-form, so parallax is zero at the centre and strongest at the limb and the stack shears against itself as it drifts. Hue runs with layer index, so depth through the stack reads as colour (WebGL). Ported from Orbkit shdr-06 — shader by XorDev, non-commercial.",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Shader by XorDev — non-commercial use only, attribution required (Orbkit `shdr-06`, https://github.com/zzzzshawn/orbkit)",
+  "params": {
+    "speed": 0.5,
+    "drift": 0.02,
+    "radius": 0.9,
+    "scale": 4.0,
+    "bulge": 0.3,
+    "depth": 0.7,
+    "freq": 0.7,
+    "glowSize": 0.05,
+    "hueRate": 0.037,
+    "exposure": 4.0,
+    "contrast": 1.1,
+    "saturation": 1.2,
+    "light": 0.45,
+    "rim": 0.4,
+    "colors": {
+      "tint": "#ffffff",
+      "sheen": "#bcd8ff"
+    }
+  }
+}

@@ -1,9 +1,9 @@
-// orb_ion — Plasma globe — lightning filaments from a hot core to the glass (WebGL)
+// orb_ion — A plasma globe: pink-to-violet lightning filaments crawling from a hot nucleus to the glass, built as the joint zero set of two animated fields over the direction sphere — so every streamer is genuinely radial, stays rooted while its far end wanders, and flares where it lands on the shell. More streamers grow in as the agent gets louder
 //
 // PORTED FROM ORBKIT (https://github.com/zzzzshawn/orbkit), orb `shdr-13`
-// ("Ion") — Orbkit's own orb, MIT like its runtime. Shader body verbatim; the
-// prelude, the colour uniforms and the WebGL lifetime live in
-// `_shared/orb-kit.ts`.
+// ("Ion") — MIT.
+// Shader body verbatim; the prelude, the colour uniforms and the WebGL lifetime
+// live in `_shared/orb-kit.ts`.
 //
 // Mode map: idle → orbkit `idle`, recording → `speaking` (`uInput` ← the live
 // audioLevel), transcribing → `thinking`. Rates (speed, spin) are

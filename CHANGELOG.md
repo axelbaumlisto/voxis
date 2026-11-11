@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased (Voxis desktop)
+
+### Add
+- **All 33 Orbkit orbs are now themes** (was 5): `orb_*` — Dispersion,
+  Rocaille, and the rest of the set, each its shader plus a table of numbers
+  behind `_shared/orb-kit.ts`. The adapter gained the two clocks the remaining
+  shaders need (`uTime`, orbkit's half-speed ambient; `uAnim`, whose rate
+  follows the voice), which is exactly the kind of gap the shared runtime
+  exists to absorb once instead of 28 times.
+- Licensing is mechanical: the 14 orbs Orbkit wrote are MIT; the 19 ported
+  from XorDev are **non-commercial with attribution** (Voxis is free), and
+  every manifest carries a `credit` string that names which is which — so if
+  Voxis ever monetises, those 19 are a single grep away from being removed.
+- Gates: `orb_family.test.ts` covers all 33 structurally (valid module, credit,
+  square size); `e2e/orb-themes.spec.ts` mounts every one in real Chromium +
+  SwiftShader and requires that the frame visibly changes with the voice level
+  (a fingerprint of sampled pixels, not an aggregate threshold — full-frame
+  orbs react in ways mean-brightness does not capture).
+
 ## v0.1.13 (Voxis desktop)
 
 ### Add

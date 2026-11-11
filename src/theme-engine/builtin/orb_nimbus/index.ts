@@ -1,9 +1,9 @@
-// orb_nimbus — Light diffusing through a cloud — volumetric march with self-shadowing (WebGL)
+// orb_nimbus — Light diffusing through a cloud: a true volumetric march with Beer-Lambert transmittance, a second march toward the light for self-shadowing, and a Henyey-Greenstein phase function that blooms the lit limb
 //
 // PORTED FROM ORBKIT (https://github.com/zzzzshawn/orbkit), orb `shdr-21`
-// ("Nimbus") — Orbkit's own orb, MIT like its runtime. Shader body verbatim; the
-// prelude, the colour uniforms and the WebGL lifetime live in
-// `_shared/orb-kit.ts`.
+// ("Nimbus") — MIT.
+// Shader body verbatim; the prelude, the colour uniforms and the WebGL lifetime
+// live in `_shared/orb-kit.ts`.
 //
 // Mode map: idle → orbkit `idle`, recording → `speaking` (`uInput` ← the live
 // audioLevel), transcribing → `thinking`. Rates (speed) are

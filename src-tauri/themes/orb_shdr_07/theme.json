@@ -1,0 +1,39 @@
+{
+  "manifest_version": 2,
+  "id": "orb_shdr_07",
+  "name": "Orb · SHDR-07",
+  "description": "A twist wave travelling out through the ball, wound around a lit polar column: an exact Rodrigues rotation whose angle is the sample's own radius minus the clock, so every spherical shell is wound by a different amount and the winding travels outward — torsion in the literal sense, twist per unit radius. The density is measured from the twist axis rather than from the centre, so the step collapses along the pole and the axis burns as a spine, and the march colour-codes itself with green by depth and blue by step index (WebGL). Ported from Orbkit shdr-07 — shader by XorDev, non-commercial.",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Shader by XorDev — non-commercial use only, attribution required (Orbkit `shdr-07`, https://github.com/zzzzshawn/orbkit)",
+  "params": {
+    "speed": 0.5,
+    "wave": 0.7,
+    "twist": 1.0,
+    "spin": 0.1,
+    "tilt": 0.3,
+    "camDist": 7.0,
+    "focal": 2.25,
+    "turb": 1.0,
+    "column": 0.0,
+    "stepScale": 0.1,
+    "hueDepth": 0.75,
+    "hueStep": 0.45,
+    "envRadius": 2.6,
+    "envCore": 0.88,
+    "fill": 0.15,
+    "stepClamp": 400.0,
+    "scatter": 0.01,
+    "exposure": 60.0,
+    "contrast": 1.3,
+    "saturation": 1.15,
+    "alphaGain": 2.0,
+    "edge": 1.0,
+    "edgeFade": 0.98,
+    "colors": {
+      "tint": "#ffffff"
+    }
+  }
+}

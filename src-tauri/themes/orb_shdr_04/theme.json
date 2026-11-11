@@ -1,0 +1,33 @@
+{
+  "manifest_version": 2,
+  "id": "orb_shdr_04",
+  "name": "Orb · SHDR-04",
+  "description": "A hollow shell of light, faceted by a voxel lattice and approached but never reached: the march sphere-traces a shell at a tenth of the remaining distance per step, so it closes on the surface asymptotically from outside and the accumulated one-over-step is dominated by the last few samples. All six turbulence octaves quantize on the SAME fixed lattice pitch — only the phase multiplier changes — so the displacement is piecewise constant and the shell facets at one crisp scale rather than fractally. Position paints the colour, washing toward a white floor with depth (WebGL). Ported from Orbkit shdr-04 — shader by XorDev, non-commercial.",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Shader by XorDev — non-commercial use only, attribution required (Orbkit `shdr-04`, https://github.com/zzzzshawn/orbkit)",
+  "params": {
+    "speed": 0.6,
+    "camDist": 9.0,
+    "focal": 1.35,
+    "shellR": 5.0,
+    "pitch": 0.3,
+    "turb": 0.45,
+    "slack": 0.1,
+    "width": 0.003,
+    "hueGain": 1.0,
+    "floorLevel": 0.8,
+    "envScale": 1.16,
+    "exposure": 3000.0,
+    "contrast": 1.3,
+    "saturation": 1.3,
+    "alphaGain": 2.0,
+    "edge": 1.0,
+    "edgeFade": 0.98,
+    "colors": {
+      "tint": "#ffffff"
+    }
+  }
+}

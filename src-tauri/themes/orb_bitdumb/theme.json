@@ -1,0 +1,34 @@
+{
+  "manifest_version": 2,
+  "id": "orb_bitdumb",
+  "name": "Orb · Bitdumb",
+  "description": "Nested binary grids shuttering on a tumbling bit-sphere: a twenty-level power-of-two zoom wrapped onto the ball through a stereographic projection, cell edges drawn with an analytic pixel footprint instead of fwidth, and an animated per-cell shutter that lets each grid level occlude the ones beneath (WebGL). Ported from Orbkit shdr-28 — shader by XorDev, non-commercial.",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Shader by XorDev — non-commercial use only, attribution required (Orbkit `shdr-28`, https://github.com/zzzzshawn/orbkit)",
+  "params": {
+    "speed": 0.5,
+    "spin": 0.15,
+    "tilt": 0.5,
+    "radius": 0.9,
+    "gridScale": 2.0,
+    "levels": 12.0,
+    "lineW": 2.0,
+    "shutter": 1.0,
+    "gain": 1.0,
+    "body": 1.0,
+    "rim": 0.6,
+    "rimPow": 3.0,
+    "contrast": 1.0,
+    "edge": 1.0,
+    "edgeFade": 0.98,
+    "colors": {
+      "lineA": "#ff5a4d",
+      "lineB": "#59d8ff",
+      "base": "#101528",
+      "rim": "#bcd8ff"
+    }
+  }
+}

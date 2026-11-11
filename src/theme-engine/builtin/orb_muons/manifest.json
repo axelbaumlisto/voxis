@@ -1,0 +1,35 @@
+{
+  "manifest_version": 2,
+  "id": "orb_muons",
+  "name": "Orb · Muons",
+  "description": "An iridescent particle-track web worn as the ball's skin: ten micro-layers anchored analytically to the sphere's entry point, a minus-90-degree Rodrigues rotation whose axis jitters per layer through field-magnitude feedback, and a march that sticks on concentric field shells where 1/d blows up into bright threads (WebGL). Ported from Orbkit shdr-15 — shader by XorDev, non-commercial.",
+  "api_version": 1,
+  "overlay_width": 160,
+  "overlay_height": 160,
+  "entry": "theme.js",
+  "credit": "Shader by XorDev — non-commercial use only, attribution required (Orbkit `shdr-15`, https://github.com/zzzzshawn/orbkit)",
+  "params": {
+    "speed": 0.5,
+    "wander": 0.15,
+    "camDist": 7.0,
+    "focal": 2.25,
+    "fieldScale": 2.4,
+    "turb": 0.8,
+    "stepScale": 0.015,
+    "disperse": 1.0,
+    "envRadius": 2.6,
+    "envCore": 1.0,
+    "fill": 0.3,
+    "stepClamp": 150.0,
+    "scatter": 0.01,
+    "exposure": 50.0,
+    "contrast": 1.35,
+    "saturation": 1.35,
+    "alphaGain": 2.0,
+    "edge": 1.0,
+    "edgeFade": 0.98,
+    "colors": {
+      "tint": "#ffffff"
+    }
+  }
+}

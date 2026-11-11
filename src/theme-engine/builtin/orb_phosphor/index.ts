@@ -1,9 +1,9 @@
-// orb_phosphor — ASCII glyph matrix in CRT green wrapped on the ball (WebGL)
+// orb_phosphor — An ASCII glyph matrix in CRT green, wrapped on the ball: a resolution-relative grid of woven dash characters whose lit-row count quantizes a streaming fbm field — exactly how ASCII art shades — with blocky dropouts eaten out of the matrix on a coarser super-grid, a stereographic wrap that rolls the weave around the sphere, and a phosphor ramp from deep green to hot glow
 //
 // PORTED FROM ORBKIT (https://github.com/zzzzshawn/orbkit), orb `shdr-23`
-// ("Phosphor") — Orbkit's own orb, MIT like its runtime. Shader body verbatim; the
-// prelude, the colour uniforms and the WebGL lifetime live in
-// `_shared/orb-kit.ts`.
+// ("Phosphor") — MIT.
+// Shader body verbatim; the prelude, the colour uniforms and the WebGL lifetime
+// live in `_shared/orb-kit.ts`.
 //
 // Mode map: idle → orbkit `idle`, recording → `speaking` (`uInput` ← the live
 // audioLevel), transcribing → `thinking`. Rates (drift, scroll, speed, spin) are
