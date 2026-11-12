@@ -67,4 +67,26 @@ test.describe("overlay drag grip", () => {
       expect(box.height).toBeLessThanOrEqual(16);
     }
   });
+
+  test("hides right after a drag even though the pointer is still over it", async ({
+    page,
+  }, testInfo) => {
+    await page.goto("/overlay.html?theme=orb_ion");
+    await page.waitForSelector(GRIP, { state: "attached", timeout: 5000 });
+
+    // Reveal, then press-and-hold on the grip to arm a drag.
+    await page.mouse.move(6, 6);
+    await expect.poll(() => opacity(page), { timeout: 1000 }).toBeGreaterThan(0.9);
+    await page.screenshot({ path: testInfo.outputPath("grip-revealed.png") });
+
+    await page.mouse.down();
+    await page.waitForTimeout(400); // > ARM_MS so the drag arms
+    await page.mouse.move(6, 6); // stay over the overlay
+    await page.mouse.up();
+
+    // The pointer is still over the overlay, but the grip must be hidden now
+    // (post-drag suppression) — this is the "stays lit after dragging" bug.
+    await expect.poll(() => opacity(page), { timeout: 1000 }).toBeLessThan(0.1);
+    await page.screenshot({ path: testInfo.outputPath("grip-after-drag.png") });
+  });
 });

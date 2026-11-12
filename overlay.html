@@ -42,6 +42,14 @@
         opacity: 1 !important;
         pointer-events: auto !important;
       }
+      /* Right after a drag the pointer is still over the overlay and pointer
+       * capture can leave :hover stuck true (the webview drops the leave), so
+       * the grip would "stay lit". Force it hidden until the pointer genuinely
+       * re-enters (enter events are reliable; leave events are not). */
+      .drag-grip.post-drag {
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
     </style>
   </head>
   <body>

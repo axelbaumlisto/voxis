@@ -49,6 +49,20 @@ const SLOP_PX = 6;
 
 function DragGrip() {
   const [dragging, setDragging] = useState(false);
+  // After a drag ends the pointer is still over the overlay and capture can
+  // leave :hover stuck, so force the grip hidden until the pointer genuinely
+  // re-enters. A fresh `pointerover` (reliable, unlike leave) clears it.
+  const [postDrag, setPostDrag] = useState(false);
+  useEffect(() => {
+    const onOver = () => {
+      // Ignore the pointerover churn emitted while the window is being dragged
+      // under the cursor; only a genuine re-entry after the drag clears it.
+      if (st.current && st.current.armedNow) return;
+      setPostDrag(false);
+    };
+    window.addEventListener("pointerover", onOver);
+    return () => window.removeEventListener("pointerover", onOver);
+  }, []);
   // Visibility is driven by pure CSS `body:hover .drag-grip` (see overlay.html):
   // the layout engine tracks the real pointer position, so the grip reveals on
   // hover without the stuck-visible (JS pointerout dropped by the Dock webview)
@@ -82,6 +96,8 @@ function DragGrip() {
     }
     st.current = null;
     setDragging(false);
+    // Suppress the grip until the pointer leaves and re-enters.
+    setPostDrag(true);
   };
 
   const flush = () => {
@@ -161,6 +177,11 @@ function DragGrip() {
   };
 
   const onPointerUp = (e: ReactPointerEvent) => {
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* capture may already be gone */
+    }
     const s = st.current;
     if (!s || s.pointerId !== e.pointerId) {
       reset();
@@ -184,7 +205,7 @@ function DragGrip() {
   return (
     <div
       data-testid="overlay-drag-grip"
-      className={dragging ? "drag-grip dragging" : "drag-grip"}
+      className={`drag-grip${dragging ? " dragging" : ""}${postDrag ? " post-drag" : ""}`}
       aria-label="Move overlay (hold to drag, double-click to reset)"
       title="Hold to drag · double-click to reset"
       onPointerDown={onPointerDown}
