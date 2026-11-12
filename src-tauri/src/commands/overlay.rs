@@ -278,6 +278,37 @@ pub fn move_overlay_window(x: i32, y: i32, app: AppHandle) -> Result<(), String>
     .map_err(|e| e.to_string())
 }
 
+/// Live-resize the overlay window to `(w, h)` in LOGICAL px WITHOUT
+/// persisting — called on every pointer-move of the corner grip (the frontend
+/// keeps it square and clamped). Main thread for the same reason as
+/// `move_overlay_window`: window geometry mutation must run there on
+/// macOS/GTK.
+#[tauri::command]
+#[specta::specta]
+pub fn resize_overlay_window(width: u32, height: u32, app: AppHandle) -> Result<(), String> {
+    use crate::orchestrator::overlay_resize::clamp_overlay_size;
+    let side = clamp_overlay_size(width.max(height)) as f64;
+    let app2 = app.clone();
+    app.run_on_main_thread(move || {
+        if let Some(w) = app2.get_webview_window(OVERLAY_PANEL_LABEL) {
+            let _ = w.set_size(tauri::LogicalSize::new(side, side));
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Current overlay window size in LOGICAL px — the resize start reference.
+#[tauri::command]
+#[specta::specta]
+pub fn get_overlay_window_size(app: AppHandle) -> Result<(u32, u32), String> {
+    let w = app
+        .get_webview_window(OVERLAY_PANEL_LABEL)
+        .ok_or_else(|| "overlay window not found".to_string())?;
+    let size = w.inner_size().map_err(|e| e.to_string())?;
+    let scale = w.scale_factor().unwrap_or(1.0).max(1.0);
+    Ok(((size.width as f64 / scale) as u32, (size.height as f64 / scale) as u32))
+}
+
 /// Current overlay window top-left in LOGICAL px — the drag start reference.
 #[tauri::command]
 #[specta::specta]
@@ -321,6 +352,60 @@ pub async fn clear_overlay_custom_position(
     let mut config = factory.config().load().unwrap_or_default();
     config.overlay.custom_x = None;
     config.overlay.custom_y = None;
+    factory.config().save(&config).cmd_err()?;
+    orchestrator_state.orchestrator.reinit_overlay(&config).await;
+    Ok(())
+}
+
+/// Persist a user-resized overlay size (logical px, square) and rebuild the
+/// overlay at it. Mirrors `set_overlay_custom_position`: the size is applied by
+/// `reinit_overlay`, so it survives restarts and theme switches.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_overlay_custom_size(
+    width: u32,
+    height: u32,
+    app_handle: AppHandle,
+    paths: State<'_, AppPaths>,
+) -> Result<(), String> {
+    use crate::orchestrator::overlay_resize::clamp_overlay_size;
+    // The grip drags a SQUARE: the larger side wins so a persisted pair can
+    // never leave the theme drawing into a non-square canvas.
+    let side = clamp_overlay_size(width.max(height));
+    let factory = StorageFactory::new(paths.inner().clone());
+    let mut config = factory.config().load().unwrap_or_default();
+    config.overlay.custom_w = Some(side);
+    config.overlay.custom_h = Some(side);
+    factory.config().save(&config).cmd_err()?;
+    // NO `reinit_overlay` here: the grip already moved the live window to this
+    // size (one `resize_overlay_window` per frame), and re-initialising the
+    // overlay would destroy and rebuild it — a visible flash, and it would cut
+    // a recording that is in flight. Persisting is all that is left to do; the
+    // config is what the next build/theme switch reads.
+    let app2 = app_handle.clone();
+    let _ = app_handle.run_on_main_thread(move || {
+        if let Some(w) = app2.get_webview_window(OVERLAY_PANEL_LABEL) {
+            let _ = w.set_size(tauri::LogicalSize::new(side as f64, side as f64));
+        }
+    });
+    Ok(())
+}
+
+/// Drop the user-resized size: the overlay returns to the active theme's
+/// manifest footprint (double-click on the corner grip).
+#[tauri::command]
+#[specta::specta]
+pub async fn clear_overlay_custom_size(
+    paths: State<'_, AppPaths>,
+    orchestrator_state: State<'_, OrchestratorState>,
+) -> Result<(), String> {
+    // Re-init on purpose: dropping the size means reverting to the ACTIVE
+    // theme's manifest footprint, which only the overlay manager can resolve.
+    // This is a deliberate double-click, never a recording gesture.
+    let factory = StorageFactory::new(paths.inner().clone());
+    let mut config = factory.config().load().unwrap_or_default();
+    config.overlay.custom_w = None;
+    config.overlay.custom_h = None;
     factory.config().save(&config).cmd_err()?;
     orchestrator_state.orchestrator.reinit_overlay(&config).await;
     Ok(())

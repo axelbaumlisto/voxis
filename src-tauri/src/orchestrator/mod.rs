@@ -5,6 +5,7 @@ pub mod coordinator;
 pub mod dispatch;
 pub mod hallucination;
 pub mod overlay_manager;
+pub mod overlay_resize;
 pub mod post_process;
 pub mod press_release;
 pub mod queue;

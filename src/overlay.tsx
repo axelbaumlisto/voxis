@@ -24,6 +24,7 @@ import { commands } from "./bindings";
 import type { ThemeState } from "./theme-engine/contract";
 import { createPressController } from "./overlay/pressController";
 import { isCanvasOpaqueAt } from "./overlay/hitTest";
+import { MIN_OVERLAY_EDGE, resizeEdgeFromDelta } from "./overlay/resize";
 
 /**
  * Semi-transparent drag grip on the LEFT edge of the overlay.
@@ -47,7 +48,7 @@ import { isCanvasOpaqueAt } from "./overlay/hitTest";
 const ARM_MS = 300;
 const SLOP_PX = 6;
 
-function DragGrip() {
+function DragGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
   const [dragging, setDragging] = useState(false);
   // After a drag ends the pointer is still over the overlay and capture can
   // leave :hover stuck, so force the grip hidden until the pointer genuinely
@@ -100,6 +101,7 @@ function DragGrip() {
     }
     st.current = null;
     setDragging(false);
+    onInteracting(false);
     // Suppress the grip until the pointer leaves and re-enters (ignoring the
     // synthetic pointerover fired right after this reset — see dragEndAt guard).
     dragEndAt.current = Date.now();
@@ -133,6 +135,7 @@ function DragGrip() {
     } catch {
       /* captured pointer may already be gone — the drag still tracks */
     }
+    onInteracting(true);
     st.current = {
       pointerId: e.pointerId,
       startScreenX: e.screenX,
@@ -250,8 +253,146 @@ function DragGrip() {
   );
 }
 
+/**
+ * Bottom-right resize grip — the overlay's only resize affordance.
+ *
+ * NOT `getCurrentWindow().startResizeDragging()`: with `decorations:false` +
+ * `transparent:true` + `macOSPrivateApi:true` AppKit accepts the gesture and
+ * then silently declines to resize (documented by projects with the identical
+ * configuration). So the grip drives the geometry itself, exactly the way the
+ * drag grip drives the position: capture the pointer, coalesce moves through
+ * rAF, and ask the host (`resize_overlay_window`) to set the size. On release
+ * the size is persisted (`set_overlay_custom_size`), so it survives restarts
+ * and theme switches; a double-click drops it back to the theme's footprint.
+ *
+ * The overlay stays SQUARE (see `overlay/resize.ts`): the dominant axis wins
+ * and the host clamps — one edge length is the whole state.
+ */
+function ResizeGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
+  const [resizing, setResizing] = useState(false);
+  const raf = useRef<number | null>(null);
+  const st = useRef<{
+    pointerId: number;
+    startScreenX: number;
+    startScreenY: number;
+    startEdge: number | null;
+    lastEdge: number;
+    pending: { x: number; y: number } | null;
+  } | null>(null);
+
+  const flush = () => {
+    raf.current = null;
+    const s = st.current;
+    if (!s || s.startEdge === null || !s.pending) return;
+    const edge = resizeEdgeFromDelta(
+      s.startEdge,
+      s.pending.x - s.startScreenX,
+      s.pending.y - s.startScreenY,
+    );
+    if (edge === s.lastEdge) return;
+    s.lastEdge = edge;
+    void invoke("resize_overlay_window", { width: edge, height: edge });
+  };
+
+  const onPointerDown = (e: ReactPointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* capture may already be gone; the gesture still tracks */
+    }
+    onInteracting(true);
+    setResizing(true);
+    st.current = {
+      pointerId: e.pointerId,
+      startScreenX: e.screenX,
+      startScreenY: e.screenY,
+      // Filled in asynchronously: the window's size at gesture start is the
+      // reference every delta is applied to. Deltas stay correct meanwhile.
+      startEdge: null,
+      lastEdge: 0,
+      pending: null,
+    };
+    void invoke<[number, number]>("get_overlay_window_size").then((size) => {
+      const s = st.current;
+      if (!s) return;
+      s.startEdge = Math.min(size[0], size[1]);
+      if (s.pending) flush();
+    });
+  };
+
+  const onPointerMove = (e: ReactPointerEvent) => {
+    const s = st.current;
+    if (!s || e.pointerId !== s.pointerId) return;
+    s.pending = { x: e.screenX, y: e.screenY };
+    if (raf.current === null) raf.current = requestAnimationFrame(flush);
+  };
+
+  const reset = () => {
+    if (raf.current !== null) {
+      cancelAnimationFrame(raf.current);
+      raf.current = null;
+    }
+    st.current = null;
+    setResizing(false);
+    onInteracting(false);
+  };
+
+  const onPointerUp = () => {
+    const edge = st.current?.lastEdge ?? 0;
+    reset();
+    // Persist only an actual resize (a tap on the grip must not re-init the
+    // overlay, which would interrupt a recording).
+    if (edge > 0) {
+      void invoke("set_overlay_custom_size", { width: edge, height: edge });
+    }
+  };
+
+  const onDoubleClick = (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    reset();
+    void invoke("clear_overlay_custom_size");
+  };
+
+  return (
+    <div
+      data-testid="overlay-resize-grip"
+      className={`resize-grip${resizing ? " resizing" : ""}`}
+      aria-label={`Resize overlay (square, ${MIN_OVERLAY_EDGE}px minimum, double-click to reset)`}
+      title="Drag to resize · double-click to reset"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={reset}
+      onDoubleClick={onDoubleClick}
+      style={{
+        position: "fixed",
+        right: 0,
+        bottom: 0,
+        width: 14,
+        height: 14,
+        boxSizing: "border-box",
+        cursor: "nwse-resize",
+        // Three etched dots read as "grab here" at 14 px without a label.
+        background:
+          "radial-gradient(circle at 30% 70%, rgba(255,255,255,0.95) 1.2px, transparent 1.6px), radial-gradient(circle at 70% 70%, rgba(255,255,255,0.95) 1.2px, transparent 1.6px), radial-gradient(circle at 70% 30%, rgba(255,255,255,0.95) 1.2px, transparent 1.6px), rgba(0,0,0,0.35)",
+        borderRadius: 3,
+        touchAction: "none",
+        userSelect: "none",
+        zIndex: 2147483647,
+      }}
+    />
+  );
+}
+
 export function OverlayApp() {
   const snapshot = useOverlayState();
+  // True while the user moves OR resizes: the overlay draws its own square
+  // outline then, because an orb fills the window edge to edge and nothing else
+  // would say where the window (and therefore the resize grip) actually ends.
+  const [interacting, setInteracting] = useState(false);
 
   // Track actual OS window size so the theme canvas fills the window.
   // When innerWidth/innerHeight is 0 (jsdom/headless), fall back to
@@ -366,7 +507,13 @@ export function OverlayApp() {
           height={size.height || undefined}
         />
       </div>
-      <DragGrip />
+      <div
+        className={`resize-frame${interacting ? " visible" : ""}`}
+        data-testid="overlay-resize-frame"
+        aria-hidden="true"
+      />
+      <DragGrip onInteracting={setInteracting} />
+      <ResizeGrip onInteracting={setInteracting} />
     </>
   );
 }

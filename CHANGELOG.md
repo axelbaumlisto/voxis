@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased (Voxis desktop)
+
+### Add
+- **The overlay can be resized from its bottom-right corner.** A grip appears
+  on hover (next to the existing move grip) and drags a SQUARE edge —
+  every theme draws into a square canvas, and the orb shaders normalise by
+  `min(w, h)`, so a rectangular window would squash them. While the user moves
+  OR resizes, the overlay draws its own outline: an orb fills the window edge
+  to edge, so nothing else says where the window ends. The size is persisted
+  (`overlay.custom_w/h`), wins over the theme's manifest footprint, and
+  survives restarts and theme switches; a double-click on the grip drops it
+  back to the theme. Limits 56…1024 logical px, clamped on BOTH sides
+  (`orchestrator/overlay_resize.rs` is the single definition, and a test
+  asserts the TS mirror in `src/overlay/resize.ts` agrees).
+- Why not `startResizeDragging()`: with `decorations:false` +
+  `transparent:true` + `macOSPrivateApi:true` AppKit accepts that gesture and
+  then silently declines to resize. The grip therefore drives the geometry
+  itself (`resize_overlay_window` per rAF frame, like the move grip already
+  did), which is the documented workaround for this exact window shape.
+  The window's `min_inner_size == max_inner_size == footprint` pin is gone
+  (it would clamp every resize to zero); `resizable(false)` stays, because it
+  only disables OS borders/gestures, not programmatic `set_size`.
+
 ## v0.1.15 (Voxis desktop)
 
 ### Change

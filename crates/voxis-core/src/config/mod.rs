@@ -174,6 +174,13 @@ pub struct OverlayConfig {
     pub custom_x: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_y: Option<i32>,
+    /// User-resized overlay size in LOGICAL px. Both are `Some` or neither:
+    /// they override the active theme's manifest footprint (and the `size`
+    /// preset) until the user resets the overlay back to the theme.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_w: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_h: Option<u32>,
 }
 
 impl Default for OverlayConfig {
@@ -188,6 +195,8 @@ impl Default for OverlayConfig {
             backend: default_overlay_backend(),
             custom_x: None,
             custom_y: None,
+            custom_w: None,
+            custom_h: None,
         }
     }
 }

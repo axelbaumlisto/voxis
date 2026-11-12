@@ -266,6 +266,12 @@ impl ConfigSqliteStorage {
         let overlay_custom_y = self
             .get(&conn, "overlay_custom_y")
             .and_then(|v| v.parse::<i32>().ok());
+        let overlay_custom_w = self
+            .get(&conn, "overlay_custom_w")
+            .and_then(|v| v.parse::<u32>().ok());
+        let overlay_custom_h = self
+            .get(&conn, "overlay_custom_h")
+            .and_then(|v| v.parse::<u32>().ok());
         config.overlay = OverlayConfig {
             enabled: self.get_bool(&conn, "overlay_enabled", config.overlay.enabled),
             position: self.get_str(&conn, "overlay_position", &config.overlay.position),
@@ -276,6 +282,8 @@ impl ConfigSqliteStorage {
             backend: self.get_str(&conn, "overlay_backend", &config.overlay.backend),
             custom_x: overlay_custom_x,
             custom_y: overlay_custom_y,
+            custom_w: overlay_custom_w,
+            custom_h: overlay_custom_h,
         };
 
         // LLM
@@ -457,6 +465,16 @@ impl ConfigSqliteStorage {
             &conn,
             "overlay_custom_y",
             &config.overlay.custom_y.map(|v| v.to_string()).unwrap_or_default(),
+        )?;
+        self.set(
+            &conn,
+            "overlay_custom_w",
+            &config.overlay.custom_w.map(|v| v.to_string()).unwrap_or_default(),
+        )?;
+        self.set(
+            &conn,
+            "overlay_custom_h",
+            &config.overlay.custom_h.map(|v| v.to_string()).unwrap_or_default(),
         )?;
 
         // LLM

@@ -28,6 +28,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl};
 
+use crate::orchestrator::overlay_resize::{MAX_OVERLAY_SIZE as MAX_OVERLAY_EDGE, MIN_OVERLAY_SIZE as MIN_OVERLAY_EDGE};
+
 /// Fixed 172×36 pill canvas. The panel hosts the React ThemeHost code-theme
 /// overlay, and the theme-engine contract uses this fixed size.
 pub const PILL_WIDTH: u32 = 320;
@@ -197,8 +199,13 @@ fn build_overlay_window(
     )
     .title("Recording Overlay")
     .inner_size(w as f64, h as f64)
-    .min_inner_size(w as f64, h as f64)
-    .max_inner_size(w as f64, h as f64)
+    // NOT pinned to the footprint any more: the overlay is resizable from its
+    // bottom-right grip (user-chosen size persisted in `overlay.custom_w/h`),
+    // so equal min/max would clamp every resize to zero. The window stays
+    // `resizable(false)` — that only disables OS-drawn borders/gestures; our
+    // own grip drives `set_size`, exactly like `resize_for_theme` already did.
+    .min_inner_size(MIN_OVERLAY_EDGE as f64, MIN_OVERLAY_EDGE as f64)
+    .max_inner_size(MAX_OVERLAY_EDGE as f64, MAX_OVERLAY_EDGE as f64)
     .position(x, y)
     .decorations(false)
     .resizable(false)

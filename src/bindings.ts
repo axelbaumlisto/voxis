@@ -665,6 +665,118 @@ async debugLogOverlay(message: string) : Promise<void> {
     await TAURI_INVOKE("debug_log_overlay", { message });
 },
 /**
+ * Live-move the overlay window to `(x, y)` in LOGICAL px WITHOUT persisting.
+ * Called on every pointer-move of an interactive grip drag; the frontend has
+ * already clamped `(x, y)` to the screen. Dispatched to the main thread
+ * because window geometry mutation must run there on macOS/GTK.
+ */
+async moveOverlayWindow(x: number, y: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("move_overlay_window", { x, y }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Current overlay window top-left in LOGICAL px — the drag start reference.
+ */
+async getOverlayWindowPosition() : Promise<Result<[number, number], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_overlay_window_position") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Persist a user-dragged overlay position and re-pin the overlay there so it
+ * survives restarts and theme changes.
+ */
+async setOverlayCustomPosition(x: number, y: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_overlay_custom_position", { x, y }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Clear the user-dragged position; the overlay returns to its configured
+ * preset placement (`position` + `margin`).
+ */
+async clearOverlayCustomPosition() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_overlay_custom_position") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Persist a user-resized overlay size (logical px, square) and rebuild the
+ * overlay at it. Mirrors `set_overlay_custom_position`: the size is applied by
+ * `reinit_overlay`, so it survives restarts and theme switches.
+ */
+async setOverlayCustomSize(width: number, height: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_overlay_custom_size", { width, height }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Drop the user-resized size: the overlay returns to the active theme's
+ * manifest footprint (double-click on the corner grip).
+ */
+async clearOverlayCustomSize() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_overlay_custom_size") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Live-resize the overlay window to `(w, h)` in LOGICAL px WITHOUT
+ * persisting — called on every pointer-move of the corner grip (the frontend
+ * keeps it square and clamped). Main thread for the same reason as
+ * `move_overlay_window`: window geometry mutation must run there on
+ * macOS/GTK.
+ */
+async resizeOverlayWindow(width: number, height: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resize_overlay_window", { width, height }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Current overlay window size in LOGICAL px — the resize start reference.
+ */
+async getOverlayWindowSize() : Promise<Result<[number, number], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_overlay_window_size") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Clear the user-dragged position; the overlay returns to its configured
+ * preset placement (`position` + `margin`).
+ */
+async clearOverlayCustomPosition() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_overlay_custom_position") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * List available audio input devices.
  * Requires microphone permission to access audio hardware.
  */
@@ -1116,7 +1228,21 @@ theme?: string;
  * Legacy values (`"native"`, `"subprocess"`, `"nspanel"`) fall back to the
  * webview overlay for back-compat.
  */
-backend?: string; custom_x?: number | null; custom_y?: number | null }
+backend?: string; 
+/**
+ * User-dragged overlay position (logical px, top-left of the window).
+ * When BOTH are `Some`, they override `position` + `margin`: the overlay
+ * is placed at these exact coordinates (clamped to the monitor). Set by
+ * dragging the overlay grip; cleared when the user picks a preset
+ * `position` from Settings.
+ */
+custom_x?: number | null; custom_y?: number | null; 
+/**
+ * User-resized overlay size in LOGICAL px. Both are `Some` or neither:
+ * they override the active theme's manifest footprint (and the `size`
+ * preset) until the user resets the overlay back to the theme.
+ */
+custom_w?: number | null; custom_h?: number | null }
 /**
  * Overlay position on screen.
  */

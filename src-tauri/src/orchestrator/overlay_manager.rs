@@ -69,8 +69,13 @@ impl OverlayManager {
         };
         // Build the overlay window at the configured theme's footprint so
         // KWin/XWayland sizes it correctly from the start (it ignores later
-        // runtime resizes of a Dock window).
-        let init_size = self.theme_overlay_size(&config.overlay.theme);
+        // runtime resizes of a Dock window). A user-resized size wins over the
+        // theme's own footprint — that is what makes the corner grip stick.
+        let init_size = crate::orchestrator::overlay_resize::resolve_overlay_size(
+            config.overlay.custom_w,
+            config.overlay.custom_h,
+            self.theme_overlay_size(&config.overlay.theme),
+        );
         let new_overlay = create_overlay(CreateOverlayParams {
             enabled: config.overlay.enabled,
             position,
@@ -89,7 +94,11 @@ impl OverlayManager {
             {
                 self.overlay.lock().await.set_theme(&config.overlay.theme);
             }
-            let size = self.theme_overlay_size(&config.overlay.theme);
+            let size = crate::orchestrator::overlay_resize::resolve_overlay_size(
+                config.overlay.custom_w,
+                config.overlay.custom_h,
+                self.theme_overlay_size(&config.overlay.theme),
+            );
             self.overlay.lock().await.resize_for_theme(size);
         }
     }

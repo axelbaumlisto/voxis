@@ -62,7 +62,31 @@ pub use suggestions::{
 };
 
 // Overlay
-pub use overlay::{get_current_overlay_theme, get_overlay_state, hide_overlay, show_overlay, update_overlay_position};
+pub use overlay::{
+    clear_overlay_custom_position,
+    clear_overlay_custom_size,
+    debug_log_overlay,
+    export_builtin_theme,
+    export_theme_dir,
+    get_current_overlay_theme,
+    get_overlay_state,
+    get_overlay_window_position,
+    get_theme_manifest,
+    get_themes_dir,
+    hide_overlay,
+    move_overlay_window,
+    preview_visualization_theme,
+    get_overlay_window_size,
+    read_theme_script,
+    resize_overlay_window,
+    reload_visualization_themes,
+    set_overlay_custom_position,
+    set_overlay_custom_size,
+    show_overlay,
+    theme_infos,
+    update_overlay_position,
+    validate_visualization_theme,
+};
 
 // Recording
 pub use recording::{
