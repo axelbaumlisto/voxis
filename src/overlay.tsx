@@ -349,29 +349,19 @@ export function OverlayApp() {
   // inside) because the Dock webview doesn't deliver DOM pointerleave or keep
   // CSS :hover in sync. Toggle a body class the grip CSS keys off of.
   useEffect(() => {
-    // Reveal/hide the handles from the Rust pointer-inside event (GTK enter/
-    // leave). SETTLE-DEBOUNCE in BOTH directions: apply the target only after
-    // it has been stable for SETTLE_MS. A burst of flapping enter/leave (the
-    // WM's grab/ungrab crossings, or the webview's content-window crossings)
-    // keeps resetting the timer, so the class changes once — no blinking —
-    // settling on whatever the pointer actually did.
-    const SETTLE_MS = 180;
-    let settle: ReturnType<typeof setTimeout> | null = null;
+    // Reveal/hide the handles from the Rust pointer-inside poller. The poller
+    // emits a clean, already-deflapped boolean (it samples the pointer vs the
+    // overlay rect), so the class just mirrors it — CSS fades it in/out.
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     void listen<boolean>("overlay://pointer-inside", (e) => {
-      if (settle) clearTimeout(settle);
-      settle = setTimeout(() => {
-        document.body.classList.toggle("pointer-inside", e.payload);
-        settle = null;
-      }, SETTLE_MS);
+      document.body.classList.toggle("pointer-inside", e.payload);
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
     });
     return () => {
       cancelled = true;
-      if (settle) clearTimeout(settle);
       if (unlisten) unlisten();
     };
   }, []);
