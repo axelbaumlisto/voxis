@@ -272,10 +272,8 @@ fn build_overlay_window(
                     // bool the overlay webview keys off (body.pointer-inside).
                     // NotifyInferior crossings (moving onto the child webview)
                     // are ignored so moving WITHIN the overlay doesn't flap.
-                    gtk_window.add_events(
-                        gtk::gdk::EventMask::ENTER_NOTIFY_MASK
-                            | gtk::gdk::EventMask::LEAVE_NOTIFY_MASK,
-                    );
+                    // (A GtkWindow receives crossing events by default, so no
+                    // explicit event-mask change is needed.)
                     let app_enter = app_evt.clone();
                     gtk_window.connect_enter_notify_event(move |_w, e| {
                         if e.detail() != gtk::gdk::NotifyType::Inferior {
