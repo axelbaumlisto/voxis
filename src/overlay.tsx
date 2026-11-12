@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useOverlayState } from "./hooks/useOverlayState";
 import ThemeHost from "./theme-engine/ThemeHost";
 import { fetchThemeModule } from "./theme-engine/fetchModule";
@@ -51,28 +52,9 @@ const SLOP_PX = 6;
 
 function DragGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
   const [dragging, setDragging] = useState(false);
-  // After a drag ends the pointer is still over the overlay and capture can
-  // leave :hover stuck, so force the grip hidden until the pointer genuinely
-  // re-enters. A fresh `pointerover` (reliable, unlike leave) clears it.
-  const [postDrag, setPostDrag] = useState(false);
-  const dragEndAt = useRef(0);
-  useEffect(() => {
-    const onOver = () => {
-      // Ignore pointerover churn while the window is dragged under the cursor,
-      // and the SYNTHETIC pointerover the browser fires right after capture is
-      // released on drag end (that one must NOT clear the suppression). Only a
-      // genuine re-entry, a moment after the drag, reveals the grip again.
-      if (st.current && st.current.armedNow) return;
-      if (Date.now() - dragEndAt.current < 600) return;
-      setPostDrag(false);
-    };
-    window.addEventListener("pointerover", onOver);
-    return () => window.removeEventListener("pointerover", onOver);
-  }, []);
-  // Visibility is driven by pure CSS `body:hover .drag-grip` (see overlay.html):
-  // the layout engine tracks the real pointer position, so the grip reveals on
-  // hover without the stuck-visible (JS pointerout dropped by the Dock webview)
-  // or blinking (JS idle timer) problems the event-based versions had.
+  // Visibility is driven by `body.pointer-inside` (toggled from the Rust-side
+  // CursorEntered/CursorLeft events, see overlay.tsx + window.rs) — reliable
+  // where the Dock webview's DOM pointerleave / CSS :hover are not.
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const raf = useRef<number | null>(null);
   const st = useRef<{
@@ -103,10 +85,6 @@ function DragGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
     st.current = null;
     setDragging(false);
     onInteracting(false);
-    // Suppress the grip until the pointer leaves and re-enters (ignoring the
-    // synthetic pointerover fired right after this reset — see dragEndAt guard).
-    dragEndAt.current = Date.now();
-    setPostDrag(true);
   };
 
   const flush = () => {
@@ -215,7 +193,7 @@ function DragGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
   return (
     <div
       data-testid="overlay-drag-grip"
-      className={`drag-grip${dragging ? " dragging" : ""}${postDrag ? " post-drag" : ""}`}
+      className={`drag-grip${dragging ? " dragging" : ""}`}
       aria-label="Move overlay (hold to drag, double-click to reset)"
       title="Hold to drag · double-click to reset"
       onPointerDown={onPointerDown}
@@ -365,6 +343,25 @@ export function OverlayApp() {
   // outline then, because an orb fills the window edge to edge and nothing else
   // would say where the window (and therefore the resize grip) actually ends.
   const [interacting, setInteracting] = useState(false);
+
+  // Reveal the handles only while the OS pointer is over the overlay window.
+  // Driven by the Rust-side CursorEntered/CursorLeft events (overlay://pointer-
+  // inside) because the Dock webview doesn't deliver DOM pointerleave or keep
+  // CSS :hover in sync. Toggle a body class the grip CSS keys off of.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void listen<boolean>("overlay://pointer-inside", (e) => {
+      document.body.classList.toggle("pointer-inside", e.payload);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   // Track actual OS window size so the theme canvas fills the window.
   // When innerWidth/innerHeight is 0 (jsdom/headless), fall back to

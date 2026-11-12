@@ -33,8 +33,8 @@
         pointer-events: none;
         transition: opacity 140ms ease;
       }
-      body:hover .drag-grip,
-      body:hover .resize-grip {
+      body.pointer-inside .drag-grip,
+      body.pointer-inside .resize-grip {
         opacity: 1;
         pointer-events: auto;
       }
@@ -42,12 +42,6 @@
       .resize-grip.resizing {
         opacity: 1 !important;
         pointer-events: auto !important;
-      }
-      /* After a drag the pointer sits on the overlay and capture can leave
-       * :hover stuck; keep the grip hidden until a genuine re-entry. */
-      .drag-grip.post-drag {
-        opacity: 0 !important;
-        pointer-events: none !important;
       }
       /* The overlay's own bounds, drawn only while the user is moving or
        * resizing it: an orb fills the window edge to edge, so without this

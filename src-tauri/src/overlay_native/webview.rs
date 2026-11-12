@@ -48,6 +48,10 @@ pub mod events {
     pub const SPECTRUM_BINS: &str = "overlay://spectrum-bins";
     /// Theme name updates (`String` JSON).
     pub const THEME: &str = "overlay://theme";
+    /// Pointer entered (`true`) / left (`false`) the overlay OS window. Driven
+    /// from windowing-system CursorEntered/CursorLeft because the Dock webview
+    /// does not reliably deliver DOM pointerleave / maintain CSS :hover.
+    pub const POINTER_INSIDE: &str = "overlay://pointer-inside";
 }
 
 /// Cross-platform overlay backend backed by a plain Tauri `WebviewWindow`.

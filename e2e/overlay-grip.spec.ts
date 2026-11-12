@@ -4,9 +4,12 @@ import { expect, test } from "@playwright/test";
  * Overlay control handles: the move grip (top-left) and the resize grip
  * (bottom-right).
  *
- * Contract: both handles are HIDDEN at rest and revealed only while the pointer
- * is over the overlay zone (CSS body:hover); they hide again when the pointer
- * leaves.
+ * Contract: both handles are HIDDEN at rest and revealed only while the OS
+ * pointer is over the overlay zone. Reveal is driven by the Rust-side
+ * CursorEntered/CursorLeft events, which toggle `body.pointer-inside` (the Dock
+ * webview doesn't deliver DOM pointerleave / keep :hover in sync). In the
+ * browser there is no Tauri event, so the test toggles that class directly to
+ * verify the CSS wiring.
  *
  * Runs in a 72×72 viewport (the orb overlay footprint) with a real WebGL orb.
  */
@@ -39,19 +42,18 @@ test.describe("overlay control handles", () => {
     await page.waitForSelector(MOVE, { state: "attached", timeout: 5000 });
     await page.waitForSelector(RESIZE, { state: "attached", timeout: 5000 });
 
-    // Pointer parked off the overlay: both handles hidden.
-    await page.mouse.move(300, 300);
+    // At rest (pointer not inside): both handles hidden.
     await expect.poll(() => opacity(page, MOVE), { timeout: 1000 }).toBeLessThan(0.1);
     await expect.poll(() => opacity(page, RESIZE), { timeout: 1000 }).toBeLessThan(0.1);
 
-    // Pointer over the overlay: both revealed.
-    await page.mouse.move(36, 36);
+    // Pointer enters the overlay zone → both revealed.
+    await page.evaluate(() => document.body.classList.add("pointer-inside"));
     await expect.poll(() => opacity(page, MOVE), { timeout: 1000 }).toBeGreaterThan(0.9);
     await expect.poll(() => opacity(page, RESIZE), { timeout: 1000 }).toBeGreaterThan(0.9);
     await page.screenshot({ path: test.info().outputPath("handles-hover.png") });
 
-    // Pointer leaves: both hidden again.
-    await page.mouse.move(300, 300);
+    // Pointer leaves → both hidden again.
+    await page.evaluate(() => document.body.classList.remove("pointer-inside"));
     await expect.poll(() => opacity(page, MOVE), { timeout: 1000 }).toBeLessThan(0.1);
     await expect.poll(() => opacity(page, RESIZE), { timeout: 1000 }).toBeLessThan(0.1);
   });
@@ -59,7 +61,7 @@ test.describe("overlay control handles", () => {
   test("move grip top-left, resize grip bottom-right", async ({ page }) => {
     await page.goto("/overlay.html?theme=orb_ion");
     await page.waitForSelector(MOVE, { state: "attached", timeout: 5000 });
-    await page.mouse.move(36, 36); // reveal
+    await page.evaluate(() => document.body.classList.add("pointer-inside")); // reveal
     const move = await page.locator(MOVE).boundingBox();
     const resize = await page.locator(RESIZE).boundingBox();
     if (move) {
