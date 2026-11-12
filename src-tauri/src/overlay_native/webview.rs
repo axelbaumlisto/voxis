@@ -205,10 +205,14 @@ fn start_overlay_pointer_poll(app: &AppHandle) {
             let app_main = app.clone();
             let latch_main = latch.clone();
             let _ = app.run_on_main_thread(move || {
-                if let Some(now) = overlay_pointer_inside(&app_main) {
-                    if now != latch_main.swap(now, Ordering::SeqCst) {
-                        let _ = app_main.emit(events::POINTER_INSIDE, now);
+                match overlay_pointer_inside(&app_main) {
+                    Some(now) => {
+                        if now != latch_main.swap(now, Ordering::SeqCst) {
+                            tracing::info!("overlay POLL inside -> {now}");
+                            let _ = app_main.emit(events::POINTER_INSIDE, now);
+                        }
                     }
+                    None => tracing::info!("overlay POLL none"),
                 }
             });
         });
@@ -226,12 +230,15 @@ fn overlay_pointer_inside(app: &AppHandle) -> Option<bool> {
     let size = win.outer_size().ok()?;
     let pointer = gtk::gdk::Display::default()?.default_seat()?.pointer()?;
     let (_, px, py) = pointer.position();
-    Some(
-        px >= pos.x
-            && py >= pos.y
-            && px < pos.x + size.width as i32
-            && py < pos.y + size.height as i32,
-    )
+    let inside = px >= pos.x
+        && py >= pos.y
+        && px < pos.x + size.width as i32
+        && py < pos.y + size.height as i32;
+    tracing::info!(
+        "overlay POLL ptr={px},{py} win={},{} {}x{} inside={inside}",
+        pos.x, pos.y, size.width, size.height
+    );
+    Some(inside)
 }
 
 /// Build a new transparent, borderless, always-on-top webview window for
