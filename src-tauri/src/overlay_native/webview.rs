@@ -48,6 +48,10 @@ pub mod events {
     pub const SPECTRUM_BINS: &str = "overlay://spectrum-bins";
     /// Theme name updates (`String` JSON).
     pub const THEME: &str = "overlay://theme";
+    /// Pointer entered (`true`) / left (`false`) the overlay window, from GTK
+    /// enter/leave-notify. The frontend settle-debounces it to reveal/hide the
+    /// drag/resize handles without flapping.
+    pub const POINTER_INSIDE: &str = "overlay://pointer-inside";
 }
 
 /// Cross-platform overlay backend backed by a plain Tauri `WebviewWindow`.
@@ -251,10 +255,36 @@ fn build_overlay_window(
     // so the compositor sees the correct geometry immediately.
     #[cfg(target_os = "linux")]
     {
+        let app_evt = app.clone();
         let _ = window.with_webview(move |webview| {
             use gtk::prelude::{Cast, GtkWindowExt, WidgetExt};
             let wv = webview.inner();
             wv.set_size_request(1, 1);
+            // Reveal/hide the drag+resize handles from GTK enter/leave-notify on
+            // the WebView widget (DOM pointermove/:hover don't reach this
+            // borderless Dock webview). Filter Grab/Ungrab bursts and Inferior
+            // crossings; the frontend settle-debounces to avoid any flap.
+            {
+                use gtk::gdk::CrossingMode;
+                let app_enter = app_evt.clone();
+                wv.connect_enter_notify_event(move |_, e| {
+                    if e.mode() == CrossingMode::Normal
+                        && e.detail() != gtk::gdk::NotifyType::Inferior
+                    {
+                        let _ = app_enter.emit(events::POINTER_INSIDE, true);
+                    }
+                    gtk::glib::Propagation::Proceed
+                });
+                let app_leave = app_evt.clone();
+                wv.connect_leave_notify_event(move |_, e| {
+                    if e.mode() == CrossingMode::Normal
+                        && e.detail() != gtk::gdk::NotifyType::Inferior
+                    {
+                        let _ = app_leave.emit(events::POINTER_INSIDE, false);
+                    }
+                    gtk::glib::Propagation::Proceed
+                });
+            }
             // Also force-resize the toplevel GTK window in case the
             // compositor has already cached the 200×200 constraints.
             if let Some(toplevel) = wv.toplevel() {

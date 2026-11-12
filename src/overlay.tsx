@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useOverlayState } from "./hooks/useOverlayState";
 import ThemeHost from "./theme-engine/ThemeHost";
 import { fetchThemeModule } from "./theme-engine/fetchModule";
@@ -348,31 +349,30 @@ export function OverlayApp() {
   // inside) because the Dock webview doesn't deliver DOM pointerleave or keep
   // CSS :hover in sync. Toggle a body class the grip CSS keys off of.
   useEffect(() => {
-    // Reveal the handles on pointer ACTIVITY over the overlay; hide them after
-    // a short idle. The hide is a JS timer, which fires in the webview's own
-    // event loop — reliable even when the overlay gets no GTK events (the one
-    // signal GTK :hover / pointerleave / glib-timeouts could NOT give us in
-    // this borderless Dock webview). Movement keeps resetting the timer, so a
-    // hovered-and-moving pointer never blinks; leaving stops the activity and
-    // the handles fade after IDLE_MS.
-    const IDLE_MS = 650;
-    let hideTimer: ReturnType<typeof setTimeout> | null = null;
-    const activity = () => {
-      document.body.classList.add("pointer-inside");
-      if (hideTimer) clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => {
-        document.body.classList.remove("pointer-inside");
-        hideTimer = null;
-      }, IDLE_MS);
-    };
-    window.addEventListener("pointermove", activity);
-    window.addEventListener("pointerdown", activity);
-    window.addEventListener("pointerenter", activity);
+    // Reveal/hide the handles from the Rust pointer-inside event (GTK enter/
+    // leave). SETTLE-DEBOUNCE in BOTH directions: apply the target only after
+    // it has been stable for SETTLE_MS. A burst of flapping enter/leave (the
+    // WM's grab/ungrab crossings, or the webview's content-window crossings)
+    // keeps resetting the timer, so the class changes once — no blinking —
+    // settling on whatever the pointer actually did.
+    const SETTLE_MS = 180;
+    let settle: ReturnType<typeof setTimeout> | null = null;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void listen<boolean>("overlay://pointer-inside", (e) => {
+      if (settle) clearTimeout(settle);
+      settle = setTimeout(() => {
+        document.body.classList.toggle("pointer-inside", e.payload);
+        settle = null;
+      }, SETTLE_MS);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
     return () => {
-      window.removeEventListener("pointermove", activity);
-      window.removeEventListener("pointerdown", activity);
-      window.removeEventListener("pointerenter", activity);
-      if (hideTimer) clearTimeout(hideTimer);
+      cancelled = true;
+      if (settle) clearTimeout(settle);
+      if (unlisten) unlisten();
     };
   }, []);
 
