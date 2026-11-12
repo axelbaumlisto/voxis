@@ -255,6 +255,7 @@ fn build_overlay_window(
     // so the compositor sees the correct geometry immediately.
     #[cfg(target_os = "linux")]
     {
+        let app_evt = app.clone();
         let _ = window.with_webview(move |webview| {
             use gtk::prelude::{Cast, GtkWindowExt, WidgetExt};
             let wv = webview.inner();
@@ -264,6 +265,31 @@ fn build_overlay_window(
             if let Some(toplevel) = wv.toplevel() {
                 if let Ok(gtk_window) = toplevel.downcast::<gtk::Window>() {
                     gtk_window.resize(w as i32, h as i32);
+                    // Hover-reveal of the drag/resize handles is driven from the
+                    // windowing system here: the Dock webview does not deliver
+                    // DOM pointerleave or keep CSS :hover in sync, but GTK
+                    // enter/leave-notify on the toplevel are reliable. Emit a
+                    // bool the overlay webview keys off (body.pointer-inside).
+                    // NotifyInferior crossings (moving onto the child webview)
+                    // are ignored so moving WITHIN the overlay doesn't flap.
+                    gtk_window.add_events(
+                        gtk::gdk::EventMask::ENTER_NOTIFY_MASK
+                            | gtk::gdk::EventMask::LEAVE_NOTIFY_MASK,
+                    );
+                    let app_enter = app_evt.clone();
+                    gtk_window.connect_enter_notify_event(move |_w, e| {
+                        if e.detail() != gtk::gdk::NotifyType::Inferior {
+                            let _ = app_enter.emit(events::POINTER_INSIDE, true);
+                        }
+                        gtk::glib::Propagation::Proceed
+                    });
+                    let app_leave = app_evt.clone();
+                    gtk_window.connect_leave_notify_event(move |_w, e| {
+                        if e.detail() != gtk::gdk::NotifyType::Inferior {
+                            let _ = app_leave.emit(events::POINTER_INSIDE, false);
+                        }
+                        gtk::glib::Propagation::Proceed
+                    });
                     // Never steal keyboard focus from the active app: a click on
                     // the pill still delivers the pointer event to WebKit (so
                     // click-to-dictate works), but the WM must not transfer input
