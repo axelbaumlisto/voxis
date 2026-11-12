@@ -27,7 +27,17 @@ build outDir and gets emptied on every `bun run build`):
   Homebrew) and `artifacts/Voxis_<version>_aarch64.dmg` (Developer ID signed,
   notarized, stapled — see "Signed/notarized DMG lane")
 
-GitHub is **binary releases only**. Do not push private Voxis source to GitHub.
+GitHub carries **both**: release binaries (the canonical public download) and,
+by the owner's decision on 2026-11-12, the `main` branch kept in sync with
+Forgejo (`git push origin main` after every push to Forgejo). The repo is
+public and MIT, so syncing source adds no exposure — and a half-synced history
+is worse than either extreme: on that date GitHub's `main` had been frozen
+since 2026-10-20 by one accidental source push, 29 commits behind, which only
+surfaced when someone asked where the branch came from.
+
+Rules that still hold: releases are published from Forgejo CI (never built
+locally), tags live in Forgejo (`plugin-v*` tags are Forgejo-only), and GitHub
+release assets are never deleted (see "Never delete release assets").
 
 ---
 
