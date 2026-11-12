@@ -289,6 +289,7 @@ fn build_overlay_window(
                     gtk::glib::timeout_add_local(
                         std::time::Duration::from_millis(150),
                         move || {
+                            use gtk::gdk::prelude::SeatExt;
                             use gtk::glib::ControlFlow;
                             let Some(win) = weak.upgrade() else {
                                 return ControlFlow::Break;
