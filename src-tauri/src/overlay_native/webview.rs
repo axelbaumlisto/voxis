@@ -265,21 +265,16 @@ fn build_overlay_window(
             // borderless Dock webview). Filter Grab/Ungrab bursts and Inferior
             // crossings; the frontend settle-debounces to avoid any flap.
             {
-                use gtk::gdk::CrossingMode;
                 let app_enter = app_evt.clone();
                 wv.connect_enter_notify_event(move |_, e| {
-                    if e.mode() == CrossingMode::Normal
-                        && e.detail() != gtk::gdk::NotifyType::Inferior
-                    {
+                    if e.detail() != gtk::gdk::NotifyType::Inferior {
                         let _ = app_enter.emit(events::POINTER_INSIDE, true);
                     }
                     gtk::glib::Propagation::Proceed
                 });
                 let app_leave = app_evt.clone();
                 wv.connect_leave_notify_event(move |_, e| {
-                    if e.mode() == CrossingMode::Normal
-                        && e.detail() != gtk::gdk::NotifyType::Inferior
-                    {
+                    if e.detail() != gtk::gdk::NotifyType::Inferior {
                         let _ = app_leave.emit(events::POINTER_INSIDE, false);
                     }
                     gtk::glib::Propagation::Proceed
