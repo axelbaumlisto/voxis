@@ -402,6 +402,46 @@ jobs:
           ls artifacts/*.rpm >/dev/null 2>&1 || { echo "ERROR: no .rpm for GitHub release"; exit 1; }
           gh release upload "$tag" "${files[@]}" --repo axelbaumlisto/voxis --clobber
 
+          # DRIFT GUARD (2026-11-11, v0.1.9/0.1.10/0.1.13 lost their Linux and
+          # Windows assets on GitHub while this pipeline — whose only DELETE
+          # calls target Forgejo — kept uploading). GitHub is supposed to hold
+          # the FULL history: `releases/latest` is what the landing site links
+          # and the Homebrew formula pins a specific asset URL, so a silently
+          # emptied release is a broken invariant, not a cosmetic gap.
+          #
+          # This release must end with every expected file...
+          expected=0
+          missing=()
+          for f in "${files[@]}"; do
+            [ -f "$f" ] || continue
+            expected=$((expected + 1))
+          done
+          published=$(gh release view "$tag" --repo axelbaumlisto/voxis --json assets --jq '.assets|length')
+          echo "GitHub release $tag: $published asset(s), $expected expected"
+          if [ "$published" -lt "$expected" ]; then
+            echo "::error::GitHub release $tag has $published asset(s) but $expected were uploaded — publish is incomplete"
+            exit 1
+          fi
+          # ...and the previous three releases must still HAVE assets. An empty
+          # older release means history was stripped outside this pipeline.
+          for old_tag in $(gh release list --repo axelbaumlisto/voxis --limit 4 --json tagName --jq '.[].tagName' | grep -v "^${tag}$" | head -3); do
+            n=$(gh release view "$old_tag" --repo axelbaumlisto/voxis --json assets --jq '.assets|length')
+            if [ "$n" -eq 0 ]; then
+              echo "::warning::GitHub release $old_tag has NO assets — history was stripped outside this pipeline (see .forgejo/workflows/release.yml drift guard)"
+            else
+              echo "  $old_tag: $n asset(s)"
+            fi
+          done
+
+          # Keep the built artifacts for this tag on the host. Each release
+          # overwrites artifacts/, so without this an asset stripped from
+          # GitHub can only be rebuilt from the tag — this makes restoring it a
+          # copy instead of a 40-minute release rerun.
+          archive="$HOME/voxis-release-archive/$tag"
+          mkdir -p "$archive"
+          cp -a "${files[@]}" "$archive"/ 2>/dev/null || true
+          echo "archived $(ls -1 "$archive" | wc -l | tr -d ' ') artifact(s) to $archive"
+
       # NOTE: no voxis.top/dist mirror step. voxis.top is served by Vercel (the
       # landing site), not this spex host's Caddy, so files copied under spex
       # would be unreachable at voxis.top. The landing's Download buttons point

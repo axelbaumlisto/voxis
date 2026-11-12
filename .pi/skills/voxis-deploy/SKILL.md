@@ -285,6 +285,27 @@ for l in d.splitlines():
 
 ---
 
+## Never delete release assets
+
+`gh release delete`, deleting a release asset, or any `DELETE` against
+`api.github.com/.../releases/assets/...` is **owner-only** and needs an
+explicit instruction. `release.yml` has exactly two `DELETE` calls and both
+target Forgejo (the prune step); GitHub receives uploads only.
+
+Why the rule exists: on 2026-11-11 three GitHub releases (v0.1.9 with 0 assets,
+v0.1.10 and v0.1.13 with only their three macOS files) had lost their Linux and
+Windows assets. Nothing in this pipeline can do that, so it was an outside
+action; the effect was invisible until someone compared the two forges.
+`publish` now fails when this release ends with fewer assets than it uploaded,
+warns when any of the previous three releases is empty, and archives every
+artifact set under `~/voxis-release-archive/<tag>/` on the host so a stripped
+asset can be restored by copying instead of rebuilding.
+
+GitHub keeps the FULL history on purpose: the landing site links
+`releases/latest/download/<name>`, but the Homebrew formula pins a specific
+asset URL for a specific tag, so old assets must stay downloadable. Forgejo is
+the one that rotates (newest release only) — see `prune-release-assets.sh`.
+
 ## Publishing targets
 
 - Forgejo release: `https://clipshot.cc/git/zverozabr/voxis/releases/tag/vX.Y.Z` —
