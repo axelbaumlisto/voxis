@@ -289,13 +289,10 @@ fn build_overlay_window(
                     gtk::glib::timeout_add_local(
                         std::time::Duration::from_millis(150),
                         move || {
-                            use gtk::gdk::prelude::SeatExt;
+                            use gtk::gdk::prelude::{DeviceExt, SeatExt};
                             use gtk::glib::ControlFlow;
                             let Some(win) = weak.upgrade() else {
                                 return ControlFlow::Break;
-                            };
-                            let Some(gdkwin) = win.window() else {
-                                return ControlFlow::Continue;
                             };
                             let Some(pointer) = gtk::gdk::Display::default()
                                 .and_then(|d| d.default_seat())
@@ -303,12 +300,18 @@ fn build_overlay_window(
                             else {
                                 return ControlFlow::Continue;
                             };
-                            let (_, px, py, _) = gdkwin.device_position(&pointer);
-                            let now = px >= 0
-                                && py >= 0
-                                && px < gdkwin.width()
-                                && py < gdkwin.height();
+                            // Global (root) coordinates vs the window's root rect
+                            // — robust for a borderless Dock window where the
+                            // window-relative device_position misbehaved.
+                            let (_, px, py) = pointer.position();
+                            let (wx, wy) = win.position();
+                            let (ww, wh) = win.size();
+                            let now =
+                                px >= wx && py >= wy && px < wx + ww && py < wy + wh;
                             if now != inside.swap(now, Ordering::SeqCst) {
+                                tracing::info!(
+                                    "overlay pointer-inside -> {now} (ptr {px},{py} win {wx},{wy} {ww}x{wh})"
+                                );
                                 let _ = app_poll.emit(events::POINTER_INSIDE, now);
                             }
                             ControlFlow::Continue
