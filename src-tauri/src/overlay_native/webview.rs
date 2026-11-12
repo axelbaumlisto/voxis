@@ -261,22 +261,37 @@ fn build_overlay_window(
             let wv = webview.inner();
             wv.set_size_request(1, 1);
             // Hover-reveal of the drag/resize handles is driven from GTK
-            // enter/leave-notify, NOT DOM/CSS :hover (the borderless Dock
-            // webview doesn't deliver DOM pointerleave or keep :hover in sync).
-            // Connect on the WebView widget itself — the pointer is directly
-            // over it, so the toplevel window often never sees the crossing.
-            // Emits overlay://pointer-inside, which toggles body.pointer-inside.
+            // enter/leave-notify on the WebView widget (the pointer is directly
+            // over it, so the toplevel window often never sees the crossing),
+            // NOT DOM/CSS :hover (the borderless Dock webview doesn't deliver
+            // DOM pointerleave or keep :hover in sync). Emits
+            // overlay://pointer-inside, which toggles body.pointer-inside.
+            //
+            // Two filters kill the "blinks N times when closing" flap:
+            //  - mode == Normal: ignore the Grab/Ungrab crossing BURST the WM
+            //    emits around pointer grabs (clicks, window moves);
+            //  - a shared `inside` latch: emit ONLY on a real transition, so
+            //    duplicate enter/leave events collapse to one show / one hide.
             {
+                use gtk::gdk::CrossingMode;
+                let inside = std::sync::Arc::new(AtomicBool::new(false));
                 let app_enter = app_evt.clone();
-                wv.connect_enter_notify_event(move |_w, _e| {
-                    let _ = app_enter.emit(events::POINTER_INSIDE, true);
+                let inside_enter = inside.clone();
+                wv.connect_enter_notify_event(move |_w, e| {
+                    if e.mode() == CrossingMode::Normal
+                        && !inside_enter.swap(true, Ordering::SeqCst)
+                    {
+                        let _ = app_enter.emit(events::POINTER_INSIDE, true);
+                    }
                     gtk::glib::Propagation::Proceed
                 });
                 let app_leave = app_evt.clone();
+                let inside_leave = inside;
                 wv.connect_leave_notify_event(move |_w, e| {
-                    // Ignore crossings into a child (NotifyInferior) so moving
-                    // within the webview doesn't spuriously hide the handles.
-                    if e.detail() != gtk::gdk::NotifyType::Inferior {
+                    if e.mode() == CrossingMode::Normal
+                        && e.detail() != gtk::gdk::NotifyType::Inferior
+                        && inside_leave.swap(false, Ordering::SeqCst)
+                    {
                         let _ = app_leave.emit(events::POINTER_INSIDE, false);
                     }
                     gtk::glib::Propagation::Proceed
@@ -287,29 +302,6 @@ fn build_overlay_window(
             if let Some(toplevel) = wv.toplevel() {
                 if let Ok(gtk_window) = toplevel.downcast::<gtk::Window>() {
                     gtk_window.resize(w as i32, h as i32);
-                    // Hover-reveal of the drag/resize handles is driven from the
-                    // windowing system here: the Dock webview does not deliver
-                    // DOM pointerleave or keep CSS :hover in sync, but GTK
-                    // enter/leave-notify on the toplevel are reliable. Emit a
-                    // bool the overlay webview keys off (body.pointer-inside).
-                    // NotifyInferior crossings (moving onto the child webview)
-                    // are ignored so moving WITHIN the overlay doesn't flap.
-                    // (A GtkWindow receives crossing events by default, so no
-                    // explicit event-mask change is needed.)
-                    let app_enter = app_evt.clone();
-                    gtk_window.connect_enter_notify_event(move |_w, e| {
-                        if e.detail() != gtk::gdk::NotifyType::Inferior {
-                            let _ = app_enter.emit(events::POINTER_INSIDE, true);
-                        }
-                        gtk::glib::Propagation::Proceed
-                    });
-                    let app_leave = app_evt.clone();
-                    gtk_window.connect_leave_notify_event(move |_w, e| {
-                        if e.detail() != gtk::gdk::NotifyType::Inferior {
-                            let _ = app_leave.emit(events::POINTER_INSIDE, false);
-                        }
-                        gtk::glib::Propagation::Proceed
-                    });
                     // Never steal keyboard focus from the active app: a click on
                     // the pill still delivers the pointer event to WebKit (so
                     // click-to-dictate works), but the WM must not transfer input
