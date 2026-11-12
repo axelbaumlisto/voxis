@@ -2,10 +2,13 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const invokeMock = vi.fn(async (cmd: string) => {
-  if (cmd === "get_overlay_window_size") return [160, 160];
-  return null;
-});
+const invokeMock = vi.fn(async (_cmd: string) => null);
+
+// The overlay webview fills its window, so the grip reads the starting edge
+// from `innerWidth/innerHeight`. jsdom's default viewport is 1024x768 — pin it
+// to the size the real overlay window has for this test (160).
+Object.defineProperty(window, "innerWidth", { configurable: true, value: 160 });
+Object.defineProperty(window, "innerHeight", { configurable: true, value: 160 });
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (cmd: string, args?: unknown) => invokeMock(cmd, args) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));

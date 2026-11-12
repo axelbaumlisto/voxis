@@ -25,6 +25,7 @@ import type { ThemeState } from "./theme-engine/contract";
 import { createPressController } from "./overlay/pressController";
 import { isCanvasOpaqueAt } from "./overlay/hitTest";
 import { MIN_OVERLAY_EDGE, resizeEdgeFromDelta } from "./overlay/resize";
+import { createGesture } from "./overlay/gesture";
 
 /**
  * Semi-transparent drag grip on the LEFT edge of the overlay.
@@ -270,89 +271,61 @@ function DragGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
  */
 function ResizeGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
   const [resizing, setResizing] = useState(false);
-  const raf = useRef<number | null>(null);
-  const st = useRef<{
-    pointerId: number;
-    startScreenX: number;
-    startScreenY: number;
-    startEdge: number | null;
-    lastEdge: number;
-    pending: { x: number; y: number } | null;
-  } | null>(null);
+  const gesture = useRef<ReturnType<typeof createGesture> | null>(null);
+  const lastEdge = useRef(0);
+  // The gesture closure reads the start edge through a ref: the size is
+  // captured on pointer-down, while the factory is built once per mount.
+  const startEdgeAt = useRef(0);
 
-  const flush = () => {
-    raf.current = null;
-    const s = st.current;
-    if (!s || s.startEdge === null || !s.pending) return;
-    const edge = resizeEdgeFromDelta(
-      s.startEdge,
-      s.pending.x - s.startScreenX,
-      s.pending.y - s.startScreenY,
-    );
-    if (edge === s.lastEdge) return;
-    s.lastEdge = edge;
-    void invoke("resize_overlay_window", { width: edge, height: edge });
-  };
+  if (gesture.current === null) {
+    // The start edge is the window's own logical size — the overlay webview
+    // fills the window exactly, so `innerWidth` needs no IPC round-trip and no
+    // "not resolved yet" state in the first frames of a gesture.
+    gesture.current = createGesture({
+      onFrame: (point, start) => {
+        const edge = resizeEdgeFromDelta(
+          startEdgeAt.current,
+          point.screenX - start.screenX,
+          point.screenY - start.screenY,
+        );
+        if (edge === lastEdge.current) return;
+        lastEdge.current = edge;
+        void invoke("resize_overlay_window", { width: edge, height: edge });
+      },
+      onEnd: () => {
+        const edge = lastEdge.current;
+        lastEdge.current = 0;
+        setResizing(false);
+        onInteracting(false);
+        if (edge > 0) {
+          void invoke("set_overlay_custom_size", { width: edge, height: edge });
+        }
+      },
+    });
+  }
 
   const onPointerDown = (e: ReactPointerEvent) => {
-    if (e.button !== 0) return;
     e.stopPropagation();
+    startEdgeAt.current = Math.min(window.innerWidth, window.innerHeight);
+    if (!gesture.current!.begin(e)) return;
     e.preventDefault();
-    try {
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    } catch {
-      /* capture may already be gone; the gesture still tracks */
-    }
-    onInteracting(true);
+    lastEdge.current = 0;
     setResizing(true);
-    st.current = {
-      pointerId: e.pointerId,
-      startScreenX: e.screenX,
-      startScreenY: e.screenY,
-      // Filled in asynchronously: the window's size at gesture start is the
-      // reference every delta is applied to. Deltas stay correct meanwhile.
-      startEdge: null,
-      lastEdge: 0,
-      pending: null,
-    };
-    void invoke<[number, number]>("get_overlay_window_size").then((size) => {
-      const s = st.current;
-      if (!s) return;
-      s.startEdge = Math.min(size[0], size[1]);
-      if (s.pending) flush();
-    });
+    onInteracting(true);
   };
 
-  const onPointerMove = (e: ReactPointerEvent) => {
-    const s = st.current;
-    if (!s || e.pointerId !== s.pointerId) return;
-    s.pending = { x: e.screenX, y: e.screenY };
-    if (raf.current === null) raf.current = requestAnimationFrame(flush);
-  };
-
-  const reset = () => {
-    if (raf.current !== null) {
-      cancelAnimationFrame(raf.current);
-      raf.current = null;
-    }
-    st.current = null;
+  const onPointerMove = (e: ReactPointerEvent) => gesture.current!.move(e);
+  const onPointerUp = () => gesture.current!.end();
+  const onPointerCancel = () => {
+    gesture.current!.cancel();
     setResizing(false);
     onInteracting(false);
   };
-
-  const onPointerUp = () => {
-    const edge = st.current?.lastEdge ?? 0;
-    reset();
-    // Persist only an actual resize (a tap on the grip must not re-init the
-    // overlay, which would interrupt a recording).
-    if (edge > 0) {
-      void invoke("set_overlay_custom_size", { width: edge, height: edge });
-    }
-  };
-
   const onDoubleClick = (e: ReactMouseEvent) => {
     e.stopPropagation();
-    reset();
+    gesture.current!.cancel();
+    setResizing(false);
+    onInteracting(false);
     void invoke("clear_overlay_custom_size");
   };
 
@@ -365,7 +338,7 @@ function ResizeGrip({ onInteracting }: { onInteracting: (on: boolean) => void })
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={reset}
+      onPointerCancel={onPointerCancel}
       onDoubleClick={onDoubleClick}
       style={{
         position: "fixed",
@@ -375,7 +348,6 @@ function ResizeGrip({ onInteracting }: { onInteracting: (on: boolean) => void })
         height: 14,
         boxSizing: "border-box",
         cursor: "nwse-resize",
-        // Three etched dots read as "grab here" at 14 px without a label.
         background:
           "radial-gradient(circle at 30% 70%, rgba(255,255,255,0.95) 1.2px, transparent 1.6px), radial-gradient(circle at 70% 70%, rgba(255,255,255,0.95) 1.2px, transparent 1.6px), radial-gradient(circle at 70% 30%, rgba(255,255,255,0.95) 1.2px, transparent 1.6px), rgba(0,0,0,0.35)",
         borderRadius: 3,

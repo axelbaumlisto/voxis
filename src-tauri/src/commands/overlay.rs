@@ -283,12 +283,13 @@ pub fn move_overlay_window(x: i32, y: i32, app: AppHandle) -> Result<(), String>
 /// keeps it square and clamped). Main thread for the same reason as
 /// `move_overlay_window`: window geometry mutation must run there on
 /// macOS/GTK.
-#[tauri::command]
-#[specta::specta]
-pub fn resize_overlay_window(width: u32, height: u32, app: AppHandle) -> Result<(), String> {
-    use crate::orchestrator::overlay_resize::clamp_overlay_size;
-    let side = clamp_overlay_size(width.max(height)) as f64;
+/// The one place an overlay size is applied to the live window. Both the
+/// per-frame gesture (`resize_overlay_window`) and the persisted value
+/// (`set_overlay_custom_size`) go through here, so "how the window is resized"
+/// cannot drift between the two.
+fn apply_overlay_size(app: &AppHandle, side: u32) -> Result<(), String> {
     let app2 = app.clone();
+    let side = side as f64;
     app.run_on_main_thread(move || {
         if let Some(w) = app2.get_webview_window(OVERLAY_PANEL_LABEL) {
             let _ = w.set_size(tauri::LogicalSize::new(side, side));
@@ -297,16 +298,11 @@ pub fn resize_overlay_window(width: u32, height: u32, app: AppHandle) -> Result<
     .map_err(|e| e.to_string())
 }
 
-/// Current overlay window size in LOGICAL px — the resize start reference.
 #[tauri::command]
 #[specta::specta]
-pub fn get_overlay_window_size(app: AppHandle) -> Result<(u32, u32), String> {
-    let w = app
-        .get_webview_window(OVERLAY_PANEL_LABEL)
-        .ok_or_else(|| "overlay window not found".to_string())?;
-    let size = w.inner_size().map_err(|e| e.to_string())?;
-    let scale = w.scale_factor().unwrap_or(1.0).max(1.0);
-    Ok(((size.width as f64 / scale) as u32, (size.height as f64 / scale) as u32))
+pub fn resize_overlay_window(width: u32, height: u32, app: AppHandle) -> Result<(), String> {
+    use crate::orchestrator::overlay_resize::clamp_overlay_size;
+    apply_overlay_size(&app, clamp_overlay_size(width.max(height)))
 }
 
 /// Current overlay window top-left in LOGICAL px — the drag start reference.
@@ -382,12 +378,7 @@ pub async fn set_overlay_custom_size(
     // overlay would destroy and rebuild it — a visible flash, and it would cut
     // a recording that is in flight. Persisting is all that is left to do; the
     // config is what the next build/theme switch reads.
-    let app2 = app_handle.clone();
-    let _ = app_handle.run_on_main_thread(move || {
-        if let Some(w) = app2.get_webview_window(OVERLAY_PANEL_LABEL) {
-            let _ = w.set_size(tauri::LogicalSize::new(side as f64, side as f64));
-        }
-    });
+    apply_overlay_size(&app_handle, side)?;
     Ok(())
 }
 

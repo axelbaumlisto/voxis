@@ -14,6 +14,13 @@
   back to the theme. Limits 56…1024 logical px, clamped on BOTH sides
   (`orchestrator/overlay_resize.rs` is the single definition, and a test
   asserts the TS mirror in `src/overlay/resize.ts` agrees).
+- The gesture plumbing both grips need (pointer capture, one call per
+  animation frame, last-position flush on release) now lives in
+  `overlay/gesture.ts` with its own tests — `DragGrip` and `ResizeGrip` differ
+  only in what they compute from the pointer. The resize grip reads its
+  starting edge from `innerWidth/innerHeight` (the overlay webview fills the
+  window exactly), and the Rust side has ONE `apply_overlay_size` used by both
+  the per-frame command and the persisted one.
 - Why not `startResizeDragging()`: with `decorations:false` +
   `transparent:true` + `macOSPrivateApi:true` AppKit accepts that gesture and
   then silently declines to resize. The grip therefore drives the geometry

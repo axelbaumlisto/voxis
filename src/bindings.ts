@@ -738,27 +738,9 @@ async clearOverlayCustomSize() : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Live-resize the overlay window to `(w, h)` in LOGICAL px WITHOUT
- * persisting — called on every pointer-move of the corner grip (the frontend
- * keeps it square and clamped). Main thread for the same reason as
- * `move_overlay_window`: window geometry mutation must run there on
- * macOS/GTK.
- */
 async resizeOverlayWindow(width: number, height: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("resize_overlay_window", { width, height }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Current overlay window size in LOGICAL px — the resize start reference.
- */
-async getOverlayWindowSize() : Promise<Result<[number, number], string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("get_overlay_window_size") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

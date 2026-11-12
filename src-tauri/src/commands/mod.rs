@@ -76,7 +76,6 @@ pub use overlay::{
     hide_overlay,
     move_overlay_window,
     preview_visualization_theme,
-    get_overlay_window_size,
     read_theme_script,
     resize_overlay_window,
     reload_visualization_themes,
