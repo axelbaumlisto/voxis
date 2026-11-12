@@ -257,46 +257,9 @@ fn build_overlay_window(
     {
         let app_evt = app.clone();
         let _ = window.with_webview(move |webview| {
-            use gtk::prelude::{Cast, GtkWindowExt, WidgetExt};
+            use gtk::prelude::{Cast, GtkWindowExt, ObjectExt, WidgetExt};
             let wv = webview.inner();
             wv.set_size_request(1, 1);
-            // Hover-reveal of the drag/resize handles is driven from GTK
-            // enter/leave-notify on the WebView widget (the pointer is directly
-            // over it, so the toplevel window often never sees the crossing),
-            // NOT DOM/CSS :hover (the borderless Dock webview doesn't deliver
-            // DOM pointerleave or keep :hover in sync). Emits
-            // overlay://pointer-inside, which toggles body.pointer-inside.
-            //
-            // Two filters kill the "blinks N times when closing" flap:
-            //  - mode == Normal: ignore the Grab/Ungrab crossing BURST the WM
-            //    emits around pointer grabs (clicks, window moves);
-            //  - a shared `inside` latch: emit ONLY on a real transition, so
-            //    duplicate enter/leave events collapse to one show / one hide.
-            {
-                use gtk::gdk::CrossingMode;
-                let inside = std::sync::Arc::new(AtomicBool::new(false));
-                let app_enter = app_evt.clone();
-                let inside_enter = inside.clone();
-                wv.connect_enter_notify_event(move |_w, e| {
-                    if e.mode() == CrossingMode::Normal
-                        && !inside_enter.swap(true, Ordering::SeqCst)
-                    {
-                        let _ = app_enter.emit(events::POINTER_INSIDE, true);
-                    }
-                    gtk::glib::Propagation::Proceed
-                });
-                let app_leave = app_evt.clone();
-                let inside_leave = inside;
-                wv.connect_leave_notify_event(move |_w, e| {
-                    if e.mode() == CrossingMode::Normal
-                        && e.detail() != gtk::gdk::NotifyType::Inferior
-                        && inside_leave.swap(false, Ordering::SeqCst)
-                    {
-                        let _ = app_leave.emit(events::POINTER_INSIDE, false);
-                    }
-                    gtk::glib::Propagation::Proceed
-                });
-            }
             // Also force-resize the toplevel GTK window in case the
             // compositor has already cached the 200×200 constraints.
             if let Some(toplevel) = wv.toplevel() {
@@ -311,6 +274,45 @@ fn build_overlay_window(
                     gtk_window.set_can_focus(false);
                     gtk_window.set_focus_on_map(false);
                     gtk_window.set_type_hint(gtk::gdk::WindowTypeHint::Dock);
+
+                    // Hover-reveal of the drag/resize handles. GTK enter/leave-
+                    // notify on the borderless Dock webview FLAP (the content
+                    // GdkWindow + WM grab/ungrab crossings), which blinked the
+                    // handles. Instead POLL the pointer position vs the window
+                    // rect every 150 ms and emit overlay://pointer-inside only
+                    // on a real transition — a sampled boolean cannot flap.
+                    // A weak ref lets the poller stop itself once the window is
+                    // destroyed (rebuild on resize/theme change), no leak.
+                    let app_poll = app_evt.clone();
+                    let weak = gtk_window.downgrade();
+                    let inside = AtomicBool::new(false);
+                    gtk::glib::timeout_add_local(
+                        std::time::Duration::from_millis(150),
+                        move || {
+                            use gtk::glib::ControlFlow;
+                            let Some(win) = weak.upgrade() else {
+                                return ControlFlow::Break;
+                            };
+                            let Some(gdkwin) = win.window() else {
+                                return ControlFlow::Continue;
+                            };
+                            let Some(pointer) = gtk::gdk::Display::default()
+                                .and_then(|d| d.default_seat())
+                                .and_then(|s| s.pointer())
+                            else {
+                                return ControlFlow::Continue;
+                            };
+                            let (_, px, py, _) = gdkwin.device_position(&pointer);
+                            let now = px >= 0
+                                && py >= 0
+                                && px < gdkwin.width()
+                                && py < gdkwin.height();
+                            if now != inside.swap(now, Ordering::SeqCst) {
+                                let _ = app_poll.emit(events::POINTER_INSIDE, now);
+                            }
+                            ControlFlow::Continue
+                        },
+                    );
                 }
             }
         });
