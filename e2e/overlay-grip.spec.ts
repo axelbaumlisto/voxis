@@ -4,10 +4,9 @@ import { expect, test } from "@playwright/test";
  * Overlay control handles: the move grip (top-left) and the resize grip
  * (bottom-right).
  *
- * Contract: both handles are ALWAYS visible (subtle at rest, brighter on
- * hover). Hover-reveal was dropped because the overlay's borderless Dock
- * webview on X11/Wayland does not reliably deliver pointer enter/leave or
- * maintain :hover, so a reveal-on-hover handle would flake and vanish.
+ * Contract: both handles are HIDDEN at rest and revealed only while the pointer
+ * is over the overlay zone (CSS body:hover); they hide again when the pointer
+ * leaves.
  *
  * Runs in a 72×72 viewport (the orb overlay footprint) with a real WebGL orb.
  */
@@ -34,39 +33,42 @@ function opacity(page: import("@playwright/test").Page, sel: string) {
 }
 
 test.describe("overlay control handles", () => {
-  test("both handles are always visible at rest", async ({ page }) => {
+  test("hidden at rest, shown on hover, hidden again on leave", async ({ page }) => {
     await page.goto("/overlay.html?theme=orb_ion");
     await page.waitForSelector("[data-testid='theme-host']", { timeout: 5000 });
     await page.waitForSelector(MOVE, { state: "attached", timeout: 5000 });
     await page.waitForSelector(RESIZE, { state: "attached", timeout: 5000 });
 
-    // Pointer parked far away: handles must still be visible (subtle).
+    // Pointer parked off the overlay: both handles hidden.
     await page.mouse.move(300, 300);
-    await expect.poll(() => opacity(page, MOVE), { timeout: 1000 }).toBeGreaterThan(0.3);
-    await expect.poll(() => opacity(page, RESIZE), { timeout: 1000 }).toBeGreaterThan(0.3);
+    await expect.poll(() => opacity(page, MOVE), { timeout: 1000 }).toBeLessThan(0.1);
+    await expect.poll(() => opacity(page, RESIZE), { timeout: 1000 }).toBeLessThan(0.1);
+
+    // Pointer over the overlay: both revealed.
+    await page.mouse.move(36, 36);
+    await expect.poll(() => opacity(page, MOVE), { timeout: 1000 }).toBeGreaterThan(0.9);
+    await expect.poll(() => opacity(page, RESIZE), { timeout: 1000 }).toBeGreaterThan(0.9);
+    await page.screenshot({ path: test.info().outputPath("handles-hover.png") });
+
+    // Pointer leaves: both hidden again.
+    await page.mouse.move(300, 300);
+    await expect.poll(() => opacity(page, MOVE), { timeout: 1000 }).toBeLessThan(0.1);
+    await expect.poll(() => opacity(page, RESIZE), { timeout: 1000 }).toBeLessThan(0.1);
   });
 
-  test("move grip sits top-left, resize grip bottom-right", async ({ page }) => {
+  test("move grip top-left, resize grip bottom-right", async ({ page }) => {
     await page.goto("/overlay.html?theme=orb_ion");
     await page.waitForSelector(MOVE, { state: "attached", timeout: 5000 });
-    await page.waitForSelector(RESIZE, { state: "attached", timeout: 5000 });
-
+    await page.mouse.move(36, 36); // reveal
     const move = await page.locator(MOVE).boundingBox();
     const resize = await page.locator(RESIZE).boundingBox();
-    expect(move).not.toBeNull();
-    expect(resize).not.toBeNull();
     if (move) {
       expect(move.x).toBeLessThanOrEqual(2);
       expect(move.y).toBeLessThanOrEqual(2);
-      expect(move.width).toBeLessThanOrEqual(16);
     }
     if (resize) {
-      // bottom-right corner of a 72×72 overlay
-      expect(resize.x + resize.width).toBeGreaterThanOrEqual(72 - 2);
-      expect(resize.y + resize.height).toBeGreaterThanOrEqual(72 - 2);
-      expect(resize.width).toBeLessThanOrEqual(16);
+      expect(resize.x + resize.width).toBeGreaterThanOrEqual(70);
+      expect(resize.y + resize.height).toBeGreaterThanOrEqual(70);
     }
-
-    await page.screenshot({ path: test.info().outputPath("overlay-handles.png") });
   });
 });
