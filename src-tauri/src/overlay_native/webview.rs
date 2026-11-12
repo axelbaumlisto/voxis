@@ -267,6 +267,7 @@ fn build_overlay_window(
             {
                 let app_enter = app_evt.clone();
                 wv.connect_enter_notify_event(move |_, e| {
+                    tracing::info!("overlay XING enter detail={:?} mode={:?}", e.detail(), e.mode());
                     if e.detail() != gtk::gdk::NotifyType::Inferior {
                         let _ = app_enter.emit(events::POINTER_INSIDE, true);
                     }
@@ -274,6 +275,7 @@ fn build_overlay_window(
                 });
                 let app_leave = app_evt.clone();
                 wv.connect_leave_notify_event(move |_, e| {
+                    tracing::info!("overlay XING leave detail={:?} mode={:?}", e.detail(), e.mode());
                     if e.detail() != gtk::gdk::NotifyType::Inferior {
                         let _ = app_leave.emit(events::POINTER_INSIDE, false);
                     }
