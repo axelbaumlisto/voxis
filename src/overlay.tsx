@@ -351,14 +351,32 @@ export function OverlayApp() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
+    // Reveal immediately on enter; DEBOUNCE the hide so a brief leave→enter
+    // flap (GTK can emit a spurious leave while the pointer moves across the
+    // webview) doesn't blink the handles. A single real leave fades them out
+    // after the delay.
+    const HIDE_DELAY_MS = 260;
     void listen<boolean>("overlay://pointer-inside", (e) => {
-      document.body.classList.toggle("pointer-inside", e.payload);
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+      if (e.payload) {
+        document.body.classList.add("pointer-inside");
+      } else {
+        hideTimer = setTimeout(() => {
+          document.body.classList.remove("pointer-inside");
+          hideTimer = null;
+        }, HIDE_DELAY_MS);
+      }
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
     });
     return () => {
       cancelled = true;
+      if (hideTimer) clearTimeout(hideTimer);
       if (unlisten) unlisten();
     };
   }, []);
