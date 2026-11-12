@@ -1282,6 +1282,8 @@ mod tests {
                 backend: "none".to_string(),
                 custom_x: Some(137),
                 custom_y: Some(241),
+                custom_w: Some(96),
+                custom_h: Some(96),
             },
             llm: LlmConfig {
                 enabled: true,
