@@ -16,7 +16,6 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useOverlayState } from "./hooks/useOverlayState";
 import ThemeHost from "./theme-engine/ThemeHost";
 import { fetchThemeModule } from "./theme-engine/fetchModule";
@@ -349,35 +348,36 @@ export function OverlayApp() {
   // inside) because the Dock webview doesn't deliver DOM pointerleave or keep
   // CSS :hover in sync. Toggle a body class the grip CSS keys off of.
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
+    // Reveal the handles on pointer ACTIVITY over the overlay; hide them after
+    // a short idle. The hide is a JS timer, which fires in the webview's own
+    // event loop — reliable even when the overlay gets no GTK events (the one
+    // signal GTK :hover / pointerleave / glib-timeouts could NOT give us in
+    // this borderless Dock webview). Movement keeps resetting the timer, so a
+    // hovered-and-moving pointer never blinks; leaving stops the activity and
+    // the handles fade after IDLE_MS.
+    const IDLE_MS = 650;
     let hideTimer: ReturnType<typeof setTimeout> | null = null;
-    // Reveal immediately on enter; DEBOUNCE the hide so a brief leave→enter
-    // flap (GTK can emit a spurious leave while the pointer moves across the
-    // webview) doesn't blink the handles. A single real leave fades them out
-    // after the delay.
-    const HIDE_DELAY_MS = 260;
-    void listen<boolean>("overlay://pointer-inside", (e) => {
-      if (hideTimer) {
-        clearTimeout(hideTimer);
-        hideTimer = null;
+    let logged = false;
+    const activity = () => {
+      if (!logged) {
+        logged = true;
+        void commands.debugLogOverlay("overlay: DOM pointer activity reveal");
       }
-      if (e.payload) {
-        document.body.classList.add("pointer-inside");
-      } else {
-        hideTimer = setTimeout(() => {
-          document.body.classList.remove("pointer-inside");
-          hideTimer = null;
-        }, HIDE_DELAY_MS);
-      }
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
-    });
-    return () => {
-      cancelled = true;
+      document.body.classList.add("pointer-inside");
       if (hideTimer) clearTimeout(hideTimer);
-      if (unlisten) unlisten();
+      hideTimer = setTimeout(() => {
+        document.body.classList.remove("pointer-inside");
+        hideTimer = null;
+      }, IDLE_MS);
+    };
+    window.addEventListener("pointermove", activity);
+    window.addEventListener("pointerdown", activity);
+    window.addEventListener("pointerenter", activity);
+    return () => {
+      window.removeEventListener("pointermove", activity);
+      window.removeEventListener("pointerdown", activity);
+      window.removeEventListener("pointerenter", activity);
+      if (hideTimer) clearTimeout(hideTimer);
     };
   }, []);
 
