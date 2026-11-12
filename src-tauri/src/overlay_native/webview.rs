@@ -275,7 +275,7 @@ fn build_overlay_window(
                 });
                 let app_leave = app_evt.clone();
                 wv.connect_leave_notify_event(move |_, e| {
-                    tracing::info!("overlay XING leave detail={:?} mode={:?}", e.detail(), e.mode());
+                    tracing::info!("overlay XING wv-leave detail={:?} mode={:?}", e.detail(), e.mode());
                     if e.detail() != gtk::gdk::NotifyType::Inferior {
                         let _ = app_leave.emit(events::POINTER_INSIDE, false);
                     }
@@ -287,6 +287,19 @@ fn build_overlay_window(
             if let Some(toplevel) = wv.toplevel() {
                 if let Ok(gtk_window) = toplevel.downcast::<gtk::Window>() {
                     gtk_window.resize(w as i32, h as i32);
+                    // The WebView child gets ENTER but never LEAVE (the leave is
+                    // delivered to the toplevel the pointer exits). So HIDE is
+                    // driven from the toplevel window's leave-notify.
+                    {
+                        let app_wleave = app_evt.clone();
+                        gtk_window.connect_leave_notify_event(move |_, e| {
+                            tracing::info!("overlay XING top-leave detail={:?} mode={:?}", e.detail(), e.mode());
+                            if e.detail() != gtk::gdk::NotifyType::Inferior {
+                                let _ = app_wleave.emit(events::POINTER_INSIDE, false);
+                            }
+                            gtk::glib::Propagation::Proceed
+                        });
+                    }
                     // Never steal keyboard focus from the active app: a click on
                     // the pill still delivers the pointer event to WebKit (so
                     // click-to-dictate works), but the WM must not transfer input
