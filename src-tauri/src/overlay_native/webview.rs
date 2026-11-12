@@ -92,12 +92,6 @@ impl WebviewOverlay {
         let label = OVERLAY_PANEL_LABEL.to_string();
         let (w, h) = init_size.unwrap_or((PILL_WIDTH, PILL_HEIGHT));
 
-        // Start the pointer-inside poller (once) so the drag/resize handles
-        // reveal on hover and hide on leave — reliably, unlike GTK crossing
-        // events / DOM :hover in this borderless Dock webview.
-        #[cfg(target_os = "linux")]
-        start_overlay_pointer_poll(&app);
-
         // Reuse an existing webview ONLY if it is already the right size.
         // KWin/XWayland honours build-time geometry hints but ignores runtime
         // resizes of a Dock window, so a size change can't be applied in place
@@ -184,63 +178,6 @@ impl WebviewOverlay {
     }
 }
 
-/// Spawn (once) a background poller that reveals/hides the overlay handles.
-///
-/// Every crossing-event scheme failed on this borderless Dock webview: DOM
-/// pointermove/:hover never arrive, the WebView child gets ENTER but not LEAVE,
-/// and a glib timeout only ticks while the overlay already has GTK events. So a
-/// std thread samples the pointer vs the overlay rect on a fixed interval and
-/// wakes the Tauri loop with `run_on_main_thread` (which fires even when idle,
-/// unlike a glib timeout). Emits `overlay://pointer-inside` only on a real
-/// transition; a sampled boolean cannot flap.
-#[cfg(target_os = "linux")]
-fn start_overlay_pointer_poll(app: &AppHandle) {
-    use std::sync::Once;
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        let app = app.clone();
-        let latch = std::sync::Arc::new(AtomicBool::new(false));
-        std::thread::spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_millis(180));
-            let app_main = app.clone();
-            let latch_main = latch.clone();
-            let _ = app.run_on_main_thread(move || {
-                match overlay_pointer_inside(&app_main) {
-                    Some(now) => {
-                        if now != latch_main.swap(now, Ordering::SeqCst) {
-                            tracing::info!("overlay POLL inside -> {now}");
-                            let _ = app_main.emit(events::POINTER_INSIDE, now);
-                        }
-                    }
-                    None => tracing::info!("overlay POLL none"),
-                }
-            });
-        });
-    });
-}
-
-/// `Some(true/false)` when the global pointer is inside / outside the overlay
-/// window's rect; `None` if anything needed to decide is unavailable. Must run
-/// on the GTK main thread (GDK access).
-#[cfg(target_os = "linux")]
-fn overlay_pointer_inside(app: &AppHandle) -> Option<bool> {
-    use gtk::gdk::prelude::{DeviceExt, SeatExt};
-    let win = app.get_webview_window(OVERLAY_PANEL_LABEL)?;
-    let pos = win.outer_position().ok()?;
-    let size = win.outer_size().ok()?;
-    let pointer = gtk::gdk::Display::default()?.default_seat()?.pointer()?;
-    let (_, px, py) = pointer.position();
-    let inside = px >= pos.x
-        && py >= pos.y
-        && px < pos.x + size.width as i32
-        && py < pos.y + size.height as i32;
-    tracing::info!(
-        "overlay POLL ptr={px},{py} win={},{} {}x{} inside={inside}",
-        pos.x, pos.y, size.width, size.height
-    );
-    Some(inside)
-}
-
 /// Build a new transparent, borderless, always-on-top webview window for
 /// the pill. Runs on the main thread.
 fn build_overlay_window(
@@ -318,15 +255,39 @@ fn build_overlay_window(
     // so the compositor sees the correct geometry immediately.
     #[cfg(target_os = "linux")]
     {
+        let app_evt = app.clone();
         let _ = window.with_webview(move |webview| {
             use gtk::prelude::{Cast, GtkWindowExt, WidgetExt};
             let wv = webview.inner();
             wv.set_size_request(1, 1);
+            // Reveal the handles when the pointer enters the WebView (the only
+            // crossing this borderless Dock webview delivers reliably), and emit
+            // the HIDE from the TOPLEVEL window's leave (the WebView child never
+            // gets a leave — it goes to the window the pointer exits). XWayland
+            // won't report the pointer position once it's off our surface, so an
+            // OS leave event is the ONLY "pointer gone" signal; the frontend
+            // debounces the hide to absorb any brief crossing flap.
+            {
+                let app_enter = app_evt.clone();
+                wv.connect_enter_notify_event(move |_, _| {
+                    let _ = app_enter.emit(events::POINTER_INSIDE, true);
+                    gtk::glib::Propagation::Proceed
+                });
+            }
             // Also force-resize the toplevel GTK window in case the
             // compositor has already cached the 200×200 constraints.
             if let Some(toplevel) = wv.toplevel() {
                 if let Ok(gtk_window) = toplevel.downcast::<gtk::Window>() {
                     gtk_window.resize(w as i32, h as i32);
+                    {
+                        let app_leave = app_evt.clone();
+                        gtk_window.connect_leave_notify_event(move |_, e| {
+                            if e.detail() != gtk::gdk::NotifyType::Inferior {
+                                let _ = app_leave.emit(events::POINTER_INSIDE, false);
+                            }
+                            gtk::glib::Propagation::Proceed
+                        });
+                    }
                     // Never steal keyboard focus from the active app: a click on
                     // the pill still delivers the pointer event to WebKit (so
                     // click-to-dictate works), but the WM must not transfer input

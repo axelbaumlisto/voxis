@@ -349,19 +349,34 @@ export function OverlayApp() {
   // inside) because the Dock webview doesn't deliver DOM pointerleave or keep
   // CSS :hover in sync. Toggle a body class the grip CSS keys off of.
   useEffect(() => {
-    // Reveal/hide the handles from the Rust pointer-inside poller. The poller
-    // emits a clean, already-deflapped boolean (it samples the pointer vs the
-    // overlay rect), so the class just mirrors it — CSS fades it in/out.
+    // Reveal/hide the handles from the Rust pointer-inside events (GTK enter →
+    // true, toplevel leave → false). Show immediately; DEBOUNCE the hide so a
+    // brief leave→enter flap at the window edge doesn't blink the handles — a
+    // real leave with no re-enter fades them out after HIDE_MS.
+    const HIDE_MS = 220;
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     void listen<boolean>("overlay://pointer-inside", (e) => {
-      document.body.classList.toggle("pointer-inside", e.payload);
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+      if (e.payload) {
+        document.body.classList.add("pointer-inside");
+      } else {
+        hideTimer = setTimeout(() => {
+          document.body.classList.remove("pointer-inside");
+          hideTimer = null;
+        }, HIDE_MS);
+      }
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
     });
     return () => {
       cancelled = true;
+      if (hideTimer) clearTimeout(hideTimer);
       if (unlisten) unlisten();
     };
   }, []);
