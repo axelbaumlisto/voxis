@@ -1,15 +1,13 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Drag-grip behaviour on the overlay (the little handle that lets the user
- * drag the overlay window around).
+ * Overlay control handles: the move grip (top-left) and the resize grip
+ * (bottom-right).
  *
- * Contract:
- *  - hidden at rest (opacity 0),
- *  - appears on pointer ACTIVITY over the overlay,
- *  - hides again after an idle timeout (does NOT depend on pointerout/leave,
- *    which the real Dock webview doesn't reliably deliver),
- *  - sits in the very top-left corner, small, so it barely touches the orb.
+ * Contract: both handles are ALWAYS visible (subtle at rest, brighter on
+ * hover). Hover-reveal was dropped because the overlay's borderless Dock
+ * webview on X11/Wayland does not reliably deliver pointer enter/leave or
+ * maintain :hover, so a reveal-on-hover handle would flake and vanish.
  *
  * Runs in a 72×72 viewport (the orb overlay footprint) with a real WebGL orb.
  */
@@ -25,68 +23,50 @@ test.use({
   },
 });
 
-const GRIP = "[data-testid='overlay-drag-grip']";
+const MOVE = "[data-testid='overlay-drag-grip']";
+const RESIZE = "[data-testid='overlay-resize-grip']";
 
-async function opacity(page: import("@playwright/test").Page) {
-  return page.evaluate((sel) => {
-    const el = document.querySelector(sel) as HTMLElement | null;
+function opacity(page: import("@playwright/test").Page, sel: string) {
+  return page.evaluate((s) => {
+    const el = document.querySelector(s) as HTMLElement | null;
     return el ? Number(getComputedStyle(el).opacity) : -1;
-  }, GRIP);
+  }, sel);
 }
 
-test.describe("overlay drag grip", () => {
-  test("hidden at rest, shows on hover, hides when pointer leaves", async ({ page }) => {
+test.describe("overlay control handles", () => {
+  test("both handles are always visible at rest", async ({ page }) => {
     await page.goto("/overlay.html?theme=orb_ion");
     await page.waitForSelector("[data-testid='theme-host']", { timeout: 5000 });
-    await page.waitForSelector(GRIP, { state: "attached", timeout: 5000 });
+    await page.waitForSelector(MOVE, { state: "attached", timeout: 5000 });
+    await page.waitForSelector(RESIZE, { state: "attached", timeout: 5000 });
 
-    // At rest (pointer not over the overlay) the grip is transparent.
+    // Pointer parked far away: handles must still be visible (subtle).
     await page.mouse.move(300, 300);
-    await expect.poll(() => opacity(page), { timeout: 1000 }).toBeLessThan(0.1);
-
-    // Hovering the overlay reveals it (CSS body:hover).
-    await page.mouse.move(36, 36);
-    await expect.poll(() => opacity(page), { timeout: 1000 }).toBeGreaterThan(0.9);
-
-    // Moving the pointer off the overlay hides it again — no blink, no stick.
-    await page.mouse.move(300, 300);
-    await expect.poll(() => opacity(page), { timeout: 1000 }).toBeLessThan(0.1);
+    await expect.poll(() => opacity(page, MOVE), { timeout: 1000 }).toBeGreaterThan(0.3);
+    await expect.poll(() => opacity(page, RESIZE), { timeout: 1000 }).toBeGreaterThan(0.3);
   });
 
-  test("sits in the top-left corner and is small", async ({ page }) => {
+  test("move grip sits top-left, resize grip bottom-right", async ({ page }) => {
     await page.goto("/overlay.html?theme=orb_ion");
-    await page.waitForSelector(GRIP, { state: "attached", timeout: 5000 });
-    await page.mouse.move(10, 10); // reveal
+    await page.waitForSelector(MOVE, { state: "attached", timeout: 5000 });
+    await page.waitForSelector(RESIZE, { state: "attached", timeout: 5000 });
 
-    const box = await page.locator(GRIP).boundingBox();
-    expect(box).not.toBeNull();
-    if (box) {
-      expect(box.x).toBeLessThanOrEqual(2);
-      expect(box.y).toBeLessThanOrEqual(2);
-      expect(box.width).toBeLessThanOrEqual(16);
-      expect(box.height).toBeLessThanOrEqual(16);
+    const move = await page.locator(MOVE).boundingBox();
+    const resize = await page.locator(RESIZE).boundingBox();
+    expect(move).not.toBeNull();
+    expect(resize).not.toBeNull();
+    if (move) {
+      expect(move.x).toBeLessThanOrEqual(2);
+      expect(move.y).toBeLessThanOrEqual(2);
+      expect(move.width).toBeLessThanOrEqual(16);
     }
-  });
+    if (resize) {
+      // bottom-right corner of a 72×72 overlay
+      expect(resize.x + resize.width).toBeGreaterThanOrEqual(72 - 2);
+      expect(resize.y + resize.height).toBeGreaterThanOrEqual(72 - 2);
+      expect(resize.width).toBeLessThanOrEqual(16);
+    }
 
-  test("hides right after a drag even though the pointer is still over it", async ({
-    page,
-  }, testInfo) => {
-    await page.goto("/overlay.html?theme=orb_ion");
-    await page.waitForSelector(GRIP, { state: "attached", timeout: 5000 });
-
-    // Reveal, then press-and-hold on the grip to arm a drag.
-    await page.mouse.move(6, 6);
-    await expect.poll(() => opacity(page), { timeout: 1000 }).toBeGreaterThan(0.9);
-    await page.screenshot({ path: testInfo.outputPath("grip-revealed.png") });
-
-    await page.mouse.down();
-    await page.waitForTimeout(400); // > ARM_MS so the drag arms
-    await page.mouse.move(6, 6); // stay over the overlay
-    await page.mouse.up();
-
-    // The pointer is still over the overlay, but the grip must be hidden now
-    // (post-drag suppression) — this is the "stays lit after dragging" bug.
-    await expect.poll(() => opacity(page), { timeout: 1000 }).toBeLessThan(0.1);
-    await page.screenshot({ path: testInfo.outputPath("grip-after-drag.png") });
+    await page.screenshot({ path: test.info().outputPath("overlay-handles.png") });
   });
 });

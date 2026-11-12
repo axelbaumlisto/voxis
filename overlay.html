@@ -25,48 +25,22 @@
         align-items: center;
         justify-content: center;
       }
-      /* Drag grip: hidden until the pointer is over the overlay. CSS :hover is
-       * maintained by the layout engine from the real pointer position, so it
-       * neither sticks (unlike JS pointerout, which the Dock webview drops) nor
-       * blinks (unlike a JS idle timer). */
-      .drag-grip {
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 140ms ease;
-      }
-      body:hover .drag-grip {
-        opacity: 1;
-        pointer-events: auto;
-      }
-      .drag-grip.dragging {
-        opacity: 1 !important;
-        pointer-events: auto !important;
-      }
-      /* Right after a drag the pointer is still over the overlay and pointer
-       * capture can leave :hover stuck true (the webview drops the leave), so
-       * the grip would "stay lit". Force it hidden until the pointer genuinely
-       * re-enters (enter events are reliable; leave events are not). */
-      .drag-grip.post-drag {
-        opacity: 0 !important;
-        pointer-events: none !important;
-      }
-      /* Resize grip: bottom-right corner, same reveal rule as the drag grip. */
+      /* Grips are ALWAYS visible (subtle), brighter on hover / while active.
+       * Hover-reveal (CSS :hover / JS leave) proved unreliable in the overlay's
+       * borderless Dock webview on X11/Wayland — enter/leave + :hover flake, so
+       * the handles would vanish. A small, always-present corner handle is
+       * reliable and predictable; it sits in the orb's transparent corner. */
+      .drag-grip,
       .resize-grip {
-        opacity: 0;
-        pointer-events: none;
+        opacity: 0.55;
+        pointer-events: auto;
         transition: opacity 140ms ease;
       }
-      body:hover .resize-grip {
-        opacity: 1;
-        pointer-events: auto;
-      }
+      .drag-grip:hover,
+      .resize-grip:hover,
+      .drag-grip.dragging,
       .resize-grip.resizing {
-        opacity: 1 !important;
-        pointer-events: auto !important;
-      }
-      .resize-grip.post-drag {
-        opacity: 0 !important;
-        pointer-events: none !important;
+        opacity: 1;
       }
       /* The overlay's own bounds, drawn only while the user is moving or
        * resizing it: an orb fills the window edge to edge, so without this
