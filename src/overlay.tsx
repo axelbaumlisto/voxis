@@ -53,11 +53,15 @@ function DragGrip() {
   // leave :hover stuck, so force the grip hidden until the pointer genuinely
   // re-enters. A fresh `pointerover` (reliable, unlike leave) clears it.
   const [postDrag, setPostDrag] = useState(false);
+  const dragEndAt = useRef(0);
   useEffect(() => {
     const onOver = () => {
-      // Ignore the pointerover churn emitted while the window is being dragged
-      // under the cursor; only a genuine re-entry after the drag clears it.
+      // Ignore pointerover churn while the window is dragged under the cursor,
+      // and the SYNTHETIC pointerover the browser fires right after capture is
+      // released on drag end (that one must NOT clear the suppression). Only a
+      // genuine re-entry, a moment after the drag, reveals the grip again.
       if (st.current && st.current.armedNow) return;
+      if (Date.now() - dragEndAt.current < 600) return;
       setPostDrag(false);
     };
     window.addEventListener("pointerover", onOver);
@@ -96,7 +100,9 @@ function DragGrip() {
     }
     st.current = null;
     setDragging(false);
-    // Suppress the grip until the pointer leaves and re-enters.
+    // Suppress the grip until the pointer leaves and re-enters (ignoring the
+    // synthetic pointerover fired right after this reset — see dragEndAt guard).
+    dragEndAt.current = Date.now();
     setPostDrag(true);
   };
 
