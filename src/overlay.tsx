@@ -357,12 +357,7 @@ export function OverlayApp() {
     // the handles fade after IDLE_MS.
     const IDLE_MS = 650;
     let hideTimer: ReturnType<typeof setTimeout> | null = null;
-    let logged = false;
     const activity = () => {
-      if (!logged) {
-        logged = true;
-        void commands.debugLogOverlay("overlay: DOM pointer activity reveal");
-      }
       document.body.classList.add("pointer-inside");
       if (hideTimer) clearTimeout(hideTimer);
       hideTimer = setTimeout(() => {
