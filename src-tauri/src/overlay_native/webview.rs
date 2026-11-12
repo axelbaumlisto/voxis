@@ -260,6 +260,28 @@ fn build_overlay_window(
             use gtk::prelude::{Cast, GtkWindowExt, WidgetExt};
             let wv = webview.inner();
             wv.set_size_request(1, 1);
+            // Hover-reveal of the drag/resize handles is driven from GTK
+            // enter/leave-notify, NOT DOM/CSS :hover (the borderless Dock
+            // webview doesn't deliver DOM pointerleave or keep :hover in sync).
+            // Connect on the WebView widget itself — the pointer is directly
+            // over it, so the toplevel window often never sees the crossing.
+            // Emits overlay://pointer-inside, which toggles body.pointer-inside.
+            {
+                let app_enter = app_evt.clone();
+                wv.connect_enter_notify_event(move |_w, _e| {
+                    let _ = app_enter.emit(events::POINTER_INSIDE, true);
+                    gtk::glib::Propagation::Proceed
+                });
+                let app_leave = app_evt.clone();
+                wv.connect_leave_notify_event(move |_w, e| {
+                    // Ignore crossings into a child (NotifyInferior) so moving
+                    // within the webview doesn't spuriously hide the handles.
+                    if e.detail() != gtk::gdk::NotifyType::Inferior {
+                        let _ = app_leave.emit(events::POINTER_INSIDE, false);
+                    }
+                    gtk::glib::Propagation::Proceed
+                });
+            }
             // Also force-resize the toplevel GTK window in case the
             // compositor has already cached the 200×200 constraints.
             if let Some(toplevel) = wv.toplevel() {
