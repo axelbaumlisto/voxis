@@ -178,6 +178,33 @@ impl WebviewOverlay {
     }
 }
 
+/// Sample the pointer position against the overlay window's root rect and emit
+/// `overlay://pointer-inside` only when the boolean changes. The TRUTH is the
+/// position (never the crossing-event type), so ambiguous/flapping GTK crossing
+/// events can't blink the handles.
+#[cfg(target_os = "linux")]
+fn sample_overlay_pointer_inside(
+    app: &AppHandle,
+    win: &gtk::Window,
+    latch: &AtomicBool,
+) {
+    use gtk::gdk::prelude::{DeviceExt, SeatExt};
+    use gtk::prelude::GtkWindowExt;
+    let Some(pointer) = gtk::gdk::Display::default()
+        .and_then(|d| d.default_seat())
+        .and_then(|s| s.pointer())
+    else {
+        return;
+    };
+    let (_, px, py) = pointer.position();
+    let (wx, wy) = win.position();
+    let (ww, wh) = win.size();
+    let now = px >= wx && py >= wy && px < wx + ww && py < wy + wh;
+    if now != latch.swap(now, Ordering::SeqCst) {
+        let _ = app.emit(events::POINTER_INSIDE, now);
+    }
+}
+
 /// Build a new transparent, borderless, always-on-top webview window for
 /// the pill. Runs on the main thread.
 fn build_overlay_window(
@@ -280,43 +307,47 @@ fn build_overlay_window(
                     // GdkWindow + WM grab/ungrab crossings), which blinked the
                     // handles. Instead POLL the pointer position vs the window
                     // rect every 150 ms and emit overlay://pointer-inside only
-                    // on a real transition — a sampled boolean cannot flap.
-                    // A weak ref lets the poller stop itself once the window is
-                    // destroyed (rebuild on resize/theme change), no leak.
-                    let app_poll = app_evt.clone();
+                    // Hover-reveal of the handles. A plain glib timeout only
+                    // ticks while the overlay gets GTK events (Tauri pumps the
+                    // context reactively), so a leave that stops the mouse was
+                    // never seen. Instead: crossing/motion events are the WAKE
+                    // (delivered on real crossings), and the pointer POSITION vs
+                    // the window rect is the TRUTH — so a flapping/ambiguous
+                    // event type can't blink the handles (the sampled boolean
+                    // only changes on a genuine enter/leave). Shared latch
+                    // dedups; weak ref drops cleanly on window rebuild.
+                    let latch = std::sync::Arc::new(AtomicBool::new(false));
                     let weak = gtk_window.downgrade();
-                    let inside = AtomicBool::new(false);
-                    gtk::glib::timeout_add_local(
-                        std::time::Duration::from_millis(150),
+                    let connect = |sig_app: tauri::AppHandle,
+                                   sig_weak: gtk::glib::WeakRef<gtk::Window>,
+                                   sig_latch: std::sync::Arc<AtomicBool>| {
                         move || {
-                            use gtk::gdk::prelude::{DeviceExt, SeatExt};
-                            use gtk::glib::ControlFlow;
-                            let Some(win) = weak.upgrade() else {
-                                return ControlFlow::Break;
-                            };
-                            let Some(pointer) = gtk::gdk::Display::default()
-                                .and_then(|d| d.default_seat())
-                                .and_then(|s| s.pointer())
-                            else {
-                                return ControlFlow::Continue;
-                            };
-                            // Global (root) coordinates vs the window's root rect
-                            // — robust for a borderless Dock window where the
-                            // window-relative device_position misbehaved.
-                            let (_, px, py) = pointer.position();
-                            let (wx, wy) = win.position();
-                            let (ww, wh) = win.size();
-                            let now =
-                                px >= wx && py >= wy && px < wx + ww && py < wy + wh;
-                            if now != inside.swap(now, Ordering::SeqCst) {
-                                tracing::info!(
-                                    "overlay pointer-inside -> {now} (ptr {px},{py} win {wx},{wy} {ww}x{wh})"
-                                );
-                                let _ = app_poll.emit(events::POINTER_INSIDE, now);
+                            if let Some(win) = sig_weak.upgrade() {
+                                sample_overlay_pointer_inside(&sig_app, &win, &sig_latch);
                             }
-                            ControlFlow::Continue
-                        },
-                    );
+                        }
+                    };
+                    {
+                        let f = connect(app_evt.clone(), weak.clone(), latch.clone());
+                        wv.connect_enter_notify_event(move |_, _| {
+                            f();
+                            gtk::glib::Propagation::Proceed
+                        });
+                    }
+                    {
+                        let f = connect(app_evt.clone(), weak.clone(), latch.clone());
+                        wv.connect_leave_notify_event(move |_, _| {
+                            f();
+                            gtk::glib::Propagation::Proceed
+                        });
+                    }
+                    {
+                        let f = connect(app_evt.clone(), weak, latch);
+                        wv.connect_motion_notify_event(move |_, _| {
+                            f();
+                            gtk::glib::Propagation::Proceed
+                        });
+                    }
                 }
             }
         });
