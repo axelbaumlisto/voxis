@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tauri::{App, Manager};
@@ -8,7 +9,10 @@ use crate::hotkey::HotkeyListener;
 use crate::orchestrator::Orchestrator;
 use crate::output::OutputHandler;
 use crate::storage;
-use crate::theme_engine::ThemeEngineLoader;
+use crate::theme_engine::{
+    known_builtin_digests, retire_pristine_copies, DirSource, EmbeddedSource, ThemeEngineLoader,
+    ThemeSource,
+};
 use crate::{AudioState, HotkeyState, OrchestratorState, OutputState};
 
 /// Theme engine state wrapping the manifest-v2 loader.
@@ -44,27 +48,21 @@ pub(super) fn migrate_config_if_needed(
     }
 }
 
-/// Resolve the bundled themes directory path.
+/// The builtin theme layer.
 ///
-/// Tries each candidate in order; the first one that `.is_dir()` wins.
-/// If no candidate passes, falls back to `CARGO_MANIFEST_DIR/themes` (dev).
-/// Returns `None` only if nothing exists.
-///
-/// Extracted as a pure function so it can be unit-tested without an AppHandle.
-pub(crate) fn resolve_bundled_themes_path(
-    candidates: &[std::path::PathBuf],
-) -> Option<std::path::PathBuf> {
-    for candidate in candidates {
-        if candidate.is_dir() {
-            return Some(candidate.clone());
-        }
+/// A debug build reads `src-tauri/themes` from disk, so `bun run build:themes`
+/// plus a theme Reload shows edits without recompiling — the no-rebuild
+/// workflow in docs/THEME_EDITING.md. A release build uses the themes embedded
+/// in the binary: they update and disappear with the app, and a bare binary
+/// without a bundle directory still has them.
+pub(super) fn builtin_theme_source() -> Box<dyn ThemeSource> {
+    if cfg!(debug_assertions) {
+        Box::new(DirSource::new(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("themes"),
+        ))
+    } else {
+        Box::new(EmbeddedSource::builtin())
     }
-    let dev_path =
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("themes");
-    if dev_path.is_dir() {
-        return Some(dev_path);
-    }
-    None
 }
 
 /// Create and register all shared application state.
@@ -76,39 +74,40 @@ pub(super) fn create_app_state(
     let recorder = Arc::new(AudioRecorder::new());
     let output = Arc::new(OutputHandler::default());
 
-    let themes_dir = app.state::<storage::AppPaths>().themes_dir();
-
-    // --- Theme engine v2: seed bundled themes BEFORE legacy seeder runs ---
-    //
-    // Ordering is critical: the legacy ThemeLoader::ensure_seeded_external_themes()
-    // writes v1-format theme.json files and skips dirs that already have a
-    // theme.json. By running v2 seeding first, we ensure:
-    //  1. Fresh install: v2 theme.jsons land first, legacy seeder skips them.
-    //  2. Upgrade from older TALRI: v2 seed_from_bundle overwrites legacy v1
-    //     theme.jsons (detected by missing manifest_version:2), then the legacy
-    //     seeder sees the v2 files and skips.
-    let theme_engine_loader = ThemeEngineLoader::new(themes_dir.clone());
-
-    // Resolve the bundled themes path (prod: resource dir, dev: CARGO_MANIFEST_DIR).
-    let bundle_themes_dir = {
-        let resource_candidate = app
-            .path()
-            .resource_dir()
-            .ok()
-            .map(|r| r.join("themes"));
-        let candidates: Vec<std::path::PathBuf> =
-            resource_candidate.into_iter().collect();
-        resolve_bundled_themes_path(&candidates)
+    let (user_dir, retired_dir) = {
+        let paths = app.state::<storage::AppPaths>();
+        // `themes-retired` is a sibling of `themes`, never inside it: the
+        // scanner must not see the retired copies as themes.
+        (paths.themes_dir(), paths.config_dir().join("themes-retired"))
     };
-    if let Some(bundle_dir) = bundle_themes_dir {
-        if let Err(e) = theme_engine_loader.seed_from_bundle(&bundle_dir) {
-            tracing::warn!("ThemeEngineLoader seed_from_bundle failed: {}", e);
-        }
-    } else {
-        tracing::warn!("ThemeEngineLoader: cannot resolve bundled themes directory");
+
+    // Move the user's untouched copies of old builtin themes out of the themes
+    // folder; a copy the user edited stays and keeps shadowing the builtin.
+    // `retire_pristine_copies` already logs every single move — here only the
+    // summary of a run that retired something, so a clean install logs nothing.
+    let report = retire_pristine_copies(&user_dir, &retired_dir, &known_builtin_digests());
+    if !report.retired.is_empty() {
+        tracing::info!(
+            "theme_engine: retired {} pristine builtin theme(s) to {:?}",
+            report.retired.len(),
+            retired_dir
+        );
+    }
+    // Not "edited" at info level: this also holds legacy and unreadable
+    // folders, and it repeats on every start by design.
+    if !report.kept_edited.is_empty() {
+        tracing::debug!(
+            "theme_engine: kept {} builtin-id folder(s) in {:?}: {:?}",
+            report.kept_edited.len(),
+            user_dir,
+            report.kept_edited
+        );
     }
 
-    // Scan v2 themes after seeding.
+    // Builtin themes come from the binary (debug: `src-tauri/themes`), the user
+    // folder holds only the user's own themes and overrides.
+    let theme_engine_loader = ThemeEngineLoader::with_builtin(builtin_theme_source(), user_dir);
+
     if let Err(e) = theme_engine_loader.scan() {
         tracing::warn!("ThemeEngineLoader scan failed at startup: {}", e);
     }

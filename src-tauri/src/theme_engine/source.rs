@@ -1,8 +1,7 @@
 //! Theme sources — where theme files come from. The loader itself only touches
-//! the filesystem to create/probe the user themes dir in `scan` (and in the
-//! legacy `seed_from_bundle`): reading themes is the sources' job. It layers
-//! `ThemeSource` implementations in precedence order. SRP: I/O only — schema
-//! rules live in manifest.rs.
+//! the filesystem to create/probe the user themes dir in `scan`: reading themes
+//! is the sources' job. It layers `ThemeSource` implementations in precedence
+//! order. SRP: I/O only — schema rules live in manifest.rs.
 use super::manifest::{is_safe_path_component, ThemeManifest};
 use include_dir::{include_dir, Dir, DirEntry};
 use std::path::{Path, PathBuf};

@@ -9,4 +9,4 @@ pub mod source;
 pub use loader::{ThemeEngineLoader, ThemeValidation};
 pub use manifest::ThemeManifest;
 pub use migrate::{known_builtin_digests, retire_pristine_copies, RetireReport};
-pub use source::{DirSource, ThemeSource};
+pub use source::{DirSource, EmbeddedSource, ThemeSource};

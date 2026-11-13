@@ -481,12 +481,13 @@ jobs:
           # The build itself dirties the tree (the checkout was verified clean
           # before it): tauri-cli rewrites src-tauri/Cargo.toml's tauri features
           # on the non-mac targets (drops `macos-private-api`), build:themes
-          # regenerates the theme bundles, update-homebrew.sh rewrites the
-          # in-tree formula. Left behind, they ride along `checkout -B main`
+          # regenerates the theme bundles and appends to the known builtin
+          # digests, update-homebrew.sh rewrites the in-tree formula. Left
+          # behind, they ride along `checkout -B main`
           # and the next release has to stash them (three stashes piled up on
           # 2026-11-13). Discard exactly these build outputs; anything ELSE is
           # someone's edit -> stash it, never discard.
-          generated=(src-tauri/Cargo.toml homebrew-tap/Formula/voxis.rb src-tauri/themes crates/tauri-plugin-voxis/guest-js/src/themes/generated)
+          generated=(src-tauri/Cargo.toml homebrew-tap/Formula/voxis.rb src-tauri/themes src-tauri/known-builtin-digests.json crates/tauri-plugin-voxis/guest-js/src/themes/generated)
           git checkout -- "${generated[@]}"
           if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
             echo "::warning::unexpected local modifications after the build; stashing them:"

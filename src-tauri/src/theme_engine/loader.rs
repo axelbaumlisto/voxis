@@ -1,7 +1,6 @@
 //! Theme engine front door: scan theme sources, read entry scripts, validate.
 //! SRP: orchestration of `ThemeSource`s only — filesystem access lives in
-//! source.rs, except seeding (`seed_from_bundle`, which still writes into the
-//! user dir until it is removed), and schema rules in manifest.rs.
+//! source.rs, schema rules in manifest.rs.
 use super::manifest::ThemeManifest;
 use super::source::{DirSource, ThemeSource};
 use std::collections::HashMap;
@@ -26,10 +25,14 @@ pub struct ThemeValidation {
 }
 
 pub struct ThemeEngineLoader {
-    /// The user themes dir — the folder the app writes into (export, seeding).
+    /// The user themes dir — the folder the app writes into (export).
     themes_dir: PathBuf,
     /// Theme sources in precedence order: a later source wins on id collision.
     sources: Vec<Box<dyn ThemeSource>>,
+    /// Whether an unusable user dir fails [`scan`](Self::scan). True for a
+    /// user-only loader (there is nothing else to show), false once builtins
+    /// are layered underneath.
+    user_dir_fatal: bool,
     /// id -> (index of the owning source, manifest) filled by scan().
     cache: RwLock<HashMap<String, (usize, ThemeManifest)>>,
 }
@@ -40,6 +43,7 @@ impl ThemeEngineLoader {
         Self::from_sources(
             themes_dir.clone(),
             vec![Box::new(DirSource::new(themes_dir))],
+            true,
         )
     }
 
@@ -50,13 +54,19 @@ impl ThemeEngineLoader {
         Self::from_sources(
             user_dir.clone(),
             vec![builtin, Box::new(DirSource::new(user_dir))],
+            false,
         )
     }
 
-    fn from_sources(themes_dir: PathBuf, sources: Vec<Box<dyn ThemeSource>>) -> Self {
+    fn from_sources(
+        themes_dir: PathBuf,
+        sources: Vec<Box<dyn ThemeSource>>,
+        user_dir_fatal: bool,
+    ) -> Self {
         Self {
             themes_dir,
             sources,
+            user_dir_fatal,
             cache: RwLock::new(HashMap::new()),
         }
     }
@@ -75,7 +85,7 @@ impl ThemeEngineLoader {
     /// visible. `DirSource::manifests` already returns nothing in that case.
     pub fn scan(&self) -> Result<Vec<ThemeManifest>, ThemeEngineError> {
         if let Err(e) = self.prepare_user_dir() {
-            if self.sources.len() < 2 {
+            if self.user_dir_fatal {
                 return Err(e);
             }
             tracing::warn!(
@@ -211,203 +221,6 @@ impl ThemeEngineLoader {
             errors: vec![format!("theme not found: {id}")],
         }
     }
-
-    /// Seed the user themes dir from a bundled themes directory.
-    ///
-    /// Iterates `bundle_dir` subdirectories. For each directory whose
-    /// `theme.json` parses as a valid v2 manifest:
-    ///
-    /// - If the corresponding user dir does **not** exist → copy entire dir.
-    /// - If the user dir exists and contains a **legacy v1** theme.json
-    ///   (no `manifest_version: 2`) → overwrite with the bundled v2 version.
-    ///   This handles upgrade from older TALRI versions that seeded v1 themes.
-    /// - If the user dir exists and contains a **v2** theme.json → skip
-    ///   (preserve user edits).
-    ///
-    /// Symlinks in the bundle dir are skipped (symlink_metadata check).
-    /// Subdirectories whose manifest fails to parse are skipped with a
-    /// `tracing::warn`.
-    pub fn seed_from_bundle(&self, bundle_dir: &std::path::Path) -> Result<(), ThemeEngineError> {
-        if !bundle_dir.is_dir() {
-            tracing::warn!(
-                "seed_from_bundle: bundle dir {:?} does not exist or is not a directory",
-                bundle_dir
-            );
-            return Ok(());
-        }
-
-        for entry in std::fs::read_dir(bundle_dir)? {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    tracing::warn!("seed_from_bundle: read_dir entry error: {}", e);
-                    continue;
-                }
-            };
-
-            // Skip symlinks — must not follow them (use symlink_metadata).
-            let entry_path = entry.path();
-            match std::fs::symlink_metadata(&entry_path) {
-                Ok(meta) if meta.file_type().is_symlink() => {
-                    tracing::warn!(
-                        "seed_from_bundle: skipping symlink {:?}",
-                        entry_path
-                    );
-                    continue;
-                }
-                Ok(meta) if !meta.is_dir() => continue,
-                Err(e) => {
-                    tracing::warn!(
-                        "seed_from_bundle: cannot stat {:?}: {}",
-                        entry_path,
-                        e
-                    );
-                    continue;
-                }
-                _ => {} // is_dir, proceed
-            }
-
-            let bundle_theme_dir = entry.path();
-
-            // Parse the bundled manifest to get id and entry filename.
-            let manifest_path = bundle_theme_dir.join("theme.json");
-            let manifest_raw = match std::fs::read_to_string(&manifest_path) {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::warn!(
-                        "seed_from_bundle: cannot read {:?}: {}",
-                        manifest_path,
-                        e
-                    );
-                    continue;
-                }
-            };
-            let manifest = match ThemeManifest::parse(&manifest_raw) {
-                Ok(m) => m,
-                Err(e) => {
-                    tracing::warn!(
-                        "seed_from_bundle: skipping {:?} — invalid manifest: {}",
-                        bundle_theme_dir,
-                        e
-                    );
-                    continue;
-                }
-            };
-
-            let user_theme_dir = self.themes_dir.join(&manifest.id);
-
-            if user_theme_dir.exists() {
-                // Existing user dir — decide what to do.
-                let existing_manifest_path = user_theme_dir.join("theme.json");
-                if existing_manifest_path.is_file() {
-                    match std::fs::read_to_string(&existing_manifest_path) {
-                        Ok(ref existing_raw) => {
-                            // Detect manifest_version independently of full
-                            // validation. A user-edited v2 manifest that is
-                            // temporarily invalid (bad entry, wrong api_version,
-                            // missing field) still has manifest_version:2 and
-                            // must be preserved — not overwritten.
-                            let is_v2 = serde_json::from_str::<serde_json::Value>(existing_raw)
-                                .ok()
-                                .is_some_and(|v| is_manifest_v2(&v));
-                            if is_v2 {
-                                // Warn if the v2 manifest fails full parse —
-                                // user may have broken something, but we
-                                // must not destroy their edits.
-                                if ThemeManifest::parse(existing_raw).is_err() {
-                                    tracing::warn!(
-                                        "seed_from_bundle: '{}' has manifest_version 2 but parse failed — preserving user edits",
-                                        manifest.id
-                                    );
-                                } else {
-                                    tracing::debug!(
-                                        "seed_from_bundle: '{}' already has v2 theme — skipping",
-                                        manifest.id
-                                    );
-                                }
-                                continue;
-                            }
-                            // No manifest_version:2 — legacy v1 format — overwrite with v2.
-                            tracing::info!(
-                                "seed_from_bundle: '{}' has legacy v1 theme — upgrading to v2",
-                                manifest.id
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "seed_from_bundle: cannot read existing {:?}: {} — skipping",
-                                existing_manifest_path,
-                                e
-                            );
-                            continue;
-                        }
-                    }
-                }
-                // Dir exists but maybe has no theme.json, or has a v1 one — (re)create.
-            } else {
-                tracing::info!(
-                    "seed_from_bundle: seeding new theme '{}' from bundle",
-                    manifest.id
-                );
-            }
-
-            // Verify the bundled entry file exists BEFORE copying anything.
-            // This prevents leaving a broken partial theme dir (v2 json, no entry).
-            let bundle_entry = bundle_theme_dir.join(&manifest.entry);
-            if !bundle_entry.is_file() {
-                tracing::warn!(
-                    "seed_from_bundle: entry file '{}' missing in bundle for '{}' — skipping",
-                    manifest.entry,
-                    manifest.id
-                );
-                continue;
-            }
-
-            // Ensure user dir exists.
-            if let Err(e) = std::fs::create_dir_all(&user_theme_dir) {
-                tracing::warn!(
-                    "seed_from_bundle: cannot create {:?}: {}",
-                    user_theme_dir,
-                    e
-                );
-                continue;
-            }
-
-            // Copy entry script first, then manifest — atomic order:
-            // if either fails we end up with nothing or a valid-but-incomplete
-            // dir, never a v2 json with a missing entry.
-            if let Err(e) = std::fs::copy(&bundle_entry, user_theme_dir.join(&manifest.entry)) {
-                tracing::warn!(
-                    "seed_from_bundle: cannot copy entry for '{}': {}",
-                    manifest.id,
-                    e
-                );
-                continue;
-            }
-
-            if let Err(e) = std::fs::copy(&manifest_path, user_theme_dir.join("theme.json")) {
-                tracing::warn!(
-                    "seed_from_bundle: cannot copy manifest for '{}': {}",
-                    manifest.id,
-                    e
-                );
-                continue;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-/// Helper: detect manifest_version:2 in any JSON Number or String shape.
-fn is_manifest_v2(value: &serde_json::Value) -> bool {
-    value
-        .get("manifest_version")
-        .is_some_and(|ver| {
-            ver.as_i64() == Some(2)
-                || ver.as_f64().is_some_and(|f| (f - 2.0).abs() < f64::EPSILON)
-                || ver.as_str().map(|s| s.trim()) == Some("2")
-        })
 }
 
 #[cfg(test)]
@@ -573,219 +386,6 @@ mod tests {
         loader.scan().unwrap();
         fs::remove_file(tmp.path().join("alpha/theme.js")).unwrap();
         assert!(loader.read_script("alpha").is_err());
-    }
-
-    /// Write a bundled-style theme (theme.json + theme.js) into a dir.
-    fn write_bundle_theme(dir: &std::path::Path, id: &str, entry: &str, content: &str) {
-        let d = dir.join(id);
-        fs::create_dir_all(&d).unwrap();
-        fs::write(
-            d.join("theme.json"),
-            format!(
-                r#"{{"manifest_version":2,"id":"{id}","name":"{id}","api_version":1,"entry":"{entry}"}}"#
-            ),
-        )
-        .unwrap();
-        fs::write(d.join(entry), content).unwrap();
-    }
-
-    #[test]
-    fn test_seed_from_bundle_copies_missing_themes_only() {
-        let bundle = TempDir::new().unwrap();
-        let user = TempDir::new().unwrap();
-
-        // Pre-create "alpha" in user dir (simulating user-edited theme).
-        write_theme(user.path(), "alpha", "export function mount(){/*user-edited*/}");
-        // Bundle has "alpha" (different content) and "beta" (missing from user).
-        write_bundle_theme(bundle.path(), "alpha", "theme.js", "export function mount(){/*bundled alpha*/}");
-        write_bundle_theme(bundle.path(), "beta", "theme.js", "export function mount(){/*bundled beta*/}");
-
-        let loader = ThemeEngineLoader::new(user.path().to_path_buf());
-        loader.seed_from_bundle(bundle.path()).unwrap();
-
-        // User's edited alpha NOT overwritten.
-        let alpha = fs::read_to_string(user.path().join("alpha/theme.js")).unwrap();
-        assert!(alpha.contains("user-edited"), "user-edited theme must not be overwritten");
-        // Missing beta copied.
-        assert!(user.path().join("beta/theme.js").is_file(), "missing theme must be copied");
-        let beta = fs::read_to_string(user.path().join("beta/theme.js")).unwrap();
-        assert!(beta.contains("bundled beta"));
-    }
-
-    #[test]
-    fn test_seed_from_bundle_skips_symlinks() {
-        let bundle = TempDir::new().unwrap();
-        let user = TempDir::new().unwrap();
-
-        // Create a normal bundled theme.
-        write_bundle_theme(bundle.path(), "safe", "theme.js", "export function mount(){}");
-
-        // Try to create a symlink as a "theme" — only works on unix.
-        #[cfg(unix)]
-        {
-            let safe_dir = bundle.path().join("safe");
-            let sym_dir = bundle.path().join("evil_link");
-            std::os::unix::fs::symlink(&safe_dir, &sym_dir).unwrap();
-        }
-
-        let loader = ThemeEngineLoader::new(user.path().to_path_buf());
-        loader.seed_from_bundle(bundle.path()).unwrap();
-
-        // "safe" should be copied.
-        assert!(user.path().join("safe/theme.js").is_file());
-        // Symlinked "dir" should NOT create a corresponding user dir.
-        assert!(!user.path().join("evil_link").exists());
-    }
-
-    #[test]
-    fn test_seed_over_legacy_v1_dir_v2_wins() {
-        let bundle = TempDir::new().unwrap();
-        let user = TempDir::new().unwrap();
-
-        // Simulate a legacy v1 theme: directory exists with theme.json lacking manifest_version:2.
-        let legacy_dir = user.path().join("old_theme");
-        fs::create_dir_all(&legacy_dir).unwrap();
-        fs::write(
-            legacy_dir.join("theme.json"),
-            "{\"name\":\"Old Theme\",\"colors\":{\"idle\":\"#fff\"}}",
-        )
-        .unwrap();
-
-        // Bundle has a v2 version of the same theme.
-        write_bundle_theme(bundle.path(), "old_theme", "theme.js", "export function mount(){/*v2*/}");
-
-        let loader = ThemeEngineLoader::new(user.path().to_path_buf());
-        loader.seed_from_bundle(bundle.path()).unwrap();
-
-        // Legacy v1 theme.json should be overwritten with v2 format.
-        let rewritten = fs::read_to_string(user.path().join("old_theme/theme.json")).unwrap();
-        assert!(
-            rewritten.contains("\"manifest_version\":2"),
-            "legacy v1 theme should be upgraded to v2, got: {rewritten}"
-        );
-        assert!(user.path().join("old_theme/theme.js").is_file());
-    }
-
-    #[test]
-    fn test_seed_over_user_edited_v2_dir_untouched() {
-        let bundle = TempDir::new().unwrap();
-        let user = TempDir::new().unwrap();
-
-        // Simulate user-edited v2 theme.
-        write_theme(user.path(), "my_theme", "export function mount(){/*user v2 edits*/}");
-
-        // Bundle has same theme with different content.
-        write_bundle_theme(bundle.path(), "my_theme", "theme.js", "export function mount(){/*bundled original*/}");
-
-        let loader = ThemeEngineLoader::new(user.path().to_path_buf());
-        loader.seed_from_bundle(bundle.path()).unwrap();
-
-        // User-edited v2 theme must NOT be touched.
-        let content = fs::read_to_string(user.path().join("my_theme/theme.js")).unwrap();
-        assert!(
-            content.contains("user v2 edits"),
-            "user-edited v2 theme must remain untouched"
-        );
-    }
-
-    #[test]
-    fn test_seed_skips_bundle_entries_with_invalid_manifest() {
-        let bundle = TempDir::new().unwrap();
-        let user = TempDir::new().unwrap();
-
-        // A valid bundled theme.
-        write_bundle_theme(bundle.path(), "good", "theme.js", "export function mount(){}");
-        // A dir without a valid v2 manifest — should be skipped, not panic.
-        let bad_dir = bundle.path().join("bad");
-        fs::create_dir_all(&bad_dir).unwrap();
-        fs::write(bad_dir.join("theme.json"), "{not valid json").unwrap();
-
-        let loader = ThemeEngineLoader::new(user.path().to_path_buf());
-        // Must not panic, just skip the bad entry.
-        loader.seed_from_bundle(bundle.path()).unwrap();
-        assert!(user.path().join("good/theme.js").is_file());
-        assert!(!user.path().join("bad").exists());
-    }
-
-    /// A user-edited v2 manifest that fails full ThemeManifest::parse
-    /// (e.g. wrong api_version) must STILL be detected as v2 via
-    /// manifest_version field and preserved — not overwritten.
-    #[test]
-    fn test_seed_preserves_invalid_v2_manifest() {
-        let bundle = TempDir::new().unwrap();
-        let user = TempDir::new().unwrap();
-
-        // Write a bundled v2 theme for "my_theme".
-        write_bundle_theme(
-            bundle.path(),
-            "my_theme",
-            "theme.js",
-            "export function mount(){/*bundled*/}",
-        );
-
-        // User dir has a v2 manifest with an INVALID api_version (99).
-        // Full ThemeManifest::parse will fail, but manifest_version is 2.
-        let user_theme_dir = user.path().join("my_theme");
-        fs::create_dir_all(&user_theme_dir).unwrap();
-        let invalid_v2_json = r#"{
-            "manifest_version": 2,
-            "id": "my_theme",
-            "name": "My Theme",
-            "api_version": 99,
-            "entry": "theme.js"
-        }"#;
-        fs::write(user_theme_dir.join("theme.json"), invalid_v2_json).unwrap();
-
-        let loader = ThemeEngineLoader::new(user.path().to_path_buf());
-        loader.seed_from_bundle(bundle.path()).unwrap();
-
-        // The invalid v2 manifest must be UNCHANGED — preserved, not overwritten.
-        let content = fs::read_to_string(user_theme_dir.join("theme.json")).unwrap();
-        assert_eq!(content, invalid_v2_json, "invalid v2 manifest must be byte-identical");
-    }
-
-    #[test]
-    fn test_is_manifest_v2_string_2_preserved() {
-        // user-edited json with manifest_version as string "2"
-        let json = r#"{"manifest_version":"2","id":"x","name":"X","api_version":1,"entry":"e.js"}"#;
-        let v: serde_json::Value = serde_json::from_str(json).unwrap();
-        assert!(is_manifest_v2(&v), "string '2' must be detected as v2");
-    }
-
-    #[test]
-    fn test_is_manifest_v2_float_2_0_preserved() {
-        // user-edited json with manifest_version as float 2.0
-        let json = r#"{"manifest_version":2.0,"id":"x","name":"X","api_version":1,"entry":"e.js"}"#;
-        let v: serde_json::Value = serde_json::from_str(json).unwrap();
-        assert!(is_manifest_v2(&v), "float 2.0 must be detected as v2");
-    }
-
-    /// When a bundled theme has a valid manifest but its entry file is
-    /// missing, seed_from_bundle must not leave a broken partial dir
-    /// (theme.json without theme.js).
-    #[test]
-    fn test_seed_skips_bundle_with_missing_entry_does_not_leave_partial_dir() {
-        let bundle = TempDir::new().unwrap();
-        let user = TempDir::new().unwrap();
-
-        // Create a bundled theme dir with a valid manifest but NO entry file.
-        let bundle_theme_dir = bundle.path().join("orphan");
-        fs::create_dir_all(&bundle_theme_dir).unwrap();
-        fs::write(
-            bundle_theme_dir.join("theme.json"),
-            r#"{"manifest_version":2,"id":"orphan","name":"Orphan","api_version":1,"entry":"theme.js"}"#,
-        )
-        .unwrap();
-        // Note: NO theme.js is written.
-
-        let loader = ThemeEngineLoader::new(user.path().to_path_buf());
-        loader.seed_from_bundle(bundle.path()).unwrap();
-
-        // The orphan theme should NOT have created a user dir at all.
-        assert!(
-            !user.path().join("orphan").exists(),
-            "missing-entry bundle must not leave a partial theme dir"
-        );
     }
 
     /// When manifest.id disagrees with the folder name, the source must

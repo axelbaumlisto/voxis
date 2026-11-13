@@ -116,44 +116,20 @@ fn specta_commands_match_generate_handler_commands() {
     );
 }
 
-// --- resolve_bundled_themes_path tests ---
+// --- builtin theme source ---
 
+/// A debug build must read the themes from `src-tauri/themes` on disk, so
+/// `bun run build:themes` plus Reload shows edits without a rebuild.
+#[cfg(debug_assertions)]
 #[test]
-fn test_resolve_bundled_themes_path_picks_first_valid_dir() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let dir_a = tmp.path().join("a");
-    let dir_b = tmp.path().join("b");
-    std::fs::create_dir_all(&dir_a).unwrap();
-    std::fs::create_dir_all(&dir_b).unwrap();
-
-    let result = state::resolve_bundled_themes_path(&[dir_a.clone(), dir_b.clone()]);
-    assert_eq!(result, Some(dir_a), "should pick first candidate");
-}
-
-#[test]
-fn test_resolve_bundled_themes_path_skips_non_dir_candidates() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let not_a_dir = tmp.path().join("notadir");
-    std::fs::write(&not_a_dir, "i am a file").unwrap();
-    let dir_b = tmp.path().join("b");
-    std::fs::create_dir_all(&dir_b).unwrap();
-
-    // First candidate is a file, not a dir — must be skipped.
-    let result =
-        state::resolve_bundled_themes_path(&[not_a_dir.clone(), dir_b.clone()]);
-    assert_eq!(result, Some(dir_b), "should skip file, pick dir");
-}
-
-#[test]
-fn test_resolve_bundled_themes_path_falls_back_to_dev_dir_when_no_candidates() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let nonexistent = tmp.path().join("ghost");
-
-    // Give it a nonexistent candidate. The dev fallback (CARGO_MANIFEST_DIR/themes)
-    // exists in our dev environment, so resolve_bundled_themes_path always
-    // returns Some() here — a true None cannot be observed without mocking.
-    let candidates: Vec<std::path::PathBuf> = vec![nonexistent];
-    let result = state::resolve_bundled_themes_path(&candidates);
-    // In dev, the fallback should succeed (we're under src-tauri/).
-    assert!(result.is_some(), "dev fallback should resolve when candidate is missing");
+fn test_builtin_theme_source_in_debug_reads_the_dev_themes_folder() {
+    let ids: Vec<String> = state::builtin_theme_source()
+        .manifests()
+        .into_iter()
+        .map(|manifest| manifest.id)
+        .collect();
+    assert!(
+        ids.iter().any(|id| id == "default"),
+        "dev themes folder must provide 'default', got: {ids:?}"
+    );
 }
