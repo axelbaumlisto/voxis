@@ -130,14 +130,31 @@ pub fn export_builtin_theme(
     export_theme_dir(&state.loader, &theme_id)
 }
 
-/// Pure helper: copy a theme directory from themes_dir/<id> to
-/// themes_dir/<id>_custom (with counter-suffix loop for collisions).
+/// Pure helper: copy a theme's files from the source that owns it to
+/// themes_dir/<id>_custom (with counter-suffix loop for collisions). Works for
+/// any source the loader knows — builtin themes (embedded or a dev dir) as
+/// well as user themes — because the files come from the owning
+/// `ThemeSource`, while the copy is written into the user themes dir.
 pub fn export_theme_dir(loader: &ThemeEngineLoader, theme_id: &str) -> Result<String, String> {
-    let themes_dir = loader.themes_dir();
-    let src_dir = themes_dir.join(theme_id);
-    if !src_dir.is_dir() {
-        return Err(format!("unknown theme: '{theme_id}' not found in themes dir"));
+    // `files()` answers from the scan cache, so a single lookup would tie the
+    // export to the caller's scan timing: a theme added since the last scan is
+    // not cached at all, and a cached id whose folder vanished (a deleted user
+    // copy that shadowed a builtin) yields no files. Both need one fresh scan —
+    // the retry is what lets the id fall back to the source that still has it.
+    let mut files = loader.files(theme_id);
+    if files.is_empty() {
+        loader.scan().map_err(|e| format!("scan themes: {e}"))?;
+        files = loader.files(theme_id);
     }
+
+    // An empty file list means "no such theme" (see `ThemeEngineLoader::files`).
+    // Bail out before creating anything, so a failed export never leaves an
+    // empty `<id>_custom` folder behind.
+    if files.is_empty() {
+        return Err(format!("unknown theme: '{theme_id}' not found"));
+    }
+
+    let themes_dir = loader.themes_dir();
 
     let base_name = format!("{}_custom", theme_id);
     let mut folder_name = base_name.clone();
@@ -151,28 +168,10 @@ pub fn export_theme_dir(loader: &ThemeEngineLoader, theme_id: &str) -> Result<St
     let dest_dir = themes_dir.join(&folder_name);
     std::fs::create_dir_all(&dest_dir).map_err(|e| format!("create dest dir: {e}"))?;
 
-    // Copy all children (theme.json, theme.js, etc.) — skip symlinks for security.
-    for entry in std::fs::read_dir(&src_dir).map_err(|e| format!("read src dir: {e}"))? {
-        let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
-        let src_path = entry.path();
-        let fname = entry.file_name();
-        let dest_path = dest_dir.join(&fname);
-
-        // Use symlink_metadata to avoid following symlinks — a symlink in a
-        // theme dir could exfiltrate content from outside the themes_dir.
-        let meta = std::fs::symlink_metadata(&src_path)
-            .map_err(|e| format!("stat {fname:?}: {e}"))?;
-        if meta.file_type().is_symlink() {
-            tracing::warn!(
-                "export_theme_dir: skipping symlink {fname:?} in theme {theme_id}"
-            );
-            continue;
-        }
-        if !meta.file_type().is_file() {
-            // Skip directories, sockets, devices, etc.
-            continue;
-        }
-        std::fs::copy(&src_path, &dest_path).map_err(|e| format!("copy {fname:?}: {e}"))?;
+    // Only plain file names arrive here: the sources skip symlinks and
+    // non-files and return regular files of one theme, so a plain join is safe.
+    for (fname, bytes) in &files {
+        std::fs::write(dest_dir.join(fname), bytes).map_err(|e| format!("write {fname:?}: {e}"))?;
     }
 
     // Rewrite the copied theme.json so the copy has a unique id and
@@ -461,10 +460,16 @@ mod tests {
     fn test_export_builtin_theme_writes_theme_json_in_folder() {
         // Legacy test — uses the pure export_theme_dir helper with a seeded dir.
         let temp = tempfile::tempdir().unwrap();
-        // Seed a theme so the export has something to copy.
+        // Seed a theme so the export has something to copy. The manifest must be
+        // a valid v2 one: export reads from the loader, which only knows themes
+        // it could scan.
         let src = temp.path().join("winamp_classic");
         std::fs::create_dir_all(&src).unwrap();
-        std::fs::write(src.join("theme.json"), "{}").unwrap();
+        std::fs::write(
+            src.join("theme.json"),
+            r#"{"manifest_version":2,"id":"winamp_classic","name":"Winamp Classic","api_version":1,"entry":"theme.js"}"#,
+        )
+        .unwrap();
         std::fs::write(src.join("theme.js"), "export function mount(){}").unwrap();
 
         let loader = crate::theme_engine::ThemeEngineLoader::new(temp.path().to_path_buf());
@@ -509,6 +514,14 @@ mod theme_engine_command_tests {
         fs::write(d.join("theme.js"), "export function mount(){}").unwrap();
     }
 
+    /// A loader layered as `[builtin, user]`, like the app's own.
+    fn layered_loader(builtin: &std::path::Path, user: &std::path::Path) -> ThemeEngineLoader {
+        ThemeEngineLoader::with_builtin(
+            Box::new(crate::theme_engine::DirSource::new(builtin.to_path_buf())),
+            user.to_path_buf(),
+        )
+    }
+
     #[test]
     fn test_theme_infos_come_from_manifests() {
         let tmp = TempDir::new().unwrap();
@@ -538,6 +551,126 @@ mod theme_engine_command_tests {
         loader.scan().unwrap();
         let err = super::export_theme_dir(&loader, "nope").unwrap_err();
         assert!(err.contains("unknown theme"));
+    }
+
+    /// Exporting a builtin works with an empty user folder: the files come from
+    /// the builtin source, the rewritten copy lands in the user dir.
+    #[test]
+    fn test_export_builtin_theme_copies_builtin_with_empty_user_dir() {
+        let builtin = TempDir::new().unwrap();
+        seed(builtin.path(), "orb");
+        fs::write(builtin.path().join("orb/palette.css"), ":root{}").unwrap();
+        let user = TempDir::new().unwrap();
+        let loader = layered_loader(builtin.path(), user.path());
+
+        let exported = super::export_theme_dir(&loader, "orb").unwrap();
+        let exported = std::path::Path::new(&exported);
+        assert_eq!(exported.parent(), Some(user.path()));
+        assert_eq!(
+            exported.file_name().and_then(|n| n.to_str()),
+            Some("orb_custom")
+        );
+        for name in ["theme.json", "theme.js", "palette.css"] {
+            assert!(exported.join(name).is_file(), "{name} must be exported");
+        }
+
+        let manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(exported.join("theme.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["id"].as_str(), Some("orb_custom"));
+        assert_eq!(manifest["name"].as_str(), Some("N (custom)"));
+
+        // Neither source is mutated by the export.
+        assert!(builtin.path().join("orb/theme.json").is_file());
+        assert!(!user.path().join("orb").exists());
+    }
+
+    /// An unknown id errors out before anything is created: a failed export
+    /// must not leave an empty `<id>_custom` folder in the user dir.
+    #[test]
+    fn test_export_theme_dir_unknown_id_creates_no_folder() {
+        let builtin = TempDir::new().unwrap();
+        seed(builtin.path(), "orb");
+        let user = TempDir::new().unwrap();
+        let loader = layered_loader(builtin.path(), user.path());
+
+        let err = super::export_theme_dir(&loader, "ghost").unwrap_err();
+        assert!(err.contains("unknown theme"), "got: {err}");
+        let left: Vec<_> = fs::read_dir(user.path())
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name())
+            .collect();
+        assert!(left.is_empty(), "no folder may be created, got: {left:?}");
+    }
+
+    /// A second export of the same theme takes the next free folder name.
+    #[test]
+    fn test_export_builtin_theme_twice_uses_custom_1() {
+        let builtin = TempDir::new().unwrap();
+        seed(builtin.path(), "orb");
+        let user = TempDir::new().unwrap();
+        let loader = layered_loader(builtin.path(), user.path());
+
+        let first = super::export_theme_dir(&loader, "orb").unwrap();
+        let second = super::export_theme_dir(&loader, "orb").unwrap();
+
+        assert!(first.ends_with("orb_custom"), "got: {first}");
+        assert!(second.ends_with("orb_custom_1"), "got: {second}");
+        assert!(std::path::Path::new(&second).join("theme.js").is_file());
+    }
+
+    /// A cached user copy that disappears between scan and export must not
+    /// fail: the id falls back to the builtin it was shadowing.
+    #[test]
+    fn test_export_theme_dir_deleted_user_shadow_falls_back_to_builtin() {
+        let builtin = TempDir::new().unwrap();
+        seed(builtin.path(), "orb");
+        fs::write(builtin.path().join("orb/builtin_only.css"), "b{}").unwrap();
+        let user = TempDir::new().unwrap();
+        seed(user.path(), "orb");
+        fs::write(user.path().join("orb/user_only.css"), "u{}").unwrap();
+        let loader = layered_loader(builtin.path(), user.path());
+        // Cache says "orb" is owned by the user dir.
+        loader.scan().unwrap();
+
+        // The user copy vanishes without a rescan.
+        fs::remove_dir_all(user.path().join("orb")).unwrap();
+
+        let exported = super::export_theme_dir(&loader, "orb").unwrap();
+        let exported = std::path::Path::new(&exported);
+        assert_eq!(exported.parent(), Some(user.path()));
+        assert_eq!(
+            exported.file_name().and_then(|n| n.to_str()),
+            Some("orb_custom")
+        );
+        assert!(
+            exported.join("builtin_only.css").is_file(),
+            "the copy must come from the builtin after the fallback"
+        );
+        assert!(!exported.join("user_only.css").exists());
+    }
+
+    /// The release path: builtins come from the binary itself (`include_dir!`),
+    /// not from the user folder. Exporting the embedded `default` theme must
+    /// produce the same usable `<id>_custom` copy.
+    #[test]
+    fn test_export_theme_dir_from_embedded_builtin() {
+        let user = TempDir::new().unwrap();
+        let loader = ThemeEngineLoader::with_builtin(
+            Box::new(crate::theme_engine::source::EmbeddedSource::builtin()),
+            user.path().to_path_buf(),
+        );
+
+        let exported = super::export_theme_dir(&loader, "default").unwrap();
+        let exported = std::path::Path::new(&exported);
+        assert_eq!(exported, user.path().join("default_custom"));
+        assert!(exported.join("theme.js").is_file());
+
+        let manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(exported.join("theme.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["id"].as_str(), Some("default_custom"));
     }
 
     #[test]
