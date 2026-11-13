@@ -271,7 +271,6 @@ fn build_overlay_window(
                 use std::cell::Cell;
                 use std::rc::Rc;
                 use std::time::{Duration, Instant};
-                wv.add_events(gtk::gdk::EventMask::POINTER_MOTION_MASK);
                 let last = Rc::new(Cell::new(Instant::now() - Duration::from_millis(500)));
                 let app_enter = app_evt.clone();
                 wv.connect_enter_notify_event(move |_, _| {
