@@ -67,11 +67,11 @@ pub fn get_current_overlay_theme(paths: State<'_, AppPaths>) -> String {
 /// into the user themes dir first, so a fresh install already lists the
 /// builtins.
 ///
-/// Returns an error if theme scanning fails. The app's loader cannot fail that
-/// way — with builtins layered underneath, an unusable user themes dir (a file
-/// instead of a directory, no permissions) is logged and the builtins stay
-/// listed — so the `Err` arm covers a user-only loader (tests, tooling); the
-/// frontend surfaces it instead of showing a silently-empty dropdown.
+/// `Result` is kept for the command API, not because scanning can fail: an
+/// unusable user themes dir (a file instead of a directory, no permissions) is
+/// logged and the builtins stay listed, so the error arm is unreachable today.
+/// The frontend handles it anyway rather than showing a silently-empty
+/// dropdown if a future source ever reports a problem.
 #[tauri::command]
 #[specta::specta]
 pub fn get_visualization_themes(
@@ -418,6 +418,21 @@ pub async fn overlay_demo(state: State<'_, OrchestratorState>) -> Result<(), Str
 mod tests {
     use super::*;
 
+    /// A loader with an empty builtin layer, so `user` is the only theme
+    /// source — the shape for tests that do not exercise layering. The returned
+    /// `tempfile::TempDir` *is* the empty builtin layer and must outlive the
+    /// loader.
+    fn user_only_loader(user: &std::path::Path) -> (ThemeEngineLoader, tempfile::TempDir) {
+        let builtin = tempfile::tempdir().unwrap();
+        let loader = ThemeEngineLoader::with_builtin(
+            Box::new(crate::theme_engine::DirSource::new(
+                builtin.path().to_path_buf(),
+            )),
+            user.to_path_buf(),
+        );
+        (loader, builtin)
+    }
+
     #[test]
     fn test_overlay_state_hidden() {
         let state = OverlayState::Hidden;
@@ -475,7 +490,7 @@ mod tests {
         .unwrap();
         std::fs::write(src.join("theme.js"), "export function mount(){}").unwrap();
 
-        let loader = crate::theme_engine::ThemeEngineLoader::new(temp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(temp.path());
         let exported_path = export_theme_dir(&loader, "winamp_classic").unwrap();
         let exported_path = std::path::PathBuf::from(exported_path);
 
@@ -491,7 +506,7 @@ mod tests {
     #[test]
     fn test_export_builtin_theme_rejects_non_builtin_theme_ids() {
         let temp = tempfile::tempdir().unwrap();
-        let loader = crate::theme_engine::ThemeEngineLoader::new(temp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(temp.path());
 
         let err = export_theme_dir(&loader, "nonexistent_theme_xyz").unwrap_err();
         assert!(err.contains("unknown theme"));
@@ -525,11 +540,19 @@ mod theme_engine_command_tests {
         )
     }
 
+    /// A loader with an empty builtin layer, so `user` is the only theme
+    /// source — the shape for tests that do not exercise layering. The returned
+    /// `TempDir` *is* the empty builtin layer and must outlive the loader.
+    fn user_only_loader(user: &std::path::Path) -> (ThemeEngineLoader, TempDir) {
+        let builtin = TempDir::new().unwrap();
+        (layered_loader(builtin.path(), user), builtin)
+    }
+
     #[test]
     fn test_theme_infos_come_from_manifests() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path(), "abc");
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         let infos = super::theme_infos(&loader).unwrap();
         assert_eq!(infos.len(), 1);
         assert_eq!(infos[0].id, "abc");
@@ -539,7 +562,7 @@ mod theme_engine_command_tests {
     fn test_export_theme_dir_copies_entry_and_manifest() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path(), "abc");
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         loader.scan().unwrap();
         let new_dir = super::export_theme_dir(&loader, "abc").unwrap();
         assert!(std::path::Path::new(&new_dir).join("theme.js").is_file());
@@ -550,7 +573,7 @@ mod theme_engine_command_tests {
     fn test_export_theme_dir_unknown_id_errors() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path(), "abc");
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         loader.scan().unwrap();
         let err = super::export_theme_dir(&loader, "nope").unwrap_err();
         assert!(err.contains("unknown theme"));
@@ -680,7 +703,7 @@ mod theme_engine_command_tests {
     fn test_read_script_through_loader_helper() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path(), "abc");
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         loader.scan().unwrap();
         let src = loader.read_script("abc").unwrap();
         assert!(src.contains("function mount()"));
@@ -689,7 +712,7 @@ mod theme_engine_command_tests {
     #[test]
     fn test_theme_infos_empty_dir() {
         let tmp = TempDir::new().unwrap();
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         let infos = super::theme_infos(&loader).unwrap();
         assert!(infos.is_empty());
     }
@@ -698,7 +721,7 @@ mod theme_engine_command_tests {
     fn test_validate_via_loader() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path(), "valid");
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         loader.scan().unwrap();
         let result = loader.validate("valid");
         assert!(result.valid);
@@ -718,7 +741,7 @@ drop(result);
         std::fs::write(&outside, "sensitive").unwrap();
         std::os::unix::fs::symlink(&outside, tmp.path().join("abc/evil_link")).unwrap();
 
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         loader.scan().unwrap();
         let new_dir = super::export_theme_dir(&loader, "abc").unwrap();
         let exported = std::path::Path::new(&new_dir);
@@ -734,7 +757,7 @@ drop(result);
     fn test_export_theme_dir_rewrites_id_and_name_in_copied_manifest() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path(), "abc");
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         loader.scan().unwrap();
         let new_dir = super::export_theme_dir(&loader, "abc").unwrap();
         let exported = std::path::Path::new(&new_dir);
@@ -751,25 +774,24 @@ drop(result);
         assert!(name.contains("(custom)"), "expected '(custom)' in name, got: {name}");
     }
 
+    /// An unusable user dir (a file where the folder should be) hides the user
+    /// themes but is not a scan error: the builtins stay listed, so the command
+    /// reports an empty list here rather than failing.
     #[test]
-    fn test_theme_infos_propagates_scan_error() {
+    fn test_theme_infos_on_unusable_user_dir_is_empty_not_an_error() {
         let tmp = TempDir::new().unwrap();
-        // Create a FILE where a themes_dir would be — scan will IO-error.
         let not_a_dir = tmp.path().join("notadir");
         std::fs::write(&not_a_dir, "i am a file").unwrap();
-        let loader = ThemeEngineLoader::new(not_a_dir);
-        let result = super::theme_infos(&loader);
-        assert!(
-            result.is_err(),
-            "theme_infos on a file (not dir) must propagate the scan error"
-        );
+        let (loader, _builtin) = user_only_loader(&not_a_dir);
+        let infos = super::theme_infos(&loader).expect("scanning must not fail");
+        assert!(infos.is_empty(), "got: {:?}", infos.iter().map(|i| &i.id).collect::<Vec<_>>());
     }
 
     #[test]
     fn test_scan_after_export_finds_both_with_distinct_ids() {
         let tmp = TempDir::new().unwrap();
         seed(tmp.path(), "abc");
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         loader.scan().unwrap();
 
         // Export to abc_custom (rewrites id in theme.json).

@@ -21,6 +21,10 @@
 //!   digest covers the folder's regular files only, and the loader cannot read
 //!   subfolders, so the extra folder cannot change the theme's behavior. The
 //!   whole folder, subfolder included, is moved — which keeps this reversible;
+//! - a folder holding an entry the digest could not see — a symlinked or
+//!   unreadable file, a non-UTF-8 name — is **never** moved: `files()` skips
+//!   those, so their content would be missing from the digest and an edit
+//!   hiding there would match a known digest. It is kept as edited;
 //! - a symlinked theme folder is not followed (and not moved): `symlink_metadata`
 //!   decides, so the migration never touches content outside the user folder;
 //! - moving is `fs::rename` **only** — never copy-and-delete. A folder that
@@ -127,7 +131,12 @@ pub fn retire_pristine_copies(
         // `files()` reports its own read errors and yields an empty list then,
         // which lands in `kept_edited` — keeping a folder we cannot judge.
         let files = source.files(&id);
-        if files.is_empty() || !digests.contains(&theme_digest(&files)) {
+        // The digest only covers what `files()` could read. Any other entry
+        // (a symlink, an unreadable file, a non-UTF-8 name) is invisible to
+        // it, so an edit hiding there would still match a known digest —
+        // count the entries and keep the folder whenever one was skipped.
+        let skipped_entries = non_dir_entry_count(&path) != Some(files.len());
+        if files.is_empty() || skipped_entries || !digests.contains(&theme_digest(&files)) {
             report.kept_edited.push(id);
             continue;
         }
@@ -143,6 +152,27 @@ pub fn retire_pristine_copies(
     report.retired.sort();
     report.kept_edited.sort();
     report
+}
+
+/// How many entries of theme folder `dir` are **not** directories — i.e. how
+/// many entries `DirSource::files` is supposed to yield. Compared against its
+/// result, a difference means an entry was skipped (a symlink, an unreadable
+/// file, a non-UTF-8 name) and the folder cannot be judged by digest.
+///
+/// `None` when the folder or one of its entries cannot be read: unknown is
+/// never pristine, so the caller keeps the folder.
+fn non_dir_entry_count(dir: &Path) -> Option<usize> {
+    let mut count = 0;
+    for entry in std::fs::read_dir(dir).ok()? {
+        let entry = entry.ok()?;
+        // `symlink_metadata`, never `is_dir()`: a symlink is an entry the
+        // reader skips, whatever it points at — a linked directory included.
+        let meta = std::fs::symlink_metadata(entry.path()).ok()?;
+        if !meta.is_dir() {
+            count += 1;
+        }
+    }
+    Some(count)
 }
 
 /// Move the theme folder `src` into `retired_dir`, under a free name.
@@ -344,6 +374,64 @@ mod tests {
         assert!(report.retired.is_empty(), "{:?}", report.retired);
         assert!(report.kept_edited.is_empty(), "{:?}", report.kept_edited);
         assert!(user_dir.join("my_own_theme/theme.js").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retire_copy_with_a_symlinked_file_is_kept() {
+        // `DirSource::files` skips symlinks, so the folder's remaining files
+        // alone would already fail the digest check — asserted here to pin the
+        // user-visible outcome for the "theme.js replaced by a link" case.
+        let tmp = TempDir::new().unwrap();
+        let user_dir = tmp.path().join("themes");
+        let retired_dir = tmp.path().join("themes-retired");
+        write_theme(&user_dir, "default", PRISTINE_JS);
+        let known = known_of(&user_dir, &["default"]);
+        let identical = tmp.path().join("identical.js");
+        fs::write(&identical, PRISTINE_JS).unwrap();
+        fs::remove_file(user_dir.join("default/theme.js")).unwrap();
+        std::os::unix::fs::symlink(&identical, user_dir.join("default/theme.js")).unwrap();
+
+        let report = retire_pristine_copies(&user_dir, &retired_dir, &known);
+
+        assert!(report.retired.is_empty(), "{:?}", report.retired);
+        assert_eq!(report.kept_edited, vec!["default"]);
+        assert!(
+            fs::symlink_metadata(user_dir.join("default/theme.js"))
+                .unwrap()
+                .is_symlink(),
+            "the folder is left exactly as it was"
+        );
+        assert!(!retired_dir.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retire_copy_with_a_skipped_symlinked_file_is_kept() {
+        // The decisive case for the entry count: the digest of the READ files
+        // matches the pristine one exactly (an extra symlink contributes no
+        // bytes), so only the skipped-entry check can tell that this folder is
+        // not a copy the app seeded.
+        let tmp = TempDir::new().unwrap();
+        let user_dir = tmp.path().join("themes");
+        let retired_dir = tmp.path().join("themes-retired");
+        write_theme(&user_dir, "default", PRISTINE_JS);
+        let known = known_of(&user_dir, &["default"]);
+        let outside = tmp.path().join("outside.js");
+        fs::write(&outside, "export function mount(){/*outside*/}").unwrap();
+        std::os::unix::fs::symlink(&outside, user_dir.join("default/extra.js")).unwrap();
+        assert_eq!(
+            DirSource::new(user_dir.clone()).files("default").len(),
+            2,
+            "the symlink is not part of what the digest sees"
+        );
+
+        let report = retire_pristine_copies(&user_dir, &retired_dir, &known);
+
+        assert!(report.retired.is_empty(), "{:?}", report.retired);
+        assert_eq!(report.kept_edited, vec!["default"]);
+        assert!(user_dir.join("default/extra.js").is_symlink());
+        assert!(!retired_dir.exists());
     }
 
     #[cfg(unix)]

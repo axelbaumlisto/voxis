@@ -1,13 +1,13 @@
-//! Theme sources — where theme files come from. The loader itself only touches
-//! the filesystem to create/probe the user themes dir in `scan`: reading themes
-//! is the sources' job. It layers `ThemeSource` implementations in precedence
-//! order. SRP: I/O only — schema rules live in manifest.rs.
+//! Theme sources — I/O plus the shared folder→manifest rules (`parse_theme`):
+//! every source names, parses and validates a theme folder the same way. The
+//! loader layers `ThemeSource` implementations in precedence order and only
+//! touches the filesystem itself to create/probe the user themes dir in `scan`.
 use super::manifest::{is_safe_path_component, ThemeManifest};
 use include_dir::{include_dir, Dir, DirEntry};
 use std::path::{Path, PathBuf};
 
 /// The themes bundled with the app, embedded into the binary at compile time.
-pub static BUILTIN_THEMES: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/themes");
+static BUILTIN_THEMES: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/themes");
 
 /// A place themes can be read from.
 ///
@@ -135,8 +135,7 @@ impl ThemeSource for DirSource {
 }
 
 /// Themes embedded in the binary (`include_dir!`) — read-only, cannot be
-/// edited, updated or removed by the user. Until the loader layers sources
-/// (plan Task 3) this is only used by tests.
+/// edited, updated or removed by the user.
 ///
 /// `include_dir!` follows symlinks at compile time, so an embedded theme may
 /// carry the content behind a link — unlike `DirSource::files`, which skips
@@ -151,7 +150,7 @@ impl EmbeddedSource {
         Self { root }
     }
 
-    /// The themes bundled with the app ([`BUILTIN_THEMES`]).
+    /// The themes bundled with the app (`BUILTIN_THEMES`).
     pub fn builtin() -> Self {
         Self::new(&BUILTIN_THEMES)
     }

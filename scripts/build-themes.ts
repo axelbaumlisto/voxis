@@ -5,10 +5,11 @@
  * from the same `Bun.build` output so both are always byte-identical to
  * what the bundler actually produced for that theme:
  *
- * - `src-tauri/themes/<id>/` — seeded to `<config>/themes` at desktop
- *   startup (unchanged; this output's bytes must not change as part of
- *   adding the second target — see guest-js's build-themes round-trip
- *   test, which diffs this directory).
+ * - `src-tauri/themes/<id>/` — committed build output that the desktop app
+ *   embeds into its binary at compile time (`include_dir!`; a debug build
+ *   reads this folder from disk instead). This output's bytes must not
+ *   change as part of adding the second target — see guest-js's
+ *   build-themes round-trip test, which diffs this directory.
  * - `crates/tauri-plugin-voxis/guest-js/src/themes/generated/<id>/` —
  *   the plugin's static `ThemeRegistry` (Task 5,
  *   `[R1-Safety S3 / R2-Coherence F2]`): guest-js imports these

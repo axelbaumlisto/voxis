@@ -62,7 +62,6 @@ pub fn theme_digest(files: &[(String, Vec<u8>)]) -> String {
 mod tests {
     use super::*;
     use crate::theme_engine::source::{DirSource, ThemeSource};
-    use std::collections::HashMap;
     use std::path::Path;
 
     fn owned(files: &[(&str, &[u8])]) -> Vec<(String, Vec<u8>)> {
@@ -140,12 +139,11 @@ mod tests {
     fn test_theme_digest_of_every_bundled_theme_is_known() {
         // `known-builtin-digests.json` is produced by
         // `scripts/gen-known-theme-digests.ts` from the git history of
-        // `src-tauri/themes`. Finding the current bundle there proves the two
-        // digest implementations agree and that this bundle is recognised as
-        // pristine (so its old copy can be retired instead of shadowing).
-        let known: HashMap<String, Vec<String>> =
-            serde_json::from_str(include_str!("../../known-builtin-digests.json"))
-                .expect("known-builtin-digests.json must be a JSON object");
+        // `src-tauri/themes` and extended by `scripts/build-themes.ts`. Finding
+        // the current bundle there proves the two digest implementations agree
+        // and that this bundle is recognised as pristine (so its old copy can
+        // be retired instead of shadowing).
+        let known = crate::theme_engine::migrate::known_builtin_digests();
 
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("themes");
         // `DirSource::files` is the reader the retirement migration will use,

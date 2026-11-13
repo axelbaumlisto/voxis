@@ -29,44 +29,18 @@ pub struct ThemeEngineLoader {
     themes_dir: PathBuf,
     /// Theme sources in precedence order: a later source wins on id collision.
     sources: Vec<Box<dyn ThemeSource>>,
-    /// Whether an unusable user dir fails [`scan`](Self::scan). True for a
-    /// user-only loader (there is nothing else to show), false once builtins
-    /// are layered underneath.
-    user_dir_fatal: bool,
     /// id -> (index of the owning source, manifest) filled by scan().
     cache: RwLock<HashMap<String, (usize, ThemeManifest)>>,
 }
 
 impl ThemeEngineLoader {
-    /// Loader over the user themes dir only — no builtin layer.
-    pub fn new(themes_dir: PathBuf) -> Self {
-        Self::from_sources(
-            themes_dir.clone(),
-            vec![Box::new(DirSource::new(themes_dir))],
-            true,
-        )
-    }
-
     /// Loader layered as `[builtin, user]`: a user theme with a builtin's id
     /// shadows it. `themes_dir()` stays the user dir — the only folder the app
     /// writes into.
     pub fn with_builtin(builtin: Box<dyn ThemeSource>, user_dir: PathBuf) -> Self {
-        Self::from_sources(
-            user_dir.clone(),
-            vec![builtin, Box::new(DirSource::new(user_dir))],
-            false,
-        )
-    }
-
-    fn from_sources(
-        themes_dir: PathBuf,
-        sources: Vec<Box<dyn ThemeSource>>,
-        user_dir_fatal: bool,
-    ) -> Self {
         Self {
-            themes_dir,
-            sources,
-            user_dir_fatal,
+            themes_dir: user_dir.clone(),
+            sources: vec![builtin, Box::new(DirSource::new(user_dir))],
             cache: RwLock::new(HashMap::new()),
         }
     }
@@ -78,16 +52,13 @@ impl ThemeEngineLoader {
     /// Scan all theme sources; cache and return manifests of valid themes.
     /// Invalid themes are skipped (logged), never fatal.
     ///
-    /// The user dir is created when missing and probed strictly — but only a
-    /// single-source loader fails on an unusable user dir. With builtins
-    /// layered underneath, the same condition (a file instead of a folder, no
-    /// permissions) is logged and scanning goes on: the builtins must stay
-    /// visible. `DirSource::manifests` already returns nothing in that case.
+    /// The user dir is created when missing and then probed; an unusable one
+    /// (a file instead of a folder, no permissions) is logged and scanning goes
+    /// on — the builtins must stay visible, and `DirSource::manifests` already
+    /// returns nothing in that case. The `Result` is kept for the command API;
+    /// scanning itself has no failure mode left.
     pub fn scan(&self) -> Result<Vec<ThemeManifest>, ThemeEngineError> {
         if let Err(e) = self.prepare_user_dir() {
-            if self.user_dir_fatal {
-                return Err(e);
-            }
             tracing::warn!(
                 "theme_engine: user themes dir {:?} is unusable ({}), scanning builtin themes only",
                 self.themes_dir,
@@ -101,9 +72,9 @@ impl ThemeEngineLoader {
     }
 
     /// Create the user themes dir when missing, then probe that it is a
-    /// readable directory. An unreadable one (a file, no permissions) must
-    /// surface as an error here rather than as an empty scan that wipes the
-    /// cache; `scan` decides whether that error is fatal.
+    /// readable directory. An unreadable one (a file, no permissions) is
+    /// reported here rather than as an empty scan that wipes the cache;
+    /// `scan` logs it and keeps serving the builtins.
     fn prepare_user_dir(&self) -> Result<(), ThemeEngineError> {
         if !self.themes_dir.exists() {
             std::fs::create_dir_all(&self.themes_dir)?;
@@ -262,12 +233,20 @@ mod tests {
         )
     }
 
+    /// A loader whose builtin layer is empty, so only `user` contributes
+    /// themes — the shape for tests that do not exercise layering. The returned
+    /// `TempDir` *is* that empty builtin layer and must outlive the loader.
+    fn user_only_loader(user: &std::path::Path) -> (ThemeEngineLoader, TempDir) {
+        let builtin = TempDir::new().unwrap();
+        (layered_loader(builtin.path(), user), builtin)
+    }
+
     #[test]
     fn test_scan_finds_valid_themes() {
         let tmp = TempDir::new().unwrap();
         write_theme(tmp.path(), "alpha", "export function mount(){}");
         write_theme(tmp.path(), "beta", "export function mount(){}");
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         let themes = loader.scan().unwrap();
         let mut ids: Vec<_> = themes.iter().map(|t| t.id.clone()).collect();
         ids.sort();
@@ -281,7 +260,7 @@ mod tests {
         let bad = tmp.path().join("bad");
         fs::create_dir_all(&bad).unwrap();
         fs::write(bad.join("theme.json"), "{not json").unwrap();
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         let themes = loader.scan().unwrap();
         assert_eq!(themes.len(), 1);
     }
@@ -296,7 +275,7 @@ mod tests {
             r#"{"manifest_version":2,"id":"noentry","name":"x","api_version":1,"entry":"theme.js"}"#,
         )
         .unwrap();
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         assert_eq!(loader.scan().unwrap().len(), 0);
     }
 
@@ -304,7 +283,7 @@ mod tests {
     fn test_read_script_returns_entry_content() {
         let tmp = TempDir::new().unwrap();
         write_theme(tmp.path(), "alpha", "export function mount(){/*alpha*/}");
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         loader.scan().unwrap();
         let src = loader.read_script("alpha").unwrap();
         assert!(src.contains("/*alpha*/"));
@@ -313,7 +292,7 @@ mod tests {
     #[test]
     fn test_read_script_unknown_id_errors() {
         let tmp = TempDir::new().unwrap();
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         loader.scan().unwrap();
         assert!(loader.read_script("ghost").is_err());
     }
@@ -324,7 +303,7 @@ mod tests {
         // Pre-populate a valid theme so the cache has entries; we must
         // still reject a traversal id before consulting the cache/path.
         write_theme(tmp.path(), "safe_theme", "export function mount(){}");
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         loader.scan().unwrap();
         let result = loader.read_script("../../../etc");
         assert!(result.is_err());
@@ -333,7 +312,7 @@ mod tests {
     #[test]
     fn test_validate_rejects_path_traversal_id() {
         let tmp = TempDir::new().unwrap();
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         let result = loader.validate("../../../etc");
         assert!(!result.valid);
         assert!(result.errors.iter().any(|e| e.contains("invalid theme id")));
@@ -345,7 +324,7 @@ mod tests {
         let bad = tmp.path().join("bad");
         fs::create_dir_all(&bad).unwrap();
         fs::write(bad.join("theme.json"), "{not json").unwrap();
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         let result = loader.validate("bad");
         assert!(!result.valid);
         assert!(!result.errors.is_empty());
@@ -363,7 +342,7 @@ mod tests {
             r#"{"manifest_version":2,"id":"noentry","name":"x","api_version":1,"entry":"theme.js"}"#,
         )
         .unwrap();
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         let result = loader.validate("noentry");
         assert!(!result.valid);
         assert!(
@@ -382,7 +361,7 @@ mod tests {
     fn test_read_script_errors_when_entry_deleted_after_scan() {
         let tmp = TempDir::new().unwrap();
         write_theme(tmp.path(), "alpha", "export function mount(){}");
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         loader.scan().unwrap();
         fs::remove_file(tmp.path().join("alpha/theme.js")).unwrap();
         assert!(loader.read_script("alpha").is_err());
@@ -404,7 +383,7 @@ mod tests {
         .unwrap();
         fs::write(d.join("theme.js"), "export function mount(){}").unwrap();
 
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         let themes = loader.scan().unwrap();
         assert_eq!(themes.len(), 1);
         // The id should be the folder name, not the manifest's "fake_id".
@@ -577,8 +556,8 @@ mod tests {
     }
 
     /// A layered loader keeps serving the builtins when the user dir is
-    /// unusable (here: a plain file where the folder should be). Only the
-    /// single-source loader treats that as a fatal scan error.
+    /// unusable (here: a plain file where the folder should be); the scan only
+    /// warns and the builtins stay visible.
     #[test]
     fn test_unusable_user_dir_does_not_hide_builtins() {
         let builtin = TempDir::new().unwrap();
@@ -705,7 +684,7 @@ mod tests {
         .unwrap();
         fs::write(copied.join("theme.js"), "export function mount(){}").unwrap();
 
-        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let (loader, _builtin) = user_only_loader(tmp.path());
         let themes = loader.scan().unwrap();
         // Both must be found with distinct ids.
         let mut ids: Vec<_> = themes.iter().map(|t| t.id.clone()).collect();

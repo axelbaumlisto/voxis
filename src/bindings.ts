@@ -572,14 +572,17 @@ async getCurrentOverlayTheme() : Promise<string> {
 },
 /**
  * Get all available visualization themes.
- * NOTE: this command reads from the *user* config themes dir (seeded by
- * Task 4.3 at startup). If seeding hasn't run yet (e.g. first launch before
- * Task 4.3 is merged), the list will be empty. No fallback hack — ordering
- * dependency is intentional.
+ * NOTE: the list is the loader's scan over `[builtin, user]` — builtin themes
+ * come from the binary (dev: `src-tauri/themes` on disk), the user themes dir
+ * contributes the user's own themes and overrides. Nothing has to be copied
+ * into the user themes dir first, so a fresh install already lists the
+ * builtins.
  * 
- * Returns an error if theme scanning fails (e.g. themes dir is a file instead
- * of a directory). The frontend must surface this so the user sees a
- * concrete problem instead of a silently-empty dropdown.
+ * `Result` is kept for the command API, not because scanning can fail: an
+ * unusable user themes dir (a file instead of a directory, no permissions) is
+ * logged and the builtins stay listed, so the error arm is unreachable today.
+ * The frontend handles it anyway rather than showing a silently-empty
+ * dropdown if a future source ever reports a problem.
  */
 async getVisualizationThemes() : Promise<Result<ThemeInfo[], string>> {
     try {

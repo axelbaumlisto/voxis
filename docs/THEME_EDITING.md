@@ -83,9 +83,10 @@ An **edited** copy stays and keeps shadowing the builtin, as long as it is a
 valid theme (a broken folder is skipped by the scanner and the builtin shows).
 Caveat: "untouched" ignores whitespace *everywhere*, including inside strings
 (`'a b'` → `'ab'`), so an edit that only moves whitespace around is retired as
-well — look in `themes-retired/` and move the folder back if that was yours. A
-folder that cannot be renamed (cross-device, locked) stays and is retried on
-the next start.
+well — look in `themes-retired/`, move the folder back and reselect the theme in
+Settings if that was yours (its theme no longer existed at startup, so the
+selection was switched to `default`). A folder that cannot be renamed
+(cross-device, locked) stays and is retried on the next start.
 
 ---
 

@@ -57,6 +57,19 @@ impl ConfigSqliteStorage {
         Ok(count == 0)
     }
 
+    /// Write the `overlay_theme` key — one upsert, nothing else.
+    ///
+    /// For callers that change a single setting of an already-loaded config
+    /// (the startup theme fallback). They must not go through
+    /// [`save`](Self::save): that rewrites **every** key from the in-memory
+    /// config, so it also writes back whatever `load` silently substituted for
+    /// a value it could not parse (a key written by another app version, a
+    /// corrupt blob) — clobbering settings the caller never meant to touch.
+    pub fn set_overlay_theme(&self, theme: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = self.conn()?;
+        self.set(&conn, "overlay_theme", theme)
+    }
+
     /// Get a single value by key.
     fn get(&self, conn: &Connection, key: &str) -> Option<String> {
         conn.query_row("SELECT value FROM config WHERE key = ?", [key], |row| {
@@ -690,6 +703,57 @@ mod tests {
         let storage = ConfigSqliteStorage::new(PathBuf::from("/nonexistent/config.db"));
         let config = storage.load().unwrap();
         assert_eq!(config, AppConfig::default());
+    }
+
+    /// Startup's theme fallback writes this one key. A full `save` would
+    /// rewrite every key from the config `load` just produced — including the
+    /// values it silently replaced with a default because it could not parse
+    /// them (the downgrade case) — so the setter must leave every other row
+    /// byte-identical.
+    #[test]
+    fn set_overlay_theme_changes_only_the_overlay_theme_key() {
+        let file = NamedTempFile::new().unwrap();
+        let storage = ConfigSqliteStorage::new(file.path().to_path_buf());
+        storage.save(&AppConfig::default()).unwrap();
+        {
+            let conn = storage.connect().unwrap();
+            // A value `load` cannot parse: it comes back as the default in
+            // memory, so a full `save` would write that default over it.
+            storage
+                .set(&conn, "retention_period", "from_a_newer_version")
+                .unwrap();
+        }
+        let before = config_rows(&storage);
+
+        storage.set_overlay_theme("neon").unwrap();
+
+        let after = config_rows(&storage);
+        assert_eq!(after.len(), before.len(), "no key may be added or dropped");
+        let changed: Vec<_> = after.iter().filter(|row| !before.contains(row)).collect();
+        assert_eq!(changed.len(), 1, "exactly one row may change: {changed:?}");
+        assert_eq!(
+            changed[0],
+            &("overlay_theme".to_string(), "neon".to_string())
+        );
+        assert!(
+            after.contains(&(
+                "retention_period".to_string(),
+                "from_a_newer_version".to_string()
+            )),
+            "the unparsable value must stay byte-identical"
+        );
+    }
+
+    /// Every `(key, value)` row of the config table, unsorted.
+    fn config_rows(storage: &ConfigSqliteStorage) -> Vec<(String, String)> {
+        let conn = storage.connect().unwrap();
+        let mut stmt = conn.prepare("SELECT key, value FROM config").unwrap();
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        rows
     }
 
     #[test]

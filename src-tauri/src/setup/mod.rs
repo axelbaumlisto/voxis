@@ -42,8 +42,7 @@ pub fn configure_app(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 
     let sqlite_storage = storage::ConfigSqliteStorage::new(paths.config_db());
     state::migrate_config_if_needed(&paths, &sqlite_storage);
-    // Mutable: a theme removed from the builtin set is rewritten below.
-    let mut config = sqlite_storage.load().unwrap_or_default();
+    let config = sqlite_storage.load().unwrap_or_default();
 
     app.manage(paths);
 
@@ -66,10 +65,13 @@ pub fn configure_app(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
             config.overlay.theme,
             fallback
         );
-        config.overlay.theme = fallback.to_string();
-        if let Err(e) = sqlite_storage.save(&config) {
-            // A failed write must not block startup: the overlay falls back on
-            // its own until the next start retries the config update.
+        // One key, not `save(&config)`: a full save would write back every
+        // value `load` had silently replaced with a default (a setting from
+        // another app version it cannot parse), clobbering settings this
+        // fallback has no business touching. A failed write must not block
+        // startup either: the overlay falls back on its own until the next
+        // start retries the config update.
+        if let Err(e) = sqlite_storage.set_overlay_theme(fallback) {
             tracing::warn!("failed to persist the overlay theme fallback: {}", e);
         }
     }
