@@ -6,7 +6,7 @@
  * fetchModule/fallbackModule/cancel.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, act } from "@testing-library/react";
+import { render, waitFor, act, fireEvent } from "@testing-library/react";
 
 // ── Mock Tauri event bus (used by useOverlayState) ──────────────────────
 type EventHandler = (event: { payload: unknown }) => void;
@@ -50,7 +50,7 @@ vi.mock("../bindings", () => ({
 
 // ── Tests ───────────────────────────────────────────────────────────────
 
-import { OverlayApp } from "../overlay";
+import { OverlayApp, ARM_MS, IDLE_HIDE_MS } from "../overlay";
 
 describe("OverlayApp (ThemeHost integration)", () => {
   beforeEach(() => {
@@ -295,5 +295,113 @@ describe("OverlayApp (ThemeHost integration)", () => {
         ).toBeGreaterThan(0),
       { timeout: 3000 },
     );
+  });
+});
+
+// ── Hover-handle visibility & no-blink-while-dragging ────────────────────
+describe("OverlayApp hover-handle visibility", () => {
+  beforeEach(() => {
+    handlers.clear();
+    document.body.classList.remove("pointer-inside");
+    listenMock.mockImplementation(
+      async (event: string, handler: EventHandler) => {
+        handlers.set(event, handler);
+        return () => {};
+      },
+    );
+    invokeMock.mockReset();
+    // get_overlay_window_position must resolve to a tuple; everything else ok.
+    invokeMock.mockImplementation(async (cmd: string) =>
+      cmd === "get_overlay_window_position"
+        ? [100, 100]
+        : { status: "ok", data: null },
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    listenMock.mockReset();
+    invokeMock.mockReset();
+    document.body.classList.remove("pointer-inside");
+  });
+
+  const emitInside = async (payload: boolean) => {
+    await act(async () => {
+      await handlers.get("overlay://pointer-inside")?.({ payload });
+    });
+  };
+
+  const mounted = async () => {
+    render(<OverlayApp />);
+    // let the pointer-inside listener subscribe
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(handlers.has("overlay://pointer-inside")).toBe(true),
+    );
+  };
+
+  it("reveals the handles on a pointer-inside=true ping", async () => {
+    await mounted();
+    expect(document.body.classList.contains("pointer-inside")).toBe(false);
+    await emitInside(true);
+    expect(document.body.classList.contains("pointer-inside")).toBe(true);
+  });
+
+  it("auto-hides the handles after the idle timeout with no further pings", async () => {
+    await mounted();
+    // Enable fake timers BEFORE the ping so the idle hide is a fake timer we
+    // can advance deterministically.
+    vi.useFakeTimers();
+    await emitInside(true);
+    expect(document.body.classList.contains("pointer-inside")).toBe(true);
+
+    await act(async () => {
+      vi.advanceTimersByTime(IDLE_HIDE_MS + 50);
+    });
+    expect(document.body.classList.contains("pointer-inside")).toBe(false);
+  });
+
+  it("ignores pointer-inside=false (the webview never emits it; only true pings keep handles alive)", async () => {
+    await mounted();
+    await emitInside(true);
+    await emitInside(false);
+    // false is a no-op: still shown (hide happens only via the idle timer)
+    expect(document.body.classList.contains("pointer-inside")).toBe(true);
+  });
+
+  it("keeps the handles pinned for the whole drag — no blink even past the idle timeout", async () => {
+    await mounted();
+    const grip = document.querySelector(
+      "[data-testid='overlay-drag-grip']",
+    ) as HTMLElement;
+    expect(grip).toBeTruthy();
+
+    // Start the drag: onInteracting(true) fires immediately on pointerdown.
+    await act(async () => {
+      fireEvent.pointerDown(grip, { button: 0, pointerId: 1, screenX: 0, screenY: 0 });
+      await Promise.resolve();
+    });
+    expect(document.body.classList.contains("pointer-inside")).toBe(true);
+
+    // Hold well past the idle timeout — the DOM pointer-capture swallows the
+    // GTK motion pings, but the handles must stay pinned (this is the blink fix).
+    vi.useFakeTimers();
+    await act(async () => {
+      vi.advanceTimersByTime(ARM_MS + IDLE_HIDE_MS * 3);
+    });
+    expect(document.body.classList.contains("pointer-inside")).toBe(true);
+
+    // Release → idle countdown resumes → handles fade after the idle timeout.
+    await act(async () => {
+      fireEvent.pointerUp(grip, { pointerId: 1 });
+    });
+    expect(document.body.classList.contains("pointer-inside")).toBe(true);
+    await act(async () => {
+      vi.advanceTimersByTime(IDLE_HIDE_MS + 50);
+    });
+    expect(document.body.classList.contains("pointer-inside")).toBe(false);
   });
 });

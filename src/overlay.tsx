@@ -47,8 +47,10 @@ import { createGesture } from "./overlay/gesture";
  * set_overlay_custom_position) so the overlay webview needs no window
  * permissions; `screenX/screenY` (stable as the window moves) drive the delta.
  */
-const ARM_MS = 300;
+export const ARM_MS = 300;
 const SLOP_PX = 6;
+/** Hide the hover handles this long after the last pointer-inside ping (idle). */
+export const IDLE_HIDE_MS = 1200;
 
 function DragGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
   const [dragging, setDragging] = useState(false);
@@ -348,6 +350,9 @@ export function OverlayApp() {
   // Driven by the Rust-side CursorEntered/CursorLeft events (overlay://pointer-
   // inside) because the Dock webview doesn't deliver DOM pointerleave or keep
   // CSS :hover in sync. Toggle a body class the grip CSS keys off of.
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const interactingRef = useRef(false);
+
   useEffect(() => {
     // Reveal the handles while pointer-inside `true` pings arrive (GTK enter +
     // throttled motion), and AUTO-HIDE once they stop — idle means the pointer
@@ -356,28 +361,57 @@ export function OverlayApp() {
     // receive `false`: the webview emits only `true`, so there is nothing that
     // can toggle the class off mid-hover — no blinking, hide happens purely on
     // idle timeout.
-    const IDLE_MS = 1200;
-    let hideTimer: ReturnType<typeof setTimeout> | null = null;
+    //
+    // While a drag/resize gesture is active (`interactingRef`), the DOM pointer
+    // capture swallows the GTK motion pings, so we must NOT arm the idle hide —
+    // otherwise the handles would vanish mid-drag and reappear on release
+    // (the "blink while dragging"). The [interacting] effect below force-shows
+    // them for the whole gesture and resumes idle on release.
+    const armHide = () => {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      if (interactingRef.current) {
+        hideTimerRef.current = null;
+        return;
+      }
+      hideTimerRef.current = setTimeout(() => {
+        document.body.classList.remove("pointer-inside");
+        hideTimerRef.current = null;
+      }, IDLE_HIDE_MS);
+    };
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     void listen<boolean>("overlay://pointer-inside", (e) => {
       if (!e.payload) return;
       document.body.classList.add("pointer-inside");
-      if (hideTimer) clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => {
-        document.body.classList.remove("pointer-inside");
-        hideTimer = null;
-      }, IDLE_MS);
+      armHide();
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
     });
     return () => {
       cancelled = true;
-      if (hideTimer) clearTimeout(hideTimer);
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
       if (unlisten) unlisten();
     };
   }, []);
+
+  // Keep the handles pinned visible for the whole drag/resize gesture, then
+  // resume the normal idle countdown when it ends.
+  useEffect(() => {
+    interactingRef.current = interacting;
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+    if (interacting) {
+      document.body.classList.add("pointer-inside");
+    } else {
+      hideTimerRef.current = setTimeout(() => {
+        document.body.classList.remove("pointer-inside");
+        hideTimerRef.current = null;
+      }, IDLE_HIDE_MS);
+    }
+  }, [interacting]);
 
   // Track actual OS window size so the theme canvas fills the window.
   // When innerWidth/innerHeight is 0 (jsdom/headless), fall back to
