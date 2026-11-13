@@ -478,9 +478,26 @@ jobs:
         run: |
           set -euo pipefail
           cd /home/spex/work/voxis
+          # The build itself dirties the tree (the checkout was verified clean
+          # before it): tauri-cli rewrites src-tauri/Cargo.toml's tauri features
+          # on the non-mac targets (drops `macos-private-api`), build:themes
+          # regenerates the theme bundles, update-homebrew.sh rewrites the
+          # in-tree formula. Left behind, they ride along `checkout -B main`
+          # and the next release has to stash them (three stashes piled up on
+          # 2026-11-13). Discard exactly these build outputs; anything ELSE is
+          # someone's edit -> stash it, never discard.
+          generated=(src-tauri/Cargo.toml homebrew-tap/Formula/voxis.rb src-tauri/themes crates/tauri-plugin-voxis/guest-js/src/themes/generated)
+          git checkout -- "${generated[@]}"
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            echo "::warning::unexpected local modifications after the build; stashing them:"
+            git --no-pager status --porcelain --untracked-files=no
+            git stash push -m "ci-host unexpected leftovers $(date +%F) (release ${{ steps.tag.outputs.tag }})" >/dev/null
+          fi
           git fetch --force origin "refs/heads/main:refs/remotes/origin/main"
           before=$(git rev-parse --short HEAD)
           git checkout -q -B main origin/main
+          # Warn, don't fail: the artifacts are built, publish must still run.
+          [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "::warning::host checkout still dirty after restore"; git --no-pager status --porcelain; }
           echo "repo restored to main: $before -> $(git rev-parse --short HEAD) (= origin/main)"
 
   # docs regeneration is DECOUPLED from release — see .forgejo/workflows/docs.yml

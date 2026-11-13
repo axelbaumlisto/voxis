@@ -154,11 +154,30 @@ Two host states that silently break every release (both hit on 2026-09-07):
 - **`voxis-ci:latest` missing** — a `docker system prune` (e.g. during a clipshot image
   rebuild) removes it; `ci.yml`/`release.yml` then fail at `docker run` in ~2 s with
   `Unable to find image 'voxis-ci:latest'`. Rebuild (see "CI image").
-- **Dirty `~/work/voxis` checkout on spex** — the `build` job is a host executor that
-  `git checkout <tag>`s in that persistent working copy; any local modification
-  (staged or not) aborts with `Your local changes … would be overwritten`. Fix:
-  `ssh spex 'cd ~/work/voxis && git stash push -m "ci-host leftovers $(date +%F)"'`
-  (never `checkout -- .`; someone may have WIP there).
+- **Dirty `~/work/voxis` checkout on spex** — the `build` job is a host executor working
+  in that persistent copy. `release.yml` now handles it both ways: before the build it
+  stashes any leftovers (named `ci-host leftovers …`), and its `restore repo to main`
+  step discards exactly the files the build itself regenerates (`src-tauri/Cargo.toml`
+  — tauri-cli drops `macos-private-api` on non-mac targets —, `homebrew-tap/Formula/voxis.rb`,
+  `src-tauri/themes`, guest-js `themes/generated`) and stashes anything else. If you
+  still find edits there, they are someone's: `git stash push -m …`, never `checkout -- .`.
+
+Two failures that shipped a broken v0.1.16 (2026-11-13), both now guarded:
+
+- **Linux lane published a STALE binary.** `bun install` died inside `docker build`, the
+  backgrounded lane function ignored it, `docker create` reused an older
+  `voxis-linux-gui:latest` (the tag is host-wide — a manual `--linux-only` build in
+  another clone had just set it), and a 0.1.15 binary/.deb/.rpm went out under 0.1.16.
+  `build_linux_gui` now fails on a failed build, clears old outputs, and checks the
+  `.deb` carries this version. Verify after any release: asset names must all carry
+  the new version.
+- **No DMG: `notarytool` HTTP 403 "A required agreement is missing or has expired".**
+  Apple pushed a new developer agreement. Only the Account Holder can accept it at
+  developer.apple.com/account (banner) or appstoreconnect.apple.com/business. Check
+  without a release: `./scripts/macos-vm.sh start`, then in the VM
+  `xcrun notarytool history --key <AuthKey_*.p8> --key-id <id> --issuer $APPLE_API_ISSUER`
+  (`~/secrets/apple-dev/notary.env`); `./scripts/macos-vm.sh stop` before tagging.
+  Acceptance took ~10 min to propagate. The lane now prints notarytool's error.
 
 ---
 
