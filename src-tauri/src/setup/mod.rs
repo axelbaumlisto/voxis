@@ -42,11 +42,37 @@ pub fn configure_app(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 
     let sqlite_storage = storage::ConfigSqliteStorage::new(paths.config_db());
     state::migrate_config_if_needed(&paths, &sqlite_storage);
-    let config = sqlite_storage.load().unwrap_or_default();
+    // Mutable: a theme removed from the builtin set is rewritten below.
+    let mut config = sqlite_storage.load().unwrap_or_default();
 
     app.manage(paths);
 
     let orchestrator = state::create_app_state(app, &config, permissions_granted);
+
+    // The loader has just scanned, so this is the one place that knows whether
+    // the configured overlay theme still exists. Persisting the fallback here
+    // matters: everything started later (`init_overlay_on_startup`, the
+    // settings' `get_current_overlay_theme`) reloads the config from storage.
+    // The user dir is passed along so a theme the scanner merely skipped (broken
+    // manifest while editing, unreadable folder) keeps the user's selection.
+    let user_themes_dir = app.state::<storage::AppPaths>().themes_dir();
+    if let Some(fallback) = state::fallback_overlay_theme(
+        &config.overlay.theme,
+        &app.state::<ThemeEngineState>().loader,
+        &user_themes_dir,
+    ) {
+        tracing::info!(
+            "overlay theme '{}' no longer exists; switching to '{}'",
+            config.overlay.theme,
+            fallback
+        );
+        config.overlay.theme = fallback.to_string();
+        if let Err(e) = sqlite_storage.save(&config) {
+            // A failed write must not block startup: the overlay falls back on
+            // its own until the next start retries the config update.
+            tracing::warn!("failed to persist the overlay theme fallback: {}", e);
+        }
+    }
 
     tracing::debug!("Setup: setting up system tray...");
     let paths_ref = app.state::<storage::AppPaths>();

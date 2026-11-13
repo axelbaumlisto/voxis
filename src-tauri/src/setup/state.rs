@@ -1,17 +1,18 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tauri::{App, Manager};
 use tokio::sync::Mutex;
 
 use crate::audio::AudioRecorder;
+use crate::config::DEFAULT_OVERLAY_THEME;
 use crate::hotkey::HotkeyListener;
 use crate::orchestrator::Orchestrator;
 use crate::output::OutputHandler;
 use crate::storage;
 use crate::theme_engine::{
-    known_builtin_digests, retire_pristine_copies, DirSource, EmbeddedSource, ThemeEngineLoader,
-    ThemeSource,
+    known_builtin_digests, manifest::is_safe_path_component, retire_pristine_copies, DirSource,
+    EmbeddedSource, ThemeEngineLoader, ThemeSource,
 };
 use crate::{AudioState, HotkeyState, OrchestratorState, OutputState};
 
@@ -63,6 +64,64 @@ pub(super) fn builtin_theme_source() -> Box<dyn ThemeSource> {
     } else {
         Box::new(EmbeddedSource::builtin())
     }
+}
+
+/// The overlay theme to switch to when the configured one is gone.
+///
+/// Builtin themes ship in the binary, so an id can disappear between versions
+/// while it stays in the user's config: the settings would show an empty
+/// selection and the overlay would try to load a script that no longer
+/// resolves. Returns the id to write into the config — always `default`, and
+/// only when that theme is actually available; `None` means "leave the value
+/// alone" (either it resolves, or there is nothing sane to fall back to).
+///
+/// "Gone" is stricter than "the loader does not know it": the scanner skips a
+/// theme it cannot parse, so a user theme mid-edit (or a temporarily unreadable
+/// user dir) is absent from the cache while its selection is perfectly valid.
+/// The rewrite is persisted, so getting this wrong would throw the user's own
+/// theme away — hence the folder probe: a theme that still has a folder of that
+/// name in the user dir keeps its selection (the frontend already falls back to
+/// `default` visually in the meantime). "Unknown" is never treated as "gone".
+pub(super) fn fallback_overlay_theme(
+    selected: &str,
+    loader: &ThemeEngineLoader,
+    user_dir: &Path,
+) -> Option<&'static str> {
+    if selected == DEFAULT_OVERLAY_THEME {
+        return None;
+    }
+    if loader.manifest(selected).is_some() {
+        return None;
+    }
+    if user_theme_may_exist(selected, user_dir) {
+        return None;
+    }
+    if loader.manifest(DEFAULT_OVERLAY_THEME).is_some() {
+        Some(DEFAULT_OVERLAY_THEME)
+    } else {
+        // Never guess another id and never retry: a missing `default` is a
+        // broken install, not something to paper over at startup.
+        None
+    }
+}
+
+/// Might `user_dir` still hold a theme called `selected`?
+///
+/// True when an entry of that name exists — any entry type counts
+/// (`symlink_metadata`, not the target): a theme the user is editing can be a
+/// folder with a broken manifest, a folder still being written, or a symlink
+/// into their dotfiles. Also true when the user dir itself cannot be read (the
+/// loader probes it the same way): nothing is visible then, and "unknown" must
+/// not be persisted as "gone". Ids that are not a single path component are
+/// never probed, so this cannot look outside `user_dir`.
+fn user_theme_may_exist(selected: &str, user_dir: &Path) -> bool {
+    if !is_safe_path_component(selected) {
+        return false;
+    }
+    if std::fs::read_dir(user_dir).is_err() {
+        return true;
+    }
+    user_dir.join(selected).symlink_metadata().is_ok()
 }
 
 /// Create and register all shared application state.
