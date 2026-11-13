@@ -31,7 +31,12 @@
       .resize-grip {
         opacity: 0;
         pointer-events: none;
-        transition: opacity 140ms ease;
+        /* Promote to its own compositor layer so the FADE-IN always animates:
+         * without this the browser may skip the first transition frame from an
+         * un-composited opacity:0 element, so the handles popped in abruptly on
+         * hover while the fade-out (from a painted opacity:1) stayed smooth. */
+        will-change: opacity;
+        transition: opacity 160ms ease-out;
       }
       body.pointer-inside .drag-grip,
       body.pointer-inside .resize-grip {
