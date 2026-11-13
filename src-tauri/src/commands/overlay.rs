@@ -61,14 +61,17 @@ pub fn get_current_overlay_theme(paths: State<'_, AppPaths>) -> String {
 }
 
 /// Get all available visualization themes.
-/// NOTE: this command reads from the *user* config themes dir (seeded by
-/// Task 4.3 at startup). If seeding hasn't run yet (e.g. first launch before
-/// Task 4.3 is merged), the list will be empty. No fallback hack — ordering
-/// dependency is intentional.
+/// NOTE: the list is the loader's scan over `[builtin, user]` — builtin themes
+/// come from the binary (dev: `src-tauri/themes` on disk), the user themes dir
+/// contributes the user's own themes and overrides. Nothing has to be copied
+/// into the user themes dir first, so a fresh install already lists the
+/// builtins.
 ///
-/// Returns an error if theme scanning fails (e.g. themes dir is a file instead
-/// of a directory). The frontend must surface this so the user sees a
-/// concrete problem instead of a silently-empty dropdown.
+/// Returns an error if theme scanning fails. The app's loader cannot fail that
+/// way — with builtins layered underneath, an unusable user themes dir (a file
+/// instead of a directory, no permissions) is logged and the builtins stay
+/// listed — so the `Err` arm covers a user-only loader (tests, tooling); the
+/// frontend surfaces it instead of showing a silently-empty dropdown.
 #[tauri::command]
 #[specta::specta]
 pub fn get_visualization_themes(

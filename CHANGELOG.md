@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased (Voxis desktop)
+
+### Changed
+- **Builtin themes live in the app binary**: they update and disappear with the
+  app (no frozen first-launch copy), and the bare `voxis-linux-x64-gui` /
+  `voxis-windows-x64-gui.exe` builds have them with no themes folder next to the
+  binary. `<config>/themes` holds only your themes: a valid folder with a
+  builtin's id shadows it, an export lands as `<id>_custom` (then `_custom_1`,
+  `_custom_2`, …).
+- **Startup moves untouched old builtin copies** to `<config>/themes-retired/`
+  (rename only, nothing deleted; collision → `<id>.1`). Edited copies stay and
+  keep shadowing (as long as they are a valid theme); a copy that cannot be moved
+  is retried on the next start, and a copy edited only in whitespace (even inside
+  strings) counts as untouched. Untouched copies of removed builtins no longer
+  linger in Settings (the 28 orbs dropped in v0.1.16) — edited copies stay.
+- **A selected theme that no longer exists falls back to `default`** (and the
+  fallback is saved); a present-but-broken user theme keeps its selection.
+
 ## v0.1.17 (Voxis desktop)
 
 Re-release of 0.1.16 with correct artifacts. 0.1.16's Linux binary, .deb and

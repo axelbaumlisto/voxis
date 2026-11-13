@@ -1,0 +1,4 @@
+# build:themes rewrites both, and a dev build reads themes/ from disk; a stale digest
+# list in the running binary is harmless (it only decides what startup retires).
+themes/
+known-builtin-digests.json

@@ -1,9 +1,10 @@
 # Editing Themes — Practical Workflow
 
 > **TL;DR — you do NOT need to rebuild Voxis to change a theme.**
-> Themes are plain `theme.js` + `theme.json` files loaded from disk at runtime.
-> Edit source → `bun run build:themes` → copy the two files into the user themes
-> dir → restart (or re-select the theme). No `cargo`, no `tauri build`.
+> Themes are plain `theme.js` + `theme.json` files. Edit source →
+> `bun run build:themes` → **Reload + Preview** in Settings. A dev build reads
+> the builtin themes from `src-tauri/themes` on disk, so no `cargo`, no
+> `tauri build`.
 
 This document is the hands-on companion to [`THEMES.md`](./THEMES.md) (which is
 the theme *author* reference — manifest, contract, ThemeApi). Read this one when
@@ -20,47 +21,71 @@ Rust knows **nothing** about theme visuals. A theme is just two files:
 | `theme.json` | Manifest v2 — id, name, `api_version`, `entry`, optional `params` and `overlay_width/height`. |
 | `theme.js`   | Self-contained ESM exporting `mount(container, themeApi)`.        |
 
-The overlay loads `theme.js` from the filesystem and mounts it. So shipping a
-theme change = updating those files. That's it.
+The overlay asks the theme loader for `theme.js` and mounts it — builtins from
+the binary (a dev build: from `src-tauri/themes` on disk), user themes from the
+config folder. So shipping a theme change = updating those files. That's it.
 
 `theme.js` is executable JavaScript trusted by the app webview. Do not install
 or copy themes from untrusted sources without reviewing the code first.
 
 ---
 
-## Where theme files live (TWO locations)
+## Where theme files live
 
-There are two copies, and the distinction matters:
+One rule: **a builtin theme lives in the app; the user themes dir holds only
+your themes.**
 
-1. **User themes dir** — *this is what actually loads at runtime*:
-   ```
-   Linux:   ~/.config/voxis/themes/<id>/
-   macOS:   ~/Library/Application Support/voxis/themes/<id>/
-   Windows: %APPDATA%/voxis/themes/<id>/
-   ```
-2. **Bundle dir** — seeds the user dir on first run / fresh installs. Common examples:
-   ```
-   macOS app bundle: /Applications/Voxis.app/Contents/Resources/themes/<id>/
-   local release:    src-tauri/target/release/themes/<id>/
-   source bundle:    src-tauri/themes/<id>/
-   ```
+### Builtins — inside the binary
 
-### ⚠️ The seeding gotcha
+Builtins are bundled from `src/theme-engine/builtin/` into `src-tauri/themes/`
+by `bun run build:themes`, then embedded into the executable at compile time
+(`src-tauri/src/theme_engine/source.rs`, `include_dir!`). They **update and
+disappear together with the app**, and need no folder next to the binary — the
+bare `voxis-linux-x64-gui` / `voxis-windows-x64-gui.exe` builds have them too.
 
-At startup the app runs `seed_from_bundle` (see
-`src-tauri/src/theme_engine/loader.rs`). Its rule:
+The one exception is a debug build (`bun run tauri dev`): there the builtins are
+read from `src-tauri/themes/` **on disk**, which is what makes the loop below
+work without recompiling. A release build (`tauri build`, installers) has them
+baked in, and the app bundle ships no themes folder.
 
-- user dir missing → copy the whole bundled theme in;
-- bundled theme's existing user copy is **legacy/non-v2** → overwrite with the bundled v2;
-- user theme is already **v2** → **SKIP** (preserve user edits).
+### User themes dir — yours
 
-This applies while seeding known bundled themes. Arbitrary invalid/non-v2 custom
-folders are skipped by the theme scanner rather than migrated.
+```
+Linux:   ~/.config/voxis/themes/<id>/
+macOS:   ~/Library/Application Support/voxis/themes/<id>/
+Windows: %APPDATA%/voxis/themes/<id>/
+```
 
-**Consequence:** once a v2 theme exists in the user dir, copying new files into
-the `.app` bundle alone does **nothing** — the bundle copy is ignored. You must
-write the updated files into the **user themes dir** (and ideally the bundle too,
-for clean reinstalls).
+Everything in it is yours: exported copies (`<id>_custom`, written by the
+`export_builtin_theme` command — it works for any builtin, no copy has to exist
+beforehand; further exports become `<id>_custom_1`, `<id>_custom_2`, …) and
+hand-made folders. The loader layers `[builtin, user]`, so a user folder with a
+**builtin's id** **shadows** it — deliberately: your edit wins until you delete
+the folder, as long as it is a valid theme (a broken folder is skipped by the
+scanner and the builtin shows).
+
+### Old copies retired by an upgrade
+
+Earlier versions copied every builtin into the user themes dir at startup and
+never updated a v2 copy again (legacy non-v2 copies used to be overwritten).
+Now, at startup, a copy whose content still matches a builtin version that once
+shipped (whitespace-insensitive digest against
+`src-tauri/known-builtin-digests.json`) is **moved** — rename, never deleted —
+to a sibling folder:
+
+```
+Linux:   ~/.config/voxis/themes-retired/<id>/     (collision: <id>.1, …)
+macOS:   ~/Library/Application Support/voxis/themes-retired/<id>/
+Windows: %APPDATA%/voxis/themes-retired/<id>/
+```
+
+An **edited** copy stays and keeps shadowing the builtin, as long as it is a
+valid theme (a broken folder is skipped by the scanner and the builtin shows).
+Caveat: "untouched" ignores whitespace *everywhere*, including inside strings
+(`'a b'` → `'ab'`), so an edit that only moves whitespace around is retired as
+well — look in `themes-retired/` and move the folder back if that was yours. A
+folder that cannot be renamed (cross-device, locked) stays and is retried on
+the next start.
 
 ---
 
@@ -139,26 +164,35 @@ This is the no-Tauri way to visually verify a theme change.
 
 ---
 
-## Deploying a theme change to the running app (no rebuild)
+## Seeing a builtin edit in the running app (no rebuild)
 
 ```bash
-# 1. Rebuild the bundled JS from source
+# 1. Rebuild the bundled JS from source (writes src-tauri/themes/<id>/)
 bun run build:themes
 
-# 2. Copy into the user theme directory (this is what the running app loads)
-THEME_DIR="$HOME/.config/voxis/themes"        # Linux
-# THEME_DIR="$HOME/Library/Application Support/voxis/themes"  # macOS
-for t in drifting_contour living_reed quiet_reed radiolarian; do
-  mkdir -p "$THEME_DIR/$t"
-  cp src-tauri/themes/$t/theme.{js,json} "$THEME_DIR/$t/"
-done
-
-# 3. Restart the app, reload themes, or re-select the theme in Settings
+# 2. Pick it up in the running app: "Reload + Preview" in Settings → Overlay
+#    theme — or restart it
 pkill -f 'Voxis|/voice$' || true
 ```
 
-When do you actually need `tauri build`? Only when you change **Rust** code
-(orchestrator, overlay window backends, commands) — never for pure theme visuals.
+This needs a **debug build** (`bun run tauri dev`): only there are the builtins
+read from `src-tauri/themes` instead of the copy embedded in the binary. A
+released build ships a changed builtin as a new app version — a file copy
+cannot update it. `src-tauri/.taurignore` keeps `themes/` and
+`known-builtin-digests.json` out of the dev watcher, so `bun run build:themes`
+rewriting them does not rebuild and restart the app. That skip is configured in
+`.taurignore` and has not been verified end-to-end yet: confirm it the first
+time you run the loop under `tauri dev` (a rebuild/restart means it is not
+taking effect).
+
+To change what a *released* app shows without rebuilding, use the user themes
+dir: an exported `<id>_custom`, or a valid folder carrying a builtin's id (it
+shadows the builtin). Editing files inside `/Applications/Voxis.app/` does
+nothing — the bundle no longer carries a themes folder.
+
+When do you actually need `tauri build`? When you change **Rust** code
+(orchestrator, overlay window backends, commands), or want the shipped builtin
+theme itself to change — never for iterating on visuals.
 
 ---
 
@@ -185,5 +219,6 @@ CSS-stretch the old canvas).
 - [ ] Add/adjust a unit test (renderer is pure → TDD it; see `renderers/__tests__/`).
 - [ ] `bun run build:themes`.
 - [ ] Eyeball in the harness (`bun run harness`, or the Playwright screenshot spec).
-- [ ] Copy `theme.{js,json}` into the **user** themes dir (+ bundle).
-- [ ] Restart / re-select the theme.
+- [ ] Reload + Preview in Settings (a debug build reads `src-tauri/themes`).
+- [ ] Commit the regenerated `src-tauri/themes/` (and
+      `src-tauri/known-builtin-digests.json`) — the release build embeds it.

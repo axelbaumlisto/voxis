@@ -123,8 +123,10 @@ The recording overlay supports user-written themes — self-contained ES modules
 that render into the overlay webview. Each theme is a folder in your config's
 `themes/` directory with a manifest v2 (`theme.json`) and a `theme.js` entry
 point. Themes can declare their own `overlay_width` / `overlay_height`; otherwise
-the default overlay size is used. Copy a builtin theme folder as a starting
-point, edit the code, then use Reload + Preview or reload/reselect it in
+the default overlay size is used. That folder holds only your own themes: builtin
+themes ship inside the app (they update and disappear with it), and a valid
+folder carrying a builtin's id shadows that builtin. Start from the template in
+the guide, edit the code, then use Reload + Preview or reload/reselect it in
 Settings. See the full guide at **[docs/THEMES.md](docs/THEMES.md)**.
 
 ### Orb themes

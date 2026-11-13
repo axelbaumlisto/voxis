@@ -29,17 +29,23 @@ my_theme/
 The folder name **is** the theme id. If your `theme.json` id field disagrees
 with the folder name, the folder name wins automatically — no silent failures.
 
-Builtin themes are seeded to your themes folder on first launch. You can copy
-an existing theme folder manually to make a custom variant; the current Settings
-UI exposes theme selection plus preview/reload actions, not an Export button.
-Existing manifest-v2 user themes are preserved by app updates. Bundled-theme
-user copies with legacy/non-v2 manifests may be upgraded/overwritten with the
-bundled v2 equivalent.
+Your themes folder holds only **your** themes — builtins ship inside the app and
+are not copied there. A valid folder carrying a builtin's id **shadows** that
+builtin; a `<id>_custom` folder (written by the `export_builtin_theme` command,
+so no copy has to exist beforehand; further exports become `<id>_custom_1`,
+`<id>_custom_2`, …) is a starting point with its own id. The current Settings UI
+exposes theme selection plus preview/reload actions, not an Export button. App
+updates never change your themes — builtins live in the binary, so they update
+and disappear with the app while anything you change beyond whitespace stays. The
+one exception: an untouched old builtin copy left by an earlier version is moved
+at startup to a sibling `themes-retired/` folder — see
+[`THEME_EDITING.md`](./THEME_EDITING.md).
 
 ## Quick Start
 
-1. Copy a builtin or user theme folder from the themes directory.
-2. Rename the copied folder to your theme id (e.g. `pulsar`).
+1. Copy a user theme folder from the themes directory, or write the two files
+   yourself from the template below.
+2. Name the folder after your theme id (e.g. `pulsar`).
 3. Edit `theme.json` — update `name` and `description`. Leave
    `manifest_version: 2`, `api_version: 1`, and `entry: "theme.js"` alone.
 4. Edit `theme.js` — change colours, behaviour, or throw it away and start
@@ -55,7 +61,7 @@ and no errors appear in the browser console, it's working.
 
 | Field             | Type   | Constraints                                  |
 |-------------------|--------|----------------------------------------------|
-| `manifest_version`| number | Must be `2`. Bundled legacy themes are upgraded during startup seeding; arbitrary invalid/non-v2 user themes are skipped. |
+| `manifest_version`| number | Must be `2`. Invalid or non-v2 themes (builtin or user) are skipped by the scanner. |
 | `id`              | string | Safe path component: no `/` `\` `..` `:` `.` |
 | `name`            | string | Human-readable, shown in the dropdown.       |
 | `description`     | string | Optional. Shown in Settings.                 |
@@ -163,11 +169,12 @@ input. The visual harness can also drive animation independently for previewing.
    is **never** blank. Check the browser console for error details (Ctrl+Shift+I
    while the overlay is shown).
 
-3. **User themes survive updates.** App updates seed v2 builtins to the
-   themes folder, but any existing v2 theme (detected by `manifest_version: 2`)
-   is left untouched — even if it's broken. Bundled themes whose existing user
-   copy is legacy/non-v2 are overwritten with the bundled v2 equivalent; arbitrary
-   custom invalid/non-v2 themes are skipped by the scanner rather than migrated.
+3. **User themes survive updates.** App updates never change your themes:
+   builtins live in the binary. A *valid* folder carrying a builtin's id keeps
+   shadowing it, including its newer versions; a broken one is skipped and the
+   builtin shows. The one exception: an untouched old builtin copy
+   (whitespace-only edits count as untouched) is moved at startup to
+   `themes-retired/` — see [`THEME_EDITING.md`](./THEME_EDITING.md).
 
 4. **Canvas size comes from the overlay window.** Themes without explicit
    sizing use the standard overlay dimensions; themes with `overlay_width` /
@@ -237,8 +244,8 @@ Place both files in `<themes dir>/pulsar/`, reload themes, select Pulsar, and
 speak — the circle pulses with your voice.
 
 > **Modifying an existing theme and want it live?** See the practical
-> workflow in [`THEME_EDITING.md`](./THEME_EDITING.md) — two file locations,
-> the seeding gotcha, harness/E2E, and deploy-without-rebuild.
+> workflow in [`THEME_EDITING.md`](./THEME_EDITING.md) — where builtins live,
+> how a same-id user folder shadows one, harness/E2E, and the no-rebuild loop.
 
 ## Writing a WebGL / Canvas-3D Theme
 
