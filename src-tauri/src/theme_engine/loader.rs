@@ -35,10 +35,28 @@ pub struct ThemeEngineLoader {
 }
 
 impl ThemeEngineLoader {
+    /// Loader over the user themes dir only — no builtin layer.
     pub fn new(themes_dir: PathBuf) -> Self {
+        Self::from_sources(
+            themes_dir.clone(),
+            vec![Box::new(DirSource::new(themes_dir))],
+        )
+    }
+
+    /// Loader layered as `[builtin, user]`: a user theme with a builtin's id
+    /// shadows it. `themes_dir()` stays the user dir — the only folder the app
+    /// writes into.
+    pub fn with_builtin(builtin: Box<dyn ThemeSource>, user_dir: PathBuf) -> Self {
+        Self::from_sources(
+            user_dir.clone(),
+            vec![builtin, Box::new(DirSource::new(user_dir))],
+        )
+    }
+
+    fn from_sources(themes_dir: PathBuf, sources: Vec<Box<dyn ThemeSource>>) -> Self {
         Self {
-            sources: vec![Box::new(DirSource::new(themes_dir.clone()))],
             themes_dir,
+            sources,
             cache: RwLock::new(HashMap::new()),
         }
     }
@@ -49,17 +67,39 @@ impl ThemeEngineLoader {
 
     /// Scan all theme sources; cache and return manifests of valid themes.
     /// Invalid themes are skipped (logged), never fatal.
+    ///
+    /// The user dir is created when missing and probed strictly — but only a
+    /// single-source loader fails on an unusable user dir. With builtins
+    /// layered underneath, the same condition (a file instead of a folder, no
+    /// permissions) is logged and scanning goes on: the builtins must stay
+    /// visible. `DirSource::manifests` already returns nothing in that case.
     pub fn scan(&self) -> Result<Vec<ThemeManifest>, ThemeEngineError> {
-        if !self.themes_dir.exists() {
-            std::fs::create_dir_all(&self.themes_dir)?;
+        if let Err(e) = self.prepare_user_dir() {
+            if self.sources.len() < 2 {
+                return Err(e);
+            }
+            tracing::warn!(
+                "theme_engine: user themes dir {:?} is unusable ({}), scanning builtin themes only",
+                self.themes_dir,
+                e
+            );
         }
-        // Strict probe: an unreadable themes dir (a file, no permissions) must
-        // surface as an error, never as an empty scan that wipes the cache.
-        std::fs::read_dir(&self.themes_dir)?;
         let found = self.collect_manifests();
         let list: Vec<_> = found.values().map(|(_, m)| m.clone()).collect();
         *self.cache.write().expect("theme cache poisoned") = found;
         Ok(list)
+    }
+
+    /// Create the user themes dir when missing, then probe that it is a
+    /// readable directory. An unreadable one (a file, no permissions) must
+    /// surface as an error here rather than as an empty scan that wipes the
+    /// cache; `scan` decides whether that error is fatal.
+    fn prepare_user_dir(&self) -> Result<(), ThemeEngineError> {
+        if !self.themes_dir.exists() {
+            std::fs::create_dir_all(&self.themes_dir)?;
+        }
+        std::fs::read_dir(&self.themes_dir)?;
+        Ok(())
     }
 
     /// Merge the manifests of every source. A later source shadows an earlier
@@ -106,13 +146,38 @@ impl ThemeEngineLoader {
         })
     }
 
+    /// All files of theme `id` as `(file name, bytes)`, read from the source
+    /// that owns the id in the scan cache.
+    ///
+    /// An empty Vec means unknown: the id was not in the last scan, its folder
+    /// disappeared since then, or the owning source cannot read it. Callers
+    /// must treat an empty result as "no such theme", never as a theme that
+    /// happens to have no files.
+    pub fn files(&self, id: &str) -> Vec<(String, Vec<u8>)> {
+        let source_index = self
+            .cache
+            .read()
+            .expect("theme cache poisoned")
+            .get(id)
+            .map(|(index, _)| *index);
+        match source_index {
+            Some(index) => self.sources[index].files(id),
+            None => Vec::new(),
+        }
+    }
+
     /// Validate one theme id; mirrors legacy ThemeTestResult semantics.
     ///
     /// Reads the sources fresh (not the cache), so a theme edited on disk
     /// validates without an explicit re-scan. Sources are asked in reverse
     /// (later wins): the first source that contains the id decides the answer —
-    /// valid, or its own invalidity reason. A broken theme therefore reports
-    /// its error instead of silently falling back to the source it shadows.
+    /// valid, or its own invalidity reason.
+    ///
+    /// This is deliberately asymmetric with [`scan`](Self::scan): scanning
+    /// skips a broken theme and leaves the valid copy it shadows visible (the
+    /// app must keep working), while validation blames the topmost copy — the
+    /// one the user actually put there — so a broken override is reported
+    /// instead of being masked by the builtin underneath it.
     pub fn validate(&self, id: &str) -> ThemeValidation {
         if !super::manifest::is_safe_path_component(id) {
             return ThemeValidation {
@@ -348,20 +413,40 @@ fn is_manifest_v2(value: &serde_json::Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme_engine::source::EmbeddedSource;
     use std::fs;
     use tempfile::TempDir;
 
     fn write_theme(dir: &std::path::Path, id: &str, entry_content: &str) {
+        write_named_theme(dir, id, id, entry_content);
+    }
+
+    /// Write a theme whose manifest carries a distinguishing `name`, so a test
+    /// can tell two copies of the same id apart.
+    fn write_named_theme(
+        dir: &std::path::Path,
+        id: &str,
+        name: &str,
+        entry_content: &str,
+    ) {
         let d = dir.join(id);
         fs::create_dir_all(&d).unwrap();
         fs::write(
             d.join("theme.json"),
             format!(
-                r#"{{"manifest_version":2,"id":"{id}","name":"{id}","api_version":1,"entry":"theme.js"}}"#
+                r#"{{"manifest_version":2,"id":"{id}","name":"{name}","api_version":1,"entry":"theme.js"}}"#
             ),
         )
         .unwrap();
         fs::write(d.join("theme.js"), entry_content).unwrap();
+    }
+
+    /// A loader layered as `[builtin, user]` over two temp dirs.
+    fn layered_loader(builtin: &std::path::Path, user: &std::path::Path) -> ThemeEngineLoader {
+        ThemeEngineLoader::with_builtin(
+            Box::new(DirSource::new(builtin.to_path_buf())),
+            user.to_path_buf(),
+        )
     }
 
     #[test]
@@ -728,6 +813,278 @@ mod tests {
         assert!(loader.manifest("real_id").is_some());
         // Lookup by the stale manifest id returns None.
         assert!(loader.manifest("fake_id").is_none());
+    }
+
+    /// An empty user dir shows every builtin theme; scripts are read from the
+    /// builtin source and `themes_dir()` still points at the user dir.
+    #[test]
+    fn test_builtin_only_lists_and_reads_builtin_themes() {
+        let builtin = TempDir::new().unwrap();
+        write_named_theme(
+            builtin.path(),
+            "alpha",
+            "Alpha Builtin",
+            "export function mount(){/*builtin alpha*/}",
+        );
+        write_named_theme(
+            builtin.path(),
+            "beta",
+            "Beta Builtin",
+            "export function mount(){/*builtin beta*/}",
+        );
+        let user = TempDir::new().unwrap();
+        let loader = layered_loader(builtin.path(), user.path());
+
+        let mut ids: Vec<_> = loader.scan().unwrap().into_iter().map(|m| m.id).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["alpha", "beta"]);
+        assert!(loader
+            .read_script("alpha")
+            .unwrap()
+            .contains("/*builtin alpha*/"));
+        assert_eq!(
+            loader.themes_dir().as_path(),
+            user.path(),
+            "themes_dir() must stay the user dir"
+        );
+    }
+
+    /// The real embedded builtins are visible with an empty user dir.
+    #[test]
+    fn test_builtin_embedded_source_lists_default_with_empty_user_dir() {
+        let user = TempDir::new().unwrap();
+        let loader = ThemeEngineLoader::with_builtin(
+            Box::new(EmbeddedSource::builtin()),
+            user.path().to_path_buf(),
+        );
+
+        let themes = loader.scan().unwrap();
+        assert!(
+            themes.iter().any(|m| m.id == "default"),
+            "embedded builtins must include 'default', got: {:?}",
+            themes.iter().map(|m| &m.id).collect::<Vec<_>>()
+        );
+        assert!(loader.read_script("default").unwrap().contains("mount"));
+    }
+
+    /// A user theme with an id of its own is listed next to the builtins and
+    /// read from the user dir.
+    #[test]
+    fn test_user_only_theme_is_listed_alongside_builtins() {
+        let builtin = TempDir::new().unwrap();
+        write_named_theme(
+            builtin.path(),
+            "alpha",
+            "Alpha Builtin",
+            "export function mount(){/*builtin alpha*/}",
+        );
+        let user = TempDir::new().unwrap();
+        write_named_theme(
+            user.path(),
+            "mine",
+            "Mine",
+            "export function mount(){/*user mine*/}",
+        );
+        let loader = layered_loader(builtin.path(), user.path());
+
+        let mut ids: Vec<_> = loader.scan().unwrap().into_iter().map(|m| m.id).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["alpha", "mine"]);
+        assert!(loader
+            .read_script("alpha")
+            .unwrap()
+            .contains("/*builtin alpha*/"));
+        assert!(loader
+            .read_script("mine")
+            .unwrap()
+            .contains("/*user mine*/"));
+    }
+
+    /// The user copy shadows the builtin: manifest, entry script and files all
+    /// come from the user dir.
+    #[test]
+    fn test_user_theme_shadows_builtin_with_same_id() {
+        let builtin = TempDir::new().unwrap();
+        write_named_theme(
+            builtin.path(),
+            "alpha",
+            "Alpha Builtin",
+            "export function mount(){/*builtin alpha*/}",
+        );
+        fs::write(builtin.path().join("alpha/builtin_only.css"), "x{}").unwrap();
+        let user = TempDir::new().unwrap();
+        write_named_theme(
+            user.path(),
+            "alpha",
+            "Alpha User",
+            "export function mount(){/*user alpha*/}",
+        );
+        fs::write(user.path().join("alpha/user_only.css"), "y{}").unwrap();
+        let loader = layered_loader(builtin.path(), user.path());
+
+        let themes = loader.scan().unwrap();
+        assert_eq!(themes.len(), 1, "one id, one manifest");
+        assert_eq!(loader.manifest("alpha").unwrap().name, "Alpha User");
+        assert!(loader
+            .read_script("alpha")
+            .unwrap()
+            .contains("/*user alpha*/"));
+
+        let names: Vec<_> = loader
+            .files("alpha")
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert!(
+            names.contains(&"user_only.css".to_string()),
+            "files must come from the user copy, got: {names:?}"
+        );
+        assert!(
+            !names.contains(&"builtin_only.css".to_string()),
+            "files must not mix in the shadowed builtin, got: {names:?}"
+        );
+    }
+
+    /// Removing the shadowing user copy gives the id back to the builtin on the
+    /// next scan: manifest and entry script are read from the builtin again.
+    #[test]
+    fn test_deleting_user_copy_restores_the_builtin() {
+        let builtin = TempDir::new().unwrap();
+        write_named_theme(
+            builtin.path(),
+            "alpha",
+            "Alpha Builtin",
+            "export function mount(){/*builtin alpha*/}",
+        );
+        let user = TempDir::new().unwrap();
+        write_named_theme(
+            user.path(),
+            "alpha",
+            "Alpha User",
+            "export function mount(){/*user alpha*/}",
+        );
+        let loader = layered_loader(builtin.path(), user.path());
+        loader.scan().unwrap();
+        assert_eq!(loader.manifest("alpha").unwrap().name, "Alpha User");
+
+        fs::remove_dir_all(user.path().join("alpha")).unwrap();
+        loader.scan().unwrap();
+        assert_eq!(loader.manifest("alpha").unwrap().name, "Alpha Builtin");
+        assert!(loader
+            .read_script("alpha")
+            .unwrap()
+            .contains("/*builtin alpha*/"));
+    }
+
+    /// A layered loader keeps serving the builtins when the user dir is
+    /// unusable (here: a plain file where the folder should be). Only the
+    /// single-source loader treats that as a fatal scan error.
+    #[test]
+    fn test_unusable_user_dir_does_not_hide_builtins() {
+        let builtin = TempDir::new().unwrap();
+        write_named_theme(
+            builtin.path(),
+            "alpha",
+            "Alpha Builtin",
+            "export function mount(){/*builtin alpha*/}",
+        );
+        let user = TempDir::new().unwrap();
+        let user_dir = user.path().join("notadir");
+        fs::write(&user_dir, "i am a file").unwrap();
+        let loader = layered_loader(builtin.path(), &user_dir);
+
+        let ids: Vec<_> = loader.scan().unwrap().into_iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec!["alpha"], "builtins must survive a broken user dir");
+        assert!(loader
+            .read_script("alpha")
+            .unwrap()
+            .contains("/*builtin alpha*/"));
+    }
+
+    /// A broken user copy of a builtin's id is skipped by scan(), so the
+    /// builtin it shadows stays visible and readable (see `validate` for the
+    /// deliberate asymmetry). Unparsable-manifest case.
+    #[test]
+    fn test_broken_user_manifest_does_not_hide_the_builtin() {
+        let builtin = TempDir::new().unwrap();
+        write_named_theme(
+            builtin.path(),
+            "alpha",
+            "Alpha Builtin",
+            "export function mount(){/*builtin alpha*/}",
+        );
+        let user = TempDir::new().unwrap();
+        fs::create_dir_all(user.path().join("alpha")).unwrap();
+        fs::write(user.path().join("alpha/theme.json"), "{not json").unwrap();
+        let loader = layered_loader(builtin.path(), user.path());
+
+        let themes = loader.scan().unwrap();
+        assert_eq!(themes.len(), 1);
+        assert_eq!(loader.manifest("alpha").unwrap().name, "Alpha Builtin");
+        assert!(loader
+            .read_script("alpha")
+            .unwrap()
+            .contains("/*builtin alpha*/"));
+
+        // Asymmetry: validate() asks the topmost source that *has* the id, so
+        // the broken user copy's reason surfaces instead of a false "valid"
+        // from the builtin underneath it.
+        let result = loader.validate("alpha");
+        assert!(!result.valid, "the broken user copy must not validate");
+        assert!(!result.errors.is_empty());
+    }
+
+    /// Same asymmetry for a user copy whose entry file is missing.
+    #[test]
+    fn test_user_copy_missing_entry_does_not_hide_the_builtin() {
+        let builtin = TempDir::new().unwrap();
+        write_named_theme(
+            builtin.path(),
+            "alpha",
+            "Alpha Builtin",
+            "export function mount(){/*builtin alpha*/}",
+        );
+        let user = TempDir::new().unwrap();
+        fs::create_dir_all(user.path().join("alpha")).unwrap();
+        fs::write(
+            user.path().join("alpha/theme.json"),
+            r#"{"manifest_version":2,"id":"alpha","name":"Broken","api_version":1,"entry":"theme.js"}"#,
+        )
+        .unwrap();
+        let loader = layered_loader(builtin.path(), user.path());
+
+        let themes = loader.scan().unwrap();
+        assert_eq!(themes.len(), 1);
+        assert_eq!(loader.manifest("alpha").unwrap().name, "Alpha Builtin");
+        assert!(loader
+            .read_script("alpha")
+            .unwrap()
+            .contains("/*builtin alpha*/"));
+
+        let result = loader.validate("alpha");
+        assert!(!result.valid);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("entry file missing")),
+            "expected the user copy's reason, got: {:?}",
+            result.errors
+        );
+    }
+
+    /// `files()` of an id no source has is empty, not an error.
+    #[test]
+    fn test_files_of_unknown_id_is_empty() {
+        let builtin = TempDir::new().unwrap();
+        write_theme(builtin.path(), "alpha", "export function mount(){}");
+        let user = TempDir::new().unwrap();
+        let loader = layered_loader(builtin.path(), user.path());
+        loader.scan().unwrap();
+
+        assert!(!loader.files("alpha").is_empty());
+        assert!(loader.files("ghost").is_empty());
+        assert!(loader.files("../alpha").is_empty());
     }
 
     /// After scan(), both the original theme and an exported copy must
