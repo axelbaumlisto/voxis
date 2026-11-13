@@ -341,10 +341,15 @@ function ResizeGrip({ onInteracting }: { onInteracting: (on: boolean) => void })
 
 export function OverlayApp() {
   const snapshot = useOverlayState();
-  // True while the user moves OR resizes: the overlay draws its own square
-  // outline then, because an orb fills the window edge to edge and nothing else
-  // would say where the window (and therefore the resize grip) actually ends.
-  const [interacting, setInteracting] = useState(false);
+  // The square outline is drawn ONLY while RESIZING: dragging the corner needs
+  // a visible window edge (an orb fills the window edge to edge). During a MOVE
+  // the orb itself shows where it goes, and repainting a 1px edge frame on every
+  // per-frame window reposition makes that frame flicker — so we keep it off.
+  const [resizing, setResizing] = useState(false);
+  // True while EITHER gesture (move or resize) is active — pins the hover
+  // handles visible for the whole gesture (DOM pointer-capture swallows the GTK
+  // motion pings that would otherwise keep them alive).
+  const [gesturing, setGesturing] = useState(false);
 
   // Reveal the handles only while the OS pointer is over the overlay window.
   // Driven by the Rust-side CursorEntered/CursorLeft events (overlay://pointer-
@@ -398,12 +403,12 @@ export function OverlayApp() {
   // Keep the handles pinned visible for the whole drag/resize gesture, then
   // resume the normal idle countdown when it ends.
   useEffect(() => {
-    interactingRef.current = interacting;
+    interactingRef.current = gesturing;
     if (hideTimerRef.current) {
       clearTimeout(hideTimerRef.current);
       hideTimerRef.current = null;
     }
-    if (interacting) {
+    if (gesturing) {
       document.body.classList.add("pointer-inside");
     } else {
       hideTimerRef.current = setTimeout(() => {
@@ -411,7 +416,7 @@ export function OverlayApp() {
         hideTimerRef.current = null;
       }, IDLE_HIDE_MS);
     }
-  }, [interacting]);
+  }, [gesturing]);
 
   // Track actual OS window size so the theme canvas fills the window.
   // When innerWidth/innerHeight is 0 (jsdom/headless), fall back to
@@ -527,12 +532,17 @@ export function OverlayApp() {
         />
       </div>
       <div
-        className={`resize-frame${interacting ? " visible" : ""}`}
+        className={`resize-frame${resizing ? " visible" : ""}`}
         data-testid="overlay-resize-frame"
         aria-hidden="true"
       />
-      <DragGrip onInteracting={setInteracting} />
-      <ResizeGrip onInteracting={setInteracting} />
+      <DragGrip onInteracting={setGesturing} />
+      <ResizeGrip
+        onInteracting={(on) => {
+          setGesturing(on);
+          setResizing(on);
+        }}
+      />
     </>
   );
 }

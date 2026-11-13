@@ -385,6 +385,12 @@ describe("OverlayApp hover-handle visibility", () => {
       await Promise.resolve();
     });
     expect(document.body.classList.contains("pointer-inside")).toBe(true);
+    // The square outline frame must NOT show during a MOVE — repainting a 1px
+    // edge frame on every per-frame reposition flickers; the orb shows position.
+    const frame = document.querySelector(
+      "[data-testid='overlay-resize-frame']",
+    ) as HTMLElement;
+    expect(frame.className).not.toContain("visible");
 
     // Hold well past the idle timeout — the DOM pointer-capture swallows the
     // GTK motion pings, but the handles must stay pinned (this is the blink fix).
@@ -403,5 +409,29 @@ describe("OverlayApp hover-handle visibility", () => {
       vi.advanceTimersByTime(IDLE_HIDE_MS + 50);
     });
     expect(document.body.classList.contains("pointer-inside")).toBe(false);
+  });
+
+  it("shows the square outline frame during a RESIZE (where the window edge matters)", async () => {
+    await mounted();
+    const grip = document.querySelector(
+      "[data-testid='overlay-resize-grip']",
+    ) as HTMLElement;
+    const frame = document.querySelector(
+      "[data-testid='overlay-resize-frame']",
+    ) as HTMLElement;
+    expect(frame.className).not.toContain("visible");
+
+    await act(async () => {
+      fireEvent.pointerDown(grip, { button: 0, pointerId: 2, screenX: 0, screenY: 0 });
+      await Promise.resolve();
+    });
+    expect(frame.className).toContain("visible");
+    // handles are pinned during resize too
+    expect(document.body.classList.contains("pointer-inside")).toBe(true);
+
+    await act(async () => {
+      fireEvent.pointerUp(grip, { pointerId: 2 });
+    });
+    expect(frame.className).not.toContain("visible");
   });
 });
