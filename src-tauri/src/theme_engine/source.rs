@@ -1,8 +1,14 @@
-//! Theme sources — where theme files come from. The loader never touches the
-//! filesystem itself: it layers `ThemeSource` implementations in precedence
-//! order. SRP: I/O only — schema rules live in manifest.rs.
+//! Theme sources — where theme files come from. The loader itself only touches
+//! the filesystem to create/probe the user themes dir in `scan` (and in the
+//! legacy `seed_from_bundle`): reading themes is the sources' job. It layers
+//! `ThemeSource` implementations in precedence order. SRP: I/O only — schema
+//! rules live in manifest.rs.
 use super::manifest::{is_safe_path_component, ThemeManifest};
+use include_dir::{include_dir, Dir, DirEntry};
 use std::path::{Path, PathBuf};
+
+/// The themes bundled with the app, embedded into the binary at compile time.
+pub static BUILTIN_THEMES: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/themes");
 
 /// A place themes can be read from.
 ///
@@ -129,6 +135,114 @@ impl ThemeSource for DirSource {
     }
 }
 
+/// Themes embedded in the binary (`include_dir!`) — read-only, cannot be
+/// edited, updated or removed by the user. Until the loader layers sources
+/// (plan Task 3) this is only used by tests.
+///
+/// `include_dir!` follows symlinks at compile time, so an embedded theme may
+/// carry the content behind a link — unlike `DirSource::files`, which skips
+/// symlinked files.
+pub struct EmbeddedSource {
+    root: &'static Dir<'static>,
+}
+
+impl EmbeddedSource {
+    /// `root` is a themes root: the folder whose children are theme folders.
+    pub fn new(root: &'static Dir<'static>) -> Self {
+        Self { root }
+    }
+
+    /// The themes bundled with the app ([`BUILTIN_THEMES`]).
+    pub fn builtin() -> Self {
+        Self::new(&BUILTIN_THEMES)
+    }
+
+    /// Embedded folder of theme `id`; `None` when the id is unsafe or absent.
+    fn theme_dir(&self, id: &str) -> Option<&'static Dir<'static>> {
+        if !is_safe_path_component(id) {
+            return None;
+        }
+        child(self.root, id).and_then(DirEntry::as_dir)
+    }
+}
+
+impl ThemeSource for EmbeddedSource {
+    fn manifests(&self) -> Vec<ThemeManifest> {
+        let mut found = Vec::new();
+        for dir in self.root.dirs() {
+            match load_embedded_theme(dir) {
+                Ok(manifest) => found.push(manifest),
+                Err(e) => {
+                    tracing::warn!("EmbeddedSource: skipping theme at {:?}: {}", dir.path(), e)
+                }
+            }
+        }
+        found
+    }
+
+    fn load(&self, id: &str) -> Result<ThemeManifest, String> {
+        let dir = self
+            .theme_dir(id)
+            .ok_or_else(|| format!("theme not found: {id}"))?;
+        load_embedded_theme(dir)
+    }
+
+    fn read(&self, id: &str, file: &str) -> Option<Vec<u8>> {
+        if !is_safe_path_component(file) {
+            return None;
+        }
+        let dir = self.theme_dir(id)?;
+        child(dir, file)
+            .and_then(DirEntry::as_file)
+            .map(|f| f.contents().to_vec())
+    }
+
+    fn files(&self, id: &str) -> Vec<(String, Vec<u8>)> {
+        let mut files = Vec::new();
+        let Some(dir) = self.theme_dir(id) else {
+            return files;
+        };
+        for file in dir.files() {
+            let name = match file.path().file_name().and_then(|n| n.to_str()) {
+                Some(name) => name.to_string(),
+                None => continue,
+            };
+            files.push((name, file.contents().to_vec()));
+        }
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        files
+    }
+}
+
+/// Child entry of `dir` named `name`.
+///
+/// `include_dir` paths are relative to the embedded root (`default/theme.json`),
+/// so the crate's `get_file`/`get_dir` only match such full paths. Themes are
+/// addressed by plain name here, the way `DirSource` joins path segments.
+fn child<'a>(dir: &'a Dir<'a>, name: &str) -> Option<&'a DirEntry<'a>> {
+    dir.entries()
+        .iter()
+        .find(|entry| entry.path().file_name().is_some_and(|n| n == name))
+}
+
+/// Load one embedded theme folder.
+fn load_embedded_theme(dir: &Dir<'_>) -> Result<ThemeManifest, String> {
+    let folder_name = dir
+        .path()
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "theme dir has no valid name".to_string())?;
+    let manifest_raw = child(dir, "theme.json")
+        .and_then(DirEntry::as_file)
+        .and_then(|file| file.contents_utf8())
+        .ok_or_else(|| "theme.json is missing or not UTF-8".to_string())?;
+    parse_theme(folder_name, manifest_raw, |entry| {
+        // `as_file`, not just presence: an entry naming a subdirectory is
+        // missing, like `DirSource`'s `is_file()`.
+        child(dir, entry).and_then(DirEntry::as_file).is_some()
+    })
+}
+
 /// Load one theme folder from disk.
 fn load_theme(dir: &Path) -> Result<ThemeManifest, String> {
     let folder_name = dir
@@ -176,6 +290,7 @@ fn parse_theme(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use include_dir::File;
     use std::fs;
     use tempfile::TempDir;
 
@@ -378,5 +493,155 @@ mod tests {
         let source = DirSource::new(tmp.path().to_path_buf());
         assert!(source.files("ghost").is_empty());
         assert!(source.files("../alpha").is_empty());
+    }
+
+    /// A hand-built embedded tree (`include_dir`'s `Dir`/`File` are const, so a
+    /// fixture needs no files on disk) exercising the rules `parse_theme`
+    /// enforces: `real_id` claims another id in its manifest, `noentry` names a
+    /// missing entry file, `direntry` names a subdirectory instead of a file.
+    static FIXTURE: Dir<'static> = Dir::new(
+        "",
+        &[
+            DirEntry::Dir(Dir::new(
+                "real_id",
+                &[
+                    DirEntry::File(File::new(
+                        "real_id/theme.json",
+                        br#"{"manifest_version":2,"id":"fake_id","name":"N","api_version":1,"entry":"theme.js"}"#,
+                    )),
+                    DirEntry::File(File::new(
+                        "real_id/theme.js",
+                        b"export function mount(){}",
+                    )),
+                ],
+            )),
+            DirEntry::Dir(Dir::new(
+                "noentry",
+                &[DirEntry::File(File::new(
+                    "noentry/theme.json",
+                    br#"{"manifest_version":2,"id":"noentry","name":"x","api_version":1,"entry":"theme.js"}"#,
+                ))],
+            )),
+            DirEntry::Dir(Dir::new(
+                "direntry",
+                &[
+                    DirEntry::File(File::new(
+                        "direntry/theme.json",
+                        br#"{"manifest_version":2,"id":"direntry","name":"D","api_version":1,"entry":"assets"}"#,
+                    )),
+                    DirEntry::Dir(Dir::new("direntry/assets", &[])),
+                ],
+            )),
+        ],
+    );
+
+    #[test]
+    fn test_embedded_source_applies_the_shared_theme_rules() {
+        let source = EmbeddedSource::new(&FIXTURE);
+        // The folder name is authoritative; a theme without its entry file is
+        // skipped by manifests() and reported as invalid by load().
+        let ids: Vec<_> = source.manifests().into_iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec!["real_id"]);
+        let err = source.load("noentry").unwrap_err();
+        assert!(err.contains("entry file missing"), "got: {err}");
+        let names: Vec<_> = source
+            .files("real_id")
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, vec!["theme.js", "theme.json"]);
+    }
+
+    /// The entry must be a *file*: a manifest naming a directory is missing its
+    /// entry, exactly as `DirSource`'s `is_file()` judges it.
+    #[test]
+    fn test_embedded_source_entry_naming_a_directory_is_missing() {
+        let source = EmbeddedSource::new(&FIXTURE);
+        let err = source.load("direntry").unwrap_err();
+        assert!(err.contains("entry file missing"), "got: {err}");
+        assert!(source.files("direntry").iter().all(|(n, _)| n != "assets"));
+    }
+
+    #[test]
+    fn test_embedded_source_lists_exactly_the_themes_folder() {
+        // The embedded ids must match the subdirectories of `src-tauri/themes`
+        // that the binary was built from.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("themes");
+        let mut on_disk: Vec<String> = fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        on_disk.sort();
+        assert!(!on_disk.is_empty(), "no themes in {:?}", root);
+
+        let mut embedded: Vec<String> = EmbeddedSource::builtin()
+            .manifests()
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        embedded.sort();
+        assert_eq!(embedded, on_disk);
+    }
+
+    #[test]
+    fn test_embedded_source_read_returns_manifest_of_default() {
+        let source = EmbeddedSource::builtin();
+        let bytes = source
+            .read("default", "theme.json")
+            .expect("bundled default theme.json");
+        assert!(String::from_utf8(bytes)
+            .unwrap()
+            .contains("\"manifest_version\""));
+    }
+
+    #[test]
+    fn test_embedded_source_read_rejects_unsafe_names() {
+        let source = EmbeddedSource::builtin();
+        assert!(source.read("default", "theme.js").is_some());
+        assert!(
+            source.read("..", "theme.json").is_none(),
+            "parent-dir id must be rejected"
+        );
+        assert!(
+            source.read("default", "../theme.json").is_none(),
+            "traversal file must be rejected"
+        );
+        assert!(
+            source.read("default", "C:theme.js").is_none(),
+            "drive prefix must be rejected"
+        );
+        assert!(
+            source.read("ghost", "theme.json").is_none(),
+            "unknown id must yield None"
+        );
+        assert!(
+            source.read("default", "nope.js").is_none(),
+            "missing file must yield None"
+        );
+    }
+
+    #[test]
+    fn test_embedded_source_files_are_sorted_and_include_manifest() {
+        let source = EmbeddedSource::builtin();
+        let files = source.files("default");
+        let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted, "files must be sorted by name");
+        assert!(names.contains(&"theme.json"), "got: {names:?}");
+        assert!(names.contains(&"theme.js"), "got: {names:?}");
+
+        assert!(source.files("ghost").is_empty());
+        assert!(source.files("../default").is_empty());
+    }
+
+    #[test]
+    fn test_embedded_source_load_unknown_id_errors() {
+        let source = EmbeddedSource::builtin();
+        assert_eq!(source.load("default").unwrap().id, "default");
+        assert!(source.load("ghost").is_err());
+        assert!(source.load("../default").is_err());
     }
 }

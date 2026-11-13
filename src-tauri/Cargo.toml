@@ -70,6 +70,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 async-trait = "0.1"
+# Embeds `src-tauri/themes` into the binary (`theme_engine::source::BUILTIN_THEMES`)
+# so builtin themes ship inside the executable, with no bundle dir to resolve.
+# Default features (no `glob`/`metadata`) — only the macro and `Dir` are used.
+include_dir = "0.7"
 # Production heartbeat atomic writes use NamedTempFile in the destination
 # directory; std-only rename cannot cleanly replace an existing file on Windows.
 tempfile = "3"
