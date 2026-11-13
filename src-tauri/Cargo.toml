@@ -70,6 +70,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 async-trait = "0.1"
+# `theme_engine::digest`: sha256 over a theme folder's files, so a pristine
+# builtin copy from any past version can be recognised (same hash is in the
+# lockfile already via voxis-core's chacha20poly1305).
+sha2 = "0.10"
 # Embeds `src-tauri/themes` into the binary (`theme_engine::source::BUILTIN_THEMES`)
 # so builtin themes ship inside the executable, with no bundle dir to resolve.
 # Default features (no `glob`/`metadata`) — only the macro and `Dir` are used.
