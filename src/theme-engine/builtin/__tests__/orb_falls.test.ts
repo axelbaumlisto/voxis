@@ -1,4 +1,4 @@
-// src/theme-engine/builtin/__tests__/orb_hydrogen.test.ts
+// src/theme-engine/builtin/__tests__/orb_falls.test.ts
 //
 // jsdom has no WebGL backend, so mount() takes its graceful-fallback path here —
 // exactly like metaballs3d.test.ts. What IS asserted: a valid module, no throw
@@ -7,7 +7,7 @@
 // covered by the real-WebGL UI spec (tests/ui/*themes* in the host repo), which
 // mounts every builtin theme in Chromium.
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as theme from "../orb_hydrogen";
+import * as theme from "../orb_falls";
 import { validateThemeModule, THEME_API_VERSION, type ThemeApi, type ThemeMode } from "../../contract";
 
 function fakeApi(params: unknown = null, mode: ThemeMode = "recording"): ThemeApi {
@@ -23,7 +23,7 @@ function fakeApi(params: unknown = null, mode: ThemeMode = "recording"): ThemeAp
   };
 }
 
-describe("orb_hydrogen theme (jsdom — no WebGL)", () => {
+describe("orb_falls theme (jsdom — no WebGL)", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -46,7 +46,7 @@ describe("orb_hydrogen theme (jsdom — no WebGL)", () => {
     }).not.toThrow();
     expect(typeof inst.unmount).toBe("function");
     const warned = warnSpy.mock.calls.map((c) => String(c[0])).join(" ");
-    expect(warned).toContain("orb_hydrogen");
+    expect(warned).toContain("orb_falls");
     expect(container.querySelector("canvas")).toBeNull();
     expect(container.innerHTML).toBe("");
   });

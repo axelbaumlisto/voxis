@@ -127,18 +127,14 @@ the default overlay size is used. Copy a builtin theme folder as a starting
 point, edit the code, then use Reload + Preview or reload/reselect it in
 Settings. See the full guide at **[docs/THEMES.md](docs/THEMES.md)**.
 
-### Orb themes to keep (owner's shortlist, provisional)
+### Orb themes
 
-The orb set is being trimmed. These are confirmed keepers so far; the other
-`orb_*` builtins are candidates for removal (nothing has been deleted yet):
-
-| Theme id | Name |
-|---|---|
-| `orb_shdr_03` | Orb · SHDR-03 |
-| `orb_shdr_06` | Orb · SHDR-06 |
-| `orb_shdr_07` | Orb · SHDR-07 |
-| `orb_rocaille` | Orb · Rocaille |
-| `orb_falls` | Orb · Falls |
+The builtin orb set was trimmed to the owner's shortlist: `orb_shdr_03`,
+`orb_shdr_06`, `orb_shdr_07`, `orb_rocaille`, `orb_falls`. The other orbs
+(`orb_bitdumb`, `orb_corona`, `orb_dispersion`, `orb_dither`, `orb_hydrogen`,
+`orb_ion`, `orb_mosaic`, `orb_muons`, `orb_nimbus`, `orb_phosphor`,
+`orb_vectors` and SHDR-04/05/08/09/10/12/16/17/18/19/24/25/26/27/30/32/33)
+were removed; they remain in git history if one is ever wanted back.
 
 ## Embeddable plugin (`tauri-plugin-voxis`)
 

@@ -37,7 +37,7 @@ function opacity(page: import("@playwright/test").Page, sel: string) {
 
 test.describe("overlay control handles", () => {
   test("hidden at rest, shown on hover, hidden again on leave", async ({ page }) => {
-    await page.goto("/overlay.html?theme=orb_ion");
+    await page.goto("/overlay.html?theme=orb_falls");
     await page.waitForSelector("[data-testid='theme-host']", { timeout: 5000 });
     await page.waitForSelector(MOVE, { state: "attached", timeout: 5000 });
     await page.waitForSelector(RESIZE, { state: "attached", timeout: 5000 });
@@ -59,7 +59,7 @@ test.describe("overlay control handles", () => {
   });
 
   test("move grip top-left, resize grip bottom-right", async ({ page }) => {
-    await page.goto("/overlay.html?theme=orb_ion");
+    await page.goto("/overlay.html?theme=orb_falls");
     await page.waitForSelector(MOVE, { state: "attached", timeout: 5000 });
     await page.evaluate(() => document.body.classList.add("pointer-inside")); // reveal
     const move = await page.locator(MOVE).boundingBox();

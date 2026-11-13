@@ -4,7 +4,7 @@
 // shader + a parameter schema + per-state presets. Voxis ships themes as
 // `mount(container, api)` with `api.onState({ mode, audioLevel })`. This file
 // is the only place the two meet: each orb theme is then just its shader and
-// its numbers (see orb_hydrogen/index.ts).
+// its numbers (see orb_falls/index.ts).
 //
 // What the adapter does, and WHY each part matters:
 //   - 2x supersample (same rule as the other shader themes): at exactly 2:1 the

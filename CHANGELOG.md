@@ -2,6 +2,18 @@
 
 ## Unreleased (Voxis desktop)
 
+### Remove
+- **Orb themes trimmed to five**: SHDR-03, SHDR-06, SHDR-07, Rocaille, Falls.
+  28 other `orb_*` builtins removed (sources, bundled `src-tauri/themes`,
+  guest-js generated copies, plugin `BUILTIN_THEMES`). A user whose selected
+  theme was removed falls back as for any missing theme. Already-seeded copies
+  in `<config>/themes` are not deleted by the app.
+
+### Fix
+- **Linux: overlay blinking.** WebKitGTK's DMA-BUF renderer flickers
+  transparent windows on Arch/AMD Mesa and NVIDIA; `WEBKIT_DISABLE_DMABUF_RENDERER=1`
+  is now set at startup unless the user set it.
+
 ### Add
 - **The overlay can be resized from its bottom-right corner.** A grip appears
   on hover (next to the existing move grip) and drags a SQUARE edge —
