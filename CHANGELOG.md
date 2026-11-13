@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.17 (Voxis desktop)
+
+Re-release of 0.1.16 with correct artifacts. 0.1.16's Linux binary, .deb and
+.rpm were stale (built from an older image after the Linux docker build failed
+silently), and it shipped no signed macOS DMG (Apple notary 403: a developer
+agreement had expired). No app changes beyond 0.1.16.
+
+### Fix
+- **Release pipeline**: the Linux lane now fails on a failed `docker build`,
+  clears last run's outputs first and checks the `.deb` carries this version;
+  the macOS lane prints Apple's notarytool error instead of a bare `rc=1`.
+
 ## v0.1.16 (Voxis desktop)
 
 ### Remove
