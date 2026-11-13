@@ -27,6 +27,10 @@ import { createPressController } from "./overlay/pressController";
 import { isCanvasOpaqueAt } from "./overlay/hitTest";
 import { MIN_OVERLAY_EDGE, resizeEdgeFromDelta } from "./overlay/resize";
 import { createGesture } from "./overlay/gesture";
+import {
+  createHandleVisibility,
+  type HandleVisibility,
+} from "./overlay/handleVisibility";
 
 /**
  * Semi-transparent drag grip on the LEFT edge of the overlay.
@@ -54,140 +58,71 @@ export const IDLE_HIDE_MS = 1200;
 
 function DragGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
   const [dragging, setDragging] = useState(false);
-  // Visibility is driven by `body.pointer-inside` (toggled from the Rust-side
-  // CursorEntered/CursorLeft events, see overlay.tsx + window.rs) — reliable
-  // where the Dock webview's DOM pointerleave / CSS :hover are not.
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const raf = useRef<number | null>(null);
-  const st = useRef<{
-    pointerId: number;
-    startScreenX: number;
-    startScreenY: number;
-    baseX: number | null;
-    baseY: number | null;
-    lastX: number;
-    lastY: number;
-    armedNow: boolean;
-    pendingScreen: { x: number; y: number } | null;
-  } | null>(null);
-
-  const clearTimer = () => {
-    if (timer.current !== null) {
-      clearTimeout(timer.current);
-      timer.current = null;
-    }
-  };
+  // The window top-left captured on press (absolute moves) and the last
+  // destination (persisted on release). Visibility of the grip itself is driven
+  // by `body.pointer-inside` from the Rust pointer-inside events.
+  const base = useRef<{ x: number; y: number } | null>(null);
+  const last = useRef<{ x: number; y: number } | null>(null);
+  const gesture = useRef<ReturnType<typeof createGesture> | null>(null);
 
   const reset = () => {
-    clearTimer();
-    if (raf.current !== null) {
-      cancelAnimationFrame(raf.current);
-      raf.current = null;
-    }
-    st.current = null;
+    base.current = null;
+    last.current = null;
     setDragging(false);
     onInteracting(false);
   };
 
-  const flush = () => {
-    raf.current = null;
-    const s = st.current;
-    if (!s || !s.armedNow || s.baseX === null || s.baseY === null || !s.pendingScreen) return;
-    const nx = Math.round(s.baseX + (s.pendingScreen.x - s.startScreenX));
-    const ny = Math.round(s.baseY + (s.pendingScreen.y - s.startScreenY));
-    s.lastX = nx;
-    s.lastY = ny;
-    void invoke("move_overlay_window", { x: nx, y: ny });
-  };
-
-  const scheduleMove = (screenX: number, screenY: number) => {
-    const s = st.current;
-    if (!s) return;
-    s.pendingScreen = { x: screenX, y: screenY };
-    if (raf.current === null) raf.current = requestAnimationFrame(flush);
-  };
+  // Capture + rAF-coalescing + hold-to-arm all live in the shared gesture
+  // transport; the drag grip only owns the position math (base + delta) and
+  // the host calls. The resize grip uses the same transport — one place to fix.
+  if (gesture.current === null) {
+    gesture.current = createGesture({
+      armMs: ARM_MS,
+      slopPx: SLOP_PX,
+      onArm: () => setDragging(true), // hold matured → a real drag: grabbing style
+      onFrame: (point, start) => {
+        if (!base.current) return; // base fetch not back yet → nothing to move
+        const nx = Math.round(base.current.x + (point.screenX - start.screenX));
+        const ny = Math.round(base.current.y + (point.screenY - start.screenY));
+        last.current = { x: nx, y: ny };
+        void invoke("move_overlay_window", { x: nx, y: ny });
+      },
+      onEnd: (point) => {
+        // `point === null` means the gesture never armed — a tap, pass through.
+        const dest = point !== null && base.current !== null ? last.current : null;
+        reset();
+        if (dest) void invoke("set_overlay_custom_position", { x: dest.x, y: dest.y });
+      },
+    });
+  }
 
   const onPointerDown = (e: ReactPointerEvent) => {
-    if (e.button !== 0) return;
+    if (!gesture.current!.begin(e)) return;
     e.stopPropagation();
     e.preventDefault();
-    try {
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    } catch {
-      /* captured pointer may already be gone — the drag still tracks */
-    }
     onInteracting(true);
-    st.current = {
-      pointerId: e.pointerId,
-      startScreenX: e.screenX,
-      startScreenY: e.screenY,
-      baseX: null,
-      baseY: null,
-      lastX: 0,
-      lastY: 0,
-      armedNow: false,
-      pendingScreen: null,
-    };
+    base.current = null;
+    last.current = null;
     // Fetch the window's current top-left so armed moves are absolute. Resolves
-    // in ~ms, long before ARM_MS, so it's ready by the time the drag arms.
+    // in ~ms, well before ARM_MS, so it's ready by the time the drag arms.
     void invoke<[number, number]>("get_overlay_window_position")
       .then(([x, y]) => {
-        if (st.current && st.current.pointerId === e.pointerId) {
-          st.current.baseX = x;
-          st.current.baseY = y;
-          st.current.lastX = x;
-          st.current.lastY = y;
-        }
+        base.current = { x, y };
       })
       .catch(() => {
         /* leave base null — arming without a base simply won't move */
       });
-    clearTimer();
-    timer.current = setTimeout(() => {
-      const s = st.current;
-      if (!s || s.pointerId !== e.pointerId) return;
-      s.armedNow = true;
-      setDragging(true);
-    }, ARM_MS);
   };
 
-  const onPointerMove = (e: ReactPointerEvent) => {
-    const s = st.current;
-    if (!s || s.pointerId !== e.pointerId) return;
-    if (!s.armedNow) {
-      // Moved past the slop before the hold matured → this is a tap-drag, not
-      // a hold: abandon, let it pass through (no drag).
-      const dx = e.screenX - s.startScreenX;
-      const dy = e.screenY - s.startScreenY;
-      if (dx * dx + dy * dy > SLOP_PX * SLOP_PX) reset();
-      return;
-    }
-    e.preventDefault();
-    scheduleMove(e.screenX, e.screenY);
-  };
-
-  const onPointerUp = (e: ReactPointerEvent) => {
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {
-      /* capture may already be gone */
-    }
-    const s = st.current;
-    if (!s || s.pointerId !== e.pointerId) {
-      reset();
-      return;
-    }
-    const wasArmed = s.armedNow;
-    const { lastX, lastY, baseX } = s;
+  const onPointerMove = (e: ReactPointerEvent) => gesture.current!.move(e);
+  const onPointerUp = () => gesture.current!.end();
+  const onPointerCancel = () => {
+    gesture.current!.cancel();
     reset();
-    if (wasArmed && baseX !== null) {
-      void invoke("set_overlay_custom_position", { x: lastX, y: lastY });
-    }
-    // Not armed → a tap: pass through (do nothing).
   };
-
   const onDoubleClick = (e: ReactMouseEvent) => {
     e.stopPropagation();
+    gesture.current!.cancel();
     reset();
     void invoke("clear_overlay_custom_position");
   };
@@ -201,7 +136,7 @@ function DragGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={reset}
+      onPointerCancel={onPointerCancel}
       onDoubleClick={onDoubleClick}
       style={{
         position: "fixed",
@@ -355,67 +290,40 @@ export function OverlayApp() {
   // Driven by the Rust-side CursorEntered/CursorLeft events (overlay://pointer-
   // inside) because the Dock webview doesn't deliver DOM pointerleave or keep
   // CSS :hover in sync. Toggle a body class the grip CSS keys off of.
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const interactingRef = useRef(false);
+  // All the show/hide timing lives in one framework-free controller (SRP): a
+  // hover ping shows + arms the idle hide; a gesture pins the handles for its
+  // whole duration. See overlay/handleVisibility.ts.
+  const visibility = useRef<HandleVisibility | null>(null);
+  if (visibility.current === null) {
+    visibility.current = createHandleVisibility({
+      idleMs: IDLE_HIDE_MS,
+      show: () => document.body.classList.add("pointer-inside"),
+      hide: () => document.body.classList.remove("pointer-inside"),
+    });
+  }
 
   useEffect(() => {
-    // Reveal the handles while pointer-inside `true` pings arrive (GTK enter +
-    // throttled motion), and AUTO-HIDE once they stop — idle means the pointer
-    // left (a reliable webview leave never arrives here). Each `true` restarts
-    // the idle timer, so continuous hovering keeps the handles shown. We never
-    // receive `false`: the webview emits only `true`, so there is nothing that
-    // can toggle the class off mid-hover — no blinking, hide happens purely on
-    // idle timeout.
-    //
-    // While a drag/resize gesture is active (`interactingRef`), the DOM pointer
-    // capture swallows the GTK motion pings, so we must NOT arm the idle hide —
-    // otherwise the handles would vanish mid-drag and reappear on release
-    // (the "blink while dragging"). The [interacting] effect below force-shows
-    // them for the whole gesture and resumes idle on release.
-    const armHide = () => {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-      if (interactingRef.current) {
-        hideTimerRef.current = null;
-        return;
-      }
-      hideTimerRef.current = setTimeout(() => {
-        document.body.classList.remove("pointer-inside");
-        hideTimerRef.current = null;
-      }, IDLE_HIDE_MS);
-    };
+    // Rust emits `overlay://pointer-inside=true` on GTK enter + throttled
+    // motion (never a reliable `false`), so each ping just keeps the handles
+    // alive; the controller hides them on idle.
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     void listen<boolean>("overlay://pointer-inside", (e) => {
-      if (!e.payload) return;
-      document.body.classList.add("pointer-inside");
-      armHide();
+      if (e.payload) visibility.current!.ping();
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
     });
     return () => {
       cancelled = true;
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      visibility.current!.dispose();
       if (unlisten) unlisten();
     };
   }, []);
 
-  // Keep the handles pinned visible for the whole drag/resize gesture, then
-  // resume the normal idle countdown when it ends.
+  // Pin the handles for the whole drag/resize gesture, resume idle on release.
   useEffect(() => {
-    interactingRef.current = gesturing;
-    if (hideTimerRef.current) {
-      clearTimeout(hideTimerRef.current);
-      hideTimerRef.current = null;
-    }
-    if (gesturing) {
-      document.body.classList.add("pointer-inside");
-    } else {
-      hideTimerRef.current = setTimeout(() => {
-        document.body.classList.remove("pointer-inside");
-        hideTimerRef.current = null;
-      }, IDLE_HIDE_MS);
-    }
+    visibility.current!.setGesturing(gesturing);
   }, [gesturing]);
 
   // Track actual OS window size so the theme canvas fills the window.
