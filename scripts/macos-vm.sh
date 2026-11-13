@@ -441,8 +441,11 @@ rm -f /tmp/voice-notarize.zip
 ditto -c -k --keepParent "\$APP" /tmp/voice-notarize.zip
 # Submit WITHOUT --wait: poll ourselves so a slow Apple queue degrades to
 # ship-now-staple-later instead of failing the build.
+# `|| ...` so set -e can't swallow the reason (v0.1.16 died here with only rc=1:
+# an auth/agreement error from Apple is in SUB_OUT and must be printed).
 SUB_OUT=\$(xcrun notarytool submit /tmp/voice-notarize.zip \\
-  --key "\$KEY" --key-id "\$KEY_ID" --issuer "\$ISSUER" 2>&1)
+  --key "\$KEY" --key-id "\$KEY_ID" --issuer "\$ISSUER" 2>&1) \\
+  || { echo "ERROR: notarytool submit failed:"; printf '%s\\n' "\$SUB_OUT"; exit 2; }
 SUB_ID=\$(printf '%s\\n' "\$SUB_OUT" | awk '/^  id: /{print \$2; exit}')
 [ -n "\$SUB_ID" ] || { echo "ERROR: submission produced no id"; exit 2; }
 echo "submission id: \$SUB_ID"

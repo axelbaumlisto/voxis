@@ -66,15 +66,27 @@ build_frontend_if_needed() {
 
 build_linux_gui() {
   cd "$PROJECT_DIR"
-  DOCKER_BUILDKIT=0 docker build --network host -f Dockerfile.gui-linux -t voxis-linux-gui:latest .
+  # Drop last run's Linux outputs first: if this build fails, nothing stale may
+  # be left behind looking like a fresh artifact.
+  rm -f "$OUTPUT_DIR/voxis-linux-x64-gui" "$OUTPUT_DIR"/Voxis_*_amd64.deb "$OUTPUT_DIR"/Voxis-*.x86_64.rpm
+  # v0.1.16 post-mortem: a failed `docker build` was ignored (no `set -e` in a
+  # backgrounded function), `docker create` then reused an OLDER image under the
+  # shared `:latest` tag, and a stale binary + 0.1.15 .deb/.rpm were published.
+  DOCKER_BUILDKIT=0 docker build --network host -f Dockerfile.gui-linux -t voxis-linux-gui:latest . \
+    || { echo "ERROR: Linux GUI docker build failed" >&2; return 1; }
   local cid
-  cid=$(docker create voxis-linux-gui:latest)
+  cid=$(docker create voxis-linux-gui:latest) || return 1
   docker cp "$cid:/voxis" "$OUTPUT_DIR/voxis-linux-x64-gui"
   docker cp "$cid:/bundle/." "$OUTPUT_DIR/" 2>/dev/null || true
   docker rm "$cid" >/dev/null
   chmod +x "$OUTPUT_DIR/voxis-linux-x64-gui"
   if [ ! -s "$OUTPUT_DIR/voxis-linux-x64-gui" ]; then
     echo "ERROR: Linux GUI binary not produced" >&2
+    return 1
+  fi
+  if [ ! -f "$OUTPUT_DIR/Voxis_${VERSION}_amd64.deb" ]; then
+    echo "ERROR: .deb for $VERSION not produced (stale image?)" >&2
+    ls -la "$OUTPUT_DIR"/Voxis_*_amd64.deb 2>/dev/null || true
     return 1
   fi
 }
