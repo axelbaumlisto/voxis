@@ -90,7 +90,7 @@ mod hover {
         let last = Rc::new(Cell::new(None::<Instant>));
         widget.connect_motion_notify_event(move |_, _| {
             let now = Instant::now();
-            if last.get().is_none_or(|t| now.duration_since(t) >= MOTION_THROTTLE) {
+            if last.get().map_or(true, |t| now.duration_since(t) >= MOTION_THROTTLE) {
                 last.set(Some(now));
                 emit(&app_motion, true);
             }
