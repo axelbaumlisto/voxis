@@ -352,27 +352,22 @@ export function OverlayApp() {
     // Reveal the handles while pointer-inside `true` pings arrive (GTK enter +
     // throttled motion), and AUTO-HIDE once they stop — idle means the pointer
     // left (a reliable webview leave never arrives here). Each `true` restarts
-    // the idle timer, so continuous hovering keeps the handles shown with no
-    // blinking; `false` (best-effort toplevel leave) hides a bit sooner.
-    const IDLE_MS = 900;
-    const LEAVE_MS = 160;
+    // the idle timer, so continuous hovering keeps the handles shown. We never
+    // receive `false`: the webview emits only `true`, so there is nothing that
+    // can toggle the class off mid-hover — no blinking, hide happens purely on
+    // idle timeout.
+    const IDLE_MS = 1200;
     let hideTimer: ReturnType<typeof setTimeout> | null = null;
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    const scheduleHide = (ms: number) => {
+    void listen<boolean>("overlay://pointer-inside", (e) => {
+      if (!e.payload) return;
+      document.body.classList.add("pointer-inside");
       if (hideTimer) clearTimeout(hideTimer);
       hideTimer = setTimeout(() => {
         document.body.classList.remove("pointer-inside");
         hideTimer = null;
-      }, ms);
-    };
-    void listen<boolean>("overlay://pointer-inside", (e) => {
-      if (e.payload) {
-        document.body.classList.add("pointer-inside");
-        scheduleHide(IDLE_MS);
-      } else {
-        scheduleHide(LEAVE_MS);
-      }
+      }, IDLE_MS);
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;

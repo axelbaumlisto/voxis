@@ -265,8 +265,10 @@ fn build_overlay_window(
             // reliably on this borderless Dock webview, whereas a webview LEAVE
             // never arrives and XWayland won't report an off-surface pointer. So
             // the frontend keeps the handles shown while these pings arrive and
-            // auto-hides them once they stop (idle = pointer gone). The toplevel
-            // leave below is a best-effort fast-hide when the OS does deliver it.
+            // auto-hides them once they stop (idle = pointer gone). We deliberately
+            // emit NO `false`: the webview/child boundary throws spurious leaves
+            // mid-hover, and any `false` there makes the handles blink. Idle-only
+            // hide can't flap.
             {
                 use std::cell::Cell;
                 use std::rc::Rc;
@@ -292,15 +294,6 @@ fn build_overlay_window(
             if let Some(toplevel) = wv.toplevel() {
                 if let Ok(gtk_window) = toplevel.downcast::<gtk::Window>() {
                     gtk_window.resize(w as i32, h as i32);
-                    {
-                        let app_leave = app_evt.clone();
-                        gtk_window.connect_leave_notify_event(move |_, e| {
-                            if e.detail() != gtk::gdk::NotifyType::Inferior {
-                                let _ = app_leave.emit(events::POINTER_INSIDE, false);
-                            }
-                            gtk::glib::Propagation::Proceed
-                        });
-                    }
                     // Never steal keyboard focus from the active app: a click on
                     // the pill still delivers the pointer event to WebKit (so
                     // click-to-dictate works), but the WM must not transfer input
