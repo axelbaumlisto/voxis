@@ -25,10 +25,15 @@
         align-items: center;
         justify-content: center;
       }
-      /* Handles are hidden until the pointer is over the overlay zone, then
-       * revealed via CSS :hover on the body (the whole overlay window). */
+      /* Hover handles: hidden until `body.pointer-inside`
+       * (src/overlay/useHandleVisibility.ts), pinned during a gesture. */
       .drag-grip,
       .resize-grip {
+        position: fixed;
+        box-sizing: border-box;
+        touch-action: none;
+        user-select: none;
+        z-index: 2147483647;
         opacity: 0;
         pointer-events: none;
         /* Promote to its own compositor layer so the FADE-IN always animates:
@@ -43,10 +48,41 @@
         opacity: 1;
         pointer-events: auto;
       }
-      .drag-grip.dragging,
-      .resize-grip.resizing {
-        opacity: 1 !important;
-        pointer-events: auto !important;
+      /* Move: green ✛, top-left. Grabbing style once the hold has armed. */
+      .drag-grip {
+        left: 0;
+        top: 0;
+        width: 13px;
+        height: 13px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        cursor: grab;
+        color: #fff;
+        background: rgba(34, 197, 94, 0.9);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+        line-height: 13px;
+        font-size: 8px;
+        font-weight: 700;
+      }
+      .drag-grip.dragging {
+        cursor: grabbing;
+        background: rgba(34, 197, 94, 0.98);
+      }
+      /* Resize: three dots, bottom-right. */
+      .resize-grip {
+        right: 0;
+        bottom: 0;
+        width: 14px;
+        height: 14px;
+        cursor: nwse-resize;
+        border-radius: 3px;
+        background:
+          radial-gradient(circle at 30% 70%, rgba(255, 255, 255, 0.95) 1.2px, transparent 1.6px),
+          radial-gradient(circle at 70% 70%, rgba(255, 255, 255, 0.95) 1.2px, transparent 1.6px),
+          radial-gradient(circle at 70% 30%, rgba(255, 255, 255, 0.95) 1.2px, transparent 1.6px),
+          rgba(0, 0, 0, 0.35);
       }
       /* The overlay's own bounds, drawn only while the user is moving or
        * resizing it: an orb fills the window edge to edge, so without this

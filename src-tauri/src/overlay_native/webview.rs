@@ -48,10 +48,66 @@ pub mod events {
     pub const SPECTRUM_BINS: &str = "overlay://spectrum-bins";
     /// Theme name updates (`String` JSON).
     pub const THEME: &str = "overlay://theme";
-    /// Pointer entered (`true`) / left (`false`) the overlay window, from GTK
-    /// enter/leave-notify. The frontend settle-debounces it to reveal/hide the
-    /// drag/resize handles without flapping.
+    /// Pointer is over (`true`) / left (`false`) the overlay window — see
+    /// [`hover`]. Drives the drag/resize handles' visibility.
     pub const POINTER_INSIDE: &str = "overlay://pointer-inside";
+}
+
+/// GTK hover signals for the overlay handles.
+///
+/// ENTER + throttled MOTION emit `POINTER_INSIDE=true`; a non-Inferior LEAVE
+/// emits `false`. On XWayland leaves are unreliable (sometimes missing,
+/// sometimes a spurious leave→enter pair), so the frontend never trusts a
+/// single `false`: `src/overlay/handleVisibility.ts` confirms it with
+/// hysteresis and has an idle fallback. Policy lives there; this module only
+/// translates GTK events.
+#[cfg(target_os = "linux")]
+mod hover {
+    use super::events;
+    use gtk::glib::object::IsA;
+    use gtk::glib::Propagation;
+    use gtk::prelude::WidgetExt;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::time::{Duration, Instant};
+    use tauri::{AppHandle, Emitter};
+
+    /// At most one motion ping per this interval — plenty for a hover reveal.
+    const MOTION_THROTTLE: Duration = Duration::from_millis(100);
+
+    fn emit(app: &AppHandle, inside: bool) {
+        let _ = app.emit(events::POINTER_INSIDE, inside);
+    }
+
+    /// Emit `true` on enter and (throttled) motion.
+    pub fn connect_inside(widget: &impl IsA<gtk::Widget>, app: &AppHandle) {
+        let app_enter = app.clone();
+        widget.connect_enter_notify_event(move |_, _| {
+            emit(&app_enter, true);
+            Propagation::Proceed
+        });
+        let app_motion = app.clone();
+        let last = Rc::new(Cell::new(None::<Instant>));
+        widget.connect_motion_notify_event(move |_, _| {
+            let now = Instant::now();
+            if last.get().is_none_or(|t| now.duration_since(t) >= MOTION_THROTTLE) {
+                last.set(Some(now));
+                emit(&app_motion, true);
+            }
+            Propagation::Proceed
+        });
+    }
+
+    /// Emit `false` when the pointer leaves `widget` (not into a child).
+    pub fn connect_leave(widget: &impl IsA<gtk::Widget>, app: &AppHandle) {
+        let app = app.clone();
+        widget.connect_leave_notify_event(move |_, e| {
+            if e.detail() != gtk::gdk::NotifyType::Inferior {
+                emit(&app, false);
+            }
+            Propagation::Proceed
+        });
+    }
 }
 
 /// Cross-platform overlay backend backed by a plain Tauri `WebviewWindow`.
@@ -260,52 +316,15 @@ fn build_overlay_window(
             use gtk::prelude::{Cast, GtkWindowExt, WidgetExt};
             let wv = webview.inner();
             wv.set_size_request(1, 1);
-            // Hover signals for the handles. ENTER + throttled MOTION emit `true`;
-            // LEAVE (webview or toplevel, non-Inferior) emits `false`. Leaves are
-            // unreliable on XWayland (sometimes missing, sometimes a spurious
-            // leave→enter pair), so the frontend never trusts a single `false`:
-            // it hides only if no `true` follows within a confirm window, with a
-            // long idle fallback for a lost leave (overlay/handleVisibility.ts).
-            {
-                use std::cell::Cell;
-                use std::rc::Rc;
-                use std::time::{Duration, Instant};
-                let last = Rc::new(Cell::new(Instant::now() - Duration::from_millis(500)));
-                let app_enter = app_evt.clone();
-                wv.connect_enter_notify_event(move |_, _| {
-                    let _ = app_enter.emit(events::POINTER_INSIDE, true);
-                    gtk::glib::Propagation::Proceed
-                });
-                let app_motion = app_evt.clone();
-                wv.connect_motion_notify_event(move |_, _| {
-                    let now = Instant::now();
-                    if now.duration_since(last.get()) >= Duration::from_millis(100) {
-                        last.set(now);
-                        let _ = app_motion.emit(events::POINTER_INSIDE, true);
-                    }
-                    gtk::glib::Propagation::Proceed
-                });
-                let app_leave = app_evt.clone();
-                wv.connect_leave_notify_event(move |_, e| {
-                    if e.detail() != gtk::gdk::NotifyType::Inferior {
-                        let _ = app_leave.emit(events::POINTER_INSIDE, false);
-                    }
-                    gtk::glib::Propagation::Proceed
-                });
-            }
+            hover::connect_inside(&wv, &app_evt);
+            hover::connect_leave(&wv, &app_evt);
             // Also force-resize the toplevel GTK window in case the
             // compositor has already cached the 200×200 constraints.
             if let Some(toplevel) = wv.toplevel() {
                 if let Ok(gtk_window) = toplevel.downcast::<gtk::Window>() {
                     gtk_window.resize(w as i32, h as i32);
                     // The leave often goes to the toplevel, not the webview.
-                    let app_top_leave = app_evt.clone();
-                    gtk_window.connect_leave_notify_event(move |_, e| {
-                        if e.detail() != gtk::gdk::NotifyType::Inferior {
-                            let _ = app_top_leave.emit(events::POINTER_INSIDE, false);
-                        }
-                        gtk::glib::Propagation::Proceed
-                    });
+                    hover::connect_leave(&gtk_window, &app_evt);
                     // Never steal keyboard focus from the active app: a click on
                     // the pill still delivers the pointer event to WebKit (so
                     // click-to-dictate works), but the WM must not transfer input

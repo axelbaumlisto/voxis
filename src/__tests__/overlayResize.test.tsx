@@ -2,7 +2,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const invokeMock = vi.fn(async (_cmd: string) => null);
+const invokeMock = vi.fn(async (cmd: string): Promise<unknown> =>
+  cmd === "get_overlay_window_position" ? [100, 100] : null,
+);
 
 // The overlay webview fills its window, so the grip reads the starting edge
 // from `innerWidth/innerHeight`. jsdom's default viewport is 1024x768 — pin it
@@ -18,7 +20,10 @@ vi.mock("../hooks/useOverlayState", () => ({
 vi.mock("../theme-engine/fetchModule", () => ({ fetchThemeModule: vi.fn(async () => null) }));
 vi.mock("../bindings", () => ({ commands: { getThemeManifest: vi.fn(async () => null), cancelOperation: vi.fn() } }));
 
-import { OverlayApp } from "../overlay";
+import { OverlayApp, ARM_MS } from "../overlay";
+
+const calls = (cmd: string) => invokeMock.mock.calls.filter(([c]) => c === cmd);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("overlay shell — corner resize", () => {
   beforeEach(() => invokeMock.mockClear());
@@ -58,5 +63,42 @@ describe("overlay shell — corner resize", () => {
     await waitFor(() =>
       expect(invokeMock.mock.calls.some(([c]) => c === "clear_overlay_custom_size")).toBe(true),
     );
+  });
+});
+
+describe("overlay shell — drag grip", () => {
+  beforeEach(() => invokeMock.mockClear());
+
+  it("hold → drag moves the window by the pointer delta and persists the spot", async () => {
+    render(<OverlayApp />);
+    const grip = screen.getByTestId("overlay-drag-grip");
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, screenX: 500, screenY: 500 });
+    await sleep(ARM_MS + 50); // hold matures
+    expect(grip.className).toContain("dragging");
+    fireEvent.pointerMove(grip, { pointerId: 1, screenX: 530, screenY: 480 });
+    await waitFor(() => expect(calls("move_overlay_window").length).toBeGreaterThan(0));
+    expect(calls("move_overlay_window").at(-1)![1]).toEqual({ x: 130, y: 80 });
+    fireEvent.pointerUp(grip, { pointerId: 1 });
+    await waitFor(() => expect(calls("set_overlay_custom_position")).toHaveLength(1));
+    expect(calls("set_overlay_custom_position")[0][1]).toEqual({ x: 130, y: 80 });
+    expect(grip.className).not.toContain("dragging");
+    // A move never shows the resize outline.
+    expect(screen.getByTestId("overlay-resize-frame").className).not.toContain("visible");
+  });
+
+  it("a short tap passes through: no move, nothing persisted", async () => {
+    render(<OverlayApp />);
+    const grip = screen.getByTestId("overlay-drag-grip");
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, screenX: 500, screenY: 500 });
+    fireEvent.pointerUp(grip, { pointerId: 1 });
+    await sleep(ARM_MS + 50);
+    expect(calls("move_overlay_window")).toHaveLength(0);
+    expect(calls("set_overlay_custom_position")).toHaveLength(0);
+  });
+
+  it("double-click resets to the preset position", async () => {
+    render(<OverlayApp />);
+    fireEvent.doubleClick(screen.getByTestId("overlay-drag-grip"));
+    await waitFor(() => expect(calls("clear_overlay_custom_position")).toHaveLength(1));
   });
 });

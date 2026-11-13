@@ -13,10 +13,8 @@
  * KISS: one useOverlayState(), one ThemeHost, one params useEffect.
  */
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useOverlayState } from "./hooks/useOverlayState";
 import ThemeHost from "./theme-engine/ThemeHost";
 import { fetchThemeModule } from "./theme-engine/fetchModule";
@@ -26,147 +24,82 @@ import type { ThemeState } from "./theme-engine/contract";
 import { createPressController } from "./overlay/pressController";
 import { isCanvasOpaqueAt } from "./overlay/hitTest";
 import { MIN_OVERLAY_EDGE, resizeEdgeFromDelta } from "./overlay/resize";
-import { createGesture } from "./overlay/gesture";
-import {
-  createHandleVisibility,
-  type HandleVisibility,
-} from "./overlay/handleVisibility";
+import { useGrip } from "./overlay/useGrip";
+import { useHandleVisibility } from "./overlay/useHandleVisibility";
 
 /**
- * Semi-transparent drag grip on the LEFT edge of the overlay.
+ * Drag grip (top-left, green ✛) — moves the overlay window.
  *
- * Interaction (option B, per owner):
- *  - PRESS-AND-HOLD the grip (≥ ARM_MS, pointer roughly still) → drag arms;
- *    the overlay OS window then follows the pointer and the final spot is
- *    persisted (survives restarts + theme changes).
- *  - A single short TAP passes through: it neither drags nor is consumed — the
- *    grip only reacts to a hold.
+ *  - PRESS-AND-HOLD (≥ ARM_MS, pointer roughly still) arms the drag; the window
+ *    follows the pointer and the final spot is persisted.
+ *  - A short TAP passes through (no drag); moving past SLOP_PX before the hold
+ *    matures abandons it too.
  *  - DOUBLE-CLICK resets to the configured preset position.
  *
- * The grip is a SIBLING of the dictation pill (not a child), so its pointer
- * events never reach the pill's hold-to-dictate handler — holding the grip
- * drags, holding the pill dictates.
- *
- * Window moves go through Rust commands (move_overlay_window /
- * set_overlay_custom_position) so the overlay webview needs no window
+ * Window moves go through Rust commands so the overlay webview needs no window
  * permissions; `screenX/screenY` (stable as the window moves) drive the delta.
+ * Pointer transport + hold-to-arm live in `overlay/gesture.ts`; React glue in
+ * `overlay/useGrip.ts` — this component owns only the position math.
  */
 export const ARM_MS = 300;
 const SLOP_PX = 6;
-/** A leave hides only if no new hover ping arrives within this window —
- *  absorbs XWayland/WebKit's spurious leave→enter pairs (no blink). */
-export const LEAVE_CONFIRM_MS = 300;
-/** Safety-net hide when a leave never arrives (XWayland can't see an
- *  off-surface pointer). Long, so holding still over the orb never hides. */
-export const IDLE_HIDE_MS = 5000;
 
-function DragGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
-  const [dragging, setDragging] = useState(false);
-  // The window top-left captured on press (absolute moves) and the last
-  // destination (persisted on release). Visibility of the grip itself is driven
-  // by `body.pointer-inside` from the Rust pointer-inside events.
-  const base = useRef<{ x: number; y: number } | null>(null);
-  const last = useRef<{ x: number; y: number } | null>(null);
-  const gesture = useRef<ReturnType<typeof createGesture> | null>(null);
+type Point = { x: number; y: number };
+type GripProps = { onActive: (on: boolean) => void };
 
-  const reset = () => {
+function DragGrip({ onActive }: GripProps) {
+  // `armed` (not merely pressed) switches to the grabbing style.
+  const [armed, setArmed] = useState(false);
+  const base = useRef<Point | null>(null); // window top-left at press
+  const last = useRef<Point | null>(null); // last destination (persisted)
+
+  const clear = () => {
     base.current = null;
     last.current = null;
-    setDragging(false);
-    onInteracting(false);
+    setArmed(false);
   };
 
-  // Capture + rAF-coalescing + hold-to-arm all live in the shared gesture
-  // transport; the drag grip only owns the position math (base + delta) and
-  // the host calls. The resize grip uses the same transport — one place to fix.
-  if (gesture.current === null) {
-    gesture.current = createGesture({
-      armMs: ARM_MS,
-      slopPx: SLOP_PX,
-      onArm: () => setDragging(true), // hold matured → a real drag: grabbing style
-      onFrame: (point, start) => {
-        if (!base.current) return; // base fetch not back yet → nothing to move
-        const nx = Math.round(base.current.x + (point.screenX - start.screenX));
-        const ny = Math.round(base.current.y + (point.screenY - start.screenY));
-        last.current = { x: nx, y: ny };
-        void invoke("move_overlay_window", { x: nx, y: ny });
-      },
-      onEnd: (point) => {
-        // `point === null` means the gesture never armed — a tap, pass through.
-        const dest = point !== null && base.current !== null ? last.current : null;
-        reset();
-        if (dest) void invoke("set_overlay_custom_position", { x: dest.x, y: dest.y });
-      },
-    });
-  }
-
-  const onPointerDown = (e: ReactPointerEvent) => {
-    if (!gesture.current!.begin(e)) return;
-    e.stopPropagation();
-    e.preventDefault();
-    onInteracting(true);
-    base.current = null;
-    last.current = null;
-    // Fetch the window's current top-left so armed moves are absolute. Resolves
-    // in ~ms, well before ARM_MS, so it's ready by the time the drag arms.
-    void invoke<[number, number]>("get_overlay_window_position")
-      .then(([x, y]) => {
-        base.current = { x, y };
-      })
-      .catch(() => {
-        /* leave base null — arming without a base simply won't move */
-      });
-  };
-
-  const onPointerMove = (e: ReactPointerEvent) => gesture.current!.move(e);
-  const onPointerUp = () => gesture.current!.end();
-  const onPointerCancel = () => {
-    gesture.current!.cancel();
-    reset();
-  };
-  const onDoubleClick = (e: ReactMouseEvent) => {
-    e.stopPropagation();
-    gesture.current!.cancel();
-    reset();
-    void invoke("clear_overlay_custom_position");
-  };
+  const handlers = useGrip({
+    armMs: ARM_MS,
+    slopPx: SLOP_PX,
+    resetCommand: "clear_overlay_custom_position",
+    onActive,
+    onArm: () => setArmed(true),
+    onBegin: () => {
+      clear();
+      // Absolute moves need the window's top-left; resolves in ~ms, well
+      // before ARM_MS. If it fails, base stays null and nothing moves.
+      void invoke<[number, number]>("get_overlay_window_position")
+        .then(([x, y]) => {
+          base.current = { x, y };
+        })
+        .catch(() => {});
+    },
+    onAbort: clear,
+    onFrame: (point, start) => {
+      if (!base.current) return;
+      const dest = {
+        x: Math.round(base.current.x + (point.screenX - start.screenX)),
+        y: Math.round(base.current.y + (point.screenY - start.screenY)),
+      };
+      last.current = dest;
+      void invoke("move_overlay_window", dest);
+    },
+    onEnd: (point) => {
+      // `point === null` → never armed: a tap, nothing to persist.
+      const dest = point !== null ? last.current : null;
+      clear();
+      if (dest) void invoke("set_overlay_custom_position", dest);
+    },
+  });
 
   return (
     <div
       data-testid="overlay-drag-grip"
-      className={`drag-grip${dragging ? " dragging" : ""}`}
+      className={`drag-grip${armed ? " dragging" : ""}`}
       aria-label="Move overlay (hold to drag, double-click to reset)"
       title="Hold to drag · double-click to reset"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerCancel}
-      onDoubleClick={onDoubleClick}
-      style={{
-        position: "fixed",
-        left: 0,
-        top: 0,
-        width: 13,
-        height: 13,
-        boxSizing: "border-box",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: "50%",
-        cursor: dragging ? "grabbing" : "grab",
-        color: "#fff",
-        background: dragging
-          ? "rgba(34,197,94,0.98)"
-          : "rgba(34,197,94,0.9)",
-        boxShadow: "0 1px 4px rgba(0,0,0,0.45)",
-        touchAction: "none",
-        userSelect: "none",
-        zIndex: 2147483647,
-        lineHeight: "13px",
-        fontSize: 8,
-        fontWeight: 700,
-        textAlign: "center",
-      }}
+      {...handlers}
     >
       ✛
     </div>
@@ -174,173 +107,65 @@ function DragGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
 }
 
 /**
- * Bottom-right resize grip — the overlay's only resize affordance.
+ * Resize grip (bottom-right) — the overlay's only resize affordance.
  *
- * NOT `getCurrentWindow().startResizeDragging()`: with `decorations:false` +
- * `transparent:true` + `macOSPrivateApi:true` AppKit accepts the gesture and
- * then silently declines to resize (documented by projects with the identical
- * configuration). So the grip drives the geometry itself, exactly the way the
- * drag grip drives the position: capture the pointer, coalesce moves through
- * rAF, and ask the host (`resize_overlay_window`) to set the size. On release
- * the size is persisted (`set_overlay_custom_size`), so it survives restarts
- * and theme switches; a double-click drops it back to the theme's footprint.
- *
- * The overlay stays SQUARE (see `overlay/resize.ts`): the dominant axis wins
- * and the host clamps — one edge length is the whole state.
+ * NOT `startResizeDragging()`: with `decorations:false` + `transparent:true` +
+ * `macOSPrivateApi:true` AppKit accepts the gesture and silently declines to
+ * resize. So the grip drives the geometry itself via `resize_overlay_window`,
+ * persists on release (`set_overlay_custom_size`), and double-click drops back
+ * to the theme's footprint. The overlay stays SQUARE (`overlay/resize.ts`).
  */
-function ResizeGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
-  const [resizing, setResizing] = useState(false);
-  const gesture = useRef<ReturnType<typeof createGesture> | null>(null);
+function ResizeGrip({ onActive }: GripProps) {
+  // Start edge = the window's own logical size (the webview fills it exactly),
+  // so no IPC round-trip is needed before the first frame.
+  const startEdge = useRef(0);
   const lastEdge = useRef(0);
-  // The gesture closure reads the start edge through a ref: the size is
-  // captured on pointer-down, while the factory is built once per mount.
-  const startEdgeAt = useRef(0);
 
-  if (gesture.current === null) {
-    // The start edge is the window's own logical size — the overlay webview
-    // fills the window exactly, so `innerWidth` needs no IPC round-trip and no
-    // "not resolved yet" state in the first frames of a gesture.
-    gesture.current = createGesture({
-      onFrame: (point, start) => {
-        const edge = resizeEdgeFromDelta(
-          startEdgeAt.current,
-          point.screenX - start.screenX,
-          point.screenY - start.screenY,
-        );
-        if (edge === lastEdge.current) return;
-        lastEdge.current = edge;
-        void invoke("resize_overlay_window", { width: edge, height: edge });
-      },
-      onEnd: () => {
-        const edge = lastEdge.current;
-        lastEdge.current = 0;
-        setResizing(false);
-        onInteracting(false);
-        if (edge > 0) {
-          void invoke("set_overlay_custom_size", { width: edge, height: edge });
-        }
-      },
-    });
-  }
-
-  const onPointerDown = (e: ReactPointerEvent) => {
-    e.stopPropagation();
-    startEdgeAt.current = Math.min(window.innerWidth, window.innerHeight);
-    if (!gesture.current!.begin(e)) return;
-    e.preventDefault();
-    lastEdge.current = 0;
-    setResizing(true);
-    onInteracting(true);
-  };
-
-  const onPointerMove = (e: ReactPointerEvent) => gesture.current!.move(e);
-  const onPointerUp = () => gesture.current!.end();
-  const onPointerCancel = () => {
-    gesture.current!.cancel();
-    setResizing(false);
-    onInteracting(false);
-  };
-  const onDoubleClick = (e: ReactMouseEvent) => {
-    e.stopPropagation();
-    gesture.current!.cancel();
-    setResizing(false);
-    onInteracting(false);
-    void invoke("clear_overlay_custom_size");
-  };
+  const handlers = useGrip({
+    resetCommand: "clear_overlay_custom_size",
+    onActive,
+    onBegin: () => {
+      startEdge.current = Math.min(window.innerWidth, window.innerHeight);
+      lastEdge.current = 0;
+    },
+    onFrame: (point, start) => {
+      const edge = resizeEdgeFromDelta(
+        startEdge.current,
+        point.screenX - start.screenX,
+        point.screenY - start.screenY,
+      );
+      if (edge === lastEdge.current) return;
+      lastEdge.current = edge;
+      void invoke("resize_overlay_window", { width: edge, height: edge });
+    },
+    onEnd: () => {
+      const edge = lastEdge.current;
+      lastEdge.current = 0;
+      if (edge > 0) void invoke("set_overlay_custom_size", { width: edge, height: edge });
+    },
+  });
 
   return (
     <div
       data-testid="overlay-resize-grip"
-      className={`resize-grip${resizing ? " resizing" : ""}`}
+      className="resize-grip"
       aria-label={`Resize overlay (square, ${MIN_OVERLAY_EDGE}px minimum, double-click to reset)`}
       title="Drag to resize · double-click to reset"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerCancel}
-      onDoubleClick={onDoubleClick}
-      style={{
-        position: "fixed",
-        right: 0,
-        bottom: 0,
-        width: 14,
-        height: 14,
-        boxSizing: "border-box",
-        cursor: "nwse-resize",
-        background:
-          "radial-gradient(circle at 30% 70%, rgba(255,255,255,0.95) 1.2px, transparent 1.6px), radial-gradient(circle at 70% 70%, rgba(255,255,255,0.95) 1.2px, transparent 1.6px), radial-gradient(circle at 70% 30%, rgba(255,255,255,0.95) 1.2px, transparent 1.6px), rgba(0,0,0,0.35)",
-        borderRadius: 3,
-        touchAction: "none",
-        userSelect: "none",
-        zIndex: 2147483647,
-      }}
+      {...handlers}
     />
   );
 }
 
+type ActiveGesture = "move" | "resize" | null;
+
 export function OverlayApp() {
   const snapshot = useOverlayState();
-  // The square outline is drawn ONLY while RESIZING: dragging the corner needs
-  // a visible window edge (an orb fills the window edge to edge). During a MOVE
-  // the orb itself shows where it goes, and repainting a 1px edge frame on every
-  // per-frame window reposition makes that frame flicker — so we keep it off.
-  const [resizing, setResizing] = useState(false);
-  // True while EITHER gesture (move or resize) is active — pins the hover
-  // handles visible for the whole gesture (DOM pointer-capture swallows the GTK
-  // motion pings that would otherwise keep them alive).
-  const [gesturing, setGesturing] = useState(false);
-
-  // Reveal the handles only while the OS pointer is over the overlay window.
-  // Driven by the Rust-side CursorEntered/CursorLeft events (overlay://pointer-
-  // inside) because the Dock webview doesn't deliver DOM pointerleave or keep
-  // CSS :hover in sync. Toggle a body class the grip CSS keys off of.
-  // All the show/hide timing lives in one framework-free controller (SRP): a
-  // hover ping shows + arms the idle hide; a gesture pins the handles for its
-  // whole duration. See overlay/handleVisibility.ts.
-  const visibility = useRef<HandleVisibility | null>(null);
-  if (visibility.current === null) {
-    visibility.current = createHandleVisibility({
-      leaveConfirmMs: LEAVE_CONFIRM_MS,
-      idleMs: IDLE_HIDE_MS,
-      show: () => document.body.classList.add("pointer-inside"),
-      hide: () => document.body.classList.remove("pointer-inside"),
-    });
-  }
-
-  useEffect(() => {
-    // Two independent sources, merged by the controller: Rust GTK crossing/
-    // motion (`overlay://pointer-inside`) and the DOM's own pointer events
-    // (WebKitGTK forwards crossings to the page). Either may drop events on
-    // XWayland; the controller's leave hysteresis + idle fallback make the
-    // union stable.
-    const v = visibility.current!;
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-    void listen<boolean>("overlay://pointer-inside", (e) => {
-      if (e.payload) v.ping();
-      else v.leave();
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
-    });
-    const onDomMove = () => v.ping();
-    const onDomLeave = () => v.leave();
-    const root = document.documentElement;
-    root.addEventListener("pointermove", onDomMove);
-    root.addEventListener("pointerleave", onDomLeave);
-    return () => {
-      cancelled = true;
-      v.dispose();
-      root.removeEventListener("pointermove", onDomMove);
-      root.removeEventListener("pointerleave", onDomLeave);
-      if (unlisten) unlisten();
-    };
-  }, []);
-
-  // Pin the handles for the whole drag/resize gesture, resume idle on release.
-  useEffect(() => {
-    visibility.current!.setGesturing(gesturing);
-  }, [gesturing]);
+  // Which grip gesture is running. Any gesture pins the hover handles; only a
+  // RESIZE shows the square outline (an orb fills the window edge to edge, so
+  // the corner needs a visible edge; during a move the orb shows position, and
+  // repainting the edge frame every reposition flickers).
+  const [active, setActive] = useState<ActiveGesture>(null);
+  useHandleVisibility(active !== null);
 
   // Track actual OS window size so the theme canvas fills the window.
   // When innerWidth/innerHeight is 0 (jsdom/headless), fall back to
@@ -456,17 +281,12 @@ export function OverlayApp() {
         />
       </div>
       <div
-        className={`resize-frame${resizing ? " visible" : ""}`}
+        className={`resize-frame${active === "resize" ? " visible" : ""}`}
         data-testid="overlay-resize-frame"
         aria-hidden="true"
       />
-      <DragGrip onInteracting={setGesturing} />
-      <ResizeGrip
-        onInteracting={(on) => {
-          setGesturing(on);
-          setResizing(on);
-        }}
-      />
+      <DragGrip onActive={(on) => setActive(on ? "move" : null)} />
+      <ResizeGrip onActive={(on) => setActive(on ? "resize" : null)} />
     </>
   );
 }

@@ -50,7 +50,8 @@ vi.mock("../bindings", () => ({
 
 // ── Tests ───────────────────────────────────────────────────────────────
 
-import { OverlayApp, ARM_MS, IDLE_HIDE_MS, LEAVE_CONFIRM_MS } from "../overlay";
+import { OverlayApp, ARM_MS } from "../overlay";
+import { IDLE_HIDE_MS, LEAVE_CONFIRM_MS } from "../overlay/useHandleVisibility";
 
 describe("OverlayApp (ThemeHost integration)", () => {
   beforeEach(() => {
