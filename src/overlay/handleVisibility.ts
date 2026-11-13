@@ -1,51 +1,51 @@
 // src/overlay/handleVisibility.ts
 /**
  * Owns WHEN the overlay's hover handles (drag + resize grips) are visible, as a
- * framework-free controller — same shape as `gesture.ts`. One place decides
- * show/hide so the reveal rule can't drift across the two React effects that
- * used to each hand-roll the idle timer.
+ * framework-free controller — same shape as `gesture.ts`.
  *
- * Rules (why each exists is hard-won on XWayland, see overlay_native/webview.rs):
- *  - a hover PING (Rust emits `overlay://pointer-inside=true` on GTK enter +
- *    throttled motion) shows the handles and (re)arms an idle timer; when pings
- *    stop for `idleMs` the pointer has left → hide. The borderless Dock webview
- *    never delivers a reliable leave, so an idle timeout IS the "gone" signal.
- *  - while a GESTURE (drag/resize) runs the handles are PINNED shown and the
- *    idle timer is suspended: the DOM pointer-capture swallows the motion pings
- *    that would keep them alive, so without pinning they'd blink mid-drag.
+ * Signals (see overlay_native/webview.rs for why each source exists):
+ *  - `ping()`  — the pointer is over the overlay (GTK enter/motion, DOM move).
+ *  - `leave()` — the pointer left (GTK leave, DOM mouseleave). Leaves are NOT
+ *    trusted immediately: XWayland/WebKit emit spurious leave→enter pairs at
+ *    surface boundaries, so a leave only HIDES after `leaveConfirmMs` with no
+ *    new ping (hysteresis). A ping inside that window cancels it — no blink.
+ *  - `setGesturing(on)` — a drag/resize pins the handles shown and ignores
+ *    leaves; DOM pointer-capture swallows the motion pings meanwhile.
+ *
+ * `idleMs` is only a SAFETY NET for a leave that never arrives (XWayland can't
+ * see the pointer off our surface). It's long so that holding the pointer
+ * still over the orb (aiming at a handle) never hides them.
  */
 export interface HandleVisibility {
-  /** A hover ping arrived (the pointer is over the overlay). */
   ping(): void;
-  /** A drag/resize gesture started (`true`) or ended (`false`). */
+  leave(): void;
   setGesturing(on: boolean): void;
-  /** Drop any pending timer (component unmount). */
   dispose(): void;
 }
 
 export interface HandleVisibilityOptions {
-  /** Hide this long after the last ping with no gesture active. */
+  /** Confirm a leave after this long without a new ping, then hide. */
+  leaveConfirmMs: number;
+  /** Fallback hide after this long with no ping at all (lost leave). */
   idleMs: number;
-  /** Reveal the handles (e.g. add a body class). */
   show: () => void;
-  /** Hide the handles (e.g. remove the body class). */
   hide: () => void;
-  /** Injectable timers (defaults to globals) — keeps the core unit-testable. */
+  /** Injectable timers (defaults resolve globals at call time — fake-timer friendly). */
   setTimeoutFn?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
   clearTimeoutFn?: (handle: ReturnType<typeof setTimeout>) => void;
 }
 
 export function createHandleVisibility(opts: HandleVisibilityOptions): HandleVisibility {
-  // Resolve the globals at CALL time (not capture time) so test fake-timers
-  // installed after construction are respected.
   const setT =
     opts.setTimeoutFn ?? ((cb: () => void, ms: number) => setTimeout(cb, ms));
   const clearT =
     opts.clearTimeoutFn ??
     ((handle: ReturnType<typeof setTimeout>) => clearTimeout(handle));
 
+  // ONE timer: the next scheduled hide (confirm-leave or idle fallback).
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
   let gesturing = false;
+  let shown = false;
 
   const clearHide = () => {
     if (hideTimer !== null) {
@@ -53,28 +53,39 @@ export function createHandleVisibility(opts: HandleVisibilityOptions): HandleVis
       hideTimer = null;
     }
   };
-
-  const armHide = () => {
+  const scheduleHide = (ms: number) => {
     clearHide();
-    if (gesturing) return; // pinned while a gesture runs — never hide mid-drag
+    if (gesturing) return; // pinned while a gesture runs
     hideTimer = setT(() => {
       hideTimer = null;
+      shown = false;
       opts.hide();
-    }, opts.idleMs);
+    }, ms);
+  };
+  const show = () => {
+    if (!shown) {
+      shown = true;
+      opts.show();
+    }
   };
 
   return {
     ping() {
-      opts.show();
-      armHide();
+      show();
+      scheduleHide(opts.idleMs);
+    },
+    leave() {
+      if (!shown || gesturing) return;
+      scheduleHide(opts.leaveConfirmMs);
     },
     setGesturing(on) {
       gesturing = on;
       if (on) {
         clearHide();
-        opts.show();
+        show();
       } else {
-        armHide(); // resume the idle countdown
+        // The pointer is on the grip at release → still over the overlay.
+        scheduleHide(opts.idleMs);
       }
     },
     dispose() {

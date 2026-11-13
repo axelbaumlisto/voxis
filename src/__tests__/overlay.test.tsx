@@ -50,7 +50,7 @@ vi.mock("../bindings", () => ({
 
 // ── Tests ───────────────────────────────────────────────────────────────
 
-import { OverlayApp, ARM_MS, IDLE_HIDE_MS } from "../overlay";
+import { OverlayApp, ARM_MS, IDLE_HIDE_MS, LEAVE_CONFIRM_MS } from "../overlay";
 
 describe("OverlayApp (ThemeHost integration)", () => {
   beforeEach(() => {
@@ -364,11 +364,30 @@ describe("OverlayApp hover-handle visibility", () => {
     expect(document.body.classList.contains("pointer-inside")).toBe(false);
   });
 
-  it("ignores pointer-inside=false (the webview never emits it; only true pings keep handles alive)", async () => {
+  it("a leave hides only after the confirm window", async () => {
     await mounted();
+    vi.useFakeTimers();
     await emitInside(true);
     await emitInside(false);
-    // false is a no-op: still shown (hide happens only via the idle timer)
+    expect(document.body.classList.contains("pointer-inside")).toBe(true);
+    await act(async () => {
+      vi.advanceTimersByTime(LEAVE_CONFIRM_MS + 20);
+    });
+    expect(document.body.classList.contains("pointer-inside")).toBe(false);
+  });
+
+  it("a spurious leave→enter pair does not blink", async () => {
+    await mounted();
+    vi.useFakeTimers();
+    await emitInside(true);
+    await emitInside(false);
+    await act(async () => {
+      vi.advanceTimersByTime(LEAVE_CONFIRM_MS / 3);
+    });
+    await emitInside(true);
+    await act(async () => {
+      vi.advanceTimersByTime(LEAVE_CONFIRM_MS * 2);
+    });
     expect(document.body.classList.contains("pointer-inside")).toBe(true);
   });
 

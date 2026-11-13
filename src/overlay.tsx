@@ -53,15 +53,12 @@ import {
  */
 export const ARM_MS = 300;
 const SLOP_PX = 6;
-/**
- * Hide the hover handles this long after the last pointer-inside ping (idle).
- * The ping stream is GTK motion, which STOPS when the pointer holds still over
- * the orb (e.g. while aiming at a handle). So this must comfortably outlast a
- * natural aiming pause — otherwise the handles hide mid-hover and re-appear on
- * the next twitch, which reads as blinking. A couple extra seconds of lingering
- * after a real leave is unnoticeable; a mid-hover blink is not.
- */
-export const IDLE_HIDE_MS = 2500;
+/** A leave hides only if no new hover ping arrives within this window —
+ *  absorbs XWayland/WebKit's spurious leave→enter pairs (no blink). */
+export const LEAVE_CONFIRM_MS = 300;
+/** Safety-net hide when a leave never arrives (XWayland can't see an
+ *  off-surface pointer). Long, so holding still over the orb never hides. */
+export const IDLE_HIDE_MS = 5000;
 
 function DragGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
   const [dragging, setDragging] = useState(false);
@@ -303,6 +300,7 @@ export function OverlayApp() {
   const visibility = useRef<HandleVisibility | null>(null);
   if (visibility.current === null) {
     visibility.current = createHandleVisibility({
+      leaveConfirmMs: LEAVE_CONFIRM_MS,
       idleMs: IDLE_HIDE_MS,
       show: () => document.body.classList.add("pointer-inside"),
       hide: () => document.body.classList.remove("pointer-inside"),
@@ -310,20 +308,31 @@ export function OverlayApp() {
   }
 
   useEffect(() => {
-    // Rust emits `overlay://pointer-inside=true` on GTK enter + throttled
-    // motion (never a reliable `false`), so each ping just keeps the handles
-    // alive; the controller hides them on idle.
+    // Two independent sources, merged by the controller: Rust GTK crossing/
+    // motion (`overlay://pointer-inside`) and the DOM's own pointer events
+    // (WebKitGTK forwards crossings to the page). Either may drop events on
+    // XWayland; the controller's leave hysteresis + idle fallback make the
+    // union stable.
+    const v = visibility.current!;
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     void listen<boolean>("overlay://pointer-inside", (e) => {
-      if (e.payload) visibility.current!.ping();
+      if (e.payload) v.ping();
+      else v.leave();
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
     });
+    const onDomMove = () => v.ping();
+    const onDomLeave = () => v.leave();
+    const root = document.documentElement;
+    root.addEventListener("pointermove", onDomMove);
+    root.addEventListener("pointerleave", onDomLeave);
     return () => {
       cancelled = true;
-      visibility.current!.dispose();
+      v.dispose();
+      root.removeEventListener("pointermove", onDomMove);
+      root.removeEventListener("pointerleave", onDomLeave);
       if (unlisten) unlisten();
     };
   }, []);

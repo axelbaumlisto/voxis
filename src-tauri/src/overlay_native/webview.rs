@@ -260,15 +260,12 @@ fn build_overlay_window(
             use gtk::prelude::{Cast, GtkWindowExt, WidgetExt};
             let wv = webview.inner();
             wv.set_size_request(1, 1);
-            // Keep the handles alive while the pointer is over the WebView. ENTER
-            // and MOTION both emit `true` (motion is throttled) — these fire
-            // reliably on this borderless Dock webview, whereas a webview LEAVE
-            // never arrives and XWayland won't report an off-surface pointer. So
-            // the frontend keeps the handles shown while these pings arrive and
-            // auto-hides them once they stop (idle = pointer gone). We deliberately
-            // emit NO `false`: the webview/child boundary throws spurious leaves
-            // mid-hover, and any `false` there makes the handles blink. Idle-only
-            // hide can't flap.
+            // Hover signals for the handles. ENTER + throttled MOTION emit `true`;
+            // LEAVE (webview or toplevel, non-Inferior) emits `false`. Leaves are
+            // unreliable on XWayland (sometimes missing, sometimes a spurious
+            // leave→enter pair), so the frontend never trusts a single `false`:
+            // it hides only if no `true` follows within a confirm window, with a
+            // long idle fallback for a lost leave (overlay/handleVisibility.ts).
             {
                 use std::cell::Cell;
                 use std::rc::Rc;
@@ -288,12 +285,27 @@ fn build_overlay_window(
                     }
                     gtk::glib::Propagation::Proceed
                 });
+                let app_leave = app_evt.clone();
+                wv.connect_leave_notify_event(move |_, e| {
+                    if e.detail() != gtk::gdk::NotifyType::Inferior {
+                        let _ = app_leave.emit(events::POINTER_INSIDE, false);
+                    }
+                    gtk::glib::Propagation::Proceed
+                });
             }
             // Also force-resize the toplevel GTK window in case the
             // compositor has already cached the 200×200 constraints.
             if let Some(toplevel) = wv.toplevel() {
                 if let Ok(gtk_window) = toplevel.downcast::<gtk::Window>() {
                     gtk_window.resize(w as i32, h as i32);
+                    // The leave often goes to the toplevel, not the webview.
+                    let app_top_leave = app_evt.clone();
+                    gtk_window.connect_leave_notify_event(move |_, e| {
+                        if e.detail() != gtk::gdk::NotifyType::Inferior {
+                            let _ = app_top_leave.emit(events::POINTER_INSIDE, false);
+                        }
+                        gtk::glib::Propagation::Proceed
+                    });
                     // Never steal keyboard focus from the active app: a click on
                     // the pill still delivers the pointer event to WebKit (so
                     // click-to-dictate works), but the WM must not transfer input
