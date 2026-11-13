@@ -1,9 +1,11 @@
 //! Theme digest — the fingerprint of one theme folder's regular files.
 //!
-//! SPEC (identical in `scripts/gen-known-theme-digests.ts`; the two
-//! implementations must agree byte for byte — the
-//! `test_theme_digest_of_every_bundled_theme_is_known` test cross-checks this
-//! implementation against digests the script derived from git history):
+//! SPEC (identical in `scripts/theme-digest.ts`, the one TypeScript
+//! implementation — used by `scripts/gen-known-theme-digests.ts` and
+//! `scripts/build-themes.ts` alike; the two implementations must agree byte for
+//! byte — the `test_theme_digest_of_every_bundled_theme_is_known` test
+//! cross-checks this implementation against digests the generator derived from
+//! git history):
 //!
 //! 1. input: the theme folder's **regular** files — no symlinks, no
 //!    subdirectories — as `(file name, bytes)`;
@@ -25,7 +27,7 @@ use sha2::{Digest, Sha256};
 /// The ASCII whitespace bytes the spec removes: `u8::is_ascii_whitespace`
 /// **plus** VT (`0x0B`), which std excludes. Do not replace this with
 /// `u8::is_ascii_whitespace` — that would drop VT and break agreement with
-/// `scripts/gen-known-theme-digests.ts`.
+/// `scripts/theme-digest.ts`.
 const ASCII_WHITESPACE: [u8; 6] = [b' ', b'\t', b'\n', 0x0b, 0x0c, b'\r'];
 
 /// Digest of one theme folder per the module spec.

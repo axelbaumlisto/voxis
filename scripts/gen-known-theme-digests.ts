@@ -6,25 +6,14 @@
  * `retire_pristine_copies` migration) from a user edit (kept, shadows the
  * builtin).
  *
- * DIGEST SPEC — identical to `src-tauri/src/theme_engine/digest.rs`, which
- * must agree with this file byte for byte (`test_theme_digest_of_every_bundled_theme_is_known`
- * cross-checks the Rust digest of the current bundle against this file):
+ * The digest spec itself lives in `scripts/theme-digest.ts` (the one TS
+ * implementation, shared with `scripts/build-themes.ts`), which states the
+ * identical spec to `src-tauri/src/theme_engine/digest.rs`; the Rust test
+ * `test_theme_digest_of_every_bundled_theme_is_known` cross-checks the Rust
+ * digest of the current bundle against this file.
  *
- * 1. input: the theme folder's **regular** files — no symlinks, no
- *    subdirectories — as `(file name, bytes)`;
- * 2. normalize each file's bytes: remove **every** ASCII whitespace byte —
- *    space `0x20`, tab `0x09`, LF `0x0A`, CR `0x0D`, VT `0x0B`, FF `0x0C`;
- *    release builds re-bundle the themes with a different bun that formats
- *    differently (`} catch {\n    }` vs `} catch {}`), so a **shipped** copy
- *    of a theme differs from its git blob in whitespace only. Canonical JSON
- *    is not an option (Rust and JS print numbers differently, `1.0` vs `1`),
- *    and the rule is applied to every file, whatever its extension;
- * 3. sort by file name, byte-wise (`String::cmp` == JS's default `Array.sort`
- *    on ASCII names; all theme file names are ASCII);
- * 4. sha256 over the concatenation, per file, of: the name bytes, `0x00`,
- *    the decimal byte length of the **normalized** content as ASCII, `0x00`,
- *    the **normalized** bytes;
- * 5. digest = the lowercase hex encoding of that sha256.
+ * The list is merged append-only into whatever is already committed (see
+ * `updateKnownBuiltinDigests`), so a digest that ever shipped is never lost.
  *
  * The walk starts at `4c3f98e` (the v2 manifest + seeder, 2026-06-10): older
  * copies were v1, which the scanner never loads, so their digests are useless
@@ -35,13 +24,18 @@
  * Run from the repo root: `bun scripts/gen-known-theme-digests.ts`.
  */
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  KNOWN_DIGESTS_FILE,
+  type KnownDigests,
+  normalize,
+  themeDigest,
+  updateKnownBuiltinDigests,
+} from "./theme-digest";
 
 const REPO_ROOT = process.cwd();
 const THEMES_DIR = "src-tauri/themes";
-const OUT_FILE = "src-tauri/known-builtin-digests.json";
 /** Commit that introduced the v2 manifest and the seeder it fed. */
 const RANGE_BASE = "4c3f98e";
 
@@ -103,37 +97,16 @@ function themeFiles(commit: string): ThemeFile[] {
   return files;
 }
 
-/** The ASCII whitespace bytes the spec removes. */
-const ASCII_WHITESPACE = new Set([0x20, 0x09, 0x0a, 0x0d, 0x0b, 0x0c]);
-
-function normalize(bytes: Buffer): Buffer {
-  return Buffer.from(bytes.filter((byte) => !ASCII_WHITESPACE.has(byte)));
-}
-
-const blobCache = new Map<string, Buffer>();
-const chunkCache = new Map<string, Buffer>();
+const blobCache = new Map<string, Uint8Array>();
 const digestCache = new Map<string, string>();
 
-/** `name`, NUL, decimal length, NUL, normalized bytes — the digest input. */
-function fileChunk(blobSha: string, name: string): Buffer {
-  const key = `${blobSha}\0${name}`;
-  const cached = chunkCache.get(key);
+/** Normalized bytes of one git blob — the only form the digest ever needs. */
+function blobBytes(blobSha: string): Uint8Array {
+  const cached = blobCache.get(blobSha);
   if (cached) return cached;
-  let bytes = blobCache.get(blobSha);
-  if (!bytes) {
-    // Normalized once per blob: it is the only form the digest ever needs.
-    bytes = normalize(git(["cat-file", "blob", blobSha]));
-    blobCache.set(blobSha, bytes);
-  }
-  const chunk = Buffer.concat([
-    Buffer.from(name, "utf8"),
-    Buffer.from([0]),
-    Buffer.from(String(bytes.length), "ascii"),
-    Buffer.from([0]),
-    bytes,
-  ]);
-  chunkCache.set(key, chunk);
-  return chunk;
+  const bytes = normalize(git(["cat-file", "blob", blobSha]));
+  blobCache.set(blobSha, bytes);
+  return bytes;
 }
 
 function sortByName(files: ThemeFile[]): ThemeFile[] {
@@ -141,14 +114,14 @@ function sortByName(files: ThemeFile[]): ThemeFile[] {
 }
 
 /** Digest of one theme folder; memoized by the folder's content signature. */
-function themeDigest(files: ThemeFile[]): string {
+function folderDigest(files: ThemeFile[]): string {
   const sorted = sortByName(files);
   const signature = sorted.map((f) => `${f.name}\0${f.blobSha}`).join("\n");
   const cached = digestCache.get(signature);
   if (cached) return cached;
-  const hash = createHash("sha256");
-  for (const file of sorted) hash.update(fileChunk(file.blobSha, file.name));
-  const digest = hash.digest("hex");
+  const digest = themeDigest(
+    sorted.map((file) => ({ name: file.name, bytes: blobBytes(file.blobSha) })),
+  );
   digestCache.set(signature, digest);
   return digest;
 }
@@ -174,7 +147,7 @@ function addCommit(commit: string): number {
       digests = new Set();
       known.set(themeId, digests);
     }
-    digests.add(themeDigest(files));
+    digests.add(folderDigest(files));
     added++;
   }
   return added;
@@ -225,14 +198,11 @@ for (const tag of tags) {
   );
 }
 
-const out: Record<string, string[]> = {};
-for (const themeId of [...known.keys()].sort()) {
-  out[themeId] = [...known.get(themeId)!].sort();
-}
-fs.writeFileSync(
-  path.join(REPO_ROOT, OUT_FILE),
-  `${JSON.stringify(out, null, 2)}\n`,
-);
+const derived: KnownDigests = {};
+for (const [themeId, digests] of known) derived[themeId] = [...digests];
+const outFile = path.join(REPO_ROOT, KNOWN_DIGESTS_FILE);
+const written = updateKnownBuiltinDigests(outFile, derived);
+const out = JSON.parse(fs.readFileSync(outFile, "utf8")) as KnownDigests;
 
 const ids = Object.keys(out);
 const digests = ids.reduce((sum, id) => sum + out[id].length, 0);
@@ -240,7 +210,7 @@ console.log(
   `${commits.length} commits walked (${rangeBase}..HEAD) in ${THEMES_DIR}: ` +
     `${instances} theme-folder instances (incl. tag trees) -> ${ids.length} ids, ${digests} digests`,
 );
-console.log(`wrote ${OUT_FILE}`);
+console.log(written ? `wrote ${KNOWN_DIGESTS_FILE}` : `${KNOWN_DIGESTS_FILE} already up to date`);
 console.log(
   uncovered.length === 0
     ? `all ${tags.length} v0.1.* release tags are in the walked range; their digests are included`

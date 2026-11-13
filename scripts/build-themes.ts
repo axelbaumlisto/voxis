@@ -19,9 +19,21 @@
  *   gitignored) rather than generated on the fly before every test run.
  *
  * Run via `bun run build:themes`.
+ *
+ * Every theme's digest (see `scripts/theme-digest.ts`) of the bytes written to
+ * `src-tauri/themes/<id>/` is appended — never removed — to
+ * `src-tauri/known-builtin-digests.json`, so the app recognises a copy of this
+ * exact bundle as pristine and can move it aside instead of letting it shadow
+ * the builtin forever.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  KNOWN_DIGESTS_FILE,
+  type KnownDigests,
+  themeDigest,
+  updateKnownBuiltinDigests,
+} from "./theme-digest";
 
 const ROOT = path.resolve(import.meta.dir, "..");
 
@@ -53,6 +65,9 @@ const ids = fs.readdirSync(BUILTIN_DIR, { withFileTypes: true })
   .filter((e) => e.isDirectory() && !e.name.startsWith("__") && !e.name.startsWith("_"))
   .map((e) => e.name);
 
+/** Digests of the themes built by this run, merged into the known list below. */
+const currentDigests: KnownDigests = {};
+
 for (const id of ids) {
   const entry = path.join(BUILTIN_DIR, id, "index.ts");
   const manifest = path.join(BUILTIN_DIR, id, "manifest.json");
@@ -75,5 +90,21 @@ for (const id of ids) {
     fs.writeFileSync(path.join(out, "theme.js"), themeJs);
     fs.copyFileSync(manifest, path.join(out, "theme.json"));
   }
+  // The digest of what was just built: exactly the two files each bundle
+  // folder holds, in the shape `ThemeSource::files` returns them.
+  currentDigests[id] = [
+    themeDigest([
+      { name: "theme.js", bytes: new TextEncoder().encode(themeJs) },
+      { name: "theme.json", bytes: fs.readFileSync(manifest) },
+    ]),
+  ];
   console.log(`built ${id}`);
 }
+
+const knownDigestsFile = path.join(ROOT, KNOWN_DIGESTS_FILE);
+const appended = updateKnownBuiltinDigests(knownDigestsFile, currentDigests);
+console.log(
+  appended
+    ? `appended ${ids.length} digests to ${KNOWN_DIGESTS_FILE}`
+    : `${KNOWN_DIGESTS_FILE} already has every built digest`,
+);
