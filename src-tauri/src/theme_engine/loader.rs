@@ -1,6 +1,9 @@
-//! Filesystem side of the theme engine: scan dir, read entry scripts, validate.
-//! SRP: I/O only — schema rules live in manifest.rs.
+//! Theme engine front door: scan theme sources, read entry scripts, validate.
+//! SRP: orchestration of `ThemeSource`s only — filesystem access lives in
+//! source.rs, except seeding (`seed_from_bundle`, which still writes into the
+//! user dir until it is removed), and schema rules in manifest.rs.
 use super::manifest::ThemeManifest;
+use super::source::{DirSource, ThemeSource};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -23,13 +26,18 @@ pub struct ThemeValidation {
 }
 
 pub struct ThemeEngineLoader {
+    /// The user themes dir — the folder the app writes into (export, seeding).
     themes_dir: PathBuf,
-    cache: RwLock<HashMap<String, ThemeManifest>>,
+    /// Theme sources in precedence order: a later source wins on id collision.
+    sources: Vec<Box<dyn ThemeSource>>,
+    /// id -> (index of the owning source, manifest) filled by scan().
+    cache: RwLock<HashMap<String, (usize, ThemeManifest)>>,
 }
 
 impl ThemeEngineLoader {
     pub fn new(themes_dir: PathBuf) -> Self {
         Self {
+            sources: vec![Box::new(DirSource::new(themes_dir.clone()))],
             themes_dir,
             cache: RwLock::new(HashMap::new()),
         }
@@ -39,58 +47,31 @@ impl ThemeEngineLoader {
         &self.themes_dir
     }
 
-    /// Scan themes dir; cache and return manifests of valid themes.
+    /// Scan all theme sources; cache and return manifests of valid themes.
     /// Invalid themes are skipped (logged), never fatal.
     pub fn scan(&self) -> Result<Vec<ThemeManifest>, ThemeEngineError> {
         if !self.themes_dir.exists() {
             std::fs::create_dir_all(&self.themes_dir)?;
         }
-        let mut found = HashMap::new();
-        for entry in std::fs::read_dir(&self.themes_dir)?.flatten() {
-            let dir = entry.path();
-            if !dir.is_dir() {
-                continue;
-            }
-            match Self::load_dir(&dir) {
-                Ok(m) => {
-                    found.insert(m.id.clone(), m);
-                }
-                Err(e) => tracing::warn!("skipping theme at {:?}: {}", dir, e),
-            }
-        }
-        let list: Vec<_> = found.values().cloned().collect();
+        // Strict probe: an unreadable themes dir (a file, no permissions) must
+        // surface as an error, never as an empty scan that wipes the cache.
+        std::fs::read_dir(&self.themes_dir)?;
+        let found = self.collect_manifests();
+        let list: Vec<_> = found.values().map(|(_, m)| m.clone()).collect();
         *self.cache.write().expect("theme cache poisoned") = found;
         Ok(list)
     }
 
-    /// Load a theme from dir. The folder name is the **authoritative** id —
-    /// if the manifest's "id" field disagrees, we WARN and override it with
-    /// the folder name. This ensures hand-copied or renamed directories
-    /// Just Work instead of being silently invisible or shadowing the
-    /// original id. Same rule applies to copied/exported themes whose
-    /// manifest was rewritten by export_theme_dir.
-    fn load_dir(dir: &std::path::Path) -> Result<ThemeManifest, String> {
-        let folder_name = dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| "theme dir has no valid name".to_string())?;
-        let manifest_path = dir.join("theme.json");
-        let raw =
-            std::fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?;
-        let mut manifest = ThemeManifest::parse(&raw).map_err(|e| e.to_string())?;
-        if manifest.id != folder_name {
-            tracing::warn!(
-                "load_dir: manifest id '{}' != folder name '{}' — using folder name as authoritative id",
-                manifest.id,
-                folder_name
-            );
-            manifest.id = folder_name.to_string();
+    /// Merge the manifests of every source. A later source shadows an earlier
+    /// one with the same id.
+    fn collect_manifests(&self) -> HashMap<String, (usize, ThemeManifest)> {
+        let mut found = HashMap::new();
+        for (index, source) in self.sources.iter().enumerate() {
+            for manifest in source.manifests() {
+                found.insert(manifest.id.clone(), (index, manifest));
+            }
         }
-        let entry = dir.join(&manifest.entry);
-        if !entry.is_file() {
-            return Err(format!("entry file missing: {}", manifest.entry));
-        }
-        Ok(manifest)
+        found
     }
 
     /// Return manifest for id (from cache filled by scan()).
@@ -99,7 +80,7 @@ impl ThemeEngineLoader {
             .read()
             .expect("theme cache poisoned")
             .get(id)
-            .cloned()
+            .map(|(_, manifest)| manifest.clone())
     }
 
     /// Read the entry-script source for a theme id.
@@ -107,14 +88,31 @@ impl ThemeEngineLoader {
         if !super::manifest::is_safe_path_component(id) {
             return Err(ThemeEngineError::UnknownTheme(id.to_string()));
         }
-        let manifest = self
-            .manifest(id)
-            .ok_or_else(|| ThemeEngineError::UnknownTheme(id.to_string()))?;
-        let path = self.themes_dir.join(id).join(&manifest.entry);
-        Ok(std::fs::read_to_string(path)?)
+        let (source_index, entry) = {
+            let cache = self.cache.read().expect("theme cache poisoned");
+            let (index, manifest) = cache
+                .get(id)
+                .ok_or_else(|| ThemeEngineError::UnknownTheme(id.to_string()))?;
+            (*index, manifest.entry.clone())
+        };
+        let bytes = self.sources[source_index].read(id, &entry).ok_or_else(|| {
+            ThemeEngineError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("entry file '{entry}' of theme '{id}' is unreadable"),
+            ))
+        })?;
+        String::from_utf8(bytes).map_err(|e| {
+            ThemeEngineError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        })
     }
 
-    /// Validate one theme dir; mirrors legacy ThemeTestResult semantics.
+    /// Validate one theme id; mirrors legacy ThemeTestResult semantics.
+    ///
+    /// Reads the sources fresh (not the cache), so a theme edited on disk
+    /// validates without an explicit re-scan. Sources are asked in reverse
+    /// (later wins): the first source that contains the id decides the answer —
+    /// valid, or its own invalidity reason. A broken theme therefore reports
+    /// its error instead of silently falling back to the source it shadows.
     pub fn validate(&self, id: &str) -> ThemeValidation {
         if !super::manifest::is_safe_path_component(id) {
             return ThemeValidation {
@@ -123,17 +121,29 @@ impl ThemeEngineLoader {
                 errors: vec!["invalid theme id".into()],
             };
         }
-        let dir = self.themes_dir.join(id);
-        match Self::load_dir(&dir) {
-            Ok(_) => ThemeValidation {
-                valid: true,
-                ..Default::default()
-            },
-            Err(e) => ThemeValidation {
-                valid: false,
-                warnings: vec![],
-                errors: vec![e],
-            },
+        for source in self.sources.iter().rev() {
+            // Presence probe: a source contains the theme when it has its
+            // manifest file — whether or not that manifest turns out to be
+            // valid (that is what `load` reports).
+            if source.read(id, "theme.json").is_none() {
+                continue;
+            }
+            return match source.load(id) {
+                Ok(_) => ThemeValidation {
+                    valid: true,
+                    ..Default::default()
+                },
+                Err(e) => ThemeValidation {
+                    valid: false,
+                    warnings: vec![],
+                    errors: vec![e],
+                },
+            };
+        }
+        ThemeValidation {
+            valid: false,
+            warnings: vec![],
+            errors: vec![format!("theme not found: {id}")],
         }
     }
 
@@ -443,6 +453,43 @@ mod tests {
         assert!(!result.errors.is_empty());
     }
 
+    /// validate() must report the precise reason a theme is invalid, e.g. a
+    /// valid manifest whose entry file is missing.
+    #[test]
+    fn test_validate_reports_missing_entry_file() {
+        let tmp = TempDir::new().unwrap();
+        let d = tmp.path().join("noentry");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(
+            d.join("theme.json"),
+            r#"{"manifest_version":2,"id":"noentry","name":"x","api_version":1,"entry":"theme.js"}"#,
+        )
+        .unwrap();
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        let result = loader.validate("noentry");
+        assert!(!result.valid);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("entry file missing")),
+            "expected the entry-file reason, got: {:?}",
+            result.errors
+        );
+    }
+
+    /// The entry file can disappear between scan() and read_script(); that must
+    /// be an error, not a panic.
+    #[test]
+    fn test_read_script_errors_when_entry_deleted_after_scan() {
+        let tmp = TempDir::new().unwrap();
+        write_theme(tmp.path(), "alpha", "export function mount(){}");
+        let loader = ThemeEngineLoader::new(tmp.path().to_path_buf());
+        loader.scan().unwrap();
+        fs::remove_file(tmp.path().join("alpha/theme.js")).unwrap();
+        assert!(loader.read_script("alpha").is_err());
+    }
+
     /// Write a bundled-style theme (theme.json + theme.js) into a dir.
     fn write_bundle_theme(dir: &std::path::Path, id: &str, entry: &str, content: &str) {
         let d = dir.join(id);
@@ -656,7 +703,7 @@ mod tests {
         );
     }
 
-    /// When manifest.id disagrees with the folder name, load_dir must
+    /// When manifest.id disagrees with the folder name, the source must
     /// WARN and override to use folder name as the authoritative id.
     /// This ensures hand-copied or renamed dirs Just Work.
     #[test]
