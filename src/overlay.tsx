@@ -53,8 +53,15 @@ import {
  */
 export const ARM_MS = 300;
 const SLOP_PX = 6;
-/** Hide the hover handles this long after the last pointer-inside ping (idle). */
-export const IDLE_HIDE_MS = 1200;
+/**
+ * Hide the hover handles this long after the last pointer-inside ping (idle).
+ * The ping stream is GTK motion, which STOPS when the pointer holds still over
+ * the orb (e.g. while aiming at a handle). So this must comfortably outlast a
+ * natural aiming pause — otherwise the handles hide mid-hover and re-appear on
+ * the next twitch, which reads as blinking. A couple extra seconds of lingering
+ * after a real leave is unnoticeable; a mid-hover blink is not.
+ */
+export const IDLE_HIDE_MS = 2500;
 
 function DragGrip({ onInteracting }: { onInteracting: (on: boolean) => void }) {
   const [dragging, setDragging] = useState(false);
