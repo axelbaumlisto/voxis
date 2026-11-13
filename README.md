@@ -127,6 +127,19 @@ the default overlay size is used. Copy a builtin theme folder as a starting
 point, edit the code, then use Reload + Preview or reload/reselect it in
 Settings. See the full guide at **[docs/THEMES.md](docs/THEMES.md)**.
 
+### Orb themes to keep (owner's shortlist, provisional)
+
+The orb set is being trimmed. These are confirmed keepers so far; the other
+`orb_*` builtins are candidates for removal (nothing has been deleted yet):
+
+| Theme id | Name |
+|---|---|
+| `orb_shdr_03` | Orb · SHDR-03 |
+| `orb_shdr_06` | Orb · SHDR-06 |
+| `orb_shdr_07` | Orb · SHDR-07 |
+| `orb_rocaille` | Orb · Rocaille |
+| `orb_falls` | Orb · Falls |
+
 ## Embeddable plugin (`tauri-plugin-voxis`)
 
 Voxis's dictation engine is also available as an embeddable Tauri 2 plugin
