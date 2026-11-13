@@ -747,18 +747,6 @@ async resizeOverlayWindow(width: number, height: number) : Promise<Result<null, 
 }
 },
 /**
- * Clear the user-dragged position; the overlay returns to its configured
- * preset placement (`position` + `margin`).
- */
-async clearOverlayCustomPosition() : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("clear_overlay_custom_position") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * List available audio input devices.
  * Requires microphone permission to access audio hardware.
  */

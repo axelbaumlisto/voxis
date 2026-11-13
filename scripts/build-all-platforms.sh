@@ -72,10 +72,15 @@ build_linux_gui() {
   # v0.1.16 post-mortem: a failed `docker build` was ignored (no `set -e` in a
   # backgrounded function), `docker create` then reused an OLDER image under the
   # shared `:latest` tag, and a stale binary + 0.1.15 .deb/.rpm were published.
-  DOCKER_BUILDKIT=0 docker build --network host -f Dockerfile.gui-linux -t voxis-linux-gui:latest . \
-    || { echo "ERROR: Linux GUI docker build failed" >&2; return 1; }
-  local cid
-  cid=$(docker create voxis-linux-gui:latest) || return 1
+  # Create the container from THIS build's image id, never the host-wide
+  # `:latest` tag another clone may have just retagged.
+  local iidfile cid
+  iidfile=$(mktemp)
+  DOCKER_BUILDKIT=0 docker build --network host --iidfile "$iidfile" \
+    -f Dockerfile.gui-linux -t voxis-linux-gui:latest . \
+    || { echo "ERROR: Linux GUI docker build failed" >&2; rm -f "$iidfile"; return 1; }
+  cid=$(docker create "$(cat "$iidfile")") || { rm -f "$iidfile"; return 1; }
+  rm -f "$iidfile"
   docker cp "$cid:/voxis" "$OUTPUT_DIR/voxis-linux-x64-gui"
   docker cp "$cid:/bundle/." "$OUTPUT_DIR/" 2>/dev/null || true
   docker rm "$cid" >/dev/null

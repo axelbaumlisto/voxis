@@ -134,7 +134,6 @@ pub fn command_handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 
         commands::overlay::set_overlay_custom_size,
         commands::overlay::clear_overlay_custom_size,
         commands::overlay::resize_overlay_window,
-        commands::overlay::clear_overlay_custom_position,
         commands::recording::cancel_operation,
         commands::recording::list_audio_devices,
         commands::recording::start_recording,
