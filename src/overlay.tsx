@@ -349,26 +349,29 @@ export function OverlayApp() {
   // inside) because the Dock webview doesn't deliver DOM pointerleave or keep
   // CSS :hover in sync. Toggle a body class the grip CSS keys off of.
   useEffect(() => {
-    // Reveal/hide the handles from the Rust pointer-inside events (GTK enter →
-    // true, toplevel leave → false). Show immediately; DEBOUNCE the hide so a
-    // brief leave→enter flap at the window edge doesn't blink the handles — a
-    // real leave with no re-enter fades them out after HIDE_MS.
-    const HIDE_MS = 220;
+    // Reveal the handles while pointer-inside `true` pings arrive (GTK enter +
+    // throttled motion), and AUTO-HIDE once they stop — idle means the pointer
+    // left (a reliable webview leave never arrives here). Each `true` restarts
+    // the idle timer, so continuous hovering keeps the handles shown with no
+    // blinking; `false` (best-effort toplevel leave) hides a bit sooner.
+    const IDLE_MS = 900;
+    const LEAVE_MS = 160;
     let hideTimer: ReturnType<typeof setTimeout> | null = null;
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    void listen<boolean>("overlay://pointer-inside", (e) => {
-      if (hideTimer) {
-        clearTimeout(hideTimer);
+    const scheduleHide = (ms: number) => {
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        document.body.classList.remove("pointer-inside");
         hideTimer = null;
-      }
+      }, ms);
+    };
+    void listen<boolean>("overlay://pointer-inside", (e) => {
       if (e.payload) {
         document.body.classList.add("pointer-inside");
+        scheduleHide(IDLE_MS);
       } else {
-        hideTimer = setTimeout(() => {
-          document.body.classList.remove("pointer-inside");
-          hideTimer = null;
-        }, HIDE_MS);
+        scheduleHide(LEAVE_MS);
       }
     }).then((fn) => {
       if (cancelled) fn();

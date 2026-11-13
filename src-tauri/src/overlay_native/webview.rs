@@ -260,17 +260,31 @@ fn build_overlay_window(
             use gtk::prelude::{Cast, GtkWindowExt, WidgetExt};
             let wv = webview.inner();
             wv.set_size_request(1, 1);
-            // Reveal the handles when the pointer enters the WebView (the only
-            // crossing this borderless Dock webview delivers reliably), and emit
-            // the HIDE from the TOPLEVEL window's leave (the WebView child never
-            // gets a leave — it goes to the window the pointer exits). XWayland
-            // won't report the pointer position once it's off our surface, so an
-            // OS leave event is the ONLY "pointer gone" signal; the frontend
-            // debounces the hide to absorb any brief crossing flap.
+            // Keep the handles alive while the pointer is over the WebView. ENTER
+            // and MOTION both emit `true` (motion is throttled) — these fire
+            // reliably on this borderless Dock webview, whereas a webview LEAVE
+            // never arrives and XWayland won't report an off-surface pointer. So
+            // the frontend keeps the handles shown while these pings arrive and
+            // auto-hides them once they stop (idle = pointer gone). The toplevel
+            // leave below is a best-effort fast-hide when the OS does deliver it.
             {
+                use std::cell::Cell;
+                use std::rc::Rc;
+                use std::time::{Duration, Instant};
+                wv.add_events(gtk::gdk::EventMask::POINTER_MOTION_MASK);
+                let last = Rc::new(Cell::new(Instant::now() - Duration::from_millis(500)));
                 let app_enter = app_evt.clone();
                 wv.connect_enter_notify_event(move |_, _| {
                     let _ = app_enter.emit(events::POINTER_INSIDE, true);
+                    gtk::glib::Propagation::Proceed
+                });
+                let app_motion = app_evt.clone();
+                wv.connect_motion_notify_event(move |_, _| {
+                    let now = Instant::now();
+                    if now.duration_since(last.get()) >= Duration::from_millis(100) {
+                        last.set(now);
+                        let _ = app_motion.emit(events::POINTER_INSIDE, true);
+                    }
                     gtk::glib::Propagation::Proceed
                 });
             }
