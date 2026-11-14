@@ -1,8 +1,8 @@
 //! Standalone typing benchmark for enigo performance testing.
 //!
-//! Usage:
-//!   cargo run --release --bin typing_bench -- "text to type"
-//!   cargo run --release --bin typing_bench -- --benchmark
+//! Usage (the [[bin]] is behind the `bench` feature so app builds skip it):
+//!   cargo run --release --bin typing_bench --features bench -- "text to type"
+//!   cargo run --release --bin typing_bench --features bench -- --benchmark
 //!
 //! The benchmark mode tests typing speed without actually typing,
 //! measuring enigo initialization and text processing overhead.
@@ -233,7 +233,7 @@ fn run_benchmark_suite() {
 
     println!();
     println!("To run actual typing test:");
-    println!("  cargo run --release --bin typing_bench -- \"your text here\"");
+    println!("  cargo run --release --bin typing_bench --features bench -- \"your text here\"");
     println!();
     println!("Target: < 500ms for any reasonable text length");
 }

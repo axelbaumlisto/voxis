@@ -61,7 +61,7 @@ cd src-tauri && cargo test test_name
 
 ### Backend (src-tauri/)
 - **Rust + Tauri v2** with SQLite storage
-- **Two binaries**: `voice` (main app) and `typing_bench` (auto-type latency benchmark)
+- **Two binaries**: `voice` (main app) and `typing_bench` (auto-type latency benchmark). `typing_bench` is dev-only: its `[[bin]]` declares `required-features = ["bench"]`, so app builds (`cargo build`, `cargo tauri build`) skip it and installs never carry it — build it with `cargo build --bin typing_bench --features bench`.
 
 Key modules:
 - `orchestrator/` - Workflow coordination: hotkey → recording → transcription → output. Uses a queue for buffered concurrent recordings.

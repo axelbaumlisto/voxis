@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.1.22 (Voxis desktop)
+
+### Fixed
+- **The Windows app did not start on a PC without the Microsoft Visual C++
+  Redistributable.** `voice.exe` imports `MSVCP140.dll` / `MSVCP140_1.dll`
+  (ONNX Runtime, via `ort`), which need `VCRUNTIME140.dll` /
+  `VCRUNTIME140_1.dll`; a clean Windows has none of them and the process exited
+  with `0xC0000135 STATUS_DLL_NOT_FOUND` before printing anything (even
+  `--version`). The **installer now carries the runtime** — those four DLLs
+  land in the install directory next to `voice.exe`, no separate download.
+- **New portable download** `voxis-windows-x64-portable.zip`:
+  `voxis.exe` + the four runtime DLLs + the Silero VAD model, unpack and run. The bare
+  `voxis-windows-x64-gui.exe` asset is unchanged and **still needs the
+  Microsoft Visual C++ Redistributable 2015–2022** installed on the PC.
+
+### Removed
+- **`typing_bench.exe` no longer ships in installs** (dev-only auto-type
+  latency benchmark). Build it explicitly with `cargo build --bin typing_bench
+  --features bench`.
+
 ## v0.1.21 (Voxis desktop)
 
 No app changes beyond 0.1.20.

@@ -104,12 +104,16 @@ build_linux_gui() {
 
 build_windows_gui() {
   cd "$PROJECT_DIR"
+  # Never let a previous run's outputs pass the checks below (the copy-out
+  # ignores errors, so a stale exe would satisfy -s and be zipped again).
+  rm -f "$OUTPUT_DIR"/Voxis_*_x64-setup.exe "$OUTPUT_DIR/voxis-windows-x64-gui.exe" "$OUTPUT_DIR/voxis-windows-x64-portable.zip"
   build_frontend_if_needed
   DOCKER_BUILDKIT=0 docker build --network host -f Dockerfile.windows-gui -t voxis-winguienv:latest .
   docker volume create voxis-wintarget >/dev/null
   docker run --rm -v voxis-wintarget:/t alpine sh -c '
     rm -f /t/x86_64-pc-windows-msvc/release/bundle/nsis/Voxis_*_x64-setup.exe
     rm -f /t/x86_64-pc-windows-msvc/release/voice.exe
+    rm -f /t/x86_64-pc-windows-msvc/release/typing_bench.exe
   ' 2>/dev/null || true
   docker run --rm --network host \
     -v "$PROJECT_DIR":/app \
@@ -133,6 +137,37 @@ build_windows_gui() {
     echo "ERROR: Windows GUI exe not produced" >&2
     return 1
   fi
+  build_windows_portable_zip
+}
+
+# The bare voxis-windows-x64-gui.exe imports MSVCP140.dll / MSVCP140_1.dll
+# (ort/onnxruntime links the C++ runtime dynamically) and therefore needs the
+# VC++ Redistributable on the PC; the NSIS installer now carries it as bundle
+# resources (src-tauri/tauri.windows.conf.json), a portable download cannot.
+# So ship voxis.exe + the four DLLs (+ resources/silero_vad_v4.onnx) in a zip: unpack and run.
+build_windows_portable_zip() {
+  local zip="$OUTPUT_DIR/voxis-windows-x64-portable.zip"
+  local staging
+  rm -f "$zip"
+  staging=$(mktemp -d) || return 1
+  cp "$OUTPUT_DIR/voxis-windows-x64-gui.exe" "$staging/voxis.exe" || { rm -rf "$staging"; return 1; }
+  cp "$PROJECT_DIR"/src-tauri/windows/vc-runtime/*.dll "$staging/" || { rm -rf "$staging"; return 1; }
+  # Same layout as the installer: voice resolves the Silero VAD model at
+  # <exe dir>/resources/silero_vad_v4.onnx.
+  mkdir -p "$staging/resources" && cp "$PROJECT_DIR/src-tauri/resources/silero_vad_v4.onnx" "$staging/resources/" \
+    || { rm -rf "$staging"; return 1; }
+  # `python3 -m zipfile` rather than `zip`: python3 is present on every host
+  # that runs this script (and in the release lane). `-c` stores the paths as
+  # given, so run it from the staging dir to keep the entries relative.
+  ( cd "$staging" && python3 -m zipfile -c "$zip" \
+      voxis.exe msvcp140.dll msvcp140_1.dll vcruntime140.dll vcruntime140_1.dll resources ) \
+    || { rm -rf "$staging"; echo "ERROR: portable zip not produced" >&2; return 1; }
+  rm -rf "$staging"
+  if [ ! -s "$zip" ]; then
+    echo "ERROR: portable zip not produced" >&2
+    return 1
+  fi
+  info "portable zip: $(basename "$zip") ($(du -h "$zip" | cut -f1))"
 }
 
 LANE_LOGS_DIR=""

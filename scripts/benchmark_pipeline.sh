@@ -39,7 +39,7 @@ if [[ "$1" == "--typing-only" ]]; then
     # Build if needed
     if [[ ! -f "src-tauri/target/release/typing_bench" ]]; then
         echo "Building typing_bench..."
-        cargo build --release --bin typing_bench --manifest-path src-tauri/Cargo.toml 2>&1 | tail -3
+        cargo build --release --bin typing_bench --features bench --manifest-path src-tauri/Cargo.toml 2>&1 | tail -3
     fi
 
     echo ">>> Running typing benchmark..."
@@ -106,7 +106,7 @@ echo ">>> [2/2] Auto-type benchmark (enigo)..."
 # Build if needed
 if [[ ! -f "src-tauri/target/release/typing_bench" ]]; then
     echo "Building typing_bench..."
-    cargo build --release --bin typing_bench --manifest-path src-tauri/Cargo.toml 2>&1 | tail -3
+    cargo build --release --bin typing_bench --features bench --manifest-path src-tauri/Cargo.toml 2>&1 | tail -3
 fi
 
 # Run dry-run to avoid actually typing during benchmark

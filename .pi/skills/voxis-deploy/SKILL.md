@@ -22,8 +22,12 @@ Release binaries land in `artifacts/` (NOT `dist/`, which is vite's frontend
 build outDir and gets emptied on every `bun run build`):
 
 - `artifacts/voxis-linux-x64-gui` (+ `.deb` / `.rpm`)
-- `artifacts/voxis-windows-x64-gui.exe`
-- `artifacts/Voxis_<version>_x64-setup.exe` (NSIS)
+- `artifacts/voxis-windows-x64-gui.exe` (bare exe — still needs the Microsoft
+  Visual C++ Redistributable on the PC)
+- `artifacts/voxis-windows-x64-portable.zip` (`voxis.exe` + the four VC++ runtime
+  DLLs + `resources/silero_vad_v4.onnx`; see "Windows runtime check")
+- `artifacts/Voxis_<version>_x64-setup.exe` (NSIS installer — carries the four
+  DLLs + `resources/silero_vad_v4.onnx` in `$INSTDIR`)
 - macOS (arm64-only, best-effort lane): `artifacts/voxis-macos-arm64` (+ `.tar.gz`,
   Homebrew, notarized but unstapled — a bare Mach-O has nowhere to staple, so
   Gatekeeper looks its ticket up online) and `artifacts/Voxis_<version>_aarch64.dmg`
@@ -247,6 +251,47 @@ Host-executor gotchas:
 
 ---
 
+## Windows runtime check
+
+A Windows build can look perfect and still not start on a clean Windows: the
+exe imports `MSVCP140.dll` / `MSVCP140_1.dll` (ONNX Runtime via `ort`), which
+need `VCRUNTIME140.dll` / `VCRUNTIME140_1.dll`. With none of them present the
+process dies in the loader with **`0xC0000135 STATUS_DLL_NOT_FOUND`** before
+printing anything — even `voice.exe --version`, and no app log is written.
+That was v0.1.21: the app never started on a Windows 11 25H2 VM without the
+VC++ Redistributable.
+
+How it was verified (2026-11-14): `naked-win-vm` on spex (dockurr/windows,
+Windows 11 25H2, ssh `spex:50945`), NSIS install silently (`setup.exe /S`), then
+
+```bash
+cd 'C:/Program Files/Voxis'
+./voice.exe --version    # redirect stdout: the CI ssh session is not a console
+```
+
+`voxis 0.1.21` + `setup complete` / overlay theme `default` in the log = good.
+Exit code `0xC0000135` (or `-1073741515`) = missing runtime DLL. `objdump -p
+voice.exe | grep -i 'DLL Name'` lists the imports from the build host.
+
+Assets that carry the runtime (v0.1.22+): the NSIS installer (DLLs as bundle
+resources from `src-tauri/tauri.windows.conf.json`, landing in `$INSTDIR` next
+to `voice.exe` — see `src-tauri/windows/vc-runtime/README.md`) and
+`voxis-windows-x64-portable.zip` (`voxis.exe` + the four DLLs + `resources/silero_vad_v4.onnx`). The bare
+`voxis-windows-x64-gui.exe` does NOT, by design.
+
+Proof the bundle is right, without a VM (on the build host, after the Windows
+lane):
+
+```bash
+7z l artifacts/Voxis_<ver>_x64-setup.exe | grep -E 'voice.exe|\.dll|silero'
+# want: voice.exe, the four DLLs at the archive root (=> $INSTDIR), and
+#       resources/silero_vad_v4.onnx; NO typing_bench.exe
+python3 -m zipfile -l artifacts/voxis-windows-x64-portable.zip
+# want: voxis.exe + msvcp140/msvcp140_1/vcruntime140/vcruntime140_1.dll
+```
+
+---
+
 ## macOS build (shared Xcode 26 VM)
 
 The release macOS lane runs on spex's **shared macOS 26 (Tahoe) VM**,
@@ -316,8 +361,9 @@ Apple Event.
 
 ### Signing gotcha (v0.1.3 post-mortem)
 
-Notarization validates **every Mach-O in the archive**. The bundle has TWO executables
-(`voice` and `typing_bench`, both `[[bin]]`s) — `scripts/ci/mac-shared-vm.sh`
+Notarization validates **every Mach-O in the archive**. The bundle used to have TWO executables
+(`voice` and `typing_bench`, both `[[bin]]`s; `typing_bench` is behind the `bench`
+feature since v0.1.22 and no longer ships) — `scripts/ci/mac-shared-vm.sh`
 signs everything under `Contents/MacOS/*` and
 `Contents/Frameworks/*` in a loop, inside-out, with the same
 `--options runtime --timestamp --entitlements` flags, then the bundle. Never sign a

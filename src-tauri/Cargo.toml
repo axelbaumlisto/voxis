@@ -25,6 +25,12 @@ path = "src/main.rs"
 [[bin]]
 name = "typing_bench"
 path = "src/bin/typing_bench.rs"
+# Dev-only auto-type latency benchmark: NOT part of the app. Without the
+# `bench` feature cargo skips this [[bin]] entirely, so `cargo build` and
+# `cargo tauri build` bundle only `voice` (v0.1.22: installs used to ship
+# typing_bench.exe). Build it with `cargo build --bin typing_bench --features
+# bench`, or `cargo run --bin typing_bench --features bench -- --dry-run`.
+required-features = ["bench"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -189,6 +195,9 @@ voxis-core = { path = "../crates/voxis-core", features = ["test-utils"] }
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+# Gates the `typing_bench` [[bin]] (see its `required-features` above). An empty
+# feature on purpose: it only exists to keep the benchmark out of app builds.
+bench = []
 
 # Crash diagnostics release-profile decisions: see `[profile.release]` in the
 # repo-root `/Cargo.toml`. Cargo only honours profile tables declared at the

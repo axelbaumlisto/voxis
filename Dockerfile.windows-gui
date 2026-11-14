@@ -1,7 +1,9 @@
 # Windows GUI (Tauri) cross-build from Linux via cargo-xwin/MSVC.
-# Produces:
-#   - voxis-windows-x64-gui.exe
-#   - Voxis_<ver>_x64-setup.exe (NSIS installer)
+# Produces (collected into artifacts/ by scripts/build-all-platforms.sh):
+#   - voxis-windows-x64-gui.exe (bare, needs the VC++ Redistributable on the PC)
+#   - voxis-windows-x64-portable.zip (voxis.exe + the four VC++ runtime DLLs)
+#   - Voxis_<ver>_x64-setup.exe (NSIS installer, carries the same DLLs)
+# `typing_bench` is NOT built here: its [[bin]] requires the `bench` feature.
 FROM messense/cargo-xwin:latest
 
 RUN rustup toolchain install 1.95.0 --profile minimal && \

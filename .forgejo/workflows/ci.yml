@@ -69,7 +69,7 @@ jobs:
               echo "=== frontend build (dist required by tauri) ===" &&
               bun install --frozen-lockfile && bun run build &&
               echo "=== [required] clippy ===" &&
-              cd src-tauri && cargo clippy --all-targets -- -D warnings && cd .. &&
+              cd src-tauri && cargo clippy --all-targets --features bench -- -D warnings && cd .. &&
               echo "=== [required] rust lib tests (serial) ===" &&
               cd src-tauri && cargo test --lib -- --test-threads=1 && cd .. &&
               echo "=== [required] frontend tests ===" &&

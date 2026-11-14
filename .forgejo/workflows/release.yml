@@ -76,7 +76,7 @@ jobs:
             voxis-ci:latest \
             bash -euo pipefail -c '
               bun install --frozen-lockfile && bun run build &&
-              cd src-tauri && cargo clippy --all-targets -- -D warnings &&
+              cd src-tauri && cargo clippy --all-targets --features bench -- -D warnings &&
               cargo test --lib -- --test-threads=1 && cd .. &&
               bun run test:run
             '
@@ -216,6 +216,7 @@ jobs:
           expected_files=(
             "artifacts/voxis-linux-x64-gui"
             "artifacts/voxis-windows-x64-gui.exe"
+            "artifacts/voxis-windows-x64-portable.zip"
             "artifacts/Voxis_${VERSION}_x64-setup.exe"
           )
           for f in "${expected_files[@]}"; do
@@ -330,6 +331,7 @@ jobs:
           artifacts=(
             "artifacts/voxis-linux-x64-gui"
             "artifacts/voxis-windows-x64-gui.exe"
+            "artifacts/voxis-windows-x64-portable.zip"
             "artifacts/Voxis_${VERSION}_x64-setup.exe"
           )
           shopt -s nullglob
@@ -382,6 +384,7 @@ jobs:
           files=(
             artifacts/voxis-linux-x64-gui
             artifacts/voxis-windows-x64-gui.exe
+            artifacts/voxis-windows-x64-portable.zip
             artifacts/Voxis_*_x64-setup.exe
             artifacts/*.deb
             artifacts/*.rpm
@@ -522,6 +525,9 @@ jobs:
           # slipped through globs and shipped to neither forge).
           echo "$fg_names" | grep -q '\.deb$' || { echo "ERROR: Forgejo release missing .deb"; exit 1; }
           echo "$fg_names" | grep -q '\.rpm$' || { echo "ERROR: Forgejo release missing .rpm"; exit 1; }
+          # The portable zip is how a Windows user without the VC++ Redistributable
+          # gets a working app; a release without it silently drops that path.
+          echo "$fg_names" | grep -q 'voxis-windows-x64-portable\.zip$' || { echo "ERROR: Forgejo release missing voxis-windows-x64-portable.zip"; exit 1; }
           echo "=== local artifacts (bare ls — no globs that could hide a mis-named file) ==="
           ls -la /home/spex/work/voxis/artifacts/ 2>/dev/null || true
           # Signed macOS DMG is advisory/best-effort (KVM VM + notarization can
@@ -553,6 +559,7 @@ jobs:
               # "empty" branch below rather than a false failure.
               echo "$gh_names" | grep -q '\.deb$' || { echo "ERROR: GitHub release missing .deb"; exit 1; }
               echo "$gh_names" | grep -q '\.rpm$' || { echo "ERROR: GitHub release missing .rpm"; exit 1; }
+              echo "$gh_names" | grep -q 'voxis-windows-x64-portable\.zip$' || { echo "ERROR: GitHub release missing voxis-windows-x64-portable.zip"; exit 1; }
             else
               echo "WARNING: gh returned no assets (auth/network?); could not verify GitHub release"
             fi
