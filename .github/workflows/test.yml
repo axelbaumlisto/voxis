@@ -9,7 +9,7 @@ on:
 jobs:
   test-frontend:
     name: Frontend Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # ubuntu-latest = 26.04 since Nov 2026; Playwright 1.58 cannot install its deps there
     steps:
       - uses: actions/checkout@v4
 
@@ -32,7 +32,7 @@ jobs:
 
   test-backend:
     name: Backend Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # ubuntu-latest = 26.04 since Nov 2026; Playwright 1.58 cannot install its deps there
     steps:
       - uses: actions/checkout@v4
 
