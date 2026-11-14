@@ -214,8 +214,9 @@ ssh spex "rm -rf /tmp/voxis-ci-build && git -c http.extraheader='Authorization: 
     `~/macos-xcode26-vm/vm.sh build voxis "$SHA" -- 'bash scripts/ci/mac-shared-vm.sh'`
     produces the signed/notarized + stapled DMG and the bare arm64 binary + tarball
     together (see "macOS build (shared Xcode 26 VM)"). Preflight is
-    `~/macos-xcode26-vm/apps/voxis.conf`; a busy host-wide VM lock is retried for up
-    to 60 min, then the lane is skipped. If the DMG is missing at publish time the
+    `~/macos-xcode26-vm/apps/voxis.conf`; a busy host-wide macOS VM is waited on
+    for up to 60 min via `VM_LOCK_WAIT=3600` (one `vm.sh` call, no retry loop),
+    then the lane is skipped. If the DMG is missing at publish time the
     job prints `::warning::` + a job-summary line but still succeeds — check for it.
   - Publish uploads to the Forgejo release and the GitHub release
     (`axelbaumlisto/voxis`), and pushes the regenerated formula to the tap repo
@@ -268,10 +269,12 @@ in the repo.
   every signing/notarization step in `mac-shared-vm.sh` is fatal — there is no
   ad-hoc fallback on this lane. `release.yml` keeps the step advisory
   (`continue-on-error`) and skips with a `::warning::` on failure.
-- **One macOS VM per host:** `vm.sh` waits ≤15 s for
-  `/home/spex/.macos-vm.lock` and exits non-zero **before booting** if
-  naked/clipshot (or the old voxis VM) hold it. `release.yml` retries that for
-  up to 60 min (60 s pauses) and then skips the lane with a `::warning::`.
+- **One macOS VM per host:** `vm.sh` waits `VM_LOCK_WAIT` seconds (default 15)
+  for `/home/spex/.macos-vm.lock` **and** for a running lock-less macOS
+  container, then exits non-zero **before booting** if naked/clipshot (or the
+  old voxis VM) still hold the host. `release.yml` passes `VM_LOCK_WAIT=3600`
+  (one call, no retry loop) and skips the lane with a `::warning::` when the
+  wait runs out or the build fails.
 - **Measured** (layer prepared, snapshot `prepared`, warm caches): cold run
   **633 s** (cargo 494 s, notarization 79 s), warm run **460 s**.
 

@@ -228,16 +228,17 @@ jobs:
 
       - name: build macOS (best-effort — shared Xcode 26 VM)
         continue-on-error: true
-        # 100 min = up to 60 min of lock retries + an 11 min cold build; the
-        # job's own budget is 180 min and Linux/Windows take ~40.
+        # 100 min = vm.sh waiting up to 60 min for a busy host VM (VM_LOCK_WAIT)
+        # + an 11 min cold build; the job's own budget is 180 min and
+        # Linux/Windows take ~40.
         timeout-minutes: 100
         run: |
           # The runner starts this step with `bash -e`, and errexit MUST be off
           # here: the step is advisory and every exit code is handled
-          # explicitly below. A busy VM lock exits vm.sh non-zero by design
-          # (retried), and a missing artifact file makes `ls` non-zero (a
-          # warning, not a failure) -- with errexit either would abort the
-          # step before the retry / the warning runs.
+          # explicitly below. A busy host VM makes vm.sh exit non-zero by
+          # design, and a missing artifact file makes `ls` non-zero (a warning,
+          # not a failure) -- with errexit either would abort the step before
+          # the warning runs.
           set +e -uo pipefail
           REPO=/home/spex/work/voxis
           VM_DIR=/home/spex/macos-xcode26-vm
@@ -274,35 +275,21 @@ jobs:
           # leftovers of an earlier run so nothing stale reaches artifacts/.
           rm -rf "$OUT/artifacts-mac"
 
-          # One macOS VM per host: vm.sh waits <=15 s for
-          # /home/spex/.macos-vm.lock, then exits non-zero BEFORE booting if
-          # another project's VM (naked/clipshot, or the old voxis VM) holds
-          # it — «another macOS VM holds …» / «a macOS VM is already running» /
-          # «… already has a writer». Retry those every 60 s for at most 60 min
-          # (same pattern as naked's release.yml), then advisory skip. Any other
-          # failure — or any failure after «==> sync source», i.e. the guest
-          # already ran the build — is the build's own, so no retry.
+          # One macOS VM per host: vm.sh waits VM_LOCK_WAIT seconds (default
+          # 15) for /home/spex/.macos-vm.lock AND for a lock-less macOS
+          # container (naked/clipshot) to disappear, then exits non-zero BEFORE
+          # booting — so no retry loop and no parsing of its error text here.
+          # 3600 s covers a whole build of another project; this step's 100 min
+          # budget still leaves room for the ~11 min cold build afterwards.
           log=$(mktemp)
-          rc=0
-          t0=$SECONDS
-          while :; do
-            "$VM" build voxis "$SHA" -- 'bash scripts/ci/mac-shared-vm.sh' 2>&1 | tee "$log"
-            rc=${PIPESTATUS[0]}
-            [ "$rc" -ne 0 ] || break
-            if grep -q '==> sync source' "$log" \
-               || ! grep -qE 'another macOS VM holds|a macOS VM is already running|already has a writer' "$log"; then
-              break
-            fi
-            if (( SECONDS - t0 >= 3600 )); then
-              echo "::warning::the host macOS VM lock stayed busy for 60 min (naked/clipshot building?) — skipping macOS (advisory); re-run this tag's release later"
-              rm -f "$log"; exit 0
-            fi
-            echo "macOS VM busy for $(( (SECONDS - t0) / 60 )) min — retrying in 60 s"
-            sleep 60
-          done
+          VM_LOCK_WAIT=3600 "$VM" build voxis "$SHA" -- 'bash scripts/ci/mac-shared-vm.sh' 2>&1 | tee "$log"
+          rc=${PIPESTATUS[0]}
           rm -f "$log"
           if [ "$rc" -ne 0 ]; then
-            echo "::warning::macOS build failed (rc=$rc, advisory — not blocking the release); log: $OUT/build.log"
+            # Advisory either way: the host VM stayed busy for the whole 60 min
+            # wait (vm.sh says «another macOS VM holds …» / «a macOS VM is
+            # already running»), or the build itself failed.
+            echo "::warning::macOS lane skipped (rc=$rc, advisory — not blocking the release): either the host macOS VM stayed busy for 60 min ('another macOS VM holds' / 'already running' in build.log) or the build failed; log: $OUT/build.log"
             exit 0
           fi
 
@@ -318,48 +305,7 @@ jobs:
             || echo "::warning::macOS build succeeded but no Voxis_*_aarch64.dmg was pulled (log: $OUT/build.log)"
           echo "✅ macOS build finished"
 
-      - name: iOS cross-build gate (voxis-core, blocking whenever the macOS VM has the iOS SDK)
-        continue-on-error: false
-        timeout-minutes: 30
-        run: |
-          set -uo pipefail
-          cd /home/spex/work/voxis
-          # This gate targets the OLD Docker-OSX fallback VM
-          # (~/voxis-macos-vm, ssh :50923). release.yml no longer starts it --
-          # the macOS build step above uses the shared Xcode 26 VM
-          # (~/macos-xcode26-vm, ssh :50933) -- so this gate normally skips.
-          PREPARED="${VOXIS_MACOS_VM_DIR:-$HOME/voxis-macos-vm}/mac_hdd_ng.prepared.img"
-          if [ ! -f "$PREPARED" ] || [ ! -e /dev/kvm ]; then
-            echo "no voxis-owned fallback macOS VM (~/voxis-macos-vm) on this host -- skipping the iOS cross-build gate (release.yml no longer starts that VM)"
-            exit 0
-          fi
-          SSH_PORT="${SSH_HOST_PORT:-50923}"
-          SSH_USER="${VM_USER:-user}"
-          SSH_PASS="${VM_PASS:-alpine}"
-          ios_ssh() {
-            sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -o ConnectTimeout=10 -p "$SSH_PORT" "$SSH_USER@localhost" "$1"
-          }
-          cleanup() { bash scripts/macos-vm.sh stop >/dev/null 2>&1 || true; }
-          trap cleanup EXIT
-          if ! ios_ssh 'echo ok' >/dev/null 2>&1; then
-            echo "~/voxis-macos-vm is not running/reachable on :$SSH_PORT -- skipping the iOS cross-build gate (that is the old fallback VM; the macOS build step above uses the shared Xcode 26 VM and never boots it)"
-            exit 0
-          fi
-          # The gate needs the iOS SDK (full Xcode) inside the VM; the release
-          # VM image ships Command Line Tools only, so `ring`'s cc-rs build died
-          # on `xcrun --show-sdk-path --sdk iphoneos` (v0.1.6 build task 6937)
-          # AFTER every artifact incl. the notarized DMG was already produced.
-          # Skip honestly when the SDK is absent -- the iOS cross-build is
-          # gated by scripts/check-ios-build.sh on the dev Mac and by naked's
-          # own "iOS compile smoke" CI lane, which do have Xcode.
-          if ! ios_ssh 'xcrun --sdk iphoneos --show-sdk-path' >/dev/null 2>&1; then
-            echo "::warning::macOS VM has no iOS SDK (Command Line Tools only) -- skipping the iOS cross-build gate; covered by scripts/check-ios-build.sh (dev Mac) and naked CI iOS compile smoke"
-            exit 0
-          fi
-          echo "=== iOS cross-build gate: scripts/check-ios-build.sh inside the macOS VM (voxis-core, aarch64-apple-ios[-sim]) ==="
-          ios_ssh 'cd ~/voxis && bash scripts/check-ios-build.sh'
-          echo "iOS cross-build gate passed"
+      # No iOS gate here: the plugin's iOS build is verified by naked's CI lane and by scripts/check-ios-build.sh on a dev Mac.
 
       - name: publish to Forgejo release
         run: |

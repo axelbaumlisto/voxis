@@ -92,12 +92,13 @@
     fast with a message naming which container currently holds it.
   - `~/macos-xcode26-vm/vm.sh` (current lane) runs QEMU in a docker container
     too (`macos26-<layer>`, which matches the same `docker ps | grep -iE
-    'macos|osx'` gate); it takes the same flock path with `flock -w 15`, so a
-    build waits ≤15 s for it and otherwise fails **before booting** with a
-    message naming the competing VM (`another macOS VM holds …` / `a macOS VM
-    is already running`). It also takes a per-app-layer lock
-    (`locks/<layer>.lock`) for one writer per layer. `release.yml` retries the
-    busy case for up to 60 min and otherwise skips the lane with a
+    'macos|osx'` gate); it takes the same flock path and waits `VM_LOCK_WAIT`
+    seconds (default 15) for it — and for a running lock-less macOS container —
+    and otherwise fails **before booting** with a message naming the competing
+    VM (`another macOS VM holds …` / `a macOS VM is already running`). It also
+    takes a per-app-layer lock (`locks/<layer>.lock`) for one writer per layer.
+    `release.yml` passes `VM_LOCK_WAIT=3600` (one call, no retry loop) so the
+    lane waits out another project's build, and otherwise skips with a
     `::warning::`.
 - **`src-tauri/tauri.conf.json`**: `bundle.macOS.signingIdentity` is `"-"`
   (ad-hoc), not a named identity — the named `Developer ID Application`
