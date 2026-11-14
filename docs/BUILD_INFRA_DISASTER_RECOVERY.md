@@ -38,7 +38,7 @@ There is no redundancy. The dependencies are:
 | **`voxis-ci:latest` Docker image** | built on spex from `Dockerfile.ci` | `Dockerfile.ci`, `scripts/ci/build-ci-image.sh` |
 | **`voxis-docs:latest` Docker image** | built on spex from `Dockerfile.docs` | `Dockerfile.docs`, `scripts/ci/build-docs-image.sh` |
 | **`voxis-linux-gui:latest` / `voxis-winguienv:latest`** | built on demand during a release build from `Dockerfile.gui-linux` / `Dockerfile.windows-gui` | `scripts/build-all-platforms.sh` |
-| **macOS KVM VM image** | `~/clipshot-macos-vm/mac_hdd_ng.prepared.img` (~31G prepared) on spex, requires `/dev/kvm` | `SKILL.md` "macOS KVM"; `scripts/macos-vm.sh`; `release.yml` "build macOS" step |
+| **Shared macOS 26 VM** | `~/macos-xcode26-vm` on spex: app layer `voxis.qcow2` on the sealed `creds` layer (Developer ID + ASC key + notary profile), requires `/dev/kvm` | `SKILL.md` "macOS build (shared Xcode 26 VM)"; `scripts/ci/mac-shared-vm.sh` (guest build); `scripts/ci/macos-shared-vm/voxis.conf` (host app config); `release.yml` "build macOS" step |
 | **CI caches** | `~/.cache/voxis-ci` on spex (`cargo`, `target`, `home`) | `ci.yml`, `release.yml` container mounts |
 | **Persistent release worktree** | `/home/spex/work/voxis` on spex | `release.yml` "checkout release tag in persistent worktree" |
 | **Forgejo repo secrets/credential store** | host files on spex (see §2 — **not** Forgejo Actions `secrets.*`) | `SKILL.md`; workflow env usage |
@@ -199,18 +199,23 @@ host-side credentials on the new host:
 
 ### 4.4 macOS build capability
 
-macOS artifacts are **best-effort** and gated on:
+macOS artifacts are **best-effort** and gated on the shared macOS 26 VM on
+spex:
 
-- the prepared image `~/clipshot-macos-vm/mac_hdd_ng.prepared.img` existing, and
+- `~/macos-xcode26-vm/apps/voxis.conf` existing (the app layer registration;
+  repo copy: `scripts/ci/macos-shared-vm/voxis.conf`), and
 - `/dev/kvm` being available.
 
 If either is missing, `release.yml`'s macOS step logs a warning and skips
 (the step is `continue-on-error: true`), and the release still ships Linux +
 Windows. macOS is **arm64-only** (`ort` rc.12 has no prebuilt ONNX Runtime for
-`x86_64-apple-darwin`). The prepared VM image is **large (~31G) and is not
-version-controlled** — if it is lost, macOS builds are unavailable until a new
-VM is prepared (a manual, non-trivial setup; see `scripts/macos-vm.sh` and
-`docs/` VM setup notes). Linux/Windows releases are unaffected.
+`x86_64-apple-darwin`). The `creds` layer holding the signing credentials is
+**not version-controlled** — if it is lost, macOS signing needs a new
+Developer ID identity + App Store Connect key imported (`vm.sh creds
+--import`) before the lane can pass again; it has no ad-hoc fallback.
+Linux/Windows releases are unaffected. Re-creating the app layer is
+`vm.sh layer voxis --prepare` (see `~/macos-xcode26-vm/README.md`); the guest
+build itself is `scripts/ci/mac-shared-vm.sh`.
 
 ### 4.5 Cut a release from the recovered host
 
@@ -245,9 +250,11 @@ following exist today:
 - **Builds are not guaranteed reproducible.** No reproducible-build flags are
   set, so rebuild-and-compare (§3, step 1) gives strong-but-not-absolute
   assurance.
-- **macOS VM image is not version-controlled or backed up.** The ~31G prepared
-  image lives only on spex; losing it removes macOS build capability until a
-  new VM is manually prepared.
+- **The shared macOS VM's `creds` layer is not version-controlled or backed
+  up.** The Developer ID identity, the ASC key and the notary profile live only
+  in that layer on spex; losing it removes macOS **signing** (and thus the
+  DMG, since the lane has no ad-hoc fallback) until the credentials are
+  re-imported with `vm.sh creds --import`.
 - **Credentials live as plaintext host files.** The operator Forgejo token
   (`~/.config/forgejo/token`) and the `gh` keyring sit on spex; there is no
   secret-manager, rotation policy, or automated revocation. (Separately, on the
@@ -270,7 +277,7 @@ exist:
    storage, so the private repo/runner state survives disk loss.
 3. **Document (and ideally script) a cold-standby build host** so §4.1–§4.3 is
    a rehearsed procedure, not first-time improvisation during an outage.
-4. **Back up (or document rebuilding) the macOS prepared VM image** so macOS
-   builds are recoverable.
+4. **Back up (or document re-importing) the shared macOS VM's `creds` layer**
+   so macOS signing is recoverable.
 5. **Move credentials into a secret manager with rotation**, or at least
    document a revoke-and-reissue runbook for the tokens in §2.

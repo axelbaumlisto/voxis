@@ -21,6 +21,10 @@
 //!   digest covers the folder's regular files only, and the loader cannot read
 //!   subfolders, so the extra folder cannot change the theme's behavior. The
 //!   whole folder, subfolder included, is moved — which keeps this reversible;
+//! - Finder/Explorer junk — [`is_os_junk`] — is ignored on both sides of the
+//!   comparison: it is not part of the digest and not part of the entry count,
+//!   so a pristine copy a file manager merely visited is still retired. The
+//!   junk travels with the folder, because retiring is a rename;
 //! - a folder holding an entry the digest could not see — a symlinked or
 //!   unreadable file, a non-UTF-8 name — is **never** moved: `files()` skips
 //!   those, so their content would be missing from the digest and an edit
@@ -130,7 +134,13 @@ pub fn retire_pristine_copies(
 
         // `files()` reports its own read errors and yields an empty list then,
         // which lands in `kept_edited` — keeping a folder we cannot judge.
-        let files = source.files(&id);
+        // OS junk is dropped here exactly as `non_dir_entry_count` drops it, so
+        // a copy a file manager merely visited is judged on its own theme files.
+        let files: Vec<(String, Vec<u8>)> = source
+            .files(&id)
+            .into_iter()
+            .filter(|(name, _)| !is_os_junk(name))
+            .collect();
         // The digest only covers what `files()` could read. Any other entry
         // (a symlink, an unreadable file, a non-UTF-8 name) is invisible to
         // it, so an edit hiding there would still match a known digest —
@@ -154,10 +164,20 @@ pub fn retire_pristine_copies(
     report
 }
 
+/// File names a file manager drops into a folder it merely opened: macOS's
+/// Finder (`.DS_Store`) and its AppleDouble resource forks (`._<file>`),
+/// Windows' `Thumbs.db` and `desktop.ini`. They carry no theme content, and a
+/// rename moves them along with the folder, so they must not make a pristine
+/// copy look edited.
+fn is_os_junk(name: &str) -> bool {
+    matches!(name, ".DS_Store" | "Thumbs.db" | "desktop.ini") || name.starts_with("._")
+}
+
 /// How many entries of theme folder `dir` are **not** directories — i.e. how
-/// many entries `DirSource::files` is supposed to yield. Compared against its
-/// result, a difference means an entry was skipped (a symlink, an unreadable
-/// file, a non-UTF-8 name) and the folder cannot be judged by digest.
+/// many entries `DirSource::files` is supposed to yield, minus OS junk.
+/// Compared against `files`' filtered result, a difference means an entry was
+/// skipped (a symlink, an unreadable file, a non-UTF-8 name) and the folder
+/// cannot be judged by digest.
 ///
 /// `None` when the folder or one of its entries cannot be read: unknown is
 /// never pristine, so the caller keeps the folder.
@@ -165,6 +185,12 @@ fn non_dir_entry_count(dir: &Path) -> Option<usize> {
     let mut count = 0;
     for entry in std::fs::read_dir(dir).ok()? {
         let entry = entry.ok()?;
+        // Junk is skipped exactly as the caller's file list skips it. A
+        // non-UTF-8 name is never junk: `files()` also skips it, so it stays
+        // counted and the folder is kept (see the module docs).
+        if entry.file_name().to_str().is_some_and(is_os_junk) {
+            continue;
+        }
         // `symlink_metadata`, never `is_dir()`: a symlink is an entry the
         // reader skips, whatever it points at — a linked directory included.
         let meta = std::fs::symlink_metadata(entry.path()).ok()?;
@@ -246,6 +272,10 @@ mod tests {
     const PRISTINE_JS: &str =
         "export function mount(container, api) {\n  container.textContent = 'hi';\n}\n";
 
+    /// One file per class of OS junk [`is_os_junk`] ignores; a real folder
+    /// holds one or two of them.
+    const OS_JUNK_FIXTURES: [&str; 4] = [".DS_Store", "._theme.js", "Thumbs.db", "desktop.ini"];
+
     /// Write one theme folder (`theme.json` + `theme.js`) under `root`.
     fn write_theme(root: &Path, id: &str, js: &str) {
         let dir = root.join(id);
@@ -315,6 +345,57 @@ mod tests {
         assert_eq!(report.retired, vec!["default"]);
         assert!(report.kept_edited.is_empty(), "{:?}", report.kept_edited);
         assert!(retired_dir.join("default/theme.js").is_file());
+    }
+
+    #[test]
+    fn retire_pristine_copy_with_os_junk_is_moved() {
+        // Finder/Explorer leave junk in a folder they merely opened. It is not
+        // theme content, so the copy is still pristine — and since retiring is
+        // a rename, the junk travels with it.
+        let tmp = TempDir::new().unwrap();
+        let user_dir = tmp.path().join("themes");
+        let retired_dir = tmp.path().join("themes-retired");
+        write_theme(&user_dir, "default", PRISTINE_JS);
+        let known = known_of(&user_dir, &["default"]);
+        for name in OS_JUNK_FIXTURES {
+            fs::write(user_dir.join("default").join(name), "junk").unwrap();
+        }
+
+        let report = retire_pristine_copies(&user_dir, &retired_dir, &known);
+
+        assert_eq!(report.retired, vec!["default"]);
+        assert!(report.kept_edited.is_empty(), "{:?}", report.kept_edited);
+        assert!(!user_dir.join("default").exists(), "moved, not copied");
+        for name in OS_JUNK_FIXTURES {
+            assert!(
+                retired_dir.join("default").join(name).is_file(),
+                "{name} must move along with the folder"
+            );
+        }
+    }
+
+    #[test]
+    fn retire_edited_copy_with_os_junk_is_kept() {
+        // Ignoring junk must not hide an edit in the theme's own files.
+        let tmp = TempDir::new().unwrap();
+        let user_dir = tmp.path().join("themes");
+        let retired_dir = tmp.path().join("themes-retired");
+        write_theme(&user_dir, "default", PRISTINE_JS);
+        let known = known_of(&user_dir, &["default"]);
+        fs::write(user_dir.join("default/.DS_Store"), "junk").unwrap();
+        let edited = PRISTINE_JS.replace("'hi'", "'edited'");
+        fs::write(user_dir.join("default/theme.js"), &edited).unwrap();
+
+        let report = retire_pristine_copies(&user_dir, &retired_dir, &known);
+
+        assert!(report.retired.is_empty(), "{:?}", report.retired);
+        assert_eq!(report.kept_edited, vec!["default"]);
+        assert_eq!(
+            fs::read_to_string(user_dir.join("default/theme.js")).unwrap(),
+            edited,
+            "the user's edit is untouched"
+        );
+        assert!(!retired_dir.exists());
     }
 
     #[test]

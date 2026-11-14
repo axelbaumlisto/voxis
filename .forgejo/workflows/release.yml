@@ -251,8 +251,6 @@ jobs:
           # arm64 binary and tarball the Homebrew formula pins). The build
           # itself lives in the repo (scripts/ci/mac-shared-vm.sh, run in the
           # guest at ~/src/voxis); on the host only apps/voxis.conf is needed.
-          # scripts/macos-vm.sh + ~/voxis-macos-vm remain as a manual fallback
-          # and are NOT used here.
           #
           # Preflight: the app layer must be registered on the shared VM.
           # Missing -> advisory skip, same semantics as the old image preflight.

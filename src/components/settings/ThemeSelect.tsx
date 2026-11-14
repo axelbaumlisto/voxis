@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import FieldWrapper, { useFieldControlId } from "./FieldWrapper";
 import { useVisualizationThemes } from "../../hooks/useVisualizationThemes";
-import { previewVisualizationTheme } from "../../lib/commands";
+import { exportBuiltinTheme, previewVisualizationTheme } from "../../lib/commands";
+import { getErrorMessage } from "../../lib/errors";
 import type { SettingOption } from "../../lib/settingsRegistry";
 
 
@@ -18,6 +19,9 @@ function ThemeSelect({ label, description, value, onChange }: ThemeSelectProps) 
   const { options, loading, error, reload } = useVisualizationThemes(value);
   const [previewing, setPreviewing] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportPath, setExportPath] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const helperText = loading
     ? t("settings.themeLoading")
@@ -36,7 +40,9 @@ function ThemeSelect({ label, description, value, onChange }: ThemeSelectProps) 
         await reload();
       }
     } catch (err) {
-      setPreviewError(err instanceof Error ? err.message : "Unknown preview error");
+      // Tauri rejects a `Result<_, String>` command with the plain string, not
+      // an Error — `getErrorMessage` is what surfaces the backend's message.
+      setPreviewError(getErrorMessage(err));
     } finally {
       setPreviewing(false);
     }
@@ -44,10 +50,33 @@ function ThemeSelect({ label, description, value, onChange }: ThemeSelectProps) 
 
   // Live preview: selecting a theme (incl. arrow-key navigation in the
   // dropdown) immediately shows it on the overlay so the user can browse
-  // themes by sight. Persists the choice AND previews it.
+  // themes by sight. Persists the choice AND previews it. The export result
+  // belongs to the previous selection, so it is cleared here.
   const handleChange = (next: string) => {
     onChange(next);
+    setExportPath(null);
+    setExportError(null);
     void runPreview(false, next);
+  };
+
+  // "Export to edit": the backend copies the selected theme into
+  // `<themes dir>/<id>_custom` and returns that folder, which is where the
+  // user edits it. The selection stays on the original on purpose — the copy
+  // is a new id, and switching to it would retheme the overlay behind the
+  // user's back while they are only looking for the folder.
+  const runExport = async () => {
+    try {
+      setExporting(true);
+      setExportError(null);
+      setExportPath(null);
+      const folder = await exportBuiltinTheme(value);
+      setExportPath(folder);
+      await reload();
+    } catch (err) {
+      setExportError(getErrorMessage(err));
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -75,7 +104,35 @@ function ThemeSelect({ label, description, value, onChange }: ThemeSelectProps) 
         >
           Reload + Preview
         </button>
+        <button
+          type="button"
+          className="theme-preview-btn"
+          data-testid="theme-export-button"
+          onClick={() => void runExport()}
+          disabled={exporting}
+        >
+          {exporting ? "Exporting…" : "Export to edit"}
+        </button>
       </div>
+      {exportPath && (
+        <p
+          className="settings-field-description"
+          data-testid="theme-export-result"
+          role="status"
+        >
+          Editing copy: <code>{exportPath}</code>
+        </p>
+      )}
+      {exportError && (
+        <p
+          className="settings-field-description"
+          data-testid="theme-export-error"
+          role="alert"
+          style={{ color: "var(--error)" }}
+        >
+          Export failed: {exportError}
+        </p>
+      )}
     </FieldWrapper>
   );
 }

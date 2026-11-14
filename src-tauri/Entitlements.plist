@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <!-- Hardened Runtime (enabled via codesign's runtime option in
-         scripts/macos-vm.sh cmd_build_gui) gates access to protected
+         scripts/ci/mac-shared-vm.sh) gates access to protected
          resources. Without these two entries a Developer ID signed and
          notarized Voxis.app silently cannot record audio and cannot send
          the Apple Event that triggers the Accessibility permission prompt

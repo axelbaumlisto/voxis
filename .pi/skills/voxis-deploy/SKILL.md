@@ -146,6 +146,7 @@ release assets are never deleted (see "Never delete release assets").
 ssh spex 'systemctl --user is-active forgejo-runner && docker ps --format "{{.Names}}" | grep -q forgejo && echo forgejo-ok
   ls ~/macos-xcode26-vm/apps/voxis.conf ~/macos-xcode26-vm/voxis.qcow2   # shared VM app layer; no conf → macOS lane skips (VM README "Adding clipshot / voxis")
   ls ~/macos-xcode26-vm/creds.qcow2 && ls /dev/kvm && echo macos-vm-ok      # signing creds layer + KVM
+  cat /proc/sys/fs/inotify/max_user_instances       # must be >= 1024 (see "Too many open files" below)
   docker images voxis-ci --format "{{.Repository}}:{{.Tag}}" | grep -q voxis-ci && echo ci-image-ok || echo "CI IMAGE MISSING"
   docker ps --format "{{.Names}} {{.Status}}" | grep -iE "macos|osx" || echo "no macOS VM running (good)"
   cd ~/work/voxis && git status --short | head -3            # MUST be empty (see below)'
@@ -176,11 +177,22 @@ Two failures that shipped a broken v0.1.16 (2026-11-13), both now guarded:
 - **No DMG: `notarytool` HTTP 403 "A required agreement is missing or has expired".**
   Apple pushed a new developer agreement. Only the Account Holder can accept it at
   developer.apple.com/account (banner) or appstoreconnect.apple.com/business. Check
-  without a release: the lane itself now prints notarytool's error; or probe by hand in
-  the fallback VM — `./scripts/macos-vm.sh start`, then in the VM
-  `xcrun notarytool history --key <AuthKey_*.p8> --key-id <id> --issuer $APPLE_API_ISSUER`
-  (`~/secrets/apple-dev/notary.env`); `./scripts/macos-vm.sh stop` before tagging.
-  Acceptance took ~10 min to propagate.
+  without a release: the lane itself now prints notarytool's error, or probe by hand through
+  `vm.sh build` — the only entry point that unlocks `build.keychain`, where the `team-notary`
+  profile lives (a plain `vm.sh ssh` session has it locked). Use any sha already present in
+  `/home/spex/work/voxis` (`vm.sh` never fetches) and replace the guest command:
+  `~/macos-xcode26-vm/vm.sh build voxis <sha> -- 'xcrun notarytool history --keychain-profile "$APPLE_NOTARY_PROFILE"'`
+  — `APPLE_NOTARY_PROFILE` comes from the creds layer's `~/.secrets/apple.env`, and nothing is
+  built: only that one command runs. Acceptance took ~10 min to propagate.
+
+One failure that broke the v0.1.19 build (2026-11-14), now guarded:
+
+- **`tauri build` panicked `Too many open files` in BOTH docker lanes.** tauri-cli's
+  notify/inotify watcher (tauri-cli `rust.rs:146`) hit the kernel limit: root's inotify
+  *instances* (133 — containerd-shim, one per container ×58, plus systemd-udevd 41)
+  exceeded `fs.inotify.max_user_instances=128`. Fixed persistently with
+  `fs.inotify.max_user_instances = 1024` in `/etc/sysctl.d/60-inotify.conf`; the
+  preflight line above must print >= 1024.
 
 ---
 
@@ -291,35 +303,10 @@ macOS is arm64-only: `ort` ships no prebuilt ONNX Runtime for
 `x86_64-apple-darwin`, so an Intel build fails at `ort-sys`. The guest is
 x86_64 Tahoe cross-building aarch64 — same arrangement as naked.
 
-### Fallback lane: the old Docker-OSX VM (`scripts/macos-vm.sh`)
-
-`release.yml` does **not** use it any more. It stays working as a manual
-fallback: `scripts/macos-vm.sh clone-image` creates voxis's **own** ~38 GB copy
-of the Clipshot-prepared Sonoma image (`~/voxis-macos-vm`; voxis never mounts
-Clipshot's disk — two QEMU processes on one qcow2 corrupted a Clipshot release),
-then `build` yields the bare arm64 binary and `build-gui` the signed/notarized
-DMG.
-
-```bash
-ssh spex 'cd ~/work/voxis && ./scripts/macos-vm.sh build-gui'
-```
-
-Its credentials come from the host file `~/secrets/apple-dev/notary.env`
-(`SIGNING_IDENTITY`, `APPLE_API_ISSUER`; path override `APPLE_NOTARY_ENV`), the
-Developer ID cert lives in that VM's `login.keychain`, and the ASC `.p8` at
-`~/.appstoreconnect/private_keys/AuthKey_*.p8`. When either is missing it
-degrades to an **ad-hoc unsigned** `.app`/DMG (Gatekeeper warns; `xattr -cr` on
-install) — it never fails on missing signing. If Apple's queue is slow it ships
-the SIGNED-but-unstapled DMG and records the submission in
-`artifacts/.notary-pending`; finish with `scripts/macos-vm.sh notary-finish`
-(afterwards re-upload the DMG by hand). Invalid/Rejected always hard-fails. Its
-container runs with `--restart no`, so the VM never starts by itself — start it
-explicitly.
-
-Both lanes take the same host-wide `flock` (`/home/spex/.macos-vm.lock`,
-override `MACOS_VM_LOCK`), so they can never run at the same time. See
-`docs/MACOS_SIGNING_TODO.md` "VM image ownership + host lock" for the incident
-writeup.
+The lane takes the host-wide `flock` (`/home/spex/.macos-vm.lock`, override
+`MACOS_VM_LOCK`), so it can never run at the same time as Clipshot's or naked's
+VM — two QEMU processes on one host starved a Clipshot release (v0.8.77). See
+`docs/MACOS_SIGNING_TODO.md` "Host lock" for the incident writeup.
 
 The Hardened Runtime build needs `src-tauri/Entitlements.plist`
 (`com.apple.security.device.audio-input` + `.automation.apple-events`) or the
@@ -329,8 +316,8 @@ Apple Event.
 ### Signing gotcha (v0.1.3 post-mortem)
 
 Notarization validates **every Mach-O in the archive**. The bundle has TWO executables
-(`voice` and `typing_bench`, both `[[bin]]`s) — `scripts/ci/mac-shared-vm.sh` (shared
-VM) and `build-gui` (fallback) sign everything under `Contents/MacOS/*` and
+(`voice` and `typing_bench`, both `[[bin]]`s) — `scripts/ci/mac-shared-vm.sh`
+signs everything under `Contents/MacOS/*` and
 `Contents/Frameworks/*` in a loop, inside-out, with the same
 `--options runtime --timestamp --entitlements` flags, then the bundle. Never sign a
 single named binary. v0.1.3 shipped without a DMG because only `voice` was re-signed

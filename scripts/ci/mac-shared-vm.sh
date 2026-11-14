@@ -14,15 +14,13 @@
 # Artifacts are written to ./artifacts-mac/ (apps/voxis.conf's ARTIFACTS) and
 # vm.sh rsyncs that dir to ~/macos-xcode26-vm/out/voxis/<sha>/artifacts-mac/.
 #
-# This one script replaces the two Docker-OSX Sonoma lanes of
-# scripts/macos-vm.sh (`build` = bare binary, `build-gui` = signed .app -> DMG)
-# with a single run: signed .app -> notarized + stapled -> DMG -> notarized +
-# stapled, plus the bare arm64 binary Homebrew pins. scripts/macos-vm.sh stays
-# unchanged as the fallback lane.
+# This script is the app's ONLY macOS lane: one run produces the signed .app ->
+# notarized + stapled -> DMG -> notarized + stapled, plus the bare arm64 binary
+# Homebrew pins.
 #
-# Signing/notarization steps are reused verbatim from scripts/macos-vm.sh
-# cmd_build_gui (the proven lane); every step here is fatal, unlike the old
-# lane's "degrade to ad-hoc" branches.
+# The signing/notarization steps follow the parts that worked in the retired
+# Docker-OSX lane; every step here is fatal, with no "degrade to ad-hoc"
+# branches.
 set -euo pipefail
 
 # Repo root of the checkout vm.sh synced (scripts/ci/mac-shared-vm.sh -> ../..).
@@ -83,7 +81,7 @@ export APPLE_SIGNING_IDENTITY="$SIGNING_IDENTITY"
 unset APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH APPLE_ID APPLE_PASSWORD
 # `--bundles app` only: Tauri's own DMG bundler drives AppleScript window
 # dressing that needs a GUI session and fails headless; the DMG is assembled
-# with hdiutil below (macos-vm.sh cmd_build_gui, same reason).
+# with hdiutil below for the same reason.
 bun run tauri build --target "$TRIPLE" --bundles app
 BUILD_SECONDS=$((SECONDS - T0))
 echo "BUILD_SECONDS=$BUILD_SECONDS"
@@ -187,12 +185,12 @@ echo "NOTARIZE_SECONDS=$NOTARIZE_SECONDS"
 
 # ---- bare arm64 binary for Homebrew -----------------------------------------
 step "bare arm64 binary for Homebrew (voxis-macos-arm64)"
-# Ship the SIGNED in-bundle `voice` (not a second plain `cargo build` copy as
-# the old lane did): Homebrew installs exactly this file as `voxis`
-# (homebrew-tap/Formula/voxis.rb, scripts/ci/update-homebrew.sh; its test block
-# only launches the binary, there is no --version contract), so brew users get
-# the same Developer-ID signed, hardened-runtime Mach-O the DMG ships — one
-# build, no chance of the two diverging.
+# Ship the SIGNED in-bundle `voice` (not a second plain `cargo build` copy):
+# Homebrew installs exactly this file as `voxis` (homebrew-tap/Formula/voxis.rb,
+# scripts/ci/update-homebrew.sh; its test runs `voxis --version`, which main.rs
+# answers with `voxis <version>` before the GUI starts), so brew users get the
+# same Developer-ID signed, hardened-runtime Mach-O the DMG ships — one build,
+# no chance of the two diverging.
 cp "$APP/Contents/MacOS/voice" "$OUT/voxis-macos-arm64"
 chmod +x "$OUT/voxis-macos-arm64"
 # The copy still carries the bundle-bound signature (Info.plist/CodeResources

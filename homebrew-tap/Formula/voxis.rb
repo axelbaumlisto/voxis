@@ -11,6 +11,9 @@ class Voxis < Formula
   end
 
   test do
-    system "#{bin}/voxis", "--version"
+    # `voxis --version` prints `voxis <version>` and exits before the GUI starts
+    # (src-tauri/src/main.rs); the version comes from this formula's own DSL
+    # value, which scripts/ci/update-homebrew.sh rewrites on every release.
+    assert_match version.to_s, shell_output("#{bin}/voxis --version")
   end
 end

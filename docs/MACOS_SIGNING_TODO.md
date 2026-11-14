@@ -6,9 +6,8 @@
 > `scripts/ci/mac-shared-vm.sh` (run in that VM's guest by
 > `~/macos-xcode26-vm/vm.sh build voxis <sha> -- …`) signs, notarizes and
 > staples every macOS artifact, and `.forgejo/workflows/release.yml` calls it on
-> every tagged release. The older `scripts/macos-vm.sh` `build-gui` lane on
-> voxis's own Docker-OSX VM is kept as a **fallback** and is no longer called by
-> CI. This section documents the CURRENT implementation; §1–§6 below are kept
+> every tagged release. It is the only macOS lane. The section below documents
+> the CURRENT implementation; §1–§6 below are kept
 > as **historical research** (moved under "History") from before the account
 > existed — still useful background (the container-format reasoning in the old
 > §3 precondition note is exactly what the current lanes implement), but no
@@ -27,8 +26,6 @@
   `~/macos-xcode26-vm/out/voxis/<sha>/artifacts-mac/` (log: `build.log` in the
   same dir); the workflow copies them into the job's `artifacts/`. The repo
   keeps the host-side app config at `scripts/ci/macos-shared-vm/voxis.conf`.
-  **Fallback (not used by CI):** `scripts/macos-vm.sh build` / `build-gui` on
-  voxis's own Docker-OSX Sonoma clone, `~/voxis-macos-vm`.
 - **What it produces:** `artifacts/Voxis_<version>_aarch64.dmg` — a
   Developer-ID-signed, hardened-runtime, notarized-and-stapled DMG containing
   `Voxis.app` (built via `cargo tauri build --target aarch64-apple-darwin
@@ -44,67 +41,37 @@
     `build.keychain` (unlocked by `vm.sh build` from `creds.keychain-pass` on
     the host, never stored in the guest), and the ASC `.p8` behind
     `APPLE_API_KEY_PATH`.
-  - Fallback lane (host): `~/secrets/apple-dev/notary.env` — `SIGNING_IDENTITY`,
-    `APPLE_API_ISSUER`, `APPLE_API_KEY_ID`, `APPLE_API_KEY_PATH`
-    (`APPLE_NOTARY_ENV` overrides the path). Inside
-    `~/voxis-macos-vm/mac_hdd_ng.prepared.img` the `Developer ID Application`
-    certificate lives in `login.keychain` (unlocked at build time with the VM's
-    own `VM_PASS`) and the ASC key at
-    `~/.appstoreconnect/private_keys/AuthKey_*.p8`.
-- **No ad-hoc fallback on the shared-VM lane:** `scripts/ci/mac-shared-vm.sh`
+- **No ad-hoc fallback:** `scripts/ci/mac-shared-vm.sh`
   fails (rc≠0) on any missing signing material or any rejected notarization, and
   `release.yml` turns that into an advisory `::warning::` — the release still
-  ships Linux/Windows, and `publish` prints "no signed macOS DMG". The fallback
-  `build-gui` still degrades to an **ad-hoc-signed** `.app`/DMG when
-  `SIGNING_IDENTITY`/`APPLE_API_ISSUER` or the identity/`.p8` are missing (from
-  `tauri.conf.json`'s `bundle.macOS.signingIdentity: "-"`, Apple's ad-hoc
-  sentinel); users then see the Gatekeeper "cannot verify the developer"
-  warning (`xattr -cr` / right-click → Open).
-- **Slow Apple notarization queue:** the shared-VM lane submits with `--wait
-  --timeout 30m` and treats anything but `Accepted` as fatal (it prints
-  `notarytool log` for the rejection). The fallback `build-gui` keeps its own
-  bounded `NOTARY_WAIT` (default 1800s); on timeout it ships the
-  **signed-but-unstapled** DMG and records the submission in
-  `artifacts/.notary-pending`. Finish that one later with
-  `scripts/macos-vm.sh notary-finish` — and since CI had already uploaded the
-  unstapled DMG, re-upload the re-emitted one **manually** (`gh release upload
-  --clobber` / the Forgejo release assets API) **before** the next release
-  build runs (it wipes `~/voxis` in that VM). `Invalid`/`Rejected` always
-  hard-fails there too.
-- **VM image ownership + host lock:** the macOS build VM used to mount
-  clipshot's prepared disk image directly (read-write) — two QEMU processes
-  on one qcow2 corrupted a clipshot release (v0.8.77, 2026-09-07). voxis then
-  cloned its **own** Docker-OSX copy via `scripts/macos-vm.sh clone-image`
-  (`~/voxis-macos-vm/mac_hdd_ng.prepared.img`, ~38 GB, one-time; the
-  Developer ID cert and API key are already inside the cloned qcow2, no
-  extra copy step) — still the fallback lane. The current lane instead has its
-  **own writable layer** in the shared VM's qcow2 chain (`voxis.qcow2` on the
-  sealed `creds` layer on the sealed Xcode base on the pristine Tahoe image),
-  so no project ever writes another project's disk. Independently, **even
-  without a shared disk** two 8 GB-RAM/4-core macOS VMs on the same host still
-  starve each other's KVM/CPU time, so both lanes take the same **host-wide**
+  ships Linux/Windows, and `publish` prints "no signed macOS DMG".
+- **Slow Apple notarization queue:** the lane submits with `--wait --timeout
+  30m` and treats anything but `Accepted` as fatal (it prints `notarytool log`
+  for the rejection). There is no signed-but-unstapled intermediate artifact —
+  the queue delay is absorbed inside the step's 100 min budget.
+- **Host lock:** two 8 GB-RAM/4-core macOS VMs on one host starve each other's
+  KVM/CPU time (a clipshot release was corrupted that way, v0.8.77,
+  2026-09-07), so the lane takes the **host-wide**
   `flock` (`/home/spex/.macos-vm.lock`, override `MACOS_VM_LOCK`) — a voxis
   build can never start while clipshot's or naked's VM is up:
-  - `scripts/macos-vm.sh` (fallback) holds it for the container's entire
-    lifetime (not just around `docker run -d`, which returns immediately) via a
-    detached background holder process that polls `docker ps` and exits —
-    releasing the lock — once the container is gone. A contending run fails
-    fast with a message naming which container currently holds it.
-  - `~/macos-xcode26-vm/vm.sh` (current lane) runs QEMU in a docker container
-    too (`macos26-<layer>`, which matches the same `docker ps | grep -iE
-    'macos|osx'` gate); it takes the same flock path and waits `VM_LOCK_WAIT`
-    seconds (default 15) for it — and for a running lock-less macOS container —
-    and otherwise fails **before booting** with a message naming the competing
-    VM (`another macOS VM holds …` / `a macOS VM is already running`). It also
+  - `~/macos-xcode26-vm/vm.sh` runs QEMU in a docker container
+    (`macos26-<layer>`, which matches the `docker ps | grep -iE 'macos|osx'`
+    gate); it takes the flock path and waits `VM_LOCK_WAIT` seconds (default
+    15) for it — and for a running lock-less macOS container — and otherwise
+    fails **before booting** with a message naming the competing VM
+    (`another macOS VM holds …` / `a macOS VM is already running`). It also
     takes a per-app-layer lock (`locks/<layer>.lock`) for one writer per layer.
     `release.yml` passes `VM_LOCK_WAIT=3600` (one call, no retry loop) so the
     lane waits out another project's build, and otherwise skips with a
     `::warning::`.
+  - Disk isolation: voxis has its **own writable layer** in the shared VM's
+    qcow2 chain (`voxis.qcow2` on the sealed `creds` layer on the sealed Xcode
+    base on the pristine Tahoe image), so no project ever writes another
+    project's disk.
 - **`src-tauri/tauri.conf.json`**: `bundle.macOS.signingIdentity` is `"-"`
   (ad-hoc), not a named identity — the named `Developer ID Application`
-  signing happens in `scripts/ci/mac-shared-vm.sh` (and in the fallback
-  `macos-vm.sh`) *after* `cargo tauri build` produces the `.app`, overwriting
-  the ad-hoc signature. A literal identity name in `tauri.conf.json` (the
+  signing happens in `scripts/ci/mac-shared-vm.sh` *after* `cargo tauri build`
+  produces the `.app`, overwriting the ad-hoc signature. A literal identity name in `tauri.conf.json` (the
   previous `"Voxis Dev"`, which doesn't exist in any keychain) would break
   local `cargo tauri build`/`bun run tauri build` for every contributor; `"-"`
   keeps local builds working everywhere.
@@ -113,10 +80,13 @@
 
 ## History (pre-implementation research, kept for reference)
 
+> Historical: `scripts/macos-vm.sh` and `~/voxis-macos-vm` were removed after
+> v0.1.19.
+>
 > Everything below this line was written **before** the Apple Developer
 > account existed, as scoping/research for a future implementer. It is
 > preserved because the reasoning (esp. the container-format precondition in
-> the old §3) is still accurate and matches what `build-gui` above actually
+> the old §3) is still accurate and matches what `scripts/ci/mac-shared-vm.sh`
 > does — but treat the concrete secret names/insertion-point line numbers as
 > historical, not current; see "Current implementation" above for what's
 > actually wired up today.

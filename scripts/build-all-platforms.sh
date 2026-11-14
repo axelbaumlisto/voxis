@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Build Voxis GUI-only release artifacts on a Linux host.
-# Linux and Windows are built in Docker; macOS is built in a Docker-OSX KVM VM.
+# Linux and Windows are built here, in Docker. macOS is NOT built here: it runs in
+# `.forgejo/workflows/release.yml` on the shared macOS 26 / Xcode 26 VM
+# (`~/macos-xcode26-vm/vm.sh build voxis <sha> -- 'bash scripts/ci/mac-shared-vm.sh'`),
+# which is also the only lane with the signing/notarization credentials.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,7 +13,6 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 # lanes both calling the frontend build, a vite build in one lane would delete
 # the release binary another lane already copied into dist/. Keep them separate.
 OUTPUT_DIR="$PROJECT_DIR/artifacts"
-PREPARED="${CLIPSHOT_MACOS_VM_DIR:-$HOME/clipshot-macos-vm}/mac_hdd_ng.prepared.img"
 VERSION=$(grep '^version' "$PROJECT_DIR/src-tauri/Cargo.toml" | head -1 | sed 's/.*"\(.*\)"/\1/')
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
@@ -18,13 +20,17 @@ info() { echo -e "${GREEN}[ALL]${NC} $1"; }
 warn() { echo -e "${YELLOW}[ALL]${NC} $1"; }
 err()  { echo -e "${RED}[ALL]${NC} $1"; }
 
-DO_LINUX=1; DO_WINDOWS=1; DO_MACOS=1
+DO_LINUX=1; DO_WINDOWS=1
 for a in "$@"; do
   case "$a" in
-    --no-macos)     DO_MACOS=0 ;;
-    --linux-only)   DO_WINDOWS=0; DO_MACOS=0 ;;
-    --windows-only) DO_LINUX=0; DO_MACOS=0 ;;
-    --macos-only)   DO_LINUX=0; DO_WINDOWS=0 ;;
+    # Accepted (release.yml passes it) and a no-op: macOS is never built here.
+    --no-macos)     ;;
+    --linux-only)   DO_WINDOWS=0 ;;
+    --windows-only) DO_LINUX=0 ;;
+    --macos-only)
+      info "macOS is not built by this script — it runs in release.yml on the shared macOS 26 VM:"
+      info "  ~/macos-xcode26-vm/vm.sh build voxis <sha> -- 'bash scripts/ci/mac-shared-vm.sh'"
+      exit 0 ;;
     *) err "unknown flag: $a"; exit 2 ;;
   esac
 done
@@ -159,21 +165,6 @@ if [[ -n "$LANE_LOGS_DIR" ]]; then
     warn "Keeping lane logs after failure: $LANE_LOGS_DIR"
   else
     rm -rf "$LANE_LOGS_DIR"
-  fi
-fi
-
-if [[ $DO_MACOS -eq 1 ]]; then
-  if [[ -f "$PREPARED" ]]; then
-    info "=== macos-arm64-x64-universal ==="
-    if bash "$SCRIPT_DIR/macos-vm.sh" build; then
-      RESULTS+=("OK   macos-arm64-x64-universal")
-    else
-      RESULTS+=("FAIL macos-arm64-x64-universal")
-      err "macOS build FAILED"
-    fi
-  else
-    warn "macOS skipped — no prepared VM image at $PREPARED"
-    RESULTS+=("SKIP macos (no prepared image)")
   fi
 fi
 

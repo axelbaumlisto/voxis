@@ -5,10 +5,17 @@
  *  - Select dropdown renders with all options.
  *  - Changing the dropdown fires onChange with the new value.
  *  - The selected value is reflected in the dropdown.
+ *  - "Export to edit" calls the export command for the SELECTED theme, refreshes
+ *    the theme list, shows the resulting folder, and leaves the selection alone;
+ *    a failed export shows the backend's message (a plain string over IPC), and
+ *    changing the selection clears the previous result.
  */
-import { describe, expect, it, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, fireEvent, screen, waitFor } from "@testing-library/react";
 import ThemeSelect from "../ThemeSelect";
+import { exportBuiltinTheme } from "../../../lib/commands";
+
+const reloadThemes = vi.fn().mockResolvedValue(undefined);
 
 // Stub the theme-list hook to avoid Tauri command round-trip.
 vi.mock("../../../hooks/useVisualizationThemes", () => ({
@@ -20,7 +27,7 @@ vi.mock("../../../hooks/useVisualizationThemes", () => ({
     ],
     loading: false,
     error: null,
-    reload: vi.fn(),
+    reload: reloadThemes,
   }),
 }));
 
@@ -31,9 +38,16 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("../../../lib/commands", () => ({
   previewVisualizationTheme: vi.fn().mockResolvedValue(undefined),
+  exportBuiltinTheme: vi.fn(),
 }));
 
+const EXPORTED_FOLDER = "/home/user/.config/voxis/themes/neon_custom";
+
 describe("ThemeSelect (dropdown)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("renders a select dropdown with one option per theme", () => {
     const { getByLabelText } = render(
       <ThemeSelect label="Theme" value="winamp_classic" onChange={() => {}} />,
@@ -80,5 +94,62 @@ describe("ThemeSelect (dropdown)", () => {
     const target = container.querySelector(`#${CSS.escape(forId!)}`);
     expect(target).not.toBeNull();
     expect(target?.tagName).toBe("SELECT");
+  });
+
+  it("exports the selected theme to an editable copy and shows the folder", async () => {
+    vi.mocked(exportBuiltinTheme).mockResolvedValue(EXPORTED_FOLDER);
+    const onChange = vi.fn();
+    render(<ThemeSelect label="Theme" value="neon" onChange={onChange} />);
+
+    fireEvent.click(screen.getByTestId("theme-export-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("theme-export-result")).toHaveTextContent(
+        EXPORTED_FOLDER,
+      );
+    });
+    expect(exportBuiltinTheme).toHaveBeenCalledWith("neon");
+    expect(reloadThemes).toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("neon");
+    expect(screen.queryByTestId("theme-export-error")).toBeNull();
+  });
+
+  it("shows the backend error when the export fails", async () => {
+    // Tauri v2 rejects a `Result<_, String>` command with the plain STRING, not
+    // an Error — the message must reach the user as-is.
+    vi.mocked(exportBuiltinTheme).mockRejectedValue(
+      "unknown theme: 'neon' not found",
+    );
+    render(<ThemeSelect label="Theme" value="neon" onChange={() => {}} />);
+
+    fireEvent.click(screen.getByTestId("theme-export-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("theme-export-error")).toHaveTextContent(
+        "unknown theme: 'neon' not found",
+      );
+    });
+    expect(screen.queryByTestId("theme-export-result")).toBeNull();
+    expect(reloadThemes).not.toHaveBeenCalled();
+  });
+
+  it("clears the export result when the selection changes", async () => {
+    vi.mocked(exportBuiltinTheme).mockResolvedValue(EXPORTED_FOLDER);
+    render(<ThemeSelect label="Theme" value="neon" onChange={() => {}} />);
+    fireEvent.click(screen.getByTestId("theme-export-button"));
+    await waitFor(() => {
+      expect(screen.getByTestId("theme-export-result")).toHaveTextContent(
+        EXPORTED_FOLDER,
+      );
+    });
+
+    fireEvent.change(screen.getByLabelText("Theme"), {
+      target: { value: "drifting_contour" },
+    });
+
+    // The folder/error described the previous theme, so it must not linger.
+    expect(screen.queryByTestId("theme-export-result")).toBeNull();
+    expect(screen.queryByTestId("theme-export-error")).toBeNull();
   });
 });
