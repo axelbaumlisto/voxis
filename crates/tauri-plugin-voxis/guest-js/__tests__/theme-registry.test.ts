@@ -1,4 +1,7 @@
 // crates/tauri-plugin-voxis/guest-js/__tests__/theme-registry.test.ts
+import { readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_THEME_ID, FALLBACK_THEME_SIZE, resolveTheme, resolveThemeSize, ThemeRegistry } from "../src/themes/registry";
 
@@ -7,6 +10,17 @@ describe("ThemeRegistry", () => {
     const mod = ThemeRegistry[DEFAULT_THEME_ID];
     expect(mod).toBeDefined();
     expect(typeof mod?.mount).toBe("function");
+  });
+
+  // naked 14.11 «тема не изменилась на новую тему»: the five orbs were built into
+  // generated/ and offered by the plugin's settings (settings.rs BUILTIN_THEMES), but
+  // never registered here — the pill mounted the default for a chosen orb.
+  it("registers every theme build-themes generated (the set the plugin's settings offer)", () => {
+    const generated = readdirSync(join(dirname(fileURLToPath(import.meta.url)), "../src/themes/generated"), { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .sort();
+    expect(Object.keys(ThemeRegistry).sort()).toEqual(generated);
   });
 
   it("every builtin id maps to a module exporting mount(container, api)", () => {

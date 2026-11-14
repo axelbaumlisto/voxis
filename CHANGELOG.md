@@ -1,5 +1,14 @@
 # Changelog
 
+## guest-js 0.10.2
+
+### Fixed
+- **A chosen orb theme never showed on the pill.** The five orb themes were
+  built into `themes/generated/` and offered by the plugin's settings, but
+  `ThemeRegistry` did not list them, so the host fell back to the default
+  theme. They are registered now (with their manifest sizes); a test keeps
+  the registry equal to the generated set.
+
 ## tauri-plugin-voxis 0.8.1 / guest-js 0.10.1
 
 ### Added

@@ -47,6 +47,11 @@ import * as metaballs from "./generated/metaballs/theme.js";
 import * as metaballs25d from "./generated/metaballs25d/theme.js";
 import * as metaballs3d from "./generated/metaballs3d/theme.js";
 import * as neon from "./generated/neon/theme.js";
+import * as orbFalls from "./generated/orb_falls/theme.js";
+import * as orbRocaille from "./generated/orb_rocaille/theme.js";
+import * as orbShdr03 from "./generated/orb_shdr_03/theme.js";
+import * as orbShdr06 from "./generated/orb_shdr_06/theme.js";
+import * as orbShdr07 from "./generated/orb_shdr_07/theme.js";
 import * as parameciumSolo from "./generated/paramecium_solo/theme.js";
 import * as quietReed from "./generated/quiet_reed/theme.js";
 import * as radiolarian from "./generated/radiolarian/theme.js";
@@ -75,6 +80,11 @@ import metaballsManifest from "./generated/metaballs/theme.json";
 import metaballs25dManifest from "./generated/metaballs25d/theme.json";
 import metaballs3dManifest from "./generated/metaballs3d/theme.json";
 import neonManifest from "./generated/neon/theme.json";
+import orbFallsManifest from "./generated/orb_falls/theme.json";
+import orbRocailleManifest from "./generated/orb_rocaille/theme.json";
+import orbShdr03Manifest from "./generated/orb_shdr_03/theme.json";
+import orbShdr06Manifest from "./generated/orb_shdr_06/theme.json";
+import orbShdr07Manifest from "./generated/orb_shdr_07/theme.json";
 import parameciumSoloManifest from "./generated/paramecium_solo/theme.json";
 import quietReedManifest from "./generated/quiet_reed/theme.json";
 import radiolarianManifest from "./generated/radiolarian/theme.json";
@@ -99,6 +109,11 @@ export const ThemeRegistry: Record<string, ThemeModule> = {
   metaballs25d: metaballs25d as unknown as ThemeModule,
   metaballs3d: metaballs3d as unknown as ThemeModule,
   neon: neon as unknown as ThemeModule,
+  orb_falls: orbFalls as unknown as ThemeModule,
+  orb_rocaille: orbRocaille as unknown as ThemeModule,
+  orb_shdr_03: orbShdr03 as unknown as ThemeModule,
+  orb_shdr_06: orbShdr06 as unknown as ThemeModule,
+  orb_shdr_07: orbShdr07 as unknown as ThemeModule,
   paramecium_solo: parameciumSolo as unknown as ThemeModule,
   quiet_reed: quietReed as unknown as ThemeModule,
   radiolarian: radiolarian as unknown as ThemeModule,
@@ -171,6 +186,11 @@ const ThemeSizes: Record<string, ThemeSize> = {
   metaballs25d: sizeFromManifest(metaballs25dManifest),
   metaballs3d: sizeFromManifest(metaballs3dManifest),
   neon: sizeFromManifest(neonManifest),
+  orb_falls: sizeFromManifest(orbFallsManifest),
+  orb_rocaille: sizeFromManifest(orbRocailleManifest),
+  orb_shdr_03: sizeFromManifest(orbShdr03Manifest),
+  orb_shdr_06: sizeFromManifest(orbShdr06Manifest),
+  orb_shdr_07: sizeFromManifest(orbShdr07Manifest),
   paramecium_solo: sizeFromManifest(parameciumSoloManifest),
   quiet_reed: sizeFromManifest(quietReedManifest),
   radiolarian: sizeFromManifest(radiolarianManifest),
