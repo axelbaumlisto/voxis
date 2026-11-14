@@ -16,7 +16,8 @@
 #
 # This script is the app's ONLY macOS lane: one run produces the signed .app ->
 # notarized + stapled -> DMG -> notarized + stapled, plus the bare arm64 binary
-# Homebrew pins.
+# Homebrew pins, which is re-signed and therefore notarized on its own (a bare
+# Mach-O cannot be stapled; its ticket is looked up online by Gatekeeper).
 #
 # The signing/notarization steps follow the parts that worked in the retired
 # Docker-OSX lane; every step here is fatal, with no "degrade to ad-hoc"
@@ -125,16 +126,18 @@ done
 codesign -d --verbose=2 "$APP" 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier)' || true
 echo "signature, arch (arm64) and entitlements OK on every Mach-O in Contents/MacOS"
 
-# ---- notarize + staple (used for both the .app and the .dmg) ----------------
+# ---- notarize + staple (used for the .app and the .dmg; notarize only for the
+# ---- bare Mach-O, which has no bundle to staple a ticket into) ---------------
 # `--wait` is required; the output is captured and printed even on failure so a
 # rejected submission (or an auth/agreement error from Apple, which is in the
 # output and not in the exit code) is never swallowed by `set -e` — v0.1.16
 # died at exactly this point with nothing but rc=1.
-notarize_and_staple() { # <path to .app or .dmg>
+notarize_and_staple() { # <path to .app, .dmg or bare Mach-O>
   local target=$1
   local submit_path=$target zip=''
-  if [[ "$target" == *.app ]]; then
-    # notarytool takes a zip for a bundle; `ditto` keeps the bundle's metadata.
+  if [[ "$target" != *.dmg ]]; then
+    # notarytool takes a zip for a bundle and for a bare Mach-O alike; `ditto`
+    # keeps the bundle's metadata. Only disk images are submitted as-is.
     zip="$WORK/$(basename "$target").zip"
     rm -f "$zip"
     ditto -c -k --keepParent "$target" "$zip"
@@ -154,14 +157,22 @@ notarize_and_staple() { # <path to .app or .dmg>
     fi
     return 1
   fi
-  xcrun stapler staple "$target"
-  xcrun stapler validate "$target"
-  if [[ "$target" == *.app ]]; then
-    spctl -a -vv -t exec "$target"
-  else
-    spctl -a -t open --context context:primary-signature -v "$target"
+  if [[ "$target" == *.app || "$target" == *.dmg ]]; then
+    xcrun stapler staple "$target"
+    xcrun stapler validate "$target"
+    if [[ "$target" == *.app ]]; then
+      spctl -a -vv -t exec "$target"
+    else
+      spctl -a -t open --context context:primary-signature -v "$target"
+    fi
+    echo "notarized + stapled: $target"
+    return 0
   fi
-  echo "notarized + stapled: $target"
+  # A bare Mach-O cannot be stapled (nothing holds a ticket), and Gatekeeper's
+  # online ticket lookup for it can lag right after acceptance, so this check is
+  # informational only: notarytool status Accepted above is the gate.
+  spctl -a -vv -t exec "$target" || true
+  echo "notarized (bare Mach-O, not stapled): $target"
 }
 
 NOTARIZE_T0=$SECONDS
@@ -180,8 +191,6 @@ codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$DMG"
 
 step "notarizing $DMG"
 notarize_and_staple "$DMG"
-NOTARIZE_SECONDS=$((SECONDS - NOTARIZE_T0))
-echo "NOTARIZE_SECONDS=$NOTARIZE_SECONDS"
 
 # ---- bare arm64 binary for Homebrew -----------------------------------------
 step "bare arm64 binary for Homebrew (voxis-macos-arm64)"
@@ -199,6 +208,15 @@ codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --
 codesign --verify --strict --verbose=2 "$OUT/voxis-macos-arm64"
 archs=$(lipo -archs "$OUT/voxis-macos-arm64" | tr -d '[:space:]')
 [[ "$archs" == "arm64" ]] || die "expected arm64, lipo -archs says '$archs' for voxis-macos-arm64"
+# That re-sign gives the bare binary its own cdhash, so the .app's notarization
+# does not cover it: without this step the developer-ID signature is rejected by
+# Gatekeeper (`source=Unnotarized Developer ID`) for anyone who downloads the
+# binary from the GitHub release in a browser. Homebrew escapes it only because
+# brew installs without the quarantine attribute.
+step "notarizing $OUT/voxis-macos-arm64"
+notarize_and_staple "$OUT/voxis-macos-arm64"
+NOTARIZE_SECONDS=$((SECONDS - NOTARIZE_T0))
+echo "NOTARIZE_SECONDS=$NOTARIZE_SECONDS"
 # Same archive layout the formula expects (binary at the tarball root, no
 # directory prefix; `bin.install "voxis-macos-arm64"`).
 tar -C "$OUT" -czf "$OUT/voxis-macos-arm64.tar.gz" voxis-macos-arm64

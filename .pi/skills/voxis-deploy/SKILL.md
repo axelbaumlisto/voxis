@@ -25,8 +25,9 @@ build outDir and gets emptied on every `bun run build`):
 - `artifacts/voxis-windows-x64-gui.exe`
 - `artifacts/Voxis_<version>_x64-setup.exe` (NSIS)
 - macOS (arm64-only, best-effort lane): `artifacts/voxis-macos-arm64` (+ `.tar.gz`,
-  Homebrew) and `artifacts/Voxis_<version>_aarch64.dmg` (Developer ID signed,
-  notarized, stapled — see "macOS build (shared Xcode 26 VM)")
+  Homebrew, notarized but unstapled — a bare Mach-O has nowhere to staple, so
+  Gatekeeper looks its ticket up online) and `artifacts/Voxis_<version>_aarch64.dmg`
+  (Developer ID signed, notarized, stapled — see "macOS build (shared Xcode 26 VM)")
 
 GitHub carries **both**: release binaries (the canonical public download) and,
 by the owner's decision on 2026-11-12, the `main` branch kept in sync with
