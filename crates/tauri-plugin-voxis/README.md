@@ -18,7 +18,7 @@ microphone and real Groq; a live-iPad end-to-end run exists (see
 `research/plugin-plan/T11_ipad_run_2026-09-16.md`) driving this plugin from
 a real host (`naked`) — that integration work is not itself part of this
 crate/repo. `guest-js` is versioned separately (`@voxis/tauri-plugin-voxis`,
-currently `0.10.0`) and is **not** on the same version number as this Rust
+currently `0.11.0`) and is **not** on the same version number as this Rust
 crate (currently `0.8.0`) — bump each independently when either changes.
 
 ## Installation
@@ -41,7 +41,7 @@ voxis-core = { git = "https://clipshot.cc/git/zverozabr/voxis.git", tag = "plugi
   the Android `cargo check` first — and they are immutable: a bad tag costs
   the next patch number, never a re-push (`plugin-v0.3.0` → `0.3.1`,
   `0.5.0` → `0.5.1` both happened). The JS half (`guest-js`,
-  `@voxis/tauri-plugin-voxis`) has its OWN version (0.10.0 today) and reaches
+  `@voxis/tauri-plugin-voxis`) has its OWN version (0.11.0 today) and reaches
   a host as a vendored `bun pm pack` tarball — see "guest-js" below.
 - **How an update reaches a device.** There is no plugin "file" on a phone
   or a Mac: the Rust crate is compiled INTO the host app and the guest-js is
@@ -342,7 +342,8 @@ Typed API + a `<voxis-overlay>` web component. See `guest-js/README.md` for
 the full API surface (`createClient`, `mountOverlay`, `HotkeyMachine`,
 driver modes) and `docs/THEMES.md`'s "Appendix: `tauri-plugin-voxis`'s own
 `<voxis-overlay>`" for the theme-engine reuse. Currently versioned
-`0.10.0` (0.10.0: the generated builtin theme set gains the five new orb
+`0.11.0` (0.11.0: the pill is user-resizable — `setSize(edge, { live })`,
+`MountOverlayOptions.size`, `el.userSize`, square 56–1024; 0.10.0: the generated builtin theme set gains the five new orb
 themes, and `lavalamp`/`metaballs3d`/the orbs all draw through the shared
 WebGL lifetime; 0.9.5: the settings manifest's `apiKey` help is
 state-neutral —

@@ -13,6 +13,35 @@ import { clampToViewport, type Point, type SafeArea, type Size, type Viewport } 
 /** The pill's fixed idle/error size — see `overlay.ts`'s module doc comment's "Compact/expanded lifecycle" section. */
 export const COMPACT_SIZE: Size = { width: 56, height: 56 };
 
+/** Smallest edge a user may resize the pill to — same bound (and value) as the desktop overlay's `src/overlay/resize.ts` `MIN_OVERLAY_EDGE`. */
+export const MIN_OVERLAY_EDGE = 56;
+/** Largest edge a user may resize the pill to — same bound as the desktop overlay's `MAX_OVERLAY_EDGE`. */
+export const MAX_OVERLAY_EDGE = 1024;
+
+/**
+ * Clamps a user's requested square edge into `[MIN_OVERLAY_EDGE,
+ * MAX_OVERLAY_EDGE]`, rounded to whole px — the same semantics as the
+ * desktop overlay's `clampOverlayEdge` (`src/overlay/resize.ts`), kept
+ * identical on purpose so a host persisting a size across the two gets the
+ * same number back. A non-finite value (NaN from a bad persisted setting)
+ * falls back to the minimum rather than propagating into the DOM.
+ */
+export function clampOverlayEdge(value: number): number {
+  if (!Number.isFinite(value)) return MIN_OVERLAY_EDGE;
+  return Math.min(MAX_OVERLAY_EDGE, Math.max(MIN_OVERLAY_EDGE, Math.round(value)));
+}
+
+/**
+ * The expanded pill's size: a user override (already clamped, see
+ * `clampOverlayEdge`) as a SQUARE — every theme draws into a square canvas
+ * and the orb shaders normalise by `min(w, h)`, so one edge length is the
+ * whole state, exactly as on the desktop — or the theme's manifest size when
+ * `userEdge` is `null` ("no override").
+ */
+export function resolveExpandedSize(manifestSize: Size, userEdge: number | null): Size {
+  return userEdge == null ? manifestSize : { width: userEdge, height: userEdge };
+}
+
 /** Named starting corners for `MountOverlayOptions.initialPosition` — see that option's doc comment. */
 export type OverlayCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 

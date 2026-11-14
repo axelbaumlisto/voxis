@@ -10,10 +10,14 @@
 import { describe, expect, it } from "vitest";
 import {
   COMPACT_SIZE,
+  MAX_OVERLAY_EDGE,
+  MIN_OVERLAY_EDGE,
   anchorGrow,
+  clampOverlayEdge,
   cornerPosition,
   growToExpandedPosition,
   resolveCurrentSize,
+  resolveExpandedSize,
   resolveInitialPosition,
   shapeRadius,
   shrinkToCompactPosition,
@@ -86,6 +90,44 @@ describe("shapeRadius [A6 shape rule]", () => {
   it("any non-square size is a rounded rect, regardless of how small", () => {
     expect(shapeRadius({ width: 64, height: 40 })).toBe("16px");
     expect(shapeRadius({ width: 340, height: 170 })).toBe("16px");
+  });
+});
+
+describe("clampOverlayEdge [user resize override]", () => {
+  it("keeps an in-range edge as-is (rounded to whole px)", () => {
+    expect(clampOverlayEdge(56)).toBe(56);
+    expect(clampOverlayEdge(120)).toBe(120);
+    expect(clampOverlayEdge(1024)).toBe(1024);
+    expect(clampOverlayEdge(199.6)).toBe(200);
+  });
+
+  it("clamps below the minimum and above the maximum", () => {
+    expect(clampOverlayEdge(0)).toBe(MIN_OVERLAY_EDGE);
+    expect(clampOverlayEdge(-500)).toBe(MIN_OVERLAY_EDGE);
+    expect(clampOverlayEdge(10)).toBe(MIN_OVERLAY_EDGE);
+    expect(clampOverlayEdge(5000)).toBe(MAX_OVERLAY_EDGE);
+  });
+
+  it("mirrors the desktop overlay's bounds (MIN 56, MAX 1024)", () => {
+    expect(MIN_OVERLAY_EDGE).toBe(56);
+    expect(MAX_OVERLAY_EDGE).toBe(1024);
+  });
+
+  it("a non-finite value falls back to the minimum instead of reaching the DOM", () => {
+    expect(clampOverlayEdge(Number.NaN)).toBe(MIN_OVERLAY_EDGE);
+    expect(clampOverlayEdge(Number.POSITIVE_INFINITY)).toBe(MIN_OVERLAY_EDGE);
+  });
+});
+
+describe("resolveExpandedSize [user override vs manifest size]", () => {
+  const manifest = { width: 340, height: 170 };
+
+  it("null -> the theme's manifest size, untouched (a theme's own aspect ratio)", () => {
+    expect(resolveExpandedSize(manifest, null)).toEqual(manifest);
+  });
+
+  it("an override -> a SQUARE of that edge (themes normalise by min(w, h), so the pill stays square)", () => {
+    expect(resolveExpandedSize(manifest, 200)).toEqual({ width: 200, height: 200 });
   });
 });
 

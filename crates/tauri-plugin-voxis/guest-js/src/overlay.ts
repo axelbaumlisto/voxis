@@ -82,6 +82,19 @@
  * (its own permanently-visible "socket") out of the compact/mount-
  * lifecycle entirely — the theme stays mounted and the pill stays
  * expanded even at idle.
+ *
+ * User size override (`setSize`/`MountOverlayOptions.size`): the pill is
+ * resizable the way the desktop overlay's resize grip makes it resizable —
+ * ONE square edge length, clamped to `[MIN_OVERLAY_EDGE, MAX_OVERLAY_EDGE]`
+ * (`clampOverlayEdge`, the same bounds/semantics as `src/overlay/resize.ts`),
+ * applied to the EXPANDED size only (the compact handle stays
+ * `COMPACT_SIZE`). The host owns the gesture and the persistence; this
+ * element offers the seam. `setSize(edge, { live: true })` is the drag-frame
+ * call (resize the pill box only, no theme remount — cheap), the final
+ * `setSize(edge)` remounts the theme once at the new size exactly like
+ * `setTheme` does, and `setSize(null)` drops the override back to the
+ * theme's manifest size. An override survives `setTheme` (a theme switch
+ * keeps the user's size).
  */
 import { createClient, type VoxisClient, type UnlistenFn } from "./client";
 import { createThemeBridge, pluginStateToThemeMode } from "./theme-bridge";
@@ -101,8 +114,10 @@ import {
 } from "./drag";
 import {
   COMPACT_SIZE,
+  clampOverlayEdge,
   growToExpandedPosition,
   resolveCurrentSize,
+  resolveExpandedSize,
   resolveInitialPosition,
   shapeRadius,
   shrinkToCompactPosition,
@@ -121,6 +136,18 @@ export const TAG_NAME = "voxis-overlay";
 // paths (`./overlay`) and public names are unchanged.
 export { COMPACT_SIZE, anchorGrow, cornerPosition, shapeRadius } from "./overlay-geometry";
 export type { OverlayCorner, OverlayLifecycleState } from "./overlay-geometry";
+
+/** `setSize`'s options — see that method's doc comment. */
+export interface SetSizeOptions {
+  /**
+   * `true` for the frames of a live resize gesture: resize the pill box only,
+   * leaving the mounted theme alone (it keeps drawing at the size it was
+   * mounted with, stretched/scaled by CSS — an acceptable preview). The final
+   * `setSize(edge)` (no `live`) remounts the theme once at the new size.
+   * Default `false`.
+   */
+  live?: boolean;
+}
 
 export interface MountOverlayOptions {
   theme?: string;
@@ -180,6 +207,16 @@ export interface MountOverlayOptions {
    * real manifest-driven sizing/growth without mounting a real theme.
    */
   themeModule?: ThemeModule;
+  /**
+   * Initial user size override — one SQUARE edge length in px, clamped to
+   * `[MIN_OVERLAY_EDGE, MAX_OVERLAY_EDGE]`; `null`/absent means "no
+   * override, use the theme's manifest size". The host persists it and
+   * passes it here so the pill is BORN at that size (one theme mount at
+   * the right size, no flash of the manifest size first). Same value
+   * `setSize` takes later; equivalent to calling `setSize(size)` right
+   * after mount, but without the extra mount.
+   */
+  size?: number | null;
 }
 
 interface OverlayConfig {
@@ -193,6 +230,8 @@ interface OverlayConfig {
   idleTheme: boolean;
   board: boolean;
   themeModule: ThemeModule | undefined;
+  /** Raw `MountOverlayOptions.size`; the element clamps it in `connectedCallback` (a config object carries the host's value verbatim, like every other option here). */
+  userSize: number | null | undefined;
 }
 
 let defined = false;
@@ -218,7 +257,16 @@ export class VoxisOverlayElement extends HTMLElement {
   private themeMounted = false;
   private resolvedThemeModule: ThemeModule | null = null;
   private lifecycleState: OverlayLifecycleState = "compact";
+  /** The expanded pill's effective size: the theme's manifest size, or the user's square override when `userEdge` is set. */
   private expandedSize: Size = { width: 64, height: 64 };
+  /**
+   * The user's square size override (already clamped via `clampOverlayEdge`),
+   * or `null` for "no override — use the theme's manifest size". Set by
+   * `setSize`/`MountOverlayOptions.size`. Deliberately NOT reset by
+   * `setTheme`: only `setSize(null)` drops it, so switching theme keeps the
+   * size the user chose for their pill.
+   */
+  private userEdge: number | null = null;
   /** The pill's position right before the most recent `growToExpanded()` — restored verbatim by `shrinkToCompact()`, so a drag that happens while expanded never changes where the pill settles once it shrinks back. */
   private compactPosition: Point | null = null;
   /**
@@ -255,7 +303,8 @@ export class VoxisOverlayElement extends HTMLElement {
       throw new Error("<voxis-overlay> must be configured via mountOverlay(), not created bare");
     }
 
-    this.expandedSize = resolveThemeSize(config.theme);
+    this.userEdge = config.userSize == null ? null : clampOverlayEdge(config.userSize);
+    this.expandedSize = this.expandedSizeFor(config.theme);
     this.lifecycleState = config.idleTheme ? "expanded" : "compact";
 
     const shadow = this.attachShadow({ mode: "open" });
@@ -447,6 +496,11 @@ export class VoxisOverlayElement extends HTMLElement {
     return this.lifecycleState;
   }
 
+  /** The user's square size override in px, or `null` when the pill is at the theme's manifest size — the host re-persists this across mounts and passes it back as `MountOverlayOptions.size`. */
+  get userSize(): number | null {
+    return this.userEdge;
+  }
+
   /**
    * Live-move the pill's COMPACT RESTING SPOT to `{x, y}` without tearing
    * the element (or its mounted theme/WebGL context) down — the host-facing
@@ -500,10 +554,70 @@ export class VoxisOverlayElement extends HTMLElement {
     if (!this.config) return;
     this.config.theme = id;
     this.resolvedThemeModule = null;
-    const newSize = resolveThemeSize(id);
+    const newSize = this.expandedSizeFor(id);
     const sizeChanged = newSize.width !== this.expandedSize.width || newSize.height !== this.expandedSize.height;
     this.expandedSize = newSize;
     if (this.lifecycleState !== "expanded") return;
+    this.remountThemeAtCurrentSize();
+    if (sizeChanged) this.dispatchResize();
+  }
+
+  /**
+   * Sets (or, with `null`, drops) the user's square size override — the
+   * host-facing seam a `driver: "host"` caller uses to make the pill
+   * user-resizable, exactly as the desktop overlay's resize grip does (one
+   * edge length, square, `[MIN_OVERLAY_EDGE, MAX_OVERLAY_EDGE]`). Same shape
+   * as `setPosition`/`setTheme`: no element re-creation, callable at any
+   * time.
+   *
+   * `edge` is clamped with `clampOverlayEdge` and sticks across `setTheme`
+   * (a theme switch keeps the user's size); `null` goes back to the
+   * current theme's manifest size. The override drives the EXPANDED size
+   * only — the compact handle stays `COMPACT_SIZE` — so while compact this
+   * only records it for the next expansion (no mount, no resize event, like
+   * `setTheme`).
+   *
+   * While expanded, `{ live: true }` is the drag-frame variant: it resizes
+   * the pill box and nothing else, leaving the mounted theme drawing at the
+   * size it was mounted with (stretched by CSS — a cheap preview, no WebGL
+   * teardown per frame). The final call (no `live`) remounts the theme once
+   * at the new size, so `api.size` and the theme's own canvas are correct —
+   * the same one-unmount/one-mount swap `setTheme` performs.
+   *
+   * Dispatches `"voxis-overlay-resize"` whenever the resulting size differs
+   * from the previous one (both the live frames and the final call), and
+   * leaves the pill's position alone: like a theme size change, the box
+   * keeps its top-left and grows/shrinks from there — placement stays the
+   * host's business (`setPosition`).
+   */
+  setSize(edge: number | null, options: SetSizeOptions = {}): void {
+    if (!this.config) return;
+    this.userEdge = edge == null ? null : clampOverlayEdge(edge);
+    const newSize = this.expandedSizeFor(this.config.theme);
+    const sizeChanged = newSize.width !== this.expandedSize.width || newSize.height !== this.expandedSize.height;
+    this.expandedSize = newSize;
+    if (this.lifecycleState !== "expanded") return;
+    if (options.live) {
+      this.applyPillSize(this.currentSize());
+    } else {
+      this.remountThemeAtCurrentSize();
+    }
+    if (sizeChanged) this.dispatchResize();
+  }
+
+  /** The expanded size for `themeId` with the current user override applied — the one rule `connectedCallback`, `setTheme` and `setSize` all use, so an override survives a theme switch. */
+  private expandedSizeFor(themeId: string): Size {
+    return resolveExpandedSize(resolveThemeSize(themeId), this.userEdge);
+  }
+
+  /**
+   * Resizes the pill to the current expanded size and re-mounts the theme
+   * into a *fresh* container at it — one unmount + one mount, no element
+   * re-creation (a prior theme's WebGL context/canvas must not leak into the
+   * new mount). Shared by `setTheme` and a non-live `setSize`, which differ
+   * only in what they did to `expandedSize`/`themeContainerEl` beforehand.
+   */
+  private remountThemeAtCurrentSize(): void {
     this.unmountThemeInstance();
     const fresh = document.createElement("div");
     fresh.className = "theme-container";
@@ -511,7 +625,6 @@ export class VoxisOverlayElement extends HTMLElement {
     this.themeContainerEl = fresh;
     this.applyPillSize(this.currentSize());
     this.mountThemeInstance();
-    if (sizeChanged) this.dispatchResize();
   }
 
   private handleViewportChange = (): void => {
@@ -800,6 +913,7 @@ export function mountOverlay(container: HTMLElement = document.body, options: Mo
     idleTheme: options.idleTheme ?? false,
     board: options.board ?? true,
     themeModule: options.themeModule,
+    userSize: options.size,
   });
   container.appendChild(el);
   return el;

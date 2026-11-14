@@ -19,8 +19,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cornerPosition, COMPACT_SIZE, mountOverlay, VoxisOverlayElement, type OverlayCorner } from "../src/overlay";
 import { OverlaySessionController } from "../src/overlay-session";
 import { clampToViewport, loadPosition, readEffectiveViewport, savePosition } from "../src/drag";
-import { growToExpandedPosition } from "../src/overlay-geometry";
+import { MAX_OVERLAY_EDGE, MIN_OVERLAY_EDGE, growToExpandedPosition } from "../src/overlay-geometry";
 import type { DictationResult, LevelEvent, PluginState } from "../src/types/contract";
+import type { ThemeApi, ThemeModule } from "../src/types/theme-api";
 import type { VoxisClient } from "../src/client";
 
 function createMockClient() {
@@ -957,6 +958,193 @@ describe("<voxis-overlay> live seams setPosition/setTheme [T3]", () => {
     expect(calls.mount).toBe(2);
     expect(calls.unmount).toBe(1);
     expect(resizes.length).toBe(0);
+  });
+});
+
+describe("<voxis-overlay> user resize seam setSize/size [guest-js 0.11.0]", () => {
+  let container: HTMLDivElement;
+
+  /** Theme module double that records the `api.size` it was mounted with — the proof that a theme really is (re-)rendered at the new size. */
+  function sizedThemeModule() {
+    const calls = { mount: 0, unmount: 0 };
+    const mountedSizes: Array<{ width: number; height: number }> = [];
+    const module: ThemeModule = {
+      mount: vi.fn((_container: HTMLElement, api: ThemeApi) => {
+        calls.mount += 1;
+        mountedSizes.push({ width: api.size.width, height: api.size.height });
+        return {
+          unmount: vi.fn(() => {
+            calls.unmount += 1;
+          }),
+        };
+      }),
+    };
+    return { module, calls, mountedSizes };
+  }
+
+  function resizeDetails(el: VoxisOverlayElement) {
+    const events: Array<{ width: number; height: number; state: string }> = [];
+    el.addEventListener("voxis-overlay-resize", (e) => {
+      events.push((e as CustomEvent<{ width: number; height: number; state: string }>).detail);
+    });
+    return events;
+  }
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("MountOverlayOptions.size restores a persisted size at mount: the pill is born at it and the theme mounts ONCE at that size (no flash of the manifest size)", () => {
+    const { module, calls, mountedSizes } = sizedThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, idleTheme: true, size: 200 });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+
+    expect(el.userSize).toBe(200);
+    expect(el.size).toEqual({ width: 200, height: 200 });
+    expect(pill.style.width).toBe("200px");
+    expect(pill.style.height).toBe("200px");
+    expect(pill.style.borderRadius).toBe("16px"); // a 200px square is a rounded rect, like the desktop overlay
+    expect(calls.mount).toBe(1);
+    expect(calls.unmount).toBe(0);
+    expect(mountedSizes).toEqual([{ width: 200, height: 200 }]);
+  });
+
+  it("MountOverlayOptions.size is clamped like setSize (a bad persisted value cannot reach the DOM)", () => {
+    const { module } = sizedThemeModule();
+    const big = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, idleTheme: true, size: 5000 });
+    expect(big.userSize).toBe(MAX_OVERLAY_EDGE);
+    expect(big.size).toEqual({ width: MAX_OVERLAY_EDGE, height: MAX_OVERLAY_EDGE });
+    big.remove();
+
+    const small = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, idleTheme: true, size: 10 });
+    expect(small.userSize).toBe(MIN_OVERLAY_EDGE);
+    expect(small.size).toEqual({ width: MIN_OVERLAY_EDGE, height: MIN_OVERLAY_EDGE });
+  });
+
+  it("no size option -> userSize null and the theme's own manifest size (unchanged behaviour)", () => {
+    const { module } = sizedThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, idleTheme: true });
+    expect(el.userSize).toBeNull();
+    expect(el.size).toEqual({ width: 120, height: 120 });
+  });
+
+  it("setSize(edge) while expanded applies the square box, remounts the theme once AT that size, and dispatches voxis-overlay-resize", () => {
+    const { module, calls, mountedSizes } = sizedThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+    el.applyState("recording"); // expanded, lavalamp 120x120, mount #1
+    const resizes = resizeDetails(el);
+
+    el.setSize(300);
+    expect(el.userSize).toBe(300);
+    expect(el.size).toEqual({ width: 300, height: 300 });
+    expect(pill.style.width).toBe("300px");
+    expect(pill.style.height).toBe("300px");
+    expect(calls.unmount).toBe(1);
+    expect(calls.mount).toBe(2);
+    expect(mountedSizes).toEqual([
+      { width: 120, height: 120 },
+      { width: 300, height: 300 },
+    ]);
+    expect(resizes).toEqual([{ width: 300, height: 300, state: "expanded" }]);
+  });
+
+  it("setSize clamps to [MIN_OVERLAY_EDGE, MAX_OVERLAY_EDGE], and userSize reports the clamped value", () => {
+    const { module } = sizedThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, idleTheme: true });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+
+    el.setSize(5);
+    expect(el.userSize).toBe(MIN_OVERLAY_EDGE);
+    expect(pill.style.width).toBe(`${MIN_OVERLAY_EDGE}px`);
+
+    el.setSize(99999);
+    expect(el.userSize).toBe(MAX_OVERLAY_EDGE);
+    expect(pill.style.width).toBe(`${MAX_OVERLAY_EDGE}px`);
+  });
+
+  it("the override SURVIVES setTheme: a theme switch keeps the user's size, and only setSize(null) drops back to the manifest size", () => {
+    const { module, mountedSizes } = sizedThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, idleTheme: true });
+
+    el.setSize(200);
+    el.setTheme("all_aquarium"); // manifest 340x170 — the override wins over it
+    expect(el.userSize).toBe(200);
+    expect(el.size).toEqual({ width: 200, height: 200 });
+    expect(mountedSizes[mountedSizes.length - 1]).toEqual({ width: 200, height: 200 });
+
+    el.setSize(null);
+    expect(el.userSize).toBeNull();
+    expect(el.size).toEqual({ width: 340, height: 170 }); // back to all_aquarium's own aspect ratio
+    expect(mountedSizes[mountedSizes.length - 1]).toEqual({ width: 340, height: 170 });
+  });
+
+  it("live preview resizes the box WITHOUT remounting the theme; the final setSize remounts it once at the new size", () => {
+    const { module, calls, mountedSizes } = sizedThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module, idleTheme: true });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+    const resizes = resizeDetails(el);
+
+    el.setSize(150, { live: true });
+    el.setSize(180, { live: true });
+    expect(pill.style.width).toBe("180px");
+    expect(pill.style.height).toBe("180px");
+    expect(calls.mount).toBe(1); // still the original mount — cheap drag frames
+    expect(calls.unmount).toBe(0);
+    expect(mountedSizes).toEqual([{ width: 120, height: 120 }]);
+
+    el.setSize(180); // gesture end
+    expect(calls.unmount).toBe(1);
+    expect(calls.mount).toBe(2);
+    expect(mountedSizes[mountedSizes.length - 1]).toEqual({ width: 180, height: 180 });
+    // One resize event per size CHANGED: the two live frames, not the
+    // final call (the size it settles on is the one it already previewed).
+    expect(resizes).toEqual([
+      { width: 150, height: 150, state: "expanded" },
+      { width: 180, height: 180, state: "expanded" },
+    ]);
+  });
+
+  it("setSize while compact only records the override (no mount, no resize event, compact stays COMPACT_SIZE); the next expansion adopts it", () => {
+    const { module, calls, mountedSizes } = sizedThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
+    const resizes = resizeDetails(el);
+
+    el.setSize(200);
+    expect(calls.mount).toBe(0);
+    expect(el.userSize).toBe(200);
+    expect(el.lifecycle).toBe("compact");
+    expect(el.size).toEqual(COMPACT_SIZE);
+    expect(resizes.length).toBe(0);
+
+    el.applyState("recording");
+    expect(el.size).toEqual({ width: 200, height: 200 });
+    expect(calls.mount).toBe(1);
+    expect(mountedSizes).toEqual([{ width: 200, height: 200 }]);
+
+    el.applyState("idle");
+    expect(el.size).toEqual(COMPACT_SIZE); // the compact handle is never user-sized
+  });
+
+  it("a size change keeps the pill's top-left in place — the same anchor semantics a theme size change has (the host owns placement)", () => {
+    const { module } = sizedThemeModule();
+    const el = mountOverlay(container, { driver: "host", theme: "lavalamp", themeModule: module });
+    const pill = el.shadowRoot!.querySelector(".pill") as HTMLButtonElement;
+
+    el.setPosition({ x: 20, y: 20 });
+    el.applyState("recording"); // grown from {20,20}, so top-left stays there
+    el.setSize(300);
+    expect({ x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) }).toEqual({ x: 20, y: 20 });
+
+    el.applyState("idle"); // shrink still lands on the recorded compact resting spot
+    expect({ x: parseFloat(pill.style.left), y: parseFloat(pill.style.top) }).toEqual({ x: 20, y: 20 });
   });
 });
 

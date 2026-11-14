@@ -1,5 +1,19 @@
 # Changelog
 
+## guest-js 0.11.0
+
+### Added
+- **The pill is user-resizable.** `VoxisOverlayElement.setSize(edge, { live })`,
+  `MountOverlayOptions.size` (an initial/persisted override, so the pill is
+  born at the host's size) and the `el.userSize` getter — the seam a host
+  needs to run its own resize grip, as Voxis desktop's overlay does. One
+  square edge, clamped to `[MIN_OVERLAY_EDGE, MAX_OVERLAY_EDGE]` (`[56, 1024]`)
+  by the new pure `clampOverlayEdge` (same bounds/semantics as the desktop's
+  `src/overlay/resize.ts`); it applies to the expanded size only, survives
+  `setTheme`, and `setSize(null)` drops back to the theme's manifest size.
+  `{ live: true }` is the drag-frame variant (pill box only, no theme
+  remount); the final `setSize(edge)` remounts the theme once at the new size.
+
 ## Unreleased
 
 ### Added

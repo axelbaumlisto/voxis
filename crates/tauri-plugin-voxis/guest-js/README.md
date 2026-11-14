@@ -8,7 +8,9 @@ the Rust command/event contract in `../contract/fixtures/*.json` and
 manual update here (the fixture-snapshot tests on both sides are the
 safety net, not a generator).
 
-Currently versioned **`0.10.0`** (0.10.0: the generated builtin theme set gains the five new orb themes (`orb_falls`, `orb_rocaille`, `orb_shdr_03`, `orb_shdr_06`, `orb_shdr_07`), and `lavalamp`/`metaballs3d`/the orbs all draw through one shared WebGL lifetime, so this is a **re-vendor** even though no hand-written API changed; 0.9.5: the manifest's `apiKey` help is state-neutral — "Leave it empty to keep the saved key." — because the «Forget the key» button it used to describe is only rendered when a key exists, so with no key stored the sentence named a control the person cannot see (owner's iPhone/iPad); 0.9.4: that help became plain user copy instead of naming `null` and `clearApiKey`; 0.9.3: `settings_set`'s `apiKey` is three-valued — absent keeps, `null` erases, `""` keeps — plus a `clearApiKey()` helper; 0.9.2: the theme select shows theme names via `status.themes`; 0.9.1: `overlayHidden` toggle split from `overlayPlacement`; 0.9.0: settings manifest + `getSettings`/`setSettings`), independently of the Rust crate's own
+Currently versioned **`0.11.0`** (0.11.0: the pill is user-resizable —
+`setSize(edge, { live })`, the `MountOverlayOptions.size` mount option and
+`el.userSize`, see "User resize seam" below; 0.10.0: the generated builtin theme set gains the five new orb themes (`orb_falls`, `orb_rocaille`, `orb_shdr_03`, `orb_shdr_06`, `orb_shdr_07`), and `lavalamp`/`metaballs3d`/the orbs all draw through one shared WebGL lifetime, so this is a **re-vendor** even though no hand-written API changed; 0.9.5: the manifest's `apiKey` help is state-neutral — "Leave it empty to keep the saved key." — because the «Forget the key» button it used to describe is only rendered when a key exists, so with no key stored the sentence named a control the person cannot see (owner's iPhone/iPad); 0.9.4: that help became plain user copy instead of naming `null` and `clearApiKey`; 0.9.3: `settings_set`'s `apiKey` is three-valued — absent keeps, `null` erases, `""` keeps — plus a `clearApiKey()` helper; 0.9.2: the theme select shows theme names via `status.themes`; 0.9.1: `overlayHidden` toggle split from `overlayPlacement`; 0.9.0: settings manifest + `getSettings`/`setSettings`), independently of the Rust crate's own
 version — bump each on its own schedule. (`0.4.0`, additive: new
 `setProvider(opts)` command for typing a Groq key / self-hosted URL in
 directly, no Voxis desktop needed. `0.2.0` earlier: the pill now resolves
@@ -192,6 +194,12 @@ webview unmodified).
   the expanded window (0.8.0): only the theme is drawn, for a host that lays
   an always-shown window (`idleTheme`) over its own content. The compact
   handle keeps its fill.
+- `size?: number | null` (0.11.0) — the initial user size override: one
+  square edge in px, clamped to `[MIN_OVERLAY_EDGE, MAX_OVERLAY_EDGE]`;
+  `null`/absent = the theme's manifest size. A host restores its persisted
+  size with it so the pill is BORN at that size (one theme mount at the
+  right size, no flash of the manifest size) instead of calling `setSize`
+  right after mount — see "User resize seam" below.
 
 `initialPosition` is the compact RESTING spot in every lifecycle (0.8.0),
 the same meaning `setPosition` has had since 0.7.0: an `idleTheme` window is
@@ -230,6 +238,55 @@ A host can read the current size via `el.size`/`el.lifecycle`, or listen
 for `"voxis-overlay-resize"` (`detail: { width, height, state }`,
 `state` being `"compact" | "expanded"`) to resize its own layout around
 the pill instead of polling.
+
+### User resize seam (`setSize`, 0.11.0)
+
+The pill is resizable the way the desktop overlay's resize grip makes it
+resizable: ONE square edge length (every builtin theme draws into a square
+canvas and the orb shaders normalise by `min(w, h)`, so a rectangular pill
+would squash them), clamped by `clampOverlayEdge` to
+`[MIN_OVERLAY_EDGE, MAX_OVERLAY_EDGE]` = `[56, 1024]` — the same bounds and
+semantics as Voxis desktop's `src/overlay/resize.ts`. The element offers the
+seam; the host owns the grip gesture (the desktop's dominant-axis drag and
+double-click-to-reset are its own UX, not this package's) and the
+persistence.
+
+```ts
+const el = mountOverlay(document.body, {
+  driver: "host",
+  idleTheme: true,
+  size: loadPersistedSize(), // number | null — restored without a flash
+});
+
+// every frame of the gesture — cheap: the pill box only, no theme remount
+el.setSize(edge, { live: true });
+
+// gesture end — remounts the theme once, so it renders at the new size
+el.setSize(edge);
+savePersistedSize(edge);
+
+// double-click reset: back to the theme's manifest size
+el.setSize(null);
+savePersistedSize(null);
+```
+
+- The override applies to the **expanded** size only — the compact handle
+  stays 56×56.
+- It **survives `setTheme`**: switching theme keeps the user's size. Only
+  `setSize(null)` drops it.
+- `{ live: true }` resizes the pill box and nothing else, leaving the mounted
+  theme drawing at the size it was mounted with (stretched by CSS — an
+  acceptable preview, and the only cheap option: a theme reads `api.size`
+  once at mount). The final `setSize(edge)` performs exactly the one
+  unmount + one mount `setTheme` does, so `api.size` and the theme's own
+  canvas are right for the size it settles at.
+- `el.userSize` is the current override (`number | null`), `el.size` the
+  current on-screen size. A size change dispatches `"voxis-overlay-resize"`
+  like every other one, and leaves the pill's top-left where it is — the same
+  anchor a theme size change has (placement stays the host's, via
+  `setPosition`).
+- While compact, `setSize` only records the override (no mount, no resize
+  event); the next expansion adopts it.
 
 ## In-app hotkey (`HotkeyMachine`/`bindHotkey`)
 
