@@ -153,6 +153,31 @@ agreement had expired). No app changes beyond 0.1.16.
   as the safety net for the cases the listener cannot see (muted mic, a
   listener that failed to arm).
 
+## `tauri-plugin-voxis` 0.8.0 / `@voxis/tauri-plugin-voxis` (guest-js) 0.10.0
+
+- **Five new WebGL orb themes** — `orb_falls`, `orb_rocaille`,
+  `orb_shdr_03`, `orb_shdr_06`, `orb_shdr_07` join
+  `settings::BUILTIN_THEMES` and the generated guest-js set; nothing a 0.7.5
+  host had was removed. Every shader theme (the orbs, `lavalamp`,
+  `metaballs3d`, …) also now draws through ONE shared WebGL lifetime
+  (`_shared/gl-theme.ts`) instead of each carrying its own
+  canvas/context/rAF/dispose.
+- **`voxis-core`'s `OverlayConfig` gains `custom_x`/`custom_y`/`custom_w`/
+  `custom_h`** — the exact spot and size of a user-dragged/resized overlay
+  (logical px, `None` = follow the preset `position`/`margin`/theme
+  footprint), persisted as the `overlay_custom_*` keys. `ConfigSqliteStorage::
+  set_overlay_theme` writes **just** the `overlay_theme` key, for a caller
+  changing one setting of an already-loaded config — `save` would rewrite
+  every key, including values `load` silently defaulted because it could not
+  parse them. These are public fields, so a host constructing `OverlayConfig`
+  with a struct literal must add them (hence the minor bump).
+- **The desktop's dead-stream stop moved into `voxis-core`**: it now exports
+  `guard::is_digital_silence`, `DEAD_STREAM_SILENCE_MS` and
+  `StopReason::DeviceSilent` (used by the Voxis desktop's recording guard);
+  the plugin does not emit it, so no host-facing contract changed.
+- guest-js 0.10.0 is a **re-vendor**: the generated theme set gains the five
+  new orb themes even though no hand-written API moved.
+
 ## `tauri-plugin-voxis` 0.7.5 / `@voxis/tauri-plugin-voxis` (guest-js) 0.9.5
 
 - **The API key field's help no longer names a button that may not be on
