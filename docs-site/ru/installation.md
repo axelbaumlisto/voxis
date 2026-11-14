@@ -5,7 +5,29 @@ layout: default
 
 # Установка
 
-## Требования
+## Установка готовой сборки
+
+Сборки лежат на [GitHub Releases](https://github.com/axelbaumlisto/voxis/releases/latest). Ссылки ниже всегда ведут на последнюю версию.
+
+| ОС | Скачать | Примечание |
+|---|---|---|
+| Windows 10/11 (x64) | [voxis-windows-x64-setup.exe](https://github.com/axelbaumlisto/voxis/releases/latest/download/voxis-windows-x64-setup.exe) | Установщик, без прав администратора; ставит в `%LOCALAPPDATA%\Voxis`. |
+| Windows, портативная | `voxis-windows-x64-portable.zip` на странице релиза | Распакуйте куда угодно и запустите `voxis.exe`. |
+| macOS 12+ (Apple Silicon) | [voxis-macos-arm64.dmg](https://github.com/axelbaumlisto/voxis/releases/latest/download/voxis-macos-arm64.dmg) | Откройте DMG и перетащите Voxis в «Программы». |
+| macOS, Homebrew | `brew install axelbaumlisto/voxis/voxis` | Бинарь командной строки `voxis`. |
+| Linux x64 | `Voxis_<версия>_amd64.deb` / `Voxis-<версия>-1.x86_64.rpm` на странице релиза | Или голый [voxis-linux-x64-gui](https://github.com/axelbaumlisto/voxis/releases/latest/download/voxis-linux-x64-gui): `chmod +x voxis-linux-x64-gui && ./voxis-linux-x64-gui`. |
+
+**Подпись.** Сборки для macOS подписаны Developer ID и нотаризованы Apple — Gatekeeper открывает их без предупреждений. Сборки для Windows пока без подписи кода: при первом запуске SmartScreen может показать «Система Windows защитила ваш компьютер» — нажмите **«Подробнее» → «Выполнить в любом случае»**.
+
+**Рантайм Windows.** Установщик и портативный zip несут Microsoft Visual C++ runtime. Голый `voxis-windows-x64-gui.exe` на странице релиза — нет; ему нужен установленный [Visual C++ Redistributable 2015–2022](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+
+**Проверить версию:** `voxis --version` (Homebrew) или `voice --version` (пакет Linux) печатает `voxis <версия>`, не запуская приложение.
+
+После установки добавьте ключ транскрипции — см. раздел ниже.
+
+## Сборка из исходников
+
+### Требования
 
 - Bun для фронтенд-скриптов.
 - Rust и Cargo для бэкенда Tauri.
@@ -18,7 +40,7 @@ layout: default
 sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
 ```
 
-## Настройка для разработки
+### Настройка для разработки
 
 ```bash
 bun install
@@ -27,7 +49,7 @@ bun run tauri dev
 
 Конфигурация разработчика Tauri запускает `bun run dev` и обслуживает фронтенд на `http://localhost:5173`.
 
-## Сборка
+### Сборка
 
 ```bash
 bun run tauri build
@@ -37,7 +59,7 @@ bun run tauri build
 
 Настроенные цели сборки Tauri: `app`, `dmg`, `deb` и `rpm`. В Linux готовые пакеты сохраняются в `src-tauri/target/release/bundle/`.
 
-## Заметки по пакетам Linux
+### Заметки по пакетам Linux
 
 Конфигурация сборки Tauri включает форматы Debian и RPM. Результат сборки зависит от хоста и установленных инструментов; установите зависимости для Linux, указанные выше, перед сборкой или запуском тестов на системах на базе Ubuntu.
 
