@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.1.20 (Voxis desktop)
+
+### Added
+- **Settings → "Export to edit"** next to the theme selector: copies the
+  selected theme (builtin or yours) to `<config>/themes/<id>_custom` and shows
+  the folder; the selection does not change.
+- **`voxis --version` / `-V` and `--help`** print and exit without starting the
+  app (the Homebrew formula test checks the version).
+
+### Fixed
+- Theme errors (export, preview) show the real message instead of
+  "Unknown … error".
+- Startup retire of untouched old builtin copies ignores OS files Finder/Explorer
+  drop into folders (`.DS_Store`, `._*`, `Thumbs.db`, `desktop.ini`); they move
+  along with the folder.
+
 ## v0.1.19 (Voxis desktop)
 
 No app changes beyond 0.1.18.
