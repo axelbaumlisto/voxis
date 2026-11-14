@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.21 (Voxis desktop)
+
+No app changes beyond 0.1.20.
+
+### Fixed
+- **The bare macOS binary `voxis-macos-arm64` is notarized** (it was only
+  Developer-ID signed, so a browser download was blocked by Gatekeeper;
+  `brew install` was not affected). A bare Mach-O cannot be stapled — Gatekeeper
+  checks its ticket online.
+
 ## v0.1.20 (Voxis desktop)
 
 ### Added
