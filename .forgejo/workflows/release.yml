@@ -76,7 +76,7 @@ jobs:
             voxis-ci:latest \
             bash -euo pipefail -c '
               bun install --frozen-lockfile && bun run build &&
-              cd src-tauri && cargo clippy --all-targets --features bench -- -D warnings &&
+              cd src-tauri && cargo clippy --all-targets -- -D warnings &&
               cargo test --lib -- --test-threads=1 && cd .. &&
               bun run test:run
             '

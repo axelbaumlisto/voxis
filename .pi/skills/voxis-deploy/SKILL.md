@@ -362,8 +362,8 @@ Apple Event.
 ### Signing gotcha (v0.1.3 post-mortem)
 
 Notarization validates **every Mach-O in the archive**. The bundle used to have TWO executables
-(`voice` and `typing_bench`, both `[[bin]]`s; `typing_bench` is behind the `bench`
-feature since v0.1.22 and no longer ships) — `scripts/ci/mac-shared-vm.sh`
+(`voice` and `typing_bench`, both `[[bin]]`s; `typing_bench` is a cargo example
+since v0.1.22 and no longer ships) — `scripts/ci/mac-shared-vm.sh`
 signs everything under `Contents/MacOS/*` and
 `Contents/Frameworks/*` in a loop, inside-out, with the same
 `--options runtime --timestamp --entitlements` flags, then the bundle. Never sign a

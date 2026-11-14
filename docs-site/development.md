@@ -61,7 +61,7 @@ Important frontend areas:
 - `src/theme-engine/` — ThemeHost, contract (`apiVersion` 1), builtin sources, and renderers.
 - `src/overlay.tsx` — overlay webview entry point and pointer recording wiring.
 
-Backend code lives in `src-tauri/` and uses Rust with Tauri v2. There are two binaries: `voice` (main app) and `typing_bench` (auto-type latency benchmark).
+Backend code lives in `src-tauri/` and uses Rust with Tauri v2. The app binary is `voice`; the auto-type latency benchmark is an example (`cargo run --release --example typing_bench`).
 
 Important modules include:
 

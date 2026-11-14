@@ -26,8 +26,8 @@
 
 ### Removed
 - **`typing_bench.exe` no longer ships in installs** (dev-only auto-type
-  latency benchmark). Build it explicitly with `cargo build --bin typing_bench
-  --features bench`.
+  latency benchmark). It is now a cargo example: `cargo run --release --example
+  typing_bench`.
 
 ## v0.1.21 (Voxis desktop)
 

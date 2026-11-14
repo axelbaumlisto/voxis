@@ -94,7 +94,7 @@ echo "BUILD_SECONDS=$BUILD_SECONDS"
 step "signing $APP"
 # Inner binaries first, then the bundle — Apple's inside-out signing order.
 # Incident (v0.1.3 run 4295): notarization returned Invalid because only
-# `voice` was re-signed — the bundle's second [[bin]], typing_bench
+# `voice` was re-signed — the bundle's then-second [[bin]], typing_bench
 # (Contents/MacOS/typing_bench), kept Tauri's non-Developer-ID signature, and
 # notarization validates every Mach-O in the archive. Sign ALL executables and
 # bundled dylibs/frameworks generically instead of naming one file.

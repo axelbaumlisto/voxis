@@ -42,7 +42,7 @@ cd src-tauri && cargo test
 - `src/theme-engine/` — ThemeHost, контракт (`apiVersion` 1), builtin-исходники и рендереры.
 - `src/overlay.tsx` — entrypoint оверлея и press/release запись по opaque-пикселям.
 
-Бэкенд в `src-tauri/`: Rust + Tauri v2. Два бинарника: `voice` (основное приложение) и `typing_bench` (бенчмарк задержки автопечати).
+Бэкенд в `src-tauri/`: Rust + Tauri v2. Бинарник приложения — `voice`; бенчмарк задержки автопечати — example (`cargo run --release --example typing_bench`).
 
 Важные модули:
 
