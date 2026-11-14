@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (Voxis desktop)
+## v0.1.18 (Voxis desktop)
 
 ### Changed
 - **Builtin themes live in the app binary**: they update and disappear with the
