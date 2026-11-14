@@ -126,6 +126,11 @@ pub struct PluginState {
     /// `TauriEventSink` in production, `events::RecordingSink` in tests.
     pub events: Arc<dyn EventSink>,
     pub pipeline_config: std::sync::Mutex<PipelineConfig>,
+    /// ONE automatic retry of a transcription the provider REFUSED (403 /
+    /// «Access denied» / Cloudflare), default ON (naked owner, 14.11). Kept
+    /// apart from `pipeline_config` (a profile apply replaces that one) and
+    /// persisted on its own in `<plugin dir>/retry-on-refusal` (`settings`).
+    pub retry_on_refusal: std::sync::atomic::AtomicBool,
     /// The OS-level hotkey backend `commands::set_hotkey` delegates to
     /// (Task 4's `hotkey_desktop::RdevHotkey` on desktop). `None` on
     /// platforms/hosts with no such backend (iOS, or desktop builds
@@ -165,6 +170,7 @@ impl PluginState {
             events: self.events.clone(),
             app_config: config.app_config.clone(),
             dictionary: config.dictionary.clone(),
+            retry_on_refusal: self.retry_on_refusal.load(std::sync::atomic::Ordering::SeqCst),
         }
     }
 
@@ -212,6 +218,7 @@ impl PluginState {
             capture,
             events,
             pipeline_config: std::sync::Mutex::new(PipelineConfig::default()),
+            retry_on_refusal: std::sync::atomic::AtomicBool::new(settings::load_retry_on_refusal(&plugin_config_dir)),
             hotkey,
             host_id: "default-host".to_string(),
             provider_host: "api.groq.com".to_string(),
@@ -632,6 +639,7 @@ mod live_activity_intent_tests {
             capture: Arc::new(MockCapture::new()),
             events: Arc::new(RecordingSink::new()),
             pipeline_config: StdMutex::new(PipelineConfig { app_config, dictionary: Vec::new() }),
+            retry_on_refusal: std::sync::atomic::AtomicBool::new(true),
             hotkey: None,
             host_id: "test-host".to_string(),
             provider_host: "api.groq.com".to_string(),
@@ -906,6 +914,7 @@ mod hotkey_sink_tests {
             capture: Arc::new(MockCapture::new()),
             events: Arc::new(RecordingSink::new()),
             pipeline_config: StdMutex::new(PipelineConfig { app_config, dictionary: Vec::new() }),
+            retry_on_refusal: std::sync::atomic::AtomicBool::new(true),
             hotkey: None,
             host_id: "test-host".to_string(),
             provider_host: "api.groq.com".to_string(),

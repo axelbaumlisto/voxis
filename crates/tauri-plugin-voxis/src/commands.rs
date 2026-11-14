@@ -345,6 +345,7 @@ mod tests {
             capture,
             events: Arc::new(RecordingSink::new()),
             pipeline_config: std::sync::Mutex::new(PipelineConfig { app_config, dictionary: Vec::new() }),
+            retry_on_refusal: std::sync::atomic::AtomicBool::new(true),
             hotkey: None,
             host_id: "test-host".to_string(),
             provider_host: "api.groq.com".to_string(),

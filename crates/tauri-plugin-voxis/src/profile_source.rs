@@ -632,6 +632,7 @@ mod tests {
             capture: mock.clone(),
             events: Arc::new(RecordingSink::new()),
             pipeline_config: std::sync::Mutex::new(PipelineConfig::default()),
+            retry_on_refusal: std::sync::atomic::AtomicBool::new(true),
             hotkey: None,
             host_id: "test-host".to_string(),
             provider_host: "api.groq.com".to_string(),

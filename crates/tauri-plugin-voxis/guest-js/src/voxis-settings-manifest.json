@@ -125,6 +125,14 @@
           "help": { "en": "Empty keeps the current model.", "ru": "Пусто — оставить текущую." }
         },
         {
+          "key": "retryOnRefusal",
+          "kind": "toggle",
+          "store": "plugin",
+          "default": true,
+          "label": { "en": "Retry once when the provider refuses", "ru": "Повторить один раз при отказе провайдера" },
+          "help": { "en": "A 403 / «Access denied» from the provider is retried once after 1.5 s.", "ru": "403 / «Access denied» от провайдера повторяется один раз через 1,5 с." }
+        },
+        {
           "key": "providerStatus",
           "kind": "status",
           "store": "plugin",

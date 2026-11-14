@@ -62,6 +62,9 @@ pub struct PipelineDeps {
     /// `(source, replacement)` dictionary entries, snapshotted the same
     /// way (Task 2/6/7 populate from `VoxisProfile.dictionary`).
     pub dictionary: Vec<(String, String)>,
+    /// ONE more attempt when the provider REFUSED the request
+    /// (`is_provider_refusal`) — `PluginState::retry_on_refusal`, default on.
+    pub retry_on_refusal: bool,
 }
 
 /// Claims the single-flight slot for a new session (`SessionGuard::begin`,
@@ -369,6 +372,18 @@ fn finish(
     let _ = outcome_tx.send(Some(result));
 }
 
+/// The pause before the one retry of a refused request.
+const REFUSAL_RETRY_PAUSE_MS: u64 = 1_500;
+
+/// The provider (or a proxy in front of it) REFUSED this request: 403,
+/// «Access denied», «Forbidden», a Cloudflare block. naked's notice classifier
+/// (`rules/voxisTurnNotice` BLOCKED) reads the same words.
+pub(crate) fn is_provider_refusal(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    m.contains("access denied") || m.contains("forbidden") || m.contains("cloudflare")
+        || m.split(|c: char| !c.is_ascii_digit()).any(|t| t == "403")
+}
+
 enum TranscribeOutcome {
     Text { text: String, language: Option<String> },
     Aborted,
@@ -419,10 +434,32 @@ async fn run_transcription(
         }
     };
 
-    let handle = tokio::spawn(async move { client.transcribe(bytes).await });
-    *abort_cell.lock().unwrap() = Some(handle.abort_handle());
-    let joined = handle.await;
-    *abort_cell.lock().unwrap() = None;
+    // ONE retry of a provider REFUSAL (naked owner 14.11; the owner's iPad saw
+    // Cloudflare in front of Groq answer «Access denied» intermittently from
+    // one network). Only that class: a bad key or a dead network would fail the
+    // same way again. The pause is cancel-aware; a cancel ends the turn.
+    let client = Arc::new(client);
+    let bytes = Arc::new(bytes);
+    let mut attempt = 0;
+    let joined = loop {
+        attempt += 1;
+        let (c, b) = (client.clone(), bytes.clone());
+        let handle = tokio::spawn(async move { c.transcribe((*b).clone()).await });
+        *abort_cell.lock().unwrap() = Some(handle.abort_handle());
+        let joined = handle.await;
+        *abort_cell.lock().unwrap() = None;
+        let refused = matches!(&joined, Ok(Err(e)) if is_provider_refusal(&e.to_string()));
+        if attempt == 1 && refused && deps.retry_on_refusal && !cancelled.load(Ordering::SeqCst) {
+            for _ in 0..(REFUSAL_RETRY_PAUSE_MS / 100) {
+                if cancelled.load(Ordering::SeqCst) {
+                    return TranscribeOutcome::Aborted;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            continue;
+        }
+        break joined;
+    };
 
     // Real race, kept: a `cancel()` that landed while the request was in
     // flight but too late to actually abort the socket (the response had
@@ -504,7 +541,7 @@ mod tests {
         // want transcription set both `min_recording_ms` (low/0) AND
         // `api_url_override` (a local mockito server) explicitly.
         let app_config = AppConfig { silence_timeout_ms: 0, min_recording_ms: 3_600_000, ..AppConfig::default() };
-        PipelineDeps { capture, secrets, events: sink, app_config, dictionary: Vec::new() }
+        PipelineDeps { capture, secrets, events: sink, app_config, dictionary: Vec::new(), retry_on_refusal: true }
     }
 
     async fn drain_outcome(mut rx: watch::Receiver<Option<Outcome>>) -> Outcome {
@@ -577,6 +614,75 @@ mod tests {
     // actually exercise the HTTP path use real time; tests that never
     // reach the network (silence/lease/liveness/self-cap decisions) keep
     // `start_paused` to run instantly regardless of guard-window length.
+    #[test]
+    fn a_provider_refusal_is_403_access_denied_forbidden_or_cloudflare_and_nothing_else() {
+        assert!(is_provider_refusal("API error: Access denied. Please check your network settings."));
+        assert!(is_provider_refusal("API error: 403 Forbidden"));
+        assert!(is_provider_refusal("blocked by Cloudflare"));
+        assert!(!is_provider_refusal("API error: 401 Invalid API Key"));
+        assert!(!is_provider_refusal("HTTP error: error sending request"));
+        assert!(!is_provider_refusal("API error: 4031 bytes"), "403 only as its own number");
+    }
+
+    /// Runs one Toggle session against `server` (its `/transcriptions`) and returns the outcome.
+    async fn one_turn(server: &mockito::Server, retry_on_refusal: bool) -> Outcome {
+        let dir = tempfile::tempdir().unwrap();
+        let (file, _path) = rec_file(&dir);
+        let capture = Arc::new(MockCapture::new());
+        let sink = Arc::new(RecordingSink::new());
+        let mut deps = test_deps(capture.clone(), sink.clone());
+        deps.app_config.api_url_override = Some(format!("{}/transcriptions", server.url()));
+        deps.app_config.min_recording_ms = 0;
+        deps.retry_on_refusal = retry_on_refusal;
+        let sessions = Arc::new(SessionGuard::new());
+        capture.start(&dir.path().join("session.wav"), 999_999).unwrap();
+        let (id, _rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
+        capture.tick();
+        drain_outcome(sessions.request_stop(&id).unwrap()).await
+    }
+
+    #[tokio::test] // real time: real HTTP to a local mockito server.
+    async fn a_refused_request_is_retried_once_and_the_second_answer_counts() {
+        let mut server = mock_server().await;
+        let refused = server.mock("POST", "/transcriptions").with_status(403).with_body("Access denied").expect(1).create_async().await;
+        let ok = server
+            .mock("POST", "/transcriptions")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"text": "second time", "language": "en"}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        let outcome = one_turn(&server, true).await;
+        assert_eq!(outcome.unwrap().text, "second time");
+        refused.assert_async().await;
+        ok.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn with_the_retry_off_a_refusal_fails_at_once_after_one_request() {
+        let mut server = mock_server().await;
+        let refused = server.mock("POST", "/transcriptions").with_status(403).with_body("Access denied").expect(1).create_async().await;
+        assert!(one_turn(&server, false).await.is_err());
+        refused.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn a_second_refusal_is_the_answer_no_third_request() {
+        let mut server = mock_server().await;
+        let refused = server.mock("POST", "/transcriptions").with_status(403).with_body("Access denied").expect(2).create_async().await;
+        assert!(one_turn(&server, true).await.is_err());
+        refused.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn a_key_refusal_is_not_retried() {
+        let mut server = mock_server().await;
+        let auth = server.mock("POST", "/transcriptions").with_status(401).with_body("Invalid API Key").expect(1).create_async().await;
+        assert!(one_turn(&server, true).await.is_err());
+        auth.assert_async().await;
+    }
+
     #[tokio::test]
     async fn happy_path_returns_transcribed_and_dictionary_applied_text() {
         // Dedicated (non-pooled) listener -- mockito's plain `new_async()`
@@ -673,7 +779,7 @@ mod tests {
             silence_timeout_ms: 0,
             ..AppConfig::default()
         };
-        let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink, app_config, dictionary: Vec::new() };
+        let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink, app_config, dictionary: Vec::new(), retry_on_refusal: true };
 
         capture.start(&dir.path().join("session.wav"), 999_999).unwrap();
         let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
@@ -1013,7 +1119,7 @@ mod tests {
         let secrets = Arc::new(InMemorySecretStore::new());
         secrets.set(API_KEY_SECRET_NAME, &Secret::new("test-key")).unwrap();
         let app_config = AppConfig { silence_timeout_ms: 0, min_recording_ms: 3_600_000, ..AppConfig::default() };
-        let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink, app_config, dictionary: Vec::new() };
+        let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink, app_config, dictionary: Vec::new(), retry_on_refusal: true };
 
         let sessions = Arc::new(SessionGuard::new());
         let (id, _session_rx) = spawn_session(&sessions, deps, file, Mode::Toggle);
@@ -1096,7 +1202,7 @@ mod tests {
         let sink: Arc<RecordingSink> = Arc::new(RecordingSink::new());
         let secrets = Arc::new(InMemorySecretStore::new());
         let app_config = AppConfig { silence_timeout_ms: 0, min_recording_ms: 3_600_000, ..AppConfig::default() };
-        let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink, app_config, dictionary: Vec::new() };
+        let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink, app_config, dictionary: Vec::new(), retry_on_refusal: true };
 
         let sessions = Arc::new(SessionGuard::new());
         capture.start(&path, 999_999).unwrap();
@@ -1154,7 +1260,7 @@ mod tests {
         let sink: Arc<dyn EventSink> = Arc::new(PanicOnIdleStateSink);
         let secrets = Arc::new(InMemorySecretStore::new());
         let app_config = AppConfig { silence_timeout_ms: 0, min_recording_ms: 3_600_000, ..AppConfig::default() };
-        let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink, app_config, dictionary: Vec::new() };
+        let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink, app_config, dictionary: Vec::new(), retry_on_refusal: true };
 
         let sessions = Arc::new(SessionGuard::new());
         capture.start(&path, 999_999).unwrap();
@@ -1242,7 +1348,7 @@ mod tests {
             silence_timeout_ms: 0,
             ..AppConfig::default()
         };
-        let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink.clone(), app_config, dictionary: Vec::new() };
+        let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink.clone(), app_config, dictionary: Vec::new(), retry_on_refusal: true };
 
         let sessions = Arc::new(SessionGuard::new());
         capture.start(&path, 1).unwrap(); // cap_samples = 1: self-cap fires on the very first sample
@@ -1336,7 +1442,7 @@ mod tests {
             silence_timeout_ms: 0,
             ..AppConfig::default()
         };
-        let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink.clone(), app_config, dictionary: Vec::new() };
+        let deps = PipelineDeps { capture: capture.clone(), secrets, events: sink.clone(), app_config, dictionary: Vec::new(), retry_on_refusal: true };
 
         let sessions = Arc::new(SessionGuard::new());
         capture.start(&path, 999_999).unwrap();

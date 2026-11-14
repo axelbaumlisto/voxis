@@ -1,5 +1,14 @@
 # Changelog
 
+## tauri-plugin-voxis 0.8.1
+
+### Added
+- **One automatic retry when the provider refuses a transcription** (403 /
+  «Access denied» / «Forbidden» / Cloudflare), 1.5 s after the refusal,
+  cancel-aware. A key refusal (401) or a dead network is not retried. New
+  plugin setting `retryOnRefusal` (manifest toggle, default **on**), kept in
+  `<plugin dir>/retry-on-refusal` so a turned-off value survives a restart.
+
 ## v0.1.22 (Voxis desktop)
 
 ### Fixed

@@ -39,7 +39,16 @@ use crate::PluginState;
 
 /// Every `store: "plugin"` key `settings_set` accepts (and the manifest
 /// declares). `apiKey` is the only one `settings_get` never returns.
-pub const PLUGIN_SETTING_KEYS: &[&str] = &["provider", "apiKey", "apiUrlOverride", "model", "hotkey", "theme"];
+pub const PLUGIN_SETTING_KEYS: &[&str] = &["provider", "apiKey", "apiUrlOverride", "model", "hotkey", "theme", "retryOnRefusal"];
+
+/// `<plugin dir>/retry-on-refusal`: `0` turns the one retry off; anything else
+/// (or no file) is the default, ON.
+const RETRY_ON_REFUSAL_FILE: &str = "retry-on-refusal";
+
+/// The stored `retryOnRefusal` (default `true`: absent/unreadable file).
+pub fn load_retry_on_refusal(plugin_dir: &std::path::Path) -> bool {
+    std::fs::read_to_string(plugin_dir.join(RETRY_ON_REFUSAL_FILE)).map(|s| s.trim() != "0").unwrap_or(true)
+}
 
 /// `values.provider` for the built-in Groq endpoint (no URL override).
 pub const PROVIDER_GROQ: &str = "groq";
@@ -122,6 +131,8 @@ pub struct SettingsValues {
     /// Global hotkey spec string (`"alt_r"`, `"Cmd+Shift+V"`); desktop only.
     pub hotkey: String,
     pub theme: String,
+    /// One automatic retry of a provider-refused transcription (default on).
+    pub retry_on_refusal: bool,
 }
 
 /// Read-only facts the manifest's `status` fields and conditions read
@@ -198,6 +209,7 @@ pub fn get(state: &PluginState) -> Result<SettingsSnapshot, PluginError> {
             model: profile.config.model.clone(),
             hotkey: profile.hotkey.clone(),
             theme: profile.theme.clone(),
+            retry_on_refusal: state.retry_on_refusal.load(std::sync::atomic::Ordering::SeqCst),
         },
         status: SettingsStatus {
             has_api_key,
@@ -254,6 +266,13 @@ pub fn set(state: &PluginState, values: Value) -> Result<SettingsSnapshot, Plugi
     if state.sessions.has_active() {
         return Err(PluginError::AlreadyRecording);
     }
+
+    // retryOnRefusal: a plain bool, validated before anything is written.
+    let retry_on_refusal = match values.get("retryOnRefusal") {
+        None | Some(Value::Null) => None,
+        Some(Value::Bool(b)) => Some(*b),
+        Some(_) => return Err(invalid("retryOnRefusal", "must be true or false")),
+    };
 
     let mut profile = profile_source::current_profile(state)?;
 
@@ -361,6 +380,13 @@ pub fn set(state: &PluginState, values: Value) -> Result<SettingsSnapshot, Plugi
             .map_err(|e| PluginError::Store { message: format!("resetting consent: {e}") })?;
     }
 
+    if let Some(on) = retry_on_refusal {
+        std::fs::create_dir_all(&state.profile_dir)
+            .and_then(|()| std::fs::write(state.profile_dir.join(RETRY_ON_REFUSAL_FILE), if on { "1" } else { "0" }))
+            .map_err(|e| PluginError::Store { message: format!("saving retryOnRefusal: {e}") })?;
+        state.retry_on_refusal.store(on, std::sync::atomic::Ordering::SeqCst);
+    }
+
     if let Some(e) = hotkey_permission_error {
         return Err(e);
     }
@@ -403,6 +429,7 @@ mod tests {
             capture: Arc::new(MockCapture::new()),
             events: Arc::new(RecordingSink::new()),
             pipeline_config: std::sync::Mutex::new(PipelineConfig::default()),
+            retry_on_refusal: std::sync::atomic::AtomicBool::new(true),
             hotkey,
             host_id: "test-host".to_string(),
             provider_host: "api.groq.com".to_string(),
@@ -429,6 +456,22 @@ mod tests {
         assert_eq!(aquarium["label"], json!({ "en": "All Aquarium", "ru": "All Aquarium" }));
         assert_eq!(wire["themeIds"][0], "all_aquarium");
         assert_eq!(snap.status.plugin_version, env!("CARGO_PKG_VERSION"));
+    }
+
+    /// naked owner 14.11: «один автоповтор при отказе провайдера — в настройки, по умолчанию да».
+    #[test]
+    fn retry_on_refusal_is_on_by_default_and_a_turned_off_value_survives_a_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = state(&tmp, None);
+        assert!(get(&s).unwrap().values.retry_on_refusal, "default ON");
+        assert!(load_retry_on_refusal(&s.profile_dir), "no file = ON");
+        let off = set(&s, json!({ "retryOnRefusal": false })).unwrap();
+        assert!(!off.values.retry_on_refusal);
+        assert!(!s.retry_on_refusal.load(std::sync::atomic::Ordering::SeqCst), "the pipeline reads it at once");
+        assert!(!load_retry_on_refusal(&s.profile_dir), "a fresh PluginState reads it back OFF");
+        assert!(set(&s, json!({ "retryOnRefusal": true })).unwrap().values.retry_on_refusal);
+        assert!(load_retry_on_refusal(&s.profile_dir));
+        assert!(set(&s, json!({ "retryOnRefusal": "yes" })).is_err(), "only a bool");
     }
 
     #[test]
