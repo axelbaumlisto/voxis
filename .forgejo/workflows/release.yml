@@ -226,53 +226,97 @@ jobs:
           done
           echo "all expected Linux/Windows GUI artifacts present ✓"
 
-      - name: build macOS (best-effort — KVM VM)
+      - name: build macOS (best-effort — shared Xcode 26 VM)
         continue-on-error: true
-        timeout-minutes: 150
+        # 100 min = up to 60 min of lock retries + an 11 min cold build; the
+        # job's own budget is 180 min and Linux/Windows take ~40.
+        timeout-minutes: 100
         run: |
-          set -uo pipefail
-          cd /home/spex/work/voxis
-          # voxis now owns its own VM disk clone (2026-09-07, see
-          # docs/MACOS_SIGNING_TODO.md "VM image ownership + host lock") —
-          # this must match scripts/macos-vm.sh's PREPARED default, not
-          # clipshot's source image, or this preflight check silently lies.
-          PREPARED="${VOXIS_MACOS_VM_DIR:-$HOME/voxis-macos-vm}/mac_hdd_ng.prepared.img"
-          if [ ! -f "$PREPARED" ]; then
-            echo "⚠️ no voxis-owned prepared macOS VM image at $PREPARED — skipping macOS"
-            echo "   (run 'scripts/macos-vm.sh clone-image' once on this host first)"
+          # The runner starts this step with `bash -e`, and errexit MUST be off
+          # here: the step is advisory and every exit code is handled
+          # explicitly below. A busy VM lock exits vm.sh non-zero by design
+          # (retried), and a missing artifact file makes `ls` non-zero (a
+          # warning, not a failure) -- with errexit either would abort the
+          # step before the retry / the warning runs.
+          set +e -uo pipefail
+          REPO=/home/spex/work/voxis
+          VM_DIR=/home/spex/macos-xcode26-vm
+          VM="$VM_DIR/vm.sh"
+          cd "$REPO"
+          # The macOS app lane runs on the SHARED macOS 26 / Xcode 26 VM
+          # (~/macos-xcode26-vm, README there), not on the old Docker-OSX
+          # Sonoma clone: one `vm.sh build` call produces all three artifacts
+          # below (signed .app -> notarized + stapled -> DMG, plus the bare
+          # arm64 binary and tarball the Homebrew formula pins). The build
+          # itself lives in the repo (scripts/ci/mac-shared-vm.sh, run in the
+          # guest at ~/src/voxis); on the host only apps/voxis.conf is needed.
+          # scripts/macos-vm.sh + ~/voxis-macos-vm remain as a manual fallback
+          # and are NOT used here.
+          #
+          # Preflight: the app layer must be registered on the shared VM.
+          # Missing -> advisory skip, same semantics as the old image preflight.
+          if [ ! -f "$VM_DIR/apps/voxis.conf" ]; then
+            echo "::warning::no $VM_DIR/apps/voxis.conf — skipping macOS (register the app: $VM_DIR/README.md 'Adding clipshot / voxis')"
             exit 0
           fi
           if [ ! -e /dev/kvm ]; then
-            echo "⚠️ /dev/kvm not available — skipping macOS"
+            echo "::warning::/dev/kvm not available — skipping macOS"
             exit 0
           fi
-          # Lane 1: bare binary (unsigned) — feeds the Homebrew tarball via
-          # scripts/ci/update-homebrew.sh, which pins voxis-macos-arm64.tar.gz.
-          if bash scripts/macos-vm.sh build; then
-            echo "=== macOS artifacts (arm64-only; ort has no x86_64-darwin prebuilt) ==="
-            ls -lh artifacts/voxis-macos-* 2>/dev/null
-            tar -C artifacts -czf artifacts/voxis-macos-arm64.tar.gz voxis-macos-arm64 2>/dev/null || true
-            echo "✅ macOS build succeeded"
-          else
-            echo "⚠️ macOS build failed (advisory — not blocking release)"
+          # vm.sh pushes this sha from $REPO into the guest and NEVER fetches,
+          # so it must be the commit the checkout step above left in the same
+          # persistent worktree (HEAD there = the release tag).
+          SHA=$(git rev-parse HEAD)
+          [ -n "$SHA" ] || { echo "::warning::cannot resolve HEAD in $REPO — skipping macOS"; exit 0; }
+          echo "sha: $SHA"
+          OUT="$VM_DIR/out/voxis/$SHA"
+          # vm.sh rsyncs (never deletes) into $OUT/artifacts-mac -- drop any
+          # leftovers of an earlier run so nothing stale reaches artifacts/.
+          rm -rf "$OUT/artifacts-mac"
+
+          # One macOS VM per host: vm.sh waits <=15 s for
+          # /home/spex/.macos-vm.lock, then exits non-zero BEFORE booting if
+          # another project's VM (naked/clipshot, or the old voxis VM) holds
+          # it — «another macOS VM holds …» / «a macOS VM is already running» /
+          # «… already has a writer». Retry those every 60 s for at most 60 min
+          # (same pattern as naked's release.yml), then advisory skip. Any other
+          # failure — or any failure after «==> sync source», i.e. the guest
+          # already ran the build — is the build's own, so no retry.
+          log=$(mktemp)
+          rc=0
+          t0=$SECONDS
+          while :; do
+            "$VM" build voxis "$SHA" -- 'bash scripts/ci/mac-shared-vm.sh' 2>&1 | tee "$log"
+            rc=${PIPESTATUS[0]}
+            [ "$rc" -ne 0 ] || break
+            if grep -q '==> sync source' "$log" \
+               || ! grep -qE 'another macOS VM holds|a macOS VM is already running|already has a writer' "$log"; then
+              break
+            fi
+            if (( SECONDS - t0 >= 3600 )); then
+              echo "::warning::the host macOS VM lock stayed busy for 60 min (naked/clipshot building?) — skipping macOS (advisory); re-run this tag's release later"
+              rm -f "$log"; exit 0
+            fi
+            echo "macOS VM busy for $(( (SECONDS - t0) / 60 )) min — retrying in 60 s"
+            sleep 60
+          done
+          rm -f "$log"
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::macOS build failed (rc=$rc, advisory — not blocking the release); log: $OUT/build.log"
+            exit 0
           fi
-          # Lane 2: signed + notarized .app -> DMG (GUI install path). Degrades
-          # to an ad-hoc-signed DMG if SIGNING_IDENTITY/the API key aren't
-          # present in the VM — see scripts/macos-vm.sh cmd_build_gui and
-          # docs/MACOS_SIGNING_TODO.md. Independent of Lane 1: its failure
-          # does not affect the tar.gz produced above.
-          if bash scripts/macos-vm.sh build-gui; then
-            echo "=== macOS signed GUI DMG ==="
-            ls -lh artifacts/Voxis_*_aarch64.dmg 2>/dev/null
-            echo "✅ macOS GUI build succeeded"
-          else
-            echo "⚠️ macOS GUI build failed (advisory — not blocking release; unsigned tar.gz above may still ship)"
-          fi
-          # VM cleanup happens in the iOS cross-build gate step below (it
-          # reuses this same still-running VM, with ~/voxis already synced
-          # by scripts/macos-vm.sh above, to run scripts/check-ios-build.sh
-          # inside it) -- that step's own trap stops the VM exactly once,
-          # whichever way it ends.
+
+          # Same artifact directory the publish step reads.
+          mkdir -p artifacts
+          cp -f "$OUT"/artifacts-mac/* artifacts/ 2>/dev/null || true
+          echo "=== macOS artifacts (arm64-only; ort has no x86_64-darwin prebuilt) ==="
+          ls -lh artifacts/voxis-macos-arm64 artifacts/voxis-macos-arm64.tar.gz artifacts/Voxis_*_aarch64.dmg 2>/dev/null
+          for f in voxis-macos-arm64 voxis-macos-arm64.tar.gz; do
+            [ -f "artifacts/$f" ] || echo "::warning::macOS build succeeded but artifacts/$f is missing (log: $OUT/build.log)"
+          done
+          ls artifacts/Voxis_*_aarch64.dmg >/dev/null 2>&1 \
+            || echo "::warning::macOS build succeeded but no Voxis_*_aarch64.dmg was pulled (log: $OUT/build.log)"
+          echo "✅ macOS build finished"
 
       - name: iOS cross-build gate (voxis-core, blocking whenever the macOS VM has the iOS SDK)
         continue-on-error: false
@@ -280,9 +324,13 @@ jobs:
         run: |
           set -uo pipefail
           cd /home/spex/work/voxis
+          # This gate targets the OLD Docker-OSX fallback VM
+          # (~/voxis-macos-vm, ssh :50923). release.yml no longer starts it --
+          # the macOS build step above uses the shared Xcode 26 VM
+          # (~/macos-xcode26-vm, ssh :50933) -- so this gate normally skips.
           PREPARED="${VOXIS_MACOS_VM_DIR:-$HOME/voxis-macos-vm}/mac_hdd_ng.prepared.img"
           if [ ! -f "$PREPARED" ] || [ ! -e /dev/kvm ]; then
-            echo "no voxis-owned macOS VM on this host -- skipping the iOS cross-build gate (same preflight as the macOS build step above)"
+            echo "no voxis-owned fallback macOS VM (~/voxis-macos-vm) on this host -- skipping the iOS cross-build gate (release.yml no longer starts that VM)"
             exit 0
           fi
           SSH_PORT="${SSH_HOST_PORT:-50923}"
@@ -295,7 +343,7 @@ jobs:
           cleanup() { bash scripts/macos-vm.sh stop >/dev/null 2>&1 || true; }
           trap cleanup EXIT
           if ! ios_ssh 'echo ok' >/dev/null 2>&1; then
-            echo "macOS VM not reachable over SSH (the build step above may have skipped/failed to bring it up) -- skipping the iOS cross-build gate"
+            echo "~/voxis-macos-vm is not running/reachable on :$SSH_PORT -- skipping the iOS cross-build gate (that is the old fallback VM; the macOS build step above uses the shared Xcode 26 VM and never boots it)"
             exit 0
           fi
           # The gate needs the iOS SDK (full Xcode) inside the VM; the release

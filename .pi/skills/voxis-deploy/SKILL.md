@@ -4,7 +4,8 @@ description: |
   Use when deploying Voxis, building releases, running CI, or publishing packages —
   the SERVER-WAY: trigger Forgejo CI/CD on spex; the server rebuilds GUI-only
   Linux + Windows artifacts in Docker and a Developer-ID-signed + notarized
-  macOS DMG (plus bare arm64 binary for Homebrew) in a KVM VM, then publishes
+  macOS DMG (plus bare arm64 binary for Homebrew) on the shared macOS 26 /
+  Xcode 26 KVM VM (`~/macos-xcode26-vm` on spex), then publishes
   release artifacts to Forgejo, GitHub and the Homebrew tap. Triggers: voxis deploy, release, build, run ci,
   tag release, voxis.top, publish, homebrew.
 ---
@@ -25,7 +26,7 @@ build outDir and gets emptied on every `bun run build`):
 - `artifacts/Voxis_<version>_x64-setup.exe` (NSIS)
 - macOS (arm64-only, best-effort lane): `artifacts/voxis-macos-arm64` (+ `.tar.gz`,
   Homebrew) and `artifacts/Voxis_<version>_aarch64.dmg` (Developer ID signed,
-  notarized, stapled — see "Signed/notarized DMG lane")
+  notarized, stapled — see "macOS build (shared Xcode 26 VM)")
 
 GitHub carries **both**: release binaries (the canonical public download) and,
 by the owner's decision on 2026-11-12, the `main` branch kept in sync with
@@ -115,7 +116,8 @@ release assets are never deleted (see "Never delete release assets").
    but ONLY if nothing was published yet (`$API/releases/tags/vX.Y.Z` → 404).
 6. Verify publication AND the macOS artifact **on a real Mac** (CI's `publish` succeeds
    even when the macOS lane degraded — it prints `::warning::no signed macOS DMG` and a
-   job-summary line; look for it):
+   job-summary line; look for it. The macOS build log is
+   `~/macos-xcode26-vm/out/voxis/<full-sha>/build.log` on spex):
    ```bash
    gh release view vX.Y.Z --repo axelbaumlisto/voxis --json assets --jq '.assets[].name'
    gh release download vX.Y.Z --repo axelbaumlisto/voxis --pattern "Voxis_*_aarch64.dmg" -D /tmp/rel
@@ -142,8 +144,8 @@ release assets are never deleted (see "Never delete release assets").
 
 ```bash
 ssh spex 'systemctl --user is-active forgejo-runner && docker ps --format "{{.Names}}" | grep -q forgejo && echo forgejo-ok
-  ls -lh ~/voxis-macos-vm/mac_hdd_ng.prepared.img          # voxis OWN image (~38G); missing → macos-vm.sh clone-image
-  ls ~/secrets/apple-dev/notary.env && ls /dev/kvm && echo creds-kvm-ok
+  ls ~/macos-xcode26-vm/apps/voxis.conf ~/macos-xcode26-vm/voxis.qcow2   # shared VM app layer; no conf → macOS lane skips (VM README "Adding clipshot / voxis")
+  ls ~/macos-xcode26-vm/creds.qcow2 && ls /dev/kvm && echo macos-vm-ok      # signing creds layer + KVM
   docker images voxis-ci --format "{{.Repository}}:{{.Tag}}" | grep -q voxis-ci && echo ci-image-ok || echo "CI IMAGE MISSING"
   docker ps --format "{{.Names}} {{.Status}}" | grep -iE "macos|osx" || echo "no macOS VM running (good)"
   cd ~/work/voxis && git status --short | head -3            # MUST be empty (see below)'
@@ -174,10 +176,11 @@ Two failures that shipped a broken v0.1.16 (2026-11-13), both now guarded:
 - **No DMG: `notarytool` HTTP 403 "A required agreement is missing or has expired".**
   Apple pushed a new developer agreement. Only the Account Holder can accept it at
   developer.apple.com/account (banner) or appstoreconnect.apple.com/business. Check
-  without a release: `./scripts/macos-vm.sh start`, then in the VM
+  without a release: the lane itself now prints notarytool's error; or probe by hand in
+  the fallback VM — `./scripts/macos-vm.sh start`, then in the VM
   `xcrun notarytool history --key <AuthKey_*.p8> --key-id <id> --issuer $APPLE_API_ISSUER`
   (`~/secrets/apple-dev/notary.env`); `./scripts/macos-vm.sh stop` before tagging.
-  Acceptance took ~10 min to propagate. The lane now prints notarytool's error.
+  Acceptance took ~10 min to propagate.
 
 ---
 
@@ -207,11 +210,13 @@ ssh spex "rm -rf /tmp/voxis-ci-build && git -c http.extraheader='Authorization: 
   job in `release.yml`. `publish` gates on `build` only and never waits on
   docs.
   - Linux GUI and Windows GUI/NSIS are built by `scripts/build-all-platforms.sh --no-macos`.
-  - macOS runs TWO lanes in the KVM VM (both `continue-on-error`, advisory):
-    `scripts/macos-vm.sh build` (bare arm64 binary + tarball for Homebrew) then
-    `build-gui` (signed/notarized DMG). The target dir is preserved between lanes.
-    If the DMG is missing at publish time the job prints `::warning::` + a job-summary
-    line but still succeeds — check for it.
+  - macOS runs as ONE `continue-on-error` (advisory) call on the shared Xcode 26 VM:
+    `~/macos-xcode26-vm/vm.sh build voxis "$SHA" -- 'bash scripts/ci/mac-shared-vm.sh'`
+    produces the signed/notarized + stapled DMG and the bare arm64 binary + tarball
+    together (see "macOS build (shared Xcode 26 VM)"). Preflight is
+    `~/macos-xcode26-vm/apps/voxis.conf`; a busy host-wide VM lock is retried for up
+    to 60 min, then the lane is skipped. If the DMG is missing at publish time the
+    job prints `::warning::` + a job-summary line but still succeeds — check for it.
   - Publish uploads to the Forgejo release and the GitHub release
     (`axelbaumlisto/voxis`), and pushes the regenerated formula to the tap repo
     `axelbaumlisto/homebrew-voxis` (via `HOMEBREW_TAP_REPO`) when the macOS arm64
@@ -228,65 +233,102 @@ Host-executor gotchas:
 
 ---
 
-## macOS KVM
+## macOS build (shared Xcode 26 VM)
 
-The Voxis macOS script clones its **own** copy of the Clipshot-prepared VM image
-(`scripts/macos-vm.sh clone-image`, one-time, ~38 GB) rather than mounting
-Clipshot's disk directly — two QEMU processes on one qcow2 corrupted a
-Clipshot release. `build`/`build-gui` refuse to run until the clone exists.
+The release macOS lane runs on spex's **shared macOS 26 (Tahoe) VM**,
+`~/macos-xcode26-vm` (README there: layers, safety, commands). One call produces
+everything: the signed `.app` → notarized + stapled → `Voxis_<ver>_aarch64.dmg`,
+plus the bare `voxis-macos-arm64` binary and `.tar.gz` the Homebrew formula pins.
 
 ```bash
-ssh spex 'cd ~/work/voxis && ./scripts/macos-vm.sh build'
+ssh spex
+cd ~/macos-xcode26-vm
+# the sha must ALREADY be in /home/spex/work/voxis (apps/voxis.conf REPO=):
+# vm.sh pushes the commit into the guest and NEVER fetches.
+git -C /home/spex/work/voxis fetch origin <tag>
+sha=$(git -C /home/spex/work/voxis rev-parse '<tag>^{commit}')
+./vm.sh build voxis "$sha" -- 'bash scripts/ci/mac-shared-vm.sh'
 ```
 
-It syncs the Voxis source into the VM, builds `voice` for
-`aarch64-apple-darwin`, and pulls the unsigned binary into `artifacts/`.
-macOS is arm64-only: `ort` rc.12 ships no prebuilt ONNX Runtime for
-`x86_64-apple-darwin`, so an Intel build fails at `ort-sys`. Apple Silicon
-covers all current Macs.
+The build logic is **in the repo** (`scripts/ci/mac-shared-vm.sh`, run in the
+guest at `~/src/voxis`); the host side is only
+`~/macos-xcode26-vm/apps/voxis.conf` (repo copy:
+`scripts/ci/macos-shared-vm/voxis.conf`). The guest has full Xcode 26 and a
+`creds` layer holding the team Developer ID + ASC key + notary profile
+`team-notary`, so `SIGNING_IDENTITY`/`APPLE_NOTARY_PROFILE` come from
+`~/.secrets/apple.env` inside the guest — nothing secret is on the host argv or
+in the repo.
 
-### Signed/notarized DMG lane (`build-gui`)
+- **Artifacts:** `~/macos-xcode26-vm/out/voxis/<full-sha>/artifacts-mac/`
+  (`Voxis_<ver>_aarch64.dmg`, `voxis-macos-arm64`, `voxis-macos-arm64.tar.gz`).
+  `release.yml` copies them into `artifacts/`, the dir publish reads.
+- **Log:** `~/macos-xcode26-vm/out/voxis/<full-sha>/build.log` (vm.sh appends
+  every run, including the guest command's output).
+- **Failure semantics:** `vm.sh build`'s exit code is the guest command's, and
+  every signing/notarization step in `mac-shared-vm.sh` is fatal — there is no
+  ad-hoc fallback on this lane. `release.yml` keeps the step advisory
+  (`continue-on-error`) and skips with a `::warning::` on failure.
+- **One macOS VM per host:** `vm.sh` waits ≤15 s for
+  `/home/spex/.macos-vm.lock` and exits non-zero **before booting** if
+  naked/clipshot (or the old voxis VM) hold it. `release.yml` retries that for
+  up to 60 min (60 s pauses) and then skips the lane with a `::warning::`.
+- **Measured** (layer prepared, snapshot `prepared`, warm caches): cold run
+  **633 s** (cargo 494 s, notarization 79 s), warm run **460 s**.
 
-The release workflow uses `scripts/macos-vm.sh build-gui` (NOT the bare
-`build`). It builds the Tauri `Voxis.app`, Developer ID-signs it, submits it to
-Apple's notary service, staples the ticket, and packs `Voxis_<ver>_aarch64.dmg`
-(also emitting the bare `voxis-macos-arm64` + tarball so the Homebrew formula
-keeps working). Credentials are read the clipshot way, kept OUTSIDE the repo:
+Layer setup (one-time ops by hand; re-do after a base/creds update — see the
+VM README `Base / creds updates`):
 
-- Host env file `~/secrets/apple-dev/notary.env` (path override via
-  `APPLE_NOTARY_ENV`) supplies `SIGNING_IDENTITY` + `APPLE_API_ISSUER`. On the
-  CI host (spex) it lives at `/home/spex/secrets/apple-dev/notary.env`.
-- The Developer ID cert + private key live in the macOS VM login keychain; the
-  App Store Connect API key `.p8` lives in the VM at
-  `~/.appstoreconnect/private_keys/AuthKey_*.p8`. Nothing secret is ever in the
-  repo or on the host argv.
+```bash
+cp scripts/ci/macos-shared-vm/voxis.conf ~/macos-xcode26-vm/apps/voxis.conf
+~/macos-xcode26-vm/vm.sh layer voxis --prepare    # then: vm.sh down voxis
+~/macos-xcode26-vm/vm.sh snapshot voxis prepared # optional rollback point
+```
 
-When either the env file or the VM credentials are absent, `build-gui` degrades
-to an **ad-hoc unsigned** `.app`/DMG (Gatekeeper warns; `xattr -cr` needed on
-install) — the build never fails on missing signing.
+macOS is arm64-only: `ort` ships no prebuilt ONNX Runtime for
+`x86_64-apple-darwin`, so an Intel build fails at `ort-sys`. The guest is
+x86_64 Tahoe cross-building aarch64 — same arrangement as naked.
 
-Two-branch notarization (ported from clipshot): if Apple's queue is slow the
-SIGNED-but-unstapled DMG ships now and the submission id is recorded in
-`artifacts/.notary-pending`; finish later with
-`scripts/macos-vm.sh notary-finish` (waits for Accepted, staples, re-emits the
-DMG). Invalid/Rejected always hard-fails — that is a real signing problem, not
-a queue delay.
+### Fallback lane: the old Docker-OSX VM (`scripts/macos-vm.sh`)
+
+`release.yml` does **not** use it any more. It stays working as a manual
+fallback: `scripts/macos-vm.sh clone-image` creates voxis's **own** ~38 GB copy
+of the Clipshot-prepared Sonoma image (`~/voxis-macos-vm`; voxis never mounts
+Clipshot's disk — two QEMU processes on one qcow2 corrupted a Clipshot release),
+then `build` yields the bare arm64 binary and `build-gui` the signed/notarized
+DMG.
+
+```bash
+ssh spex 'cd ~/work/voxis && ./scripts/macos-vm.sh build-gui'
+```
+
+Its credentials come from the host file `~/secrets/apple-dev/notary.env`
+(`SIGNING_IDENTITY`, `APPLE_API_ISSUER`; path override `APPLE_NOTARY_ENV`), the
+Developer ID cert lives in that VM's `login.keychain`, and the ASC `.p8` at
+`~/.appstoreconnect/private_keys/AuthKey_*.p8`. When either is missing it
+degrades to an **ad-hoc unsigned** `.app`/DMG (Gatekeeper warns; `xattr -cr` on
+install) — it never fails on missing signing. If Apple's queue is slow it ships
+the SIGNED-but-unstapled DMG and records the submission in
+`artifacts/.notary-pending`; finish with `scripts/macos-vm.sh notary-finish`
+(afterwards re-upload the DMG by hand). Invalid/Rejected always hard-fails. Its
+container runs with `--restart no`, so the VM never starts by itself — start it
+explicitly.
+
+Both lanes take the same host-wide `flock` (`/home/spex/.macos-vm.lock`,
+override `MACOS_VM_LOCK`), so they can never run at the same time. See
+`docs/MACOS_SIGNING_TODO.md` "VM image ownership + host lock" for the incident
+writeup.
 
 The Hardened Runtime build needs `src-tauri/Entitlements.plist`
 (`com.apple.security.device.audio-input` + `.automation.apple-events`) or the
 notarized app silently can't hear the mic or send the Accessibility-prompt
-Apple Event. Only ONE macOS Docker-OSX container (voxis's or clipshot's) may
-run at a time on this host — a host-wide `flock` (`/home/spex/.macos-vm.lock`,
-override `MACOS_VM_LOCK`) enforces it; `--restart no` means the VM does NOT
-auto-start after a host reboot (start it manually before dispatching a
-release). See `docs/MACOS_SIGNING_TODO.md` "VM image ownership + host lock"
-for the full incident writeup.
+Apple Event.
 
 ### Signing gotcha (v0.1.3 post-mortem)
 
 Notarization validates **every Mach-O in the archive**. The bundle has TWO executables
-(`voice` and `typing_bench`, both `[[bin]]`s) — `build-gui` signs everything under
-`Contents/MacOS/*` and `Contents/Frameworks/*` in a loop, inside-out, with the same
+(`voice` and `typing_bench`, both `[[bin]]`s) — `scripts/ci/mac-shared-vm.sh` (shared
+VM) and `build-gui` (fallback) sign everything under `Contents/MacOS/*` and
+`Contents/Frameworks/*` in a loop, inside-out, with the same
 `--options runtime --timestamp --entitlements` flags, then the bundle. Never sign a
 single named binary. v0.1.3 shipped without a DMG because only `voice` was re-signed
 (`Invalid: The binary is not signed with a valid Developer ID certificate` on
