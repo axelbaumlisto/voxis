@@ -33,6 +33,18 @@ build outDir and gets emptied on every `bun run build`):
   Gatekeeper looks its ticket up online) and `artifacts/Voxis_<version>_aarch64.dmg`
   (Developer ID signed, notarized, stapled — see "macOS build (shared Xcode 26 VM)")
 
+The landing site (`axelbaumlisto/voxis-landing`) links
+`releases/latest/download/<name>`, which cannot carry a version, so each release
+must also publish a **stable-name** asset for every website download button
+(`release.yml`, step "stable-name copies for the website's latest-download
+links" — copies, the versioned originals stay):
+
+- windows → `voxis-windows-x64-setup.exe` (copy of `Voxis_<version>_x64-setup.exe`;
+  required, same as the installer)
+- macos → `voxis-macos-arm64.dmg` (copy of `Voxis_<version>_aarch64.dmg`;
+  advisory, same as the DMG — no DMG, no copy)
+- linux → `voxis-linux-x64-gui` (already version-less, no copy needed)
+
 GitHub carries **both**: release binaries (the canonical public download) and,
 by the owner's decision on 2026-11-12, the `main` branch kept in sync with
 Forgejo (`git push origin main` after every push to Forgejo). The repo is

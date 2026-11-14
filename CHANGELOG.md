@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Stable-name release assets for the website's latest-download links**:
+  `voxis-windows-x64-setup.exe` (copy of `Voxis_<ver>_x64-setup.exe`) and
+  `voxis-macos-arm64.dmg` (copy of `Voxis_<ver>_aarch64.dmg`). The landing links
+  `releases/latest/download/<name>`, which cannot carry a version.
+
 ## guest-js 0.10.2
 
 ### Fixed

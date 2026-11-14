@@ -37,13 +37,13 @@ if [[ "$1" == "--typing-only" ]]; then
     echo ""
 
     # Build if needed
-    if [[ ! -f "src-tauri/target/release/examples/typing_bench" ]]; then
+    if [[ ! -f "target/release/examples/typing_bench" ]]; then
         echo "Building typing_bench..."
         cargo build --release --example typing_bench --manifest-path src-tauri/Cargo.toml 2>&1 | tail -3
     fi
 
     echo ">>> Running typing benchmark..."
-    ./src-tauri/target/release/examples/typing_bench "$TEXT"
+    ./target/release/examples/typing_bench "$TEXT"
     exit $?
 fi
 
@@ -104,14 +104,14 @@ echo ""
 echo ">>> [2/2] Auto-type benchmark (enigo)..."
 
 # Build if needed
-if [[ ! -f "src-tauri/target/release/examples/typing_bench" ]]; then
+if [[ ! -f "target/release/examples/typing_bench" ]]; then
     echo "Building typing_bench..."
     cargo build --release --example typing_bench --manifest-path src-tauri/Cargo.toml 2>&1 | tail -3
 fi
 
 # Run dry-run to avoid actually typing during benchmark
 START=$(date +%s%3N)
-./src-tauri/target/release/examples/typing_bench --dry-run "$TEXT"
+./target/release/examples/typing_bench --dry-run "$TEXT"
 END=$(date +%s%3N)
 TYPING_MS=$((END - START))
 
