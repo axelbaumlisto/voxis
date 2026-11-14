@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.19 (Voxis desktop)
+
+No app changes beyond 0.1.18.
+
+### Changed
+- **macOS build moved to macOS 26 + Xcode 26.6** (the shared build VM; was the older
+  macOS 14 VM): every Mach-O in `Voxis.app` is signed inside-out with
+  Developer ID + hardened runtime + microphone entitlement; the app and the DMG
+  are notarized and stapled. The Homebrew `voxis-macos-arm64` binary is now the
+  same build as the DMG's, re-signed standalone (was a separate build lane).
+- The overlay plugin for hosts is released separately as `tauri-plugin-voxis`
+  0.8.0 / guest-js 0.10.0 (see the plugin section below).
+
 ## v0.1.18 (Voxis desktop)
 
 ### Changed

@@ -1,6 +1,6 @@
 [package]
 name = "voice"
-version = "0.1.18"
+version = "0.1.19"
 description = "Voice dictation app"
 authors = ["Voxis"]
 license = "MIT"
