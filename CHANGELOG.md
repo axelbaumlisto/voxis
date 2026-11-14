@@ -1,6 +1,6 @@
 # Changelog
 
-## tauri-plugin-voxis 0.8.1
+## tauri-plugin-voxis 0.8.1 / guest-js 0.10.1
 
 ### Added
 - **One automatic retry when the provider refuses a transcription** (403 /
