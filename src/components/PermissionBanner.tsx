@@ -38,17 +38,18 @@ function PermissionBanner({
     <div className="permission-banners">
       {secureInputOn && (
         // D3: not a permission — a transient session state some other app
-        // holds. No button: nothing Voxis can do about it, the text says who.
+        // holds. No button: nothing Voxis can do about it. The app name is
+        // macOS's hint (the backend drops it when the OS could not attribute
+        // the state), so the text always carries the steps that work anyway.
         <div className="permission-banner" data-testid="secure-input-banner">
           <span className="permission-banner-icon">[!]</span>
           <span className="permission-banner-text">
             <strong>{t("permissions.secureInputTitle")}</strong>
             <span className="permission-banner-desc">
-              {" — "}
-              {secureInput?.holder_pid !== null && secureInput?.holder_pid !== undefined
-                ? t("permissions.secureInputHolder", { name: secureInput.holder_name ?? "?", pid: secureInput.holder_pid })
-                : t("permissions.secureInputHolderUnknown")}
-              {"; "}
+              {" "}
+              {secureInput?.holder_name
+                ? t("permissions.secureInputHolder", { name: secureInput.holder_name })
+                : t("permissions.secureInputHolderUnknown")}{" "}
               {t("permissions.secureInputDesc")}
             </span>
           </span>

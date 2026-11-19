@@ -1253,11 +1253,12 @@ export type SecureInputStatus = {
  */
 enabled: boolean; 
 /**
- * The holder's pid, when the console-users record names one.
+ * The pid macOS attributes the state to — `None` unless it names an
+ * app a person can act on (see `credible_holder`).
  */
 holder_pid: number | null; 
 /**
- * The holder's process name (`ps -o comm=`), when the pid resolved.
+ * That process's name (`ps -o comm=`). Set exactly when `holder_pid` is.
  */
 holder_name: string | null }
 /**

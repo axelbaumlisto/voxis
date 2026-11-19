@@ -264,10 +264,10 @@
   "permissions": {
     "openSettings": "[Open Settings]",
     "restart": "[Restart]",
-    "secureInputTitle": "Secure Input is on",
-    "secureInputHolder": "held by {{name}} (pid {{pid}})",
-    "secureInputHolderUnknown": "held by an unknown process",
-    "secureInputDesc": "while it is on, no app receives global keyboard events — the Voxis hotkey is dead until that app releases it (usually: leave the password field, or quit it)."
+    "secureInputTitle": "Hotkey paused — macOS Secure Input is on.",
+    "secureInputHolder": "macOS points at {{name}}, so check it first.",
+    "secureInputHolderUnknown": "macOS doesn't say which app turned it on.",
+    "secureInputDesc": "Secure Input protects password fields, and while it's on no app can see your keys. Finish or close any password or sign-in prompt — a browser tab with a login form is a common cause. If that doesn't help, lock your Mac and unlock it with your password rather than Touch ID. This notice disappears as soon as Secure Input is released."
   },
   "nav": {
     "history": "History",

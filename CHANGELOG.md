@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **The Secure Input banner reads like a sentence and no longer blames
+  `loginwindow`.** When macOS cannot attribute Secure Input to an app it
+  writes `loginwindow`'s pid into the console-users record; the banner
+  repeated that as "held by loginwindow (pid 421)" and sent the reader after a
+  system process while a browser password field was the real holder
+  (2026-11-19). `credible_holder` now reports no holder for that placeholder
+  and for a pid whose process no longer resolves, and the text says what to
+  do either way: close any password or sign-in prompt (a browser login tab is
+  a common cause), then lock and unlock with the password rather than Touch
+  ID. A named app is shown as macOS's hint — without the pid.
+
 ## guest-js 0.11.0
 
 ### Added

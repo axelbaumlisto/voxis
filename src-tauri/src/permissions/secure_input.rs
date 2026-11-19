@@ -4,9 +4,14 @@
 //! screen…) turns on; while it is on, NO process gets keyboard events from
 //! the HID tap `rdev` uses — the global hotkey goes dead with no error
 //! anywhere. This module asks the OS (`IsSecureEventInputEnabled`, HIToolbox)
-//! and names the process holding it (`kCGSSessionSecureInputPID` in IOKit's
-//! console-users record, via `ioreg`), so the banner can say "Secure Input is
-//! on — held by Terminal (pid 812)" instead of the user reinstalling Voxis.
+//! and reads the process macOS attributes it to (`kCGSSessionSecureInputPID`
+//! in IOKit's console-users record, via `ioreg`), so the banner can say
+//! "macOS points at Terminal" instead of the user reinstalling Voxis.
+//!
+//! That attribution is a HINT, not a fact. When macOS cannot attribute the
+//! state it writes `loginwindow`'s pid; `credible_holder` turns that (and a
+//! pid whose process no longer resolves) into "no holder named", so the
+//! banner never sends a person after a system process they cannot act on.
 //!
 //! The parser is pure and tested; the two probes are thin and macOS-only.
 
@@ -15,9 +20,10 @@
 pub struct SecureInputStatus {
     /// `true` while some process holds Secure Event Input.
     pub enabled: bool,
-    /// The holder's pid, when the console-users record names one.
+    /// The pid macOS attributes the state to — `None` unless it names an
+    /// app a person can act on (see `credible_holder`).
     pub holder_pid: Option<u32>,
-    /// The holder's process name (`ps -o comm=`), when the pid resolved.
+    /// That process's name (`ps -o comm=`). Set exactly when `holder_pid` is.
     pub holder_name: Option<String>,
 }
 
@@ -38,9 +44,24 @@ pub fn parse_secure_input_pid(ioreg_dump: &str) -> Option<u32> {
     }
 }
 
+/// macOS writes this process's pid into the record when it cannot attribute
+/// Secure Input to an app (2026-11-19: the banner blamed it for an hour while
+/// a browser password field held the state).
+const UNATTRIBUTED_PLACEHOLDER: &str = "loginwindow";
+
+/// The holder worth showing: a pid whose process resolved to a name that is
+/// not the OS's "could not attribute" placeholder. Anything else is `None` —
+/// a nameless pid or a system process gives the reader nothing to do.
+pub fn credible_holder(pid: Option<u32>, name: Option<String>) -> Option<(u32, String)> {
+    match (pid, name) {
+        (Some(pid), Some(name)) if name != UNATTRIBUTED_PLACEHOLDER => Some((pid, name)),
+        _ => None,
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod probe {
-    use super::{parse_secure_input_pid, SecureInputStatus};
+    use super::{credible_holder, parse_secure_input_pid, SecureInputStatus};
     use std::process::Command;
 
     #[link(name = "Carbon", kind = "framework")]
@@ -68,8 +89,8 @@ mod probe {
         if !enabled {
             return SecureInputStatus::OFF;
         }
-        let holder_pid = holder_pid();
-        let holder_name = holder_pid.and_then(process_name);
+        let pid = holder_pid();
+        let (holder_pid, holder_name) = credible_holder(pid, pid.and_then(process_name)).unzip();
         SecureInputStatus { enabled, holder_pid, holder_name }
     }
 }
@@ -118,6 +139,26 @@ mod tests {
     #[ignore]
     fn secure_input_live_probe() {
         println!("{:?}", check_secure_input());
+    }
+
+    #[test]
+    fn loginwindow_is_the_os_placeholder_not_a_holder() {
+        // 2026-11-19: the banner said "held by loginwindow (pid 421)" for an
+        // hour while the real holder was a browser password field. macOS
+        // writes loginwindow's pid when it cannot attribute the state.
+        assert_eq!(credible_holder(Some(421), Some("loginwindow".into())), None);
+    }
+
+    #[test]
+    fn a_named_app_is_a_credible_holder() {
+        assert_eq!(credible_holder(Some(812), Some("Terminal".into())), Some((812, "Terminal".to_string())));
+    }
+
+    #[test]
+    fn a_pid_whose_name_did_not_resolve_is_not_a_holder() {
+        // A dead pid left in the record: nothing a person can act on.
+        assert_eq!(credible_holder(Some(645), None), None);
+        assert_eq!(credible_holder(None, None), None);
     }
 
     #[test]
